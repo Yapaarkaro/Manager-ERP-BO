@@ -118,6 +118,16 @@ export default function FAB({ onAction }: FABProps) {
       router.push('/payment-selection');
     }
     
+    // Navigate to add expense if expense action is pressed
+    if (actionId === 'expense') {
+      router.push('/expenses/add-expense');
+    }
+    
+    // Navigate to notify staff if notify-staff action is pressed
+    if (actionId === 'notify-staff') {
+      router.push('/notifications/notify-staff');
+    }
+    
     toggleFAB();
   };
 

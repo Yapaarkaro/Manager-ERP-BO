@@ -143,20 +143,25 @@ export default function CustomerDetailsScreen() {
   };
 
   const handleCreateSale = () => {
+    // Clean mobile number to remove +91 and spaces
+    const cleanMobile = customer.mobile.replace(/^\+91\s*/, '').replace(/\s/g, '');
+    
+    const preSelectedCustomerData = {
+      name: customer.contactPerson,
+      mobile: cleanMobile,
+      address: customer.address,
+      isBusinessCustomer: customer.customerType === 'business',
+      gstin: customer.gstin,
+      businessName: customer.businessName,
+      paymentTerms: customer.paymentTerms,
+    };
+    
+    console.log('Creating sale with customer data:', preSelectedCustomerData);
+    
     router.push({
-      pathname: '/new-sale/customer-details',
+      pathname: '/new-sale',
       params: {
-        cartItems: JSON.stringify([]),
-        totalAmount: '0',
-        preSelectedCustomer: JSON.stringify({
-          name: customer.contactPerson,
-          mobile: customer.mobile,
-          address: customer.address,
-          isBusinessCustomer: customer.customerType === 'business',
-          gstin: customer.gstin,
-          businessName: customer.businessName,
-          paymentTerms: customer.paymentTerms,
-        })
+        preSelectedCustomer: JSON.stringify(preSelectedCustomerData)
       }
     });
   };

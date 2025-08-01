@@ -9,7 +9,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { 
   ArrowLeft, 
   Search, 
@@ -96,6 +96,7 @@ const recentProducts: RecentProduct[] = [
 ];
 
 export default function NewSaleScreen() {
+  const { preSelectedCustomer } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleProductSelect = (product: RecentProduct) => {
@@ -106,14 +107,20 @@ export default function NewSaleScreen() {
         selectedProducts: JSON.stringify([{
           ...product,
           quantity: 1
-        }])
+        }]),
+        preSelectedCustomer: preSelectedCustomer
       }
     });
   };
 
   const handleScanBarcode = () => {
     // Navigate to barcode scanner
-    router.push('/new-sale/scanner');
+    router.push({
+      pathname: '/new-sale/scanner',
+      params: {
+        preSelectedCustomer: preSelectedCustomer
+      }
+    });
   };
 
   const handleSearch = (query: string) => {

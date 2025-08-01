@@ -32,6 +32,7 @@ export default function GstinPanScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedGstinData, setVerifiedGstinData] = useState<any>(null);
+  const [hasAutoVerified, setHasAutoVerified] = useState(false);
 
   const validateInput = (text: string, type: 'GSTIN' | 'PAN') => {
     if (type === 'GSTIN') {
@@ -61,8 +62,9 @@ export default function GstinPanScreen() {
     setIsValid(isFormatValid);
     setVerificationError(null);
     
-    // Auto-verify GSTIN when format is valid
-    if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15) {
+    // Auto-verify GSTIN when format is valid (only once)
+    if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15 && !hasAutoVerified && !isVerifying) {
+      setHasAutoVerified(true);
       verifyGSTINNumber(formatted);
     }
   };
@@ -73,6 +75,7 @@ export default function GstinPanScreen() {
     setIsValid(false);
     setVerificationError(null);
     setIsVerifying(false);
+    setHasAutoVerified(false);
     // Auto-focus input after type switch
     setTimeout(() => {
       // Focus will be handled by the input field's autoFocus prop
@@ -80,6 +83,8 @@ export default function GstinPanScreen() {
   };
 
   const verifyGSTINNumber = async (gstinNumber: string) => {
+    if (isVerifying) return; // Prevent multiple simultaneous calls
+    
     setIsVerifying(true);
     setVerificationError(null);
     

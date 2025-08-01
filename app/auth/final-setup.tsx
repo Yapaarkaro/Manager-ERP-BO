@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { DollarSign, CircleCheck as CheckCircle, User, Building2, CreditCard, MapPin, Banknote } from 'lucide-react-native';
+import { IndianRupee, CircleCheck as CheckCircle, User, Building2, CreditCard, MapPin, Banknote } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 
 export default function FinalSetupScreen() {
@@ -236,7 +236,7 @@ export default function FinalSetupScreen() {
 
                   <View style={[styles.summaryItem, styles.totalItem]}>
                     <View style={styles.summaryItemLeft}>
-                      <DollarSign size={16} color="#10b981" />
+                      <IndianRupee size={16} color="#10b981" />
                       <Text style={[styles.summaryLabel, styles.totalLabel]}>Total</Text>
                     </View>
                     <Text style={[styles.summaryValue, styles.totalValue]}>

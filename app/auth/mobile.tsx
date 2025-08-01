@@ -27,10 +27,13 @@ export default function MobileScreen() {
   const [mobileNumber, setMobileNumber] = useState('');
   const [isValid, setIsValid] = useState(false);
 
+  const [isNavigating, setIsNavigating] = useState(false);
+
   useEffect(() => {
-    // Auto-navigate when 10 digits are entered
-    if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber)) {
+    // Auto-navigate when 10 digits are entered (only once)
+    if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber) && !isNavigating) {
       setIsValid(true);
+      setIsNavigating(true);
       // Simulate API call delay
       setTimeout(() => {
         router.push({
@@ -38,10 +41,11 @@ export default function MobileScreen() {
           params: { mobile: mobileNumber }
         });
       }, 500);
-    } else {
+    } else if (mobileNumber.length !== 10) {
       setIsValid(false);
+      setIsNavigating(false);
     }
-  }, [mobileNumber]);
+  }, [mobileNumber, isNavigating]);
 
   const handleMobileChange = (text: string) => {
     // Only allow numbers and limit to 10 digits

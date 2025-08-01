@@ -48,7 +48,7 @@ interface CartProduct {
 }
 
 export default function CartScreen() {
-  const { selectedProducts } = useLocalSearchParams();
+  const { selectedProducts, preSelectedCustomer } = useLocalSearchParams();
   const [cartItems, setCartItems] = useState<CartProduct[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -113,7 +113,8 @@ export default function CartScreen() {
       pathname: '/new-sale/customer-details',
       params: {
         cartItems: JSON.stringify(cartItems),
-        totalAmount: calculateTotal().toString()
+        totalAmount: calculateTotal().toString(),
+        preSelectedCustomer: preSelectedCustomer
       }
     });
   };
@@ -239,42 +240,45 @@ export default function CartScreen() {
         )}
       </ScrollView>
 
-      {/* Continue Button */}
-      {cartItems.length > 0 && (
-        <View style={styles.continueSection}>
-          <TouchableOpacity
-            style={styles.continueButton}
-            onPress={handleContinue}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.continueButtonText}>
-              Continue to Customer Details
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Bottom Section with Search and Scan */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search more products..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
+      {/* Bottom Section with Continue Button and Search */}
+      <View style={styles.bottomContainer}>
+        {/* Continue Button */}
+        {cartItems.length > 0 && (
+          <View style={styles.continueSection}>
+            <TouchableOpacity
+              style={styles.continueButton}
+              onPress={handleContinue}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.continueButtonText}>
+                Continue to Customer Details
+              </Text>
+            </TouchableOpacity>
           </View>
-          
-          <TouchableOpacity
-            style={styles.scanButton}
-            onPress={handleScanBarcode}
-            activeOpacity={0.7}
-          >
-            <Scan size={24} color="#ffffff" />
-          </TouchableOpacity>
+        )}
+
+        {/* Search and Scan */}
+        <View style={styles.floatingSearchContainer}>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search more products..."
+                placeholderTextColor={Colors.textLight}
+                value={searchQuery}
+                onChangeText={handleSearch}
+              />
+            </View>
+            
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={handleScanBarcode}
+              activeOpacity={0.7}
+            >
+              <Scan size={24} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -468,9 +472,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.success,
   },
+  bottomContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    gap: 12, // Small gap between continue button and search bar
+  },
   continueSection: {
-    marginTop: 20,
-    marginBottom: 20,
+    marginBottom: 0, // No margin since it's in the bottom container
   },
   continueButton: {
     backgroundColor: '#3f66ac',
@@ -492,10 +502,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
     backgroundColor: Colors.background,
     borderRadius: 25,
     shadowColor: '#000',

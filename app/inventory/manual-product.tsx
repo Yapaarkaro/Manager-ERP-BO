@@ -25,7 +25,9 @@ import {
   Building2,
   Hash,
   IndianRupee,
-  Percent
+  Percent,
+  Plus,
+  Barcode
 } from 'lucide-react-native';
 
 const Colors = {
@@ -44,7 +46,7 @@ const Colors = {
   }
 };
 
-const categories = [
+let categories = [
   'Smartphones', 'Laptops', 'Tablets', 'Audio', 'Cameras', 'Gaming', 
   'Accessories', 'Wearables', 'Home Appliances', 'Others'
 ];
@@ -66,7 +68,6 @@ const secondaryUnits = [
 ];
 
 const taxRates = [0, 5, 12, 18, 28];
-const cessRates = [0, 1, 2, 3, 4, 5, 10, 15, 20, 25];
 
 const cessTypes = [
   { value: 'value', label: 'Based on Value' },
@@ -90,7 +91,6 @@ const unitConversions: { [key: string]: { [key: string]: number } } = {
   'Box': { 'Piece': 24 },
   'Carton': { 'Piece': 48 },
   'Bundle': { 'Piece': 25 },
-  'Roll': { 'Meter': 100 },
 };
 
 const storageLocations = [
@@ -135,6 +135,8 @@ interface ProductFormData {
   purchasePrice: string;
   salesPrice: string;
   cessRate: number;
+  cessAmount: string;
+  cessAmountType: 'amount' | 'percentage';
   minStockLevel: string;
   maxStockLevel: string;
   openingStock: string;
@@ -154,6 +156,8 @@ export default function ManualProductScreen() {
     barcode: '',
     taxRate: 18,
     cessRate: 0,
+    cessAmount: '',
+    cessAmountType: 'amount',
     primaryUnit: 'Piece',
     secondaryUnit: 'None',
     useCompoundUnit: false,
@@ -170,11 +174,13 @@ export default function ManualProductScreen() {
   });
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [showSecondaryUnitModal, setShowSecondaryUnitModal] = useState(false);
   const [showTaxModal, setShowTaxModal] = useState(false);
   const [showCessModal, setShowCessModal] = useState(false);
   const [showCessTypeModal, setShowCessTypeModal] = useState(false);
+  const [showCessAmountModal, setShowCessAmountModal] = useState(false);
   const [showUnitTypeModal, setShowUnitTypeModal] = useState(false);
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -183,6 +189,7 @@ export default function ManualProductScreen() {
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const categorySearchRef = useRef<TextInput>(null);
@@ -195,120 +202,115 @@ export default function ManualProductScreen() {
         const scanned = JSON.parse(scannedData as string);
         setFormData(prev => ({
           ...prev,
-          name: scanned.name || '',
-          hsnCode: scanned.hsnCode || '',
-          taxRate: scanned.taxRate || 18,
-          cessRate: scanned.cessRate || 0,
-          category: scanned.category || '',
-          primaryUnit: scanned.primaryUnit || 'Piece',
           barcode: scanned.barcode || '',
-          productImage: scanned.image || null,
+          name: scanned.name || '',
         }));
       } catch (error) {
         console.error('Error parsing scanned data:', error);
       }
     }
-  }, [isScanned, scannedData]);
+  }, [scannedData, isScanned]);
 
   const updateFormData = (field: keyof ProductFormData, value: string | number | null) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const handleCategorySelect = (category: string) => {
-    updateFormData('category', category);
-    if (category !== 'Others') {
-      updateFormData('customCategory', '');
+    if (category === 'Add New Category') {
+      setShowCategoryModal(false);
+      setShowAddCategoryModal(true);
+      return;
     }
-    setCategorySearch('');
+    setFormData(prev => ({ 
+      ...prev, 
+      category: category,
+      customCategory: category === 'Others' ? prev.customCategory : ''
+    }));
     setShowCategoryModal(false);
   };
 
+  const handleAddNewCategory = () => {
+    if (newCategoryName.trim()) {
+      // Add new category to the list
+      categories.push(newCategoryName.trim());
+      setFormData(prev => ({ 
+        ...prev, 
+        category: newCategoryName.trim(),
+        customCategory: ''
+      }));
+      setNewCategoryName('');
+      setShowAddCategoryModal(false);
+    }
+  };
+
   const handleUnitSelect = (unit: string) => {
-    updateFormData('primaryUnit', unit);
+    setFormData(prev => ({ ...prev, primaryUnit: unit }));
     setShowUnitModal(false);
   };
 
   const handleSecondaryUnitSelect = (unit: string) => {
-    updateFormData('secondaryUnit', unit);
-    
-    // Check if conversion is needed
-    if (unit !== 'None' && formData.primaryUnit !== 'Piece') {
-      const preset = unitConversions[formData.primaryUnit]?.[unit];
-      if (preset) {
-        updateFormData('conversionRatio', preset.toString());
-      } else {
-        // Ask user for conversion ratio
-        setShowConversionModal(true);
-      }
-    }
-    
+    setFormData(prev => ({ ...prev, secondaryUnit: unit }));
     setShowSecondaryUnitModal(false);
   };
 
   const handleTaxRateSelect = (rate: number) => {
-    updateFormData('taxRate', rate);
+    setFormData(prev => ({ ...prev, taxRate: rate }));
     setShowTaxModal(false);
   };
 
-  const handleCessRateSelect = (rate: number) => {
-    updateFormData('cessRate', rate);
-    
-    // Show CESS type selector if rate > 0
-    if (rate > 0) {
-      setShowCessTypeModal(true);
-    }
-    
-    setShowCessModal(false);
+  const handleCessTypeSelect = (type: string) => {
+    setFormData(prev => ({ ...prev, cessType: type }));
+    setShowCessTypeModal(false);
+    // Show cess amount/rate modal after type selection
+    setTimeout(() => setShowCessAmountModal(true), 300);
   };
 
-  const handleCessTypeSelect = (type: string) => {
-    updateFormData('cessType', type);
-    setShowCessTypeModal(false);
+  const handleCessAmountSubmit = (amount: string) => {
+    setFormData(prev => ({ ...prev, cessAmount: amount }));
+    setShowCessAmountModal(false);
   };
 
   const handleUnitTypeSelect = (useCompound: boolean) => {
-    updateFormData('useCompoundUnit', useCompound);
-    if (!useCompound) {
-      updateFormData('secondaryUnit', 'None');
-      updateFormData('conversionRatio', '');
-    }
+    setFormData(prev => ({ 
+      ...prev, 
+      useCompoundUnit: useCompound,
+      secondaryUnit: useCompound ? prev.secondaryUnit : 'None'
+    }));
     setShowUnitTypeModal(false);
   };
 
   const handleConversionSubmit = (ratio: string) => {
-    updateFormData('conversionRatio', ratio);
+    setFormData(prev => ({ ...prev, conversionRatio: ratio }));
     setShowConversionModal(false);
   };
 
   const handleSupplierSelect = (supplierId: string) => {
-    updateFormData('supplier', supplierId);
-    setSupplierSearch('');
+    setFormData(prev => ({ ...prev, supplier: supplierId }));
     setShowSupplierModal(false);
   };
 
   const handleLocationSelect = (location: string) => {
-    updateFormData('location', location);
-    setLocationSearch('');
+    setFormData(prev => ({ ...prev, location: location }));
     setShowLocationModal(false);
   };
 
   const handleImageSelect = (type: 'camera' | 'gallery') => {
+    // Mock image selection
+    const mockImage = 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=400&h=400&dpr=1';
+    setFormData(prev => ({ ...prev, productImage: mockImage }));
     setShowImageModal(false);
-    // Mock image URL - in real app this would open camera/gallery
-    const mockImageUrl = 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=300&h=300&dpr=1';
-    updateFormData('productImage', mockImageUrl);
-    Alert.alert('Image Added', 'Product image has been added');
   };
 
   const handlePriceChange = (field: 'purchasePrice' | 'salesPrice', text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
     const parts = cleaned.split('.');
-    if (parts.length > 2) return;
-    updateFormData(field, cleaned);
+    if (parts.length <= 2 && parts[0].length <= 8) {
+      updateFormData(field, cleaned);
+    }
   };
 
   const handleStockChange = (field: 'minStockLevel' | 'maxStockLevel' | 'openingStock', text: string) => {
-    const cleaned = text.replace(/\D/g, '');
+    const cleaned = text.replace(/[^0-9]/g, '');
     updateFormData(field, cleaned);
   };
 
@@ -344,6 +346,10 @@ export default function ManualProductScreen() {
       taxRate: formData.taxRate,
       primaryUnit: formData.primaryUnit,
       secondaryUnit: formData.secondaryUnit !== 'None' ? formData.secondaryUnit : undefined,
+      useCompoundUnit: formData.useCompoundUnit,
+      conversionRatio: formData.conversionRatio,
+      cessType: formData.cessType,
+      cessAmount: formData.cessAmount,
       purchasePrice: parseFloat(formData.purchasePrice),
       salesPrice: parseFloat(formData.salesPrice),
       minStockLevel: parseInt(formData.minStockLevel),
@@ -376,17 +382,18 @@ export default function ManualProductScreen() {
     supplier.name.toLowerCase().includes(supplierSearch.toLowerCase())
   );
 
+  const filteredLocations = storageLocations.filter(location =>
+    location.toLowerCase().includes(locationSearch.toLowerCase())
+  );
+
   const getSupplierName = (supplierId: string) => {
     const supplier = mockSuppliers.find(s => s.id === supplierId);
-    return supplier?.name || 'Select supplier';
+    return supplier ? supplier.name : '';
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -514,14 +521,27 @@ export default function ManualProductScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Barcode *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.barcode}
-                onChangeText={(text) => updateFormData('barcode', text)}
-                placeholder="Enter or scan barcode"
-                placeholderTextColor={Colors.textLight}
-                editable={isScanned !== 'true'}
-              />
+              <View style={styles.inputContainer}>
+                <Barcode size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={formData.barcode}
+                  onChangeText={(text) => updateFormData('barcode', text)}
+                  placeholder="Enter or scan barcode"
+                  placeholderTextColor={Colors.textLight}
+                  editable={isScanned !== 'true'}
+                />
+                <TouchableOpacity
+                  style={styles.scanIconButton}
+                  onPress={() => {
+                    // Navigate to scanner
+                    router.push('/inventory/scan-product');
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Camera size={20} color={Colors.primary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
@@ -539,14 +559,17 @@ export default function ManualProductScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>CESS Rate</Text>
+              <Text style={styles.label}>CESS Calculation</Text>
               <TouchableOpacity
                 style={styles.dropdown}
-                onPress={() => setShowCessModal(true)}
+                onPress={() => setShowCessTypeModal(true)}
                 activeOpacity={0.7}
               >
                 <Text style={styles.dropdownText}>
-                  {formData.cessRate}% CESS {formData.cessRate > 0 ? `(${cessTypes.find(t => t.value === formData.cessType)?.label})` : ''}
+                  {formData.cessAmount ? 
+                    `${formData.cessAmount} ${formData.cessAmountType === 'amount' ? '₹' : '%'} ${formData.cessType === 'value' ? '' : formData.cessType === 'quantity' ? 'per unit' : 'per unit'} (${cessTypes.find(t => t.value === formData.cessType)?.label})` : 
+                    'Select CESS calculation method'
+                  }
                 </Text>
                 <ChevronDown size={20} color={Colors.textLight} />
               </TouchableOpacity>
@@ -556,6 +579,20 @@ export default function ManualProductScreen() {
           {/* Units of Measurement */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Units of Measurement</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Unit Type *</Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowUnitTypeModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.dropdownText}>
+                  {formData.useCompoundUnit ? 'Compound Unit (Primary + Secondary)' : 'Primary Unit Only'}
+                </Text>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
             
             <View style={styles.rowContainer}>
               <View style={[styles.inputGroup, styles.halfWidth]}>
@@ -572,20 +609,38 @@ export default function ManualProductScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={[styles.inputGroup, styles.halfWidth]}>
-                <Text style={styles.label}>Secondary Unit</Text>
+              {formData.useCompoundUnit && (
+                <View style={[styles.inputGroup, styles.halfWidth]}>
+                  <Text style={styles.label}>Secondary Unit</Text>
+                  <TouchableOpacity
+                    style={styles.dropdown}
+                    onPress={() => setShowSecondaryUnitModal(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.dropdownText}>
+                      {formData.secondaryUnit}
+                    </Text>
+                    <ChevronDown size={20} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {formData.useCompoundUnit && formData.secondaryUnit !== 'None' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Conversion Ratio</Text>
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => setShowSecondaryUnitModal(true)}
+                  onPress={() => setShowConversionModal(true)}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.dropdownText}>
-                    {formData.secondaryUnit}
+                    {formData.conversionRatio || 'Set conversion ratio'}
                   </Text>
                   <ChevronDown size={20} color={Colors.textLight} />
                 </TouchableOpacity>
               </View>
-            </View>
+            )}
           </View>
 
           {/* Pricing */}
@@ -683,20 +738,6 @@ export default function ManualProductScreen() {
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Supplier</Text>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Unit Type *</Text>
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setShowUnitTypeModal(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.dropdownText}>
-                {formData.useCompoundUnit ? 'Compound Unit (Primary + Secondary)' : 'Primary Unit Only'}
-              </Text>
-              <ChevronDown size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-          
               <TouchableOpacity
                 style={styles.dropdown}
                 onPress={() => setShowSupplierModal(true)}
@@ -706,55 +747,34 @@ export default function ManualProductScreen() {
                   styles.dropdownText,
                   !formData.supplier && styles.placeholderText
                 ]}>
-                  {formData.supplier ? getSupplierName(formData.supplier) : 'Select supplier (optional)'}
+                  {formData.supplier ? getSupplierName(formData.supplier) : 'Select supplier'}
                 </Text>
                 <ChevronDown size={20} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
 
-            {formData.useCompoundUnit && (
-            <View style={[styles.inputGroup, styles.halfWidth]}>
+            <View style={styles.inputGroup}>
               <Text style={styles.label}>Storage Location</Text>
               <TouchableOpacity
                 style={styles.dropdown}
                 onPress={() => setShowLocationModal(true)}
                 activeOpacity={0.7}
               >
-                <Text style={[
-                  styles.dropdownText,
-                  !formData.location && styles.placeholderText
-                ]}>
-                  {formData.location || 'Select storage location'}
+                <Text style={styles.dropdownText}>
+                  {formData.location}
                 </Text>
                 <ChevronDown size={20} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            )}
           </View>
-          
-          {formData.useCompoundUnit && formData.secondaryUnit !== 'None' && (
-            <View style={styles.conversionContainer}>
-              <Text style={styles.conversionText}>
-                1 {formData.primaryUnit} = 
-              </Text>
-              <TextInput
-                style={styles.conversionInput}
-                value={formData.conversionRatio}
-                onChangeText={(text) => updateFormData('conversionRatio', text.replace(/[^0-9.]/g, ''))}
-                placeholder="0"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="decimal-pad"
-              />
-              <Text style={styles.conversionText}>
-                {formData.secondaryUnit}
-              </Text>
-            </View>
-          )}
+        </ScrollView>
 
+        {/* Submit Button */}
+        <View style={styles.submitSection}>
           <TouchableOpacity
             style={[
               styles.submitButton,
-              isFormValid() ? styles.enabledButton : styles.disabledButton
+              isFormValid() ? styles.enabledButton : styles.disabledButton,
             ]}
             onPress={handleSubmit}
             disabled={!isFormValid() || isSubmitting}
@@ -762,582 +782,703 @@ export default function ManualProductScreen() {
           >
             <Text style={[
               styles.submitButtonText,
-              isFormValid() ? styles.enabledButtonText : styles.disabledButtonText
+              isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
             ]}>
-              {isSubmitting ? 'Adding Product...' : 'Add Product to Inventory'}
+              {isSubmitting ? 'Adding Product...' : 'Add Product'}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
+        </View>
+      </SafeAreaView>
 
-        {/* Modals */}
-        {/* Category Modal */}
-        <Modal
-          visible={showCategoryModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowCategoryModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Category</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowCategoryModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.searchContainer}>
-                <Search size={18} color={Colors.textLight} />
-                <TextInput
-                  ref={categorySearchRef}
-                  style={styles.searchInput}
-                  value={categorySearch}
-                  onChangeText={setCategorySearch}
-                  placeholder="Search categories..."
-                  placeholderTextColor={Colors.textLight}
-                />
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {filteredCategories.map((category) => (
-                  <TouchableOpacity
-                    key={category}
-                    style={[
-                      styles.modalOption,
-                      formData.category === category && styles.selectedOption
-                    ]}
-                    onPress={() => handleCategorySelect(category)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.category === category && styles.selectedOptionText
-                    ]}>
-                      {category}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+      {/* Category Selection Modal */}
+      <Modal
+        visible={showCategoryModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowCategoryModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Category</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowCategoryModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
             </View>
-          </View>
-        </Modal>
 
-        {/* Similar modals for other dropdowns... */}
-        {/* I'll include the key modals here */}
-
-        {/* Image Selection Modal */}
-        <Modal
-          visible={showImageModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowImageModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.imageModalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add Product Image</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowImageModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.imageOptions}>
-                <TouchableOpacity
-                  style={styles.imageOption}
-                  onPress={() => handleImageSelect('camera')}
-                  activeOpacity={0.7}
-                >
-                  <Camera size={24} color={Colors.primary} />
-                  <Text style={styles.imageOptionText}>Take Photo</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.imageOption}
-                  onPress={() => handleImageSelect('gallery')}
-                  activeOpacity={0.7}
-                >
-                  <Upload size={24} color={Colors.primary} />
-                  <Text style={styles.imageOptionText}>Choose from Gallery</Text>
-                </TouchableOpacity>
-              </View>
+            <View style={styles.searchContainer}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                ref={categorySearchRef}
+                style={styles.searchInput}
+                placeholder="Search categories..."
+                placeholderTextColor={Colors.textLight}
+                value={categorySearch}
+                onChangeText={setCategorySearch}
+                autoFocus={true}
+              />
             </View>
-          </View>
-        </Modal>
 
-        {/* Tax Rate Modal */}
-        <Modal
-          visible={showTaxModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowTaxModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Tax Rate</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowTaxModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {taxRates.map((rate) => (
-                  <TouchableOpacity
-                    key={rate}
-                    style={[
-                      styles.modalOption,
-                      formData.taxRate === rate && styles.selectedOption
-                    ]}
-                    onPress={() => handleTaxRateSelect(rate)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.taxRate === rate && styles.selectedOptionText
-                    ]}>
-                      {rate}% GST
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* CESS Rate Modal */}
-        <Modal
-          visible={showCessModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowCessModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select CESS Rate</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowCessModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {cessRates.map((rate) => (
-                  <TouchableOpacity
-                    key={rate}
-                    style={[
-                      styles.modalOption,
-                      formData.cessRate === rate && styles.selectedOption
-                    ]}
-                    onPress={() => handleCessRateSelect(rate)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.cessRate === rate && styles.selectedOptionText
-                    ]}>
-                      {rate}% CESS
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* CESS Type Modal */}
-        <Modal
-          visible={showCessTypeModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowCessTypeModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>CESS Calculation Method</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowCessTypeModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.modalContent}>
-                <Text style={styles.modalDescription}>
-                  Choose how CESS should be calculated for this product
-                </Text>
-                
-                {cessTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type.value}
-                    style={[
-                      styles.modalOption,
-                      formData.cessType === type.value && styles.selectedOption
-                    ]}
-                    onPress={() => handleCessTypeSelect(type.value)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.cessType === type.value && styles.selectedOptionText
-                    ]}>
-                      {type.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Unit Type Modal */}
-        <Modal
-          visible={showUnitTypeModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowUnitTypeModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Unit Measurement Type</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowUnitTypeModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.modalContent}>
-                <Text style={styles.modalDescription}>
-                  Choose the unit measurement system for this product
-                </Text>
-                
-                <TouchableOpacity
-                  style={[
-                    styles.modalOption,
-                    !formData.useCompoundUnit && styles.selectedOption
-                  ]}
-                  onPress={() => handleUnitTypeSelect(false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.modalOptionText,
-                    !formData.useCompoundUnit && styles.selectedOptionText
-                  ]}>
-                    Primary Unit Only
-                  </Text>
-                  <Text style={styles.modalOptionDescription}>
-                    Use only one unit (e.g., Pieces, Kilograms)
-                  </Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={[
-                    styles.modalOption,
-                    formData.useCompoundUnit && styles.selectedOption
-                  ]}
-                  onPress={() => handleUnitTypeSelect(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.modalOptionText,
-                    formData.useCompoundUnit && styles.selectedOptionText
-                  ]}>
-                    Compound Unit
-                  </Text>
-                  <Text style={styles.modalOptionDescription}>
-                    Use both primary and secondary units with conversion
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Conversion Ratio Modal */}
-        <Modal
-          visible={showConversionModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowConversionModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Unit Conversion</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowConversionModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.modalContent}>
-                <Text style={styles.conversionQuestion}>
-                  How many {formData.secondaryUnit} are in 1 {formData.primaryUnit}?
-                </Text>
-                
-                <View style={styles.conversionInputContainer}>
-                  <Text style={styles.conversionLabel}>1 {formData.primaryUnit} = </Text>
-                  <TextInput
-                    style={styles.conversionModalInput}
-                    value={formData.conversionRatio}
-                    onChangeText={(text) => updateFormData('conversionRatio', text.replace(/[^0-9.]/g, ''))}
-                    placeholder="0"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="decimal-pad"
-                    autoFocus
-                  />
-                  <Text style={styles.conversionLabel}> {formData.secondaryUnit}</Text>
+            <ScrollView style={styles.modalScrollView}>
+              <TouchableOpacity
+                style={styles.modalItem}
+                onPress={() => handleCategorySelect('Add New Category')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add New Category</Text>
                 </View>
-                
+              </TouchableOpacity>
+              
+              {filteredCategories.map((category) => (
+                <TouchableOpacity
+                  key={category}
+                  style={styles.modalItem}
+                  onPress={() => handleCategorySelect(category)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.modalItemText}>{category}</Text>
+                  {formData.category === category && (
+                    <View style={styles.selectedIndicator}>
+                      <Text style={styles.selectedText}>✓</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add New Category Modal */}
+      <Modal
+        visible={showAddCategoryModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowAddCategoryModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add New Category</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowAddCategoryModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Category Name *</Text>
+              <View style={styles.modalInputContainer}>
+                <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.modalInput}
+                  value={newCategoryName}
+                  onChangeText={setNewCategoryName}
+                  placeholder="Enter category name"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  autoFocus={true}
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowAddCategoryModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  !newCategoryName.trim() && styles.disabledButton
+                ]}
+                onPress={handleAddNewCategory}
+                disabled={!newCategoryName.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmButtonText}>Add Category</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CESS Amount Modal */}
+      <Modal
+        visible={showCessAmountModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowCessAmountModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Set CESS Amount</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowCessAmountModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Amount Type</Text>
+              <View style={styles.toggleContainer}>
                 <TouchableOpacity
                   style={[
-                    styles.conversionSubmitButton,
-                    !formData.conversionRatio && styles.disabledButton
+                    styles.toggleButton,
+                    formData.cessAmountType === 'amount' && styles.activeToggleButton,
                   ]}
-                  onPress={() => setShowConversionModal(false)}
-                  disabled={!formData.conversionRatio}
-                  activeOpacity={0.8}
+                  onPress={() => updateFormData('cessAmountType', 'amount')}
+                  activeOpacity={0.7}
                 >
                   <Text style={[
-                    styles.conversionSubmitButtonText,
-                    !formData.conversionRatio && styles.disabledButtonText
+                    styles.toggleButtonText,
+                    formData.cessAmountType === 'amount' && styles.activeToggleButtonText,
                   ]}>
-                    Set Conversion
+                    ₹ Amount
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.toggleButton,
+                    formData.cessAmountType === 'percentage' && styles.activeToggleButton,
+                  ]}
+                  onPress={() => updateFormData('cessAmountType', 'percentage')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.toggleButtonText,
+                    formData.cessAmountType === 'percentage' && styles.activeToggleButtonText,
+                  ]}>
+                    % Percentage
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        </Modal>
 
-        {/* Primary Unit Modal */}
-        <Modal
-          visible={showUnitModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowUnitModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Primary Unit</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowUnitModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {primaryUnits.map((unit) => (
-                  <TouchableOpacity
-                    key={unit}
-                    style={[
-                      styles.modalOption,
-                      formData.primaryUnit === unit && styles.selectedOption
-                    ]}
-                    onPress={() => handleUnitSelect(unit)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.primaryUnit === unit && styles.selectedOptionText
-                    ]}>
-                      {unit}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Secondary Unit Modal */}
-        <Modal
-          visible={showSecondaryUnitModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowSecondaryUnitModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Secondary Unit</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowSecondaryUnitModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {secondaryUnits.map((unit) => (
-                  <TouchableOpacity
-                    key={unit}
-                    style={[
-                      styles.modalOption,
-                      formData.secondaryUnit === unit && styles.selectedOption
-                    ]}
-                    onPress={() => handleSecondaryUnitSelect(unit)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.secondaryUnit === unit && styles.selectedOptionText
-                    ]}>
-                      {unit}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Supplier Modal */}
-        <Modal
-          visible={showSupplierModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowSupplierModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Supplier</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowSupplierModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.searchContainer}>
-                <Search size={18} color={Colors.textLight} />
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>
+                {formData.cessAmountType === 'amount' ? 'CESS Amount (₹)' : 'CESS Percentage (%)'}
+              </Text>
+              <View style={styles.modalInputContainer}>
+                <Text style={styles.currencySymbol}>
+                  {formData.cessAmountType === 'amount' ? '₹' : '%'}
+                </Text>
                 <TextInput
-                  style={styles.searchInput}
-                  value={supplierSearch}
-                  onChangeText={setSupplierSearch}
-                  placeholder="Search suppliers..."
+                  style={styles.modalInput}
+                  value={formData.cessAmount}
+                  onChangeText={(text) => updateFormData('cessAmount', text.replace(/[^0-9.]/g, ''))}
+                  placeholder={formData.cessAmountType === 'amount' ? "0.00" : "0"}
                   placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                  autoFocus={true}
                 />
               </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {filteredSuppliers.map((supplier) => (
-                  <TouchableOpacity
-                    key={supplier.id}
-                    style={[
-                      styles.modalOption,
-                      formData.supplier === supplier.id && styles.selectedOption
-                    ]}
-                    onPress={() => handleSupplierSelect(supplier.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.supplier === supplier.id && styles.selectedOptionText
-                    ]}>
-                      {supplier.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowCessAmountModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  !formData.cessAmount.trim() && styles.disabledButton
+                ]}
+                onPress={() => handleCessAmountSubmit(formData.cessAmount)}
+                disabled={!formData.cessAmount.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmButtonText}>Set CESS</Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </Modal>
+        </View>
+      </Modal>
 
-        {/* Storage Location Modal */}
-        <Modal
-          visible={showLocationModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowLocationModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Storage Location</Text>
+      {/* Tax Rate Modal */}
+      <Modal
+        visible={showTaxModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowTaxModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Tax Rate</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowTaxModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {taxRates.map((rate) => (
                 <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowLocationModal(false)}
+                  key={rate}
+                  style={[
+                    styles.modalOption,
+                    formData.taxRate === rate && styles.selectedOption
+                  ]}
+                  onPress={() => handleTaxRateSelect(rate)}
                   activeOpacity={0.7}
                 >
-                  <X size={24} color={Colors.textLight} />
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.taxRate === rate && styles.selectedOptionText
+                  ]}>
+                    {rate}% GST
+                  </Text>
                 </TouchableOpacity>
-              </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CESS Type Modal */}
+      <Modal
+        visible={showCessTypeModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCessTypeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>CESS Calculation Method</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowCessTypeModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalContent}>
+              <Text style={styles.modalDescription}>
+                Choose how CESS should be calculated for this product
+              </Text>
               
-              <View style={styles.searchContainer}>
-                <Search size={18} color={Colors.textLight} />
-                <TextInput
-                  style={styles.searchInput}
-                  value={locationSearch}
-                  onChangeText={setLocationSearch}
-                  placeholder="Search locations..."
-                  placeholderTextColor={Colors.textLight}
-                />
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {storageLocations
-                  .filter(location => 
-                    location.toLowerCase().includes(locationSearch.toLowerCase())
-                  )
-                  .map((location) => (
-                  <TouchableOpacity
-                    key={location}
-                    style={[
-                      styles.modalOption,
-                      formData.location === location && styles.selectedOption
-                    ]}
-                    onPress={() => handleLocationSelect(location)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.modalOptionText,
-                      formData.location === location && styles.selectedOptionText
-                    ]}>
-                      {location}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {cessTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.value}
+                  style={[
+                    styles.modalOption,
+                    formData.cessType === type.value && styles.selectedOption
+                  ]}
+                  onPress={() => handleCessTypeSelect(type.value)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.cessType === type.value && styles.selectedOptionText
+                  ]}>
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
-        </Modal>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* Unit Type Modal */}
+      <Modal
+        visible={showUnitTypeModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowUnitTypeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Unit Measurement Type</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowUnitTypeModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalContent}>
+              <Text style={styles.modalDescription}>
+                Choose the unit measurement system for this product
+              </Text>
+              
+              <TouchableOpacity
+                style={[
+                  styles.modalOption,
+                  !formData.useCompoundUnit && styles.selectedOption
+                ]}
+                onPress={() => handleUnitTypeSelect(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.modalOptionText,
+                  !formData.useCompoundUnit && styles.selectedOptionText
+                ]}>
+                  Primary Unit Only
+                </Text>
+                <Text style={styles.modalOptionDescription}>
+                  Use only one unit (e.g., Pieces, Kilograms)
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.modalOption,
+                  formData.useCompoundUnit && styles.selectedOption
+                ]}
+                onPress={() => handleUnitTypeSelect(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.modalOptionText,
+                  formData.useCompoundUnit && styles.selectedOptionText
+                ]}>
+                  Compound Unit
+                </Text>
+                <Text style={styles.modalOptionDescription}>
+                  Use both primary and secondary units with conversion
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Conversion Ratio Modal */}
+      <Modal
+        visible={showConversionModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowConversionModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Unit Conversion</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowConversionModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalContent}>
+              <Text style={styles.conversionQuestion}>
+                How many {formData.secondaryUnit} are in 1 {formData.primaryUnit}?
+              </Text>
+              
+              <View style={styles.conversionInputContainer}>
+                <Text style={styles.conversionLabel}>1 {formData.primaryUnit} = </Text>
+                <TextInput
+                  style={styles.conversionModalInput}
+                  value={formData.conversionRatio}
+                  onChangeText={(text) => updateFormData('conversionRatio', text.replace(/[^0-9.]/g, ''))}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+                <Text style={styles.conversionLabel}> {formData.secondaryUnit}</Text>
+              </View>
+              
+              <TouchableOpacity
+                style={[
+                  styles.conversionSubmitButton,
+                  !formData.conversionRatio && styles.disabledButton
+                ]}
+                onPress={() => setShowConversionModal(false)}
+                disabled={!formData.conversionRatio}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.conversionSubmitButtonText,
+                  !formData.conversionRatio && styles.disabledButtonText
+                ]}>
+                  Set Conversion
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Primary Unit Modal */}
+      <Modal
+        visible={showUnitModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowUnitModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Primary Unit</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowUnitModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {primaryUnits.map((unit) => (
+                <TouchableOpacity
+                  key={unit}
+                  style={[
+                    styles.modalOption,
+                    formData.primaryUnit === unit && styles.selectedOption
+                  ]}
+                  onPress={() => handleUnitSelect(unit)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.primaryUnit === unit && styles.selectedOptionText
+                  ]}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Secondary Unit Modal */}
+      <Modal
+        visible={showSecondaryUnitModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowSecondaryUnitModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Secondary Unit</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowSecondaryUnitModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {secondaryUnits.map((unit) => (
+                <TouchableOpacity
+                  key={unit}
+                  style={[
+                    styles.modalOption,
+                    formData.secondaryUnit === unit && styles.selectedOption
+                  ]}
+                  onPress={() => handleSecondaryUnitSelect(unit)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.secondaryUnit === unit && styles.selectedOptionText
+                  ]}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Supplier Modal */}
+      <Modal
+        visible={showSupplierModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowSupplierModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Supplier</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowSupplierModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.searchContainer}>
+              <Search size={18} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={supplierSearch}
+                onChangeText={setSupplierSearch}
+                placeholder="Search suppliers..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {filteredSuppliers.map((supplier) => (
+                <TouchableOpacity
+                  key={supplier.id}
+                  style={[
+                    styles.modalOption,
+                    formData.supplier === supplier.id && styles.selectedOption
+                  ]}
+                  onPress={() => handleSupplierSelect(supplier.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.supplier === supplier.id && styles.selectedOptionText
+                  ]}>
+                    {supplier.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Storage Location Modal */}
+      <Modal
+        visible={showLocationModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLocationModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Storage Location</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowLocationModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.searchContainer}>
+              <Search size={18} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={locationSearch}
+                onChangeText={setLocationSearch}
+                placeholder="Search locations..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {filteredLocations
+                .filter(location => 
+                  location.toLowerCase().includes(locationSearch.toLowerCase())
+                )
+                .map((location) => (
+                <TouchableOpacity
+                  key={location}
+                  style={[
+                    styles.modalOption,
+                    formData.location === location && styles.selectedOption
+                  ]}
+                  onPress={() => handleLocationSelect(location)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.modalOptionText,
+                    formData.location === location && styles.selectedOptionText
+                  ]}>
+                    {location}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Image Selection Modal */}
+      <Modal
+        visible={showImageModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.imageModalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Product Image</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowImageModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.imageOptions}>
+              <TouchableOpacity
+                style={styles.imageOption}
+                onPress={() => handleImageSelect('camera')}
+                activeOpacity={0.7}
+              >
+                <Camera size={24} color={Colors.primary} />
+                <Text style={styles.imageOptionText}>Take Photo</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.imageOption}
+                onPress={() => handleImageSelect('gallery')}
+                activeOpacity={0.7}
+              >
+                <Upload size={24} color={Colors.primary} />
+                <Text style={styles.imageOptionText}>Choose from Gallery</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -1345,6 +1486,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  safeArea: {
+    flex: 1,
   },
   keyboardView: {
     flex: 1,
@@ -1425,7 +1569,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    outlineStyle: 'none',
   },
   dropdown: {
     flexDirection: 'row',
@@ -1532,11 +1675,16 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '600',
   },
+  submitSection: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+  },
   submitButton: {
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 16,
   },
   enabledButton: {
     backgroundColor: Colors.primary,
@@ -1564,9 +1712,12 @@ const styles = StyleSheet.create({
   modalContainer: {
     backgroundColor: Colors.background,
     borderRadius: 20,
-    width: '100%',
+    width: '90%',
     maxWidth: 400,
     maxHeight: '80%',
+    alignSelf: 'center',
+    marginTop: 'auto',
+    marginBottom: 'auto',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1581,12 +1732,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
   },
@@ -1612,16 +1763,75 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     paddingVertical: 8,
-    outlineStyle: 'none',
   },
-  modalContent: {
+  modalScrollView: {
     maxHeight: 300,
   },
-  modalOption: {
+  modalItem: {
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[100],
+  },
+  addNewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addNewText: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  modalItemText: {
+    fontSize: 16,
+    color: Colors.text,
+  },
+  selectedIndicator: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  selectedText: {
+    color: Colors.background,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  cancelButton: {
+    backgroundColor: Colors.grey[200],
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 10,
+  },
+  cancelButtonText: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmButton: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 10,
+  },
+  confirmButtonText: {
+    color: Colors.background,
+    fontSize: 16,
+    fontWeight: '600',
   },
   selectedOption: {
     backgroundColor: '#f0f4ff',
@@ -1633,6 +1843,12 @@ const styles = StyleSheet.create({
   selectedOptionText: {
     color: Colors.primary,
     fontWeight: '600',
+  },
+  modalOptionDescription: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   imageModalContainer: {
     backgroundColor: Colors.background,
@@ -1659,6 +1875,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     fontWeight: '500',
+  },
+  closeButton: {
+    padding: 8,
+  },
+  modalContent: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 350,
+  },
+  modalOption: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
   },
   conversionContainer: {
     flexDirection: 'row',
@@ -1688,7 +1919,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     minWidth: 60,
-    outlineStyle: 'none',
   },
   fieldHint: {
     fontSize: 12,
@@ -1727,7 +1957,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     minWidth: 80,
-    outlineStyle: 'none',
   },
   conversionSubmitButton: {
     backgroundColor: Colors.primary,
@@ -1739,42 +1968,6 @@ const styles = StyleSheet.create({
     color: Colors.background,
     fontSize: 16,
     fontWeight: '600',
-  },
-  disabledButton: {
-    backgroundColor: Colors.grey[300],
-  },
-  disabledButtonText: {
-    color: Colors.textLight,
-  },
-  conversionContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  conversionText: {
-    fontSize: 16,
-    color: Colors.text,
-    fontWeight: '500',
-  },
-  conversionInput: {
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 16,
-    color: Colors.text,
-    fontWeight: '600',
-    textAlign: 'center',
-    minWidth: 60,
-    outlineStyle: 'none',
   },
   modalDescription: {
     fontSize: 14,
@@ -1783,48 +1976,67 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     textAlign: 'center',
   },
-  conversionQuestion: {
-    fontSize: 16,
-    color: Colors.text,
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 22,
+  scanIconButton: {
+    padding: 8,
+    marginLeft: 8,
   },
-  conversionInputContainer: {
+  toggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 12,
+    padding: 4,
+  },
+  toggleButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  activeToggleButton: {
+    backgroundColor: Colors.background,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  toggleButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  activeToggleButtonText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  modalInputGroup: {
+    marginBottom: 16,
+    paddingHorizontal: 20,
+  },
+  modalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  modalInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    gap: 8,
-  },
-  conversionLabel: {
-    fontSize: 16,
-    color: Colors.text,
-    fontWeight: '500',
-  },
-  conversionModalInput: {
     backgroundColor: Colors.grey[50],
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    borderRadius: 8,
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 18,
-    color: Colors.text,
-    fontWeight: '600',
-    textAlign: 'center',
-    minWidth: 80,
-    outlineStyle: 'none',
   },
-  conversionSubmitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  conversionSubmitButtonText: {
-    color: Colors.background,
+  modalInput: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: '600',
+    color: Colors.text,
+    marginLeft: 12,
   },
 });

@@ -48,12 +48,15 @@ export default function OTPScreen() {
     }
   }, [countdown]);
 
+  const [hasAutoVerified, setHasAutoVerified] = useState(false);
+
   useEffect(() => {
-    // Auto-verify when all 6 digits are entered
-    if (otp.every(digit => digit !== '') && !isVerifying) {
+    // Auto-verify when all 6 digits are entered (only once)
+    if (otp.every(digit => digit !== '') && !isVerifying && !hasAutoVerified) {
+      setHasAutoVerified(true);
       verifyOTP();
     }
-  }, [otp]);
+  }, [otp, isVerifying, hasAutoVerified]);
 
   const handleOtpChange = (text: string, index: number) => {
     const newOtp = [...otp];
@@ -85,6 +88,8 @@ export default function OTPScreen() {
   };
 
   const verifyOTP = async () => {
+    if (isVerifying) return; // Prevent multiple simultaneous calls
+    
     setIsVerifying(true);
     const otpCode = otp.join('');
     
@@ -94,6 +99,7 @@ export default function OTPScreen() {
         router.push('/auth/gstin-pan');
       } else {
         setOtp(['', '', '', '', '', '']);
+        setHasAutoVerified(false);
         inputRefs.current[0]?.focus();
         Alert.alert('Invalid OTP', 'Please enter the correct verification code');
       }
@@ -105,6 +111,7 @@ export default function OTPScreen() {
     setCountdown(30);
     setCanResend(false);
     setOtp(['', '', '', '', '', '']);
+    setHasAutoVerified(false);
     inputRefs.current[0]?.focus();
     Alert.alert('OTP Sent', 'A new verification code has been sent to your mobile number');
   };

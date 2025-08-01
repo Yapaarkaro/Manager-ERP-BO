@@ -47,12 +47,16 @@ export default function BusinessDetailsScreen() {
   const [isCompleting, setIsCompleting] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Auto-fill data from GSTIN verification
+  const [hasAutoFilled, setHasAutoFilled] = useState(false);
+
+  // Auto-fill data from GSTIN verification (only once)
   useEffect(() => {
-    if (type === 'GSTIN' && gstinData) {
+    if (type === 'GSTIN' && gstinData && !hasAutoFilled) {
       try {
         const parsedData = JSON.parse(gstinData as string);
         if (parsedData) {
+          setHasAutoFilled(true);
+          
           // Auto-fill business name from trade name or legal name
           const businessNameFromGstin = parsedData.tradeNam || parsedData.lgnm || '';
           setBusinessName(businessNameFromGstin);
@@ -96,7 +100,7 @@ export default function BusinessDetailsScreen() {
         console.error('Error parsing GSTIN data:', error);
       }
     }
-  }, [type, gstinData]);
+  }, [type, gstinData, hasAutoFilled]);
 
   const isFormValid = () => {
     return (

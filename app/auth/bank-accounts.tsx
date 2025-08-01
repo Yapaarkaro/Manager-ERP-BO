@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { CreditCard, Plus, CreditCard as Edit3, Trash2, Check, ArrowRight, Building2, DollarSign, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { CreditCard, Plus, CreditCard as Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 
 interface BankAccount {
@@ -23,6 +23,7 @@ interface BankAccount {
   accountNumber: string;
   ifscCode: string;
   branchName: string;
+  accountType: string;
   initialBalance: number;
   isPrimary: boolean;
   createdAt: string;
@@ -382,7 +383,7 @@ export default function BankAccountsScreen() {
             {/* Total Balance Summary */}
             <View style={styles.balanceSummary}>
               <View style={styles.balanceSummaryIcon}>
-                <DollarSign size={24} color="#10b981" />
+                <IndianRupee size={24} color="#10b981" />
               </View>
               <View style={styles.balanceSummaryText}>
                 <Text style={styles.balanceSummaryLabel}>Total Balance</Text>

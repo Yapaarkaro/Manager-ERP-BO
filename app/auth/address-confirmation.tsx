@@ -448,7 +448,7 @@ export default function AddressConfirmationScreen() {
               onPress={handleContinue}
               activeOpacity={0.8}
             >
-              <Text style={styles.continueButtonText}>Complete Setup</Text>
+              <Text style={styles.continueButtonText}>Continue</Text>
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
           </Animated.View>

@@ -21,7 +21,7 @@ import {
   X, 
   ChevronDown, 
   CreditCard,
-  DollarSign,
+  IndianRupee,
   User,
   Hash
 } from 'lucide-react-native';

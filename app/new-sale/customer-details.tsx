@@ -79,6 +79,7 @@ export default function CustomerDetailsScreen() {
     if (preSelectedCustomer) {
       try {
         const preSelected = JSON.parse(preSelectedCustomer as string);
+        console.log('Pre-selected customer data:', preSelected);
         setCustomer(preSelected);
       } catch (error) {
         console.error('Error parsing pre-selected customer:', error);

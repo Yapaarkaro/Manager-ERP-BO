@@ -26,6 +26,7 @@ const Colors = {
 };
 
 export default function BarcodeScannerScreen() {
+  const { preSelectedCustomer } = useLocalSearchParams();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
@@ -89,7 +90,8 @@ export default function BarcodeScannerScreen() {
                 selectedProducts: JSON.stringify([{
                   ...mockProduct,
                   quantity: 1
-                }])
+                }]),
+                preSelectedCustomer: preSelectedCustomer
               }
             });
           },

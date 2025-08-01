@@ -261,6 +261,10 @@ export default function CustomersScreen() {
     });
   };
 
+  const handleAddCustomer = () => {
+    router.push('/people/add-customer');
+  };
+
   const handleChatPress = (customer: Customer) => {
     if (customer.customerType === 'business') {
       router.push({
@@ -620,6 +624,16 @@ export default function CustomersScreen() {
           filteredCustomers.map(renderCustomerCard)
         )}
       </ScrollView>
+
+      {/* Add Customer FAB */}
+      <TouchableOpacity
+        style={styles.addCustomerFAB}
+        onPress={handleAddCustomer}
+        activeOpacity={0.8}
+      >
+        <Plus size={20} color="#ffffff" />
+        <Text style={styles.addCustomerText}>Add Customer</Text>
+      </TouchableOpacity>
 
       {/* Bottom Search Bar */}
       <View style={styles.floatingSearchContainer}>
@@ -1023,5 +1037,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: Colors.grey[200],
+  },
+  addCustomerFAB: {
+    position: 'absolute',
+    bottom: 90,
+    right: 20,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 25,
+    zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  addCustomerText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
