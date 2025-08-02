@@ -39,7 +39,7 @@ export default function AddressAutocomplete({
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const debounceRef = useRef<NodeJS.Timeout>();
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (value.length > 2) {
@@ -50,7 +50,7 @@ export default function AddressAutocomplete({
       
       debounceRef.current = setTimeout(() => {
         searchAddresses(value);
-      }, 300);
+      }, 300) as unknown as NodeJS.Timeout;
     } else {
       setSuggestions([]);
       setShowSuggestions(false);
@@ -273,7 +273,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: '#1e293b',
-    outlineStyle: 'none',
   },
   loadingText: {
     color: '#64748b',
