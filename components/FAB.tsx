@@ -128,6 +128,11 @@ export default function FAB({ onAction }: FABProps) {
       router.push('/notifications/notify-staff');
     }
     
+    // Navigate to stock management if stock action is pressed
+    if (actionId === 'stock') {
+      router.push('/inventory/stock-management');
+    }
+    
     toggleFAB();
   };
 

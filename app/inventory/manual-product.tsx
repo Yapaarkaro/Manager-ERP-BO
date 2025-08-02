@@ -146,7 +146,7 @@ interface ProductFormData {
 }
 
 export default function ManualProductScreen() {
-  const { scannedData, isScanned } = useLocalSearchParams();
+  const { scannedData, isScanned, returnToStockIn, supplierId } = useLocalSearchParams();
   
   const [formData, setFormData] = useState<ProductFormData>({
     name: '',
@@ -210,6 +210,16 @@ export default function ManualProductScreen() {
       }
     }
   }, [scannedData, isScanned]);
+
+  useEffect(() => {
+    // Auto-fill supplier if passed from stock in
+    if (supplierId && typeof supplierId === 'string') {
+      setFormData(prev => ({
+        ...prev,
+        supplier: supplierId
+      }));
+    }
+  }, [supplierId]);
 
   const updateFormData = (field: keyof ProductFormData, value: string | number | null) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -364,12 +374,40 @@ export default function ManualProductScreen() {
     console.log('Creating new product:', productData);
     
     setTimeout(() => {
-      Alert.alert('Success', 'Product added to inventory successfully', [
-        {
-          text: 'OK',
-          onPress: () => router.push('/inventory')
-        }
-      ]);
+      if (returnToStockIn === 'true') {
+        // Return to stock in with the new product data
+        const stockInProductData = {
+          id: productData.id,
+          name: productData.name,
+          price: productData.purchasePrice,
+          gstRate: productData.taxRate,
+          cessRate: parseFloat(formData.cessAmount) || 0,
+          cessType: formData.cessType,
+          cessAmount: parseFloat(formData.cessAmount) || 0,
+        };
+        
+        Alert.alert('Success', 'Product added successfully. Returning to stock in...', [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to stock in with product data
+              router.push({
+                pathname: '/inventory/stock-in/manual',
+                params: {
+                  newProduct: JSON.stringify(stockInProductData)
+                }
+              });
+            }
+          }
+        ]);
+      } else {
+        Alert.alert('Success', 'Product added to inventory successfully', [
+          {
+            text: 'OK',
+            onPress: () => router.push('/inventory')
+          }
+        ]);
+      }
       setIsSubmitting(false);
     }, 1000);
   };

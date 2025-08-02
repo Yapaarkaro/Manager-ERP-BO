@@ -468,7 +468,7 @@ export default function SuppliersScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => router.push('/dashboard')}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

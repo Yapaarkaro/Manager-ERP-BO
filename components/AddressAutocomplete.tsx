@@ -123,8 +123,36 @@ export default function AddressAutocomplete({
 
   const extractCityFromDescription = (description: string): string => {
     const parts = description.split(',').map(part => part.trim());
-    // Usually city is the second last part before state
-    if (parts.length >= 2) {
+    // Look for city in the middle parts, avoiding the first (street) and last (state/pincode)
+    if (parts.length >= 3) {
+      // Common address words to skip
+      const commonAddressWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'india', 'puram', 'palayam', 'patti'];
+      const commonSuffixes = ['puram', 'palayam', 'patti', 'nagar', 'colony'];
+      
+      // First, try to find a part that looks like a major city (not a locality)
+      for (let i = 1; i < parts.length - 1; i++) {
+        const part = parts[i];
+        if (part.length > 2 && 
+            !/\d{6}/.test(part) && 
+            !/^\d+$/.test(part) &&
+            !commonAddressWords.some(word => part.toLowerCase().includes(word)) &&
+            !commonSuffixes.some(suffix => part.toLowerCase().endsWith(suffix))) {
+          return part;
+        }
+      }
+      
+      // If no city found, try to find the most likely city name
+      for (let i = 1; i < parts.length - 1; i++) {
+        const part = parts[i];
+        if (part.length > 2 && 
+            !/\d{6}/.test(part) && 
+            !/^\d+$/.test(part) &&
+            !commonAddressWords.some(word => part.toLowerCase().includes(word))) {
+          return part;
+        }
+      }
+      
+      // Fallback to second last part
       return parts[parts.length - 2] || '';
     }
     return '';
@@ -132,11 +160,17 @@ export default function AddressAutocomplete({
 
   const extractStateFromDescription = (description: string): string => {
     const parts = description.split(',').map(part => part.trim());
-    // State is usually the last part
-    if (parts.length >= 1) {
-      const lastPart = parts[parts.length - 1];
+    // Look for state in the last parts, but avoid common words
+    const commonWords = ['india', 'road', 'street', 'area'];
+    
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = parts[i];
       // Remove pincode if present
-      return lastPart.replace(/\d{6}/, '').trim();
+      const cleanPart = part.replace(/\d{6}/, '').trim();
+      if (cleanPart.length > 2 && 
+          !commonWords.some(word => cleanPart.toLowerCase().includes(word))) {
+        return cleanPart;
+      }
     }
     return '';
   };

@@ -50,6 +50,26 @@ interface PurchaseInvoice {
   supplierAvatar: string;
 }
 
+interface PurchaseOrder {
+  id: string;
+  poNumber: string;
+  supplierName: string;
+  supplierType: 'business' | 'individual';
+  businessName?: string;
+  gstin?: string;
+  staffName: string;
+  staffAvatar: string;
+  status: 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled';
+  type: 'created' | 'received';
+  amount: number;
+  itemCount: number;
+  date: string;
+  expectedDelivery: string;
+  supplierAvatar: string;
+  supplierId?: string;
+  customerId?: string;
+}
+
 const mockPurchaseInvoices: PurchaseInvoice[] = [
   {
     id: '1',
@@ -98,122 +118,212 @@ const mockPurchaseInvoices: PurchaseInvoice[] = [
     supplierType: 'business',
     businessName: 'Dell Technologies India Pvt Ltd',
     gstin: '07KLMNO9012P3Q4',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    staffName: 'Amit Patel',
+    staffAvatar: 'https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
     status: 'partial',
-    paymentStatus: 'pending',
-    paymentMethod: 'bank_transfer',
-    amount: 420000,
+    paymentStatus: 'overdue',
+    paymentMethod: 'card',
+    amount: 450000,
     itemCount: 5,
-    date: '2024-01-16',
-    expectedDelivery: '2024-01-22',
-    actualDelivery: '2024-01-21',
-    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+    date: '2024-01-20',
+    expectedDelivery: '2024-01-30',
+    supplierAvatar: 'https://images.pexels.com/photos/1222272/pexels-photo-1222272.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+  }
+];
+
+const mockPurchaseOrders: PurchaseOrder[] = [
+  {
+    id: '1',
+    poNumber: 'PO-2024-001',
+    supplierName: 'Apple India Pvt Ltd',
+    supplierType: 'business',
+    businessName: 'Apple India Pvt Ltd',
+    gstin: '29ABCDE1234F2Z6',
+    staffName: 'Rajesh Kumar',
+    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'received',
+    type: 'created',
+    amount: 850000,
+    itemCount: 10,
+    date: '2024-01-15',
+    expectedDelivery: '2024-01-20',
+    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    supplierId: 'supplier_apple_001',
+    customerId: 'customer_001'
+  },
+  {
+    id: '2',
+    poNumber: 'PO-2024-002',
+    supplierName: 'Samsung Electronics',
+    supplierType: 'business',
+    businessName: 'Samsung Electronics India Pvt Ltd',
+    gstin: '27FGHIJ5678K3L9',
+    staffName: 'Priya Sharma',
+    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'sent',
+    type: 'created',
+    amount: 650000,
+    itemCount: 8,
+    date: '2024-01-18',
+    expectedDelivery: '2024-01-25',
+    supplierAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    supplierId: 'supplier_samsung_002',
+    customerId: 'customer_002'
+  },
+  {
+    id: '3',
+    poNumber: 'PO-2024-003',
+    supplierName: 'Dell Technologies',
+    supplierType: 'business',
+    businessName: 'Dell Technologies India Pvt Ltd',
+    gstin: '07KLMNO9012P3Q4',
+    staffName: 'Amit Patel',
+    staffAvatar: 'https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'confirmed',
+    type: 'received',
+    amount: 450000,
+    itemCount: 5,
+    date: '2024-01-20',
+    expectedDelivery: '2024-01-30',
+    supplierAvatar: 'https://images.pexels.com/photos/1222272/pexels-photo-1222272.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    supplierId: 'supplier_dell_003',
+    customerId: 'customer_003'
   },
   {
     id: '4',
     poNumber: 'PO-2024-004',
-    invoiceNumber: 'PINV-2024-004',
-    supplierName: 'Local Electronics Supplier',
-    supplierType: 'individual',
-    staffName: 'Meera Joshi',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'cancelled',
-    paymentStatus: 'pending',
-    paymentMethod: 'cash',
-    amount: 180000,
-    itemCount: 3,
-    date: '2024-01-12',
-    expectedDelivery: '2024-01-18',
-    supplierAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-  },
+    supplierName: 'HP India',
+    supplierType: 'business',
+    businessName: 'HP India Pvt Ltd',
+    gstin: '12PQRST5678U9V0',
+    staffName: 'Neha Singh',
+    staffAvatar: 'https://images.pexels.com/photos/1239292/pexels-photo-1239292.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'draft',
+    type: 'created',
+    amount: 320000,
+    itemCount: 4,
+    date: '2024-01-22',
+    expectedDelivery: '2024-02-05',
+    supplierAvatar: 'https://images.pexels.com/photos/1222273/pexels-photo-1222273.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    supplierId: 'supplier_hp_004',
+    customerId: 'customer_004'
+  }
 ];
 
 export default function PurchasesScreen() {
+  const [activeTab, setActiveTab] = useState<'invoices' | 'orders'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredPurchases, setFilteredPurchases] = useState(mockPurchaseInvoices);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'pending' | 'received' | 'cancelled'>('all');
-  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [poFilter, setPoFilter] = useState<'all' | 'created' | 'received'>('all');
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    applyFilters(query, selectedFilter);
   };
 
-  const handleFilterChange = (filter: typeof selectedFilter) => {
-    setSelectedFilter(filter);
-    setShowFilterModal(false);
-    applyFilters(searchQuery, filter);
+  const handleTabChange = (tab: 'invoices' | 'orders') => {
+    setActiveTab(tab);
+    setSearchQuery('');
   };
 
-  const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockPurchaseInvoices;
-
-    // Apply search filter
-    if (query.trim() !== '') {
-      filtered = filtered.filter(purchase =>
-        purchase.poNumber.toLowerCase().includes(query.toLowerCase()) ||
-        purchase.invoiceNumber.toLowerCase().includes(query.toLowerCase()) ||
-        purchase.supplierName.toLowerCase().includes(query.toLowerCase()) ||
-        purchase.businessName?.toLowerCase().includes(query.toLowerCase()) ||
-        purchase.staffName.toLowerCase().includes(query.toLowerCase())
-      );
-    }
-
-    // Apply status filter
-    if (filter !== 'all') {
-      filtered = filtered.filter(purchase => purchase.status === filter);
-    }
-
-    setFilteredPurchases(filtered);
+  const handlePoFilterChange = (filter: 'all' | 'created' | 'received') => {
+    setPoFilter(filter);
   };
+
+  const filteredInvoices = mockPurchaseInvoices.filter(invoice =>
+    invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    invoice.supplierName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    invoice.poNumber.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredOrders = mockPurchaseOrders.filter(order => {
+    const matchesSearch = order.poNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      order.supplierName.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    if (poFilter === 'all') return matchesSearch;
+    return matchesSearch && order.type === poFilter;
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'received': return Colors.success;
-      case 'pending': return Colors.warning;
-      case 'partial': return Colors.primary;
-      case 'cancelled': return Colors.error;
-      default: return Colors.textLight;
+      case 'received':
+      case 'confirmed':
+      case 'paid':
+        return Colors.success;
+      case 'pending':
+      case 'sent':
+        return Colors.warning;
+      case 'partial':
+      case 'overdue':
+        return Colors.error;
+      case 'cancelled':
+      case 'draft':
+        return Colors.textLight;
+      default:
+        return Colors.textLight;
     }
   };
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'received': return 'RECEIVED';
-      case 'pending': return 'PENDING';
-      case 'partial': return 'PARTIAL';
-      case 'cancelled': return 'CANCELLED';
-      default: return status.toUpperCase();
+      case 'received':
+        return 'Received';
+      case 'pending':
+        return 'Pending';
+      case 'partial':
+        return 'Partial';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'sent':
+        return 'Sent';
+      case 'confirmed':
+        return 'Confirmed';
+      case 'draft':
+        return 'Draft';
+      case 'paid':
+        return 'Paid';
+      case 'overdue':
+        return 'Overdue';
+      default:
+        return status;
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'received': return CheckCircle;
-      case 'pending': return Clock;
-      case 'partial': return Package;
-      case 'cancelled': return AlertTriangle;
-      default: return FileText;
+      case 'received':
+      case 'confirmed':
+      case 'paid':
+        return <CheckCircle size={16} color={Colors.success} />;
+      case 'pending':
+      case 'sent':
+        return <Clock size={16} color={Colors.warning} />;
+      case 'partial':
+      case 'overdue':
+        return <AlertTriangle size={16} color={Colors.error} />;
+      case 'cancelled':
+      case 'draft':
+        return <FileText size={16} color={Colors.textLight} />;
+      default:
+        return <FileText size={16} color={Colors.textLight} />;
     }
   };
 
   const getPaymentMethodIcon = (method: string) => {
     switch (method) {
-      case 'cash': return Banknote;
-      case 'upi': return Smartphone;
-      case 'card': return CreditCard;
-      case 'bank_transfer': return Building2;
-      default: return IndianRupee;
+      case 'cash':
+        return <Banknote size={16} color={Colors.success} />;
+      case 'upi':
+        return <Smartphone size={16} color={Colors.primary} />;
+      case 'card':
+        return <CreditCard size={16} color={Colors.warning} />;
+      case 'bank_transfer':
+        return <Building2 size={16} color={Colors.primary} />;
+      default:
+        return <Banknote size={16} color={Colors.textLight} />;
     }
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return `₹${amount.toLocaleString('en-IN')}`;
   };
 
   const formatDate = (dateString: string) => {
@@ -225,355 +335,270 @@ export default function PurchasesScreen() {
     });
   };
 
-  const handlePurchasePress = (purchase: PurchaseInvoice) => {
+  const handleInvoicePress = (invoice: PurchaseInvoice) => {
     router.push({
-      pathname: '/purchasing/purchase-details',
-      params: {
-        purchaseId: purchase.id,
-        purchaseData: JSON.stringify(purchase)
+      pathname: '/purchasing/invoice-details',
+      params: { invoiceId: invoice.id }
+    });
+  };
+
+  const handleOrderPress = (order: PurchaseOrder) => {
+    router.push({
+      pathname: '/purchasing/po-details',
+      params: { 
+        poId: order.id,
+        poData: JSON.stringify(order)
       }
     });
   };
 
   const handleCreatePO = () => {
-    router.push('/purchasing/select-supplier');
+    router.push('/purchasing/create-po');
   };
 
-  const renderPurchaseCard = (purchase: PurchaseInvoice) => {
-    const StatusIcon = getStatusIcon(purchase.status);
-    const PaymentIcon = getPaymentMethodIcon(purchase.paymentMethod);
-    const statusColor = getStatusColor(purchase.status);
-
-    return (
-      <TouchableOpacity
-        key={purchase.id}
-        style={[
-          styles.purchaseCard,
-          { borderLeftColor: statusColor }
-        ]}
-        onPress={() => handlePurchasePress(purchase)}
-        activeOpacity={0.7}
-      >
-        {/* Header */}
-        <View style={styles.purchaseHeader}>
-          <View style={styles.purchaseLeft}>
-            <View style={[styles.statusIcon, { backgroundColor: `${statusColor}20` }]}>
-              <StatusIcon size={20} color={statusColor} />
-            </View>
-            <View style={styles.purchaseInfo}>
-              <Text style={styles.poNumber}>{purchase.poNumber}</Text>
-              <Text style={styles.invoiceNumber}>Invoice: {purchase.invoiceNumber}</Text>
-              <View style={styles.supplierInfo}>
-                {purchase.supplierType === 'business' ? (
-                  <Building2 size={14} color={Colors.textLight} />
-                ) : (
-                  <User size={14} color={Colors.textLight} />
-                )}
-                <Text style={styles.supplierName}>
-                  {purchase.supplierType === 'business' ? purchase.businessName : purchase.supplierName}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.purchaseRight}>
-            <Text style={styles.purchaseAmount}>
-              {formatAmount(purchase.amount)}
-            </Text>
-            <Text style={styles.itemCount}>
-              {purchase.itemCount} items
-            </Text>
-            <View style={[
-              styles.statusBadge,
-              { backgroundColor: `${statusColor}20` }
-            ]}>
-              <Text style={[styles.statusText, { color: statusColor }]}>
-                {getStatusText(purchase.status)}
-              </Text>
-            </View>
-          </View>
+  const renderInvoiceCard = (invoice: PurchaseInvoice) => (
+    <TouchableOpacity
+      key={invoice.id}
+      style={styles.card}
+      onPress={() => handleInvoicePress(invoice)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.cardHeader}>
+        <View style={styles.cardHeaderLeft}>
+          <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
+          <Text style={styles.poNumber}>PO: {invoice.poNumber}</Text>
         </View>
-
-        {/* Delivery Info */}
-        <View style={styles.deliverySection}>
-          <View style={styles.deliveryRow}>
-            <Truck size={14} color={Colors.textLight} />
-            <Text style={styles.deliveryLabel}>Expected:</Text>
-            <Text style={styles.deliveryDate}>{formatDate(purchase.expectedDelivery)}</Text>
-          </View>
-          {purchase.actualDelivery && (
-            <View style={styles.deliveryRow}>
-              <CheckCircle size={14} color={Colors.success} />
-              <Text style={styles.deliveryLabel}>Delivered:</Text>
-              <Text style={styles.deliveryDate}>{formatDate(purchase.actualDelivery)}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Payment Info */}
-        <View style={styles.paymentSection}>
-          <View style={styles.paymentRow}>
-            <PaymentIcon size={16} color={Colors.primary} />
-            <Text style={styles.paymentMethod}>
-              {purchase.paymentMethod === 'bank_transfer' ? 'Bank Transfer' :
-               purchase.paymentMethod === 'cash' ? 'Cash' :
-               purchase.paymentMethod === 'upi' ? 'UPI' : 'Card'}
-            </Text>
-            <View style={[
-              styles.paymentStatusBadge,
-              { backgroundColor: purchase.paymentStatus === 'paid' ? `${Colors.success}20` : `${Colors.warning}20` }
-            ]}>
-              <Text style={[
-                styles.paymentStatusText,
-                { color: purchase.paymentStatus === 'paid' ? Colors.success : Colors.warning }
-              ]}>
-                {purchase.paymentStatus.toUpperCase()}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.purchaseFooter}>
-          <View style={styles.staffInfo}>
-            <Image 
-              source={{ uri: purchase.staffAvatar }}
-              style={styles.staffAvatar}
-            />
-            <Text style={styles.staffName}>Ordered by {purchase.staffName}</Text>
-          </View>
-          
-          <View style={styles.actionIcons}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => console.log('Download purchase')}
-              activeOpacity={0.7}
-            >
-              <Download size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => console.log('Share purchase')}
-              activeOpacity={0.7}
-            >
-              <Share size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handlePurchasePress(purchase)}
-              activeOpacity={0.7}
-            >
-              <Eye size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const totalPurchases = filteredPurchases.reduce((sum, p) => sum + p.amount, 0);
-  const pendingPurchases = filteredPurchases.filter(p => p.status === 'pending').length;
-  const receivedPurchases = filteredPurchases.filter(p => p.status === 'received').length;
-
-  return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Purchase Orders</Text>
-        
-        <View style={styles.headerRight}>
-          <Text style={styles.totalCount}>
-            {filteredPurchases.length} orders
+        <View style={styles.statusContainer}>
+          {getStatusIcon(invoice.status)}
+          <Text style={[styles.statusText, { color: getStatusColor(invoice.status) }]}>
+            {getStatusText(invoice.status)}
           </Text>
         </View>
       </View>
 
-      {/* Summary Stats */}
-      <View style={styles.summaryContainer}>
-        <View style={styles.summaryCard}>
-          <ShoppingCart size={20} color={Colors.primary} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Total Value</Text>
-            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
-              {formatAmount(totalPurchases)}
-            </Text>
+      <View style={styles.cardBody}>
+        <View style={styles.supplierInfo}>
+          <Image source={{ uri: invoice.supplierAvatar }} style={styles.avatar} />
+          <View style={styles.supplierDetails}>
+            <Text style={styles.supplierName}>{invoice.supplierName}</Text>
+            {invoice.gstin && (
+              <Text style={styles.gstin}>GSTIN: {invoice.gstin}</Text>
+            )}
           </View>
         </View>
 
-        <View style={styles.summaryCard}>
-          <Clock size={20} color={Colors.warning} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Pending</Text>
-            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
-              {pendingPurchases}
-            </Text>
+        <View style={styles.cardFooter}>
+          <View style={styles.footerLeft}>
+            <Text style={styles.amount}>{formatAmount(invoice.amount)}</Text>
+            <Text style={styles.itemCount}>{invoice.itemCount} items</Text>
           </View>
-        </View>
-
-        <View style={styles.summaryCard}>
-          <CheckCircle size={20} color={Colors.success} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Received</Text>
-            <Text style={[styles.summaryValue, { color: Colors.success }]}>
-              {receivedPurchases}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScrollContent}
-        >
-          {[
-            { key: 'all', label: 'All', count: mockPurchaseInvoices.length },
-            { key: 'pending', label: 'Pending', count: mockPurchaseInvoices.filter(p => p.status === 'pending').length },
-            { key: 'received', label: 'Received', count: mockPurchaseInvoices.filter(p => p.status === 'received').length },
-            { key: 'cancelled', label: 'Cancelled', count: mockPurchaseInvoices.filter(p => p.status === 'cancelled').length },
-          ].map((filter) => (
-            <TouchableOpacity
-              key={filter.key}
-              style={[
-                styles.filterTab,
-                selectedFilter === filter.key && styles.activeFilterTab
-              ]}
-              onPress={() => handleFilterChange(filter.key as typeof selectedFilter)}
-              activeOpacity={0.7}
-            >
-              <Text style={[
-                styles.filterTabText,
-                selectedFilter === filter.key && styles.activeFilterTabText
-              ]}>
-                {filter.label}
+          <View style={styles.footerRight}>
+            <View style={styles.paymentInfo}>
+              {getPaymentMethodIcon(invoice.paymentMethod)}
+              <Text style={[styles.paymentStatus, { color: getStatusColor(invoice.paymentStatus) }]}>
+                {getStatusText(invoice.paymentStatus)}
               </Text>
-              <View style={[
-                styles.filterTabCount,
-                selectedFilter === filter.key && styles.activeFilterTabCount
-              ]}>
-                <Text style={[
-                  styles.filterTabCountText,
-                  selectedFilter === filter.key && styles.activeFilterTabCountText
-                ]}>
-                  {filter.count}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Purchase List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredPurchases.length === 0 ? (
-          <View style={styles.emptyState}>
-            <ShoppingCart size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Purchase Orders Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No purchase orders match your search criteria' : 'No purchase orders created yet'}
-            </Text>
-          </View>
-        ) : (
-          filteredPurchases.map(renderPurchaseCard)
-        )}
-      </ScrollView>
-
-      {/* Create PO FAB */}
-      <TouchableOpacity
-        style={styles.createPOFAB}
-        onPress={handleCreatePO}
-        activeOpacity={0.8}
-      >
-        <Plus size={20} color="#ffffff" />
-        <Text style={styles.createPOText}>Create PO</Text>
-      </TouchableOpacity>
-
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search purchase orders..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => setShowFilterModal(true)}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
+            </View>
+            <Text style={styles.date}>{formatDate(invoice.date)}</Text>
           </View>
         </View>
       </View>
+    </TouchableOpacity>
+  );
 
-      {/* Filter Modal */}
-      <Modal
-        visible={showFilterModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowFilterModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Filter Purchase Orders</Text>
+  const renderOrderCard = (order: PurchaseOrder) => (
+    <TouchableOpacity
+      key={order.id}
+      style={styles.card}
+      onPress={() => handleOrderPress(order)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.cardHeader}>
+        <View style={styles.cardHeaderLeft}>
+          <Text style={styles.invoiceNumber}>{order.poNumber}</Text>
+          <View style={styles.typeBadge}>
+            <Text style={[styles.typeText, { color: order.type === 'created' ? Colors.primary : Colors.success }]}>
+              {order.type === 'created' ? 'Created' : 'Received'}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.statusContainer}>
+          {getStatusIcon(order.status)}
+          <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+            {getStatusText(order.status)}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.cardBody}>
+        <View style={styles.supplierInfo}>
+          <Image source={{ uri: order.supplierAvatar }} style={styles.avatar} />
+          <View style={styles.supplierDetails}>
+            <Text style={styles.supplierName}>{order.supplierName}</Text>
+            {order.gstin && (
+              <Text style={styles.gstin}>GSTIN: {order.gstin}</Text>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.cardFooter}>
+          <View style={styles.footerLeft}>
+            <Text style={styles.amount}>{formatAmount(order.amount)}</Text>
+            <Text style={styles.itemCount}>{order.itemCount} items</Text>
+          </View>
+          <View style={styles.footerRight}>
+            <Text style={styles.date}>{formatDate(order.date)}</Text>
+            <Text style={styles.expectedDelivery}>Expected: {formatDate(order.expectedDelivery)}</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color={Colors.text} />
+          </TouchableOpacity>
+          
+          <Text style={styles.headerTitle}>Purchases</Text>
+        </View>
+
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'invoices' && styles.activeTab]}
+            onPress={() => handleTabChange('invoices')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, activeTab === 'invoices' && styles.activeTabText]}>
+              Purchase Invoices
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'orders' && styles.activeTab]}
+            onPress={() => handleTabChange('orders')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, activeTab === 'orders' && styles.activeTabText]}>
+              Purchase Orders
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* PO Filter (only for orders tab) */}
+        {activeTab === 'orders' && (
+          <View style={styles.filterContainer}>
+                         <TouchableOpacity
+               style={[styles.poFilterButton, poFilter === 'all' && styles.activeFilterButton]}
+               onPress={() => handlePoFilterChange('all')}
+               activeOpacity={0.7}
+             >
+               <Text style={[styles.filterText, poFilter === 'all' && styles.activeFilterText]}>
+                 All
+               </Text>
+             </TouchableOpacity>
+             <TouchableOpacity
+               style={[styles.poFilterButton, poFilter === 'created' && styles.activeFilterButton]}
+               onPress={() => handlePoFilterChange('created')}
+               activeOpacity={0.7}
+             >
+               <Text style={[styles.filterText, poFilter === 'created' && styles.activeFilterText]}>
+                 Created
+               </Text>
+             </TouchableOpacity>
+             <TouchableOpacity
+               style={[styles.poFilterButton, poFilter === 'received' && styles.activeFilterButton]}
+               onPress={() => handlePoFilterChange('received')}
+               activeOpacity={0.7}
+             >
+               <Text style={[styles.filterText, poFilter === 'received' && styles.activeFilterText]}>
+                 Received
+               </Text>
+             </TouchableOpacity>
+          </View>
+        )}
+
+
+
+        {/* Content */}
+        <View style={styles.content}>
+          <ScrollView 
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {activeTab === 'invoices' ? (
+              filteredInvoices.length > 0 ? (
+                filteredInvoices.map(renderInvoiceCard)
+              ) : (
+                <View style={styles.emptyState}>
+                  <FileText size={48} color={Colors.textLight} />
+                  <Text style={styles.emptyStateTitle}>No Purchase Invoices</Text>
+                  <Text style={styles.emptyStateText}>
+                    {searchQuery ? 'No invoices found matching your search.' : 'You haven\'t received any purchase invoices yet.'}
+                  </Text>
+                </View>
+              )
+            ) : (
+              filteredOrders.length > 0 ? (
+                filteredOrders.map(renderOrderCard)
+              ) : (
+                <View style={styles.emptyState}>
+                  <ShoppingCart size={48} color={Colors.textLight} />
+                  <Text style={styles.emptyStateTitle}>No Purchase Orders</Text>
+                  <Text style={styles.emptyStateText}>
+                    {searchQuery ? 'No orders found matching your search.' : 'You haven\'t created any purchase orders yet.'}
+                  </Text>
+                </View>
+              )
+            )}
+          </ScrollView>
+
+          {/* Create PO FAB (only for orders tab) */}
+          {activeTab === 'orders' && (
+            <TouchableOpacity
+              style={styles.createPoFAB}
+              onPress={handleCreatePO}
+              activeOpacity={0.8}
+            >
+              <Plus size={20} color={Colors.background} />
+              <Text style={styles.createPoFABText}>Create New PO</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Search Bar at Bottom */}
+        <View style={styles.floatingSearchContainer}>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder={`Search ${activeTab === 'invoices' ? 'invoices' : 'orders'}...`}
+                placeholderTextColor={Colors.textLight}
+                value={searchQuery}
+                onChangeText={handleSearch}
+              />
               <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={() => setShowFilterModal(false)}
+                style={styles.filterButton}
+                onPress={() => console.log('Filter purchases')}
                 activeOpacity={0.7}
               >
-                <X size={24} color={Colors.textLight} />
+                <Filter size={20} color={Colors.textLight} />
               </TouchableOpacity>
-            </View>
-
-            <View style={styles.filterOptions}>
-              {[
-                { key: 'all', label: 'All Orders' },
-                { key: 'pending', label: 'Pending Orders' },
-                { key: 'received', label: 'Received Orders' },
-                { key: 'cancelled', label: 'Cancelled Orders' },
-              ].map((option) => (
-                <TouchableOpacity
-                  key={option.key}
-                  style={[
-                    styles.filterOption,
-                    selectedFilter === option.key && styles.selectedFilterOption
-                  ]}
-                  onPress={() => handleFilterChange(option.key as typeof selectedFilter)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.filterOptionText,
-                    selectedFilter === option.key && styles.selectedFilterOptionText
-                  ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
             </View>
           </View>
         </View>
-      </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -582,333 +607,232 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  safeArea: {
+    flex: 1,
+  },
   header: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
+    padding: 8,
+    marginRight: 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: Colors.text,
-    flex: 1,
   },
-  headerRight: {
-    alignItems: 'flex-end',
-  },
-  totalCount: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  summaryContainer: {
+  tabContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    gap: 12,
-    backgroundColor: Colors.grey[50],
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
   },
-  summaryCard: {
+  tab: {
     flex: 1,
-    flexDirection: 'column',
+    paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    borderRadius: 8,
   },
-  summaryInfo: {
-    alignItems: 'center',
-    marginTop: 8,
+  activeTab: {
+    backgroundColor: Colors.primary + '20',
   },
-  summaryLabel: {
-    fontSize: 11,
+  tabText: {
+    fontSize: 16,
+    fontWeight: '500',
     color: Colors.textLight,
-    marginBottom: 2,
-    textAlign: 'center',
   },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
+  activeTabText: {
+    color: Colors.primary,
+    fontWeight: '600',
   },
   filterContainer: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-    paddingVertical: 12,
-  },
-  filterScrollContent: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  filterTab: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
     gap: 8,
   },
-  activeFilterTab: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  poFilterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
   },
-  filterTabText: {
+  activeFilterButton: {
+    backgroundColor: Colors.primary + '20',
+  },
+  filterText: {
     fontSize: 14,
     fontWeight: '500',
     color: Colors.textLight,
   },
-  activeFilterTabText: {
+  activeFilterText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  createPoContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  createPoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    gap: 8,
+  },
+  createPoText: {
+    fontSize: 16,
+    fontWeight: '600',
     color: Colors.background,
   },
-  filterTabCount: {
-    backgroundColor: Colors.grey[200],
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    minWidth: 20,
-    alignItems: 'center',
-  },
-  activeFilterTabCount: {
-    backgroundColor: Colors.background,
-  },
-  filterTabCountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textLight,
-  },
-  activeFilterTabCountText: {
-    color: Colors.primary,
+  content: {
+    flex: 1,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
-    paddingBottom: 120,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 120, // Space for search bar and FAB
   },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 100,
-  },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  purchaseCard: {
+  card: {
     backgroundColor: Colors.background,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    borderLeftWidth: 4,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  purchaseHeader: {
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
-  purchaseLeft: {
-    flexDirection: 'row',
-    flex: 1,
-    marginRight: 16,
-  },
-  statusIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  purchaseInfo: {
+  cardHeaderLeft: {
     flex: 1,
   },
-  poNumber: {
+  invoiceNumber: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
     marginBottom: 4,
   },
-  invoiceNumber: {
+  poNumber: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  typeBadge: {
+    backgroundColor: Colors.grey[100],
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  typeText: {
     fontSize: 12,
-    color: Colors.primary,
-    marginBottom: 6,
+    fontWeight: '500',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  cardBody: {
+    gap: 12,
   },
   supplierInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 12,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  supplierDetails: {
+    flex: 1,
   },
   supplierName: {
     fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  gstin: {
+    fontSize: 12,
     color: Colors.textLight,
   },
-  purchaseRight: {
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'flex-end',
   },
-  purchaseAmount: {
-    fontSize: 18,
-    fontWeight: '700',
+  footerLeft: {
+    gap: 4,
+  },
+  amount: {
+    fontSize: 16,
+    fontWeight: '600',
     color: Colors.text,
-    marginBottom: 4,
   },
   itemCount: {
     fontSize: 12,
     color: Colors.textLight,
-    marginBottom: 6,
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  footerRight: {
+    alignItems: 'flex-end',
+    gap: 4,
   },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  deliverySection: {
-    gap: 6,
-    marginBottom: 12,
-  },
-  deliveryRow: {
+  paymentInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
-  deliveryLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  deliveryDate: {
+  paymentStatus: {
     fontSize: 12,
     fontWeight: '500',
-    color: Colors.text,
   },
-  paymentSection: {
-    marginBottom: 12,
-  },
-  paymentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  paymentMethod: {
+  date: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  expectedDelivery: {
+    fontSize: 11,
+    color: Colors.textLight,
+  },
+
+  searchInput: {
     flex: 1,
-  },
-  paymentStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  paymentStatusText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  purchaseFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  staffInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  staffAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  staffName: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  actionIcons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.grey[50],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  createPOFAB: {
-    position: 'absolute',
-    bottom: 90,
-    right: 20,
-    backgroundColor: Colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 25,
-    zIndex: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  createPOText: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: Colors.text,
+    marginLeft: 12,
+    marginRight: 12,
   },
   floatingSearchContainer: {
     position: 'absolute',
@@ -940,14 +864,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[300],
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: Colors.text,
-    marginLeft: 12,
-    marginRight: 12,
-    outlineStyle: 'none',
-  },
   filterButton: {
     width: 32,
     height: 32,
@@ -958,70 +874,47 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  emptyState: {
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingVertical: 60,
   },
-  modalContainer: {
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-    width: '100%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalTitle: {
+  emptyStateTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
-  },
-  modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  filterOptions: {
-    padding: 20,
-  },
-  filterOption: {
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    marginTop: 16,
     marginBottom: 8,
-    backgroundColor: Colors.grey[50],
   },
-  selectedFilterOption: {
-    backgroundColor: '#f0f4ff',
-    borderWidth: 1,
-    borderColor: Colors.primary,
+  emptyStateText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 32,
   },
-  filterOptionText: {
-    fontSize: 16,
-    color: Colors.text,
+  createPoFAB: {
+    position: 'absolute',
+    bottom: 80,
+    right: 20,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 28,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  selectedFilterOptionText: {
-    color: Colors.primary,
+  createPoFABText: {
+    fontSize: 14,
     fontWeight: '600',
+    color: Colors.background,
   },
 });

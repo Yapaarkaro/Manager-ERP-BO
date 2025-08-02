@@ -24,9 +24,12 @@ import {
   X, 
   Hash,
   Plus,
-  AlertTriangle
+  AlertTriangle,
+  ChevronDown,
+  Map
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
+import AddressAutocomplete from '@/components/AddressAutocomplete';
 
 const Colors = {
   background: '#FFFFFF',
@@ -45,49 +48,304 @@ const Colors = {
 };
 
 interface SupplierFormData {
-  name: string;
   businessName: string;
   contactPerson: string;
   mobile: string;
   email: string;
-  address: string;
+  addressLine1: string;
+  addressLine2: string;
+  addressLine3: string;
+  city: string;
+  pincode: string;
+  state: string;
   gstin: string;
-  categories: string[];
-  customCategory: string;
   notes: string;
 }
 
-const supplierCategories = [
-  'Electronics', 'Textiles', 'Automotive', 'Food & Beverages', 
-  'Pharmaceuticals', 'Construction', 'Furniture', 'Chemicals',
-  'Machinery', 'Plastics', 'Metals', 'Others'
+const indianStates = [
+  { name: 'Andhra Pradesh', code: '37' },
+  { name: 'Arunachal Pradesh', code: '12' },
+  { name: 'Assam', code: '18' },
+  { name: 'Bihar', code: '10' },
+  { name: 'Chhattisgarh', code: '22' },
+  { name: 'Goa', code: '30' },
+  { name: 'Gujarat', code: '24' },
+  { name: 'Haryana', code: '06' },
+  { name: 'Himachal Pradesh', code: '02' },
+  { name: 'Jharkhand', code: '20' },
+  { name: 'Karnataka', code: '29' },
+  { name: 'Kerala', code: '32' },
+  { name: 'Madhya Pradesh', code: '23' },
+  { name: 'Maharashtra', code: '27' },
+  { name: 'Manipur', code: '14' },
+  { name: 'Meghalaya', code: '17' },
+  { name: 'Mizoram', code: '15' },
+  { name: 'Nagaland', code: '13' },
+  { name: 'Odisha', code: '21' },
+  { name: 'Punjab', code: '03' },
+  { name: 'Rajasthan', code: '08' },
+  { name: 'Sikkim', code: '11' },
+  { name: 'Tamil Nadu', code: '33' },
+  { name: 'Telangana', code: '36' },
+  { name: 'Tripura', code: '16' },
+  { name: 'Uttar Pradesh', code: '09' },
+  { name: 'Uttarakhand', code: '05' },
+  { name: 'West Bengal', code: '19' },
+  { name: 'Delhi', code: '07' },
+  { name: 'Jammu and Kashmir', code: '01' },
+  { name: 'Ladakh', code: '38' },
+  { name: 'Chandigarh', code: '04' },
+  { name: 'Dadra and Nagar Haveli and Daman and Diu', code: '26' },
+  { name: 'Lakshadweep', code: '31' },
+  { name: 'Puducherry', code: '34' },
+  { name: 'Andaman and Nicobar Islands', code: '35' }
 ];
-
-
 
 export default function AddSupplierScreen() {
   const [formData, setFormData] = useState<SupplierFormData>({
-    name: '',
     businessName: '',
     contactPerson: '',
     mobile: '',
     email: '',
-    address: '',
+    addressLine1: '',
+    addressLine2: '',
+    addressLine3: '',
+    city: '',
+    pincode: '',
+    state: '',
     gstin: '',
-    categories: [],
-    customCategory: '',
     notes: '',
   });
 
   const [showGstinModal, setShowGstinModal] = useState(false);
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showStateModal, setShowStateModal] = useState(false);
   const [gstinSearch, setGstinSearch] = useState('');
+  const [stateSearch, setStateSearch] = useState('');
+  const [addressSearch, setAddressSearch] = useState('');
   const [isLoadingGstin, setIsLoadingGstin] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [showMap, setShowMap] = useState(false);
 
-  const updateFormData = (field: keyof SupplierFormData, value: string | string[]) => {
+  const updateFormData = (field: keyof SupplierFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Shared function to parse address components with enhanced logic
+  const parseAddressComponents = (addressString: string, rawCity?: string, rawState?: string, rawPincode?: string) => {
+    const addressParts = addressString.split(',').map((part: string) => part.trim());
+    
+    // Extract address components
+    let addressLine1 = addressParts[0] || '';
+    let addressLine2 = addressParts[1] || '';
+    let addressLine3 = addressParts[2] || '';
+    let city = rawCity || '';
+    let state = rawState || '';
+    let pincode = rawPincode || '';
+
+    // Clean city name - remove numbers, extra spaces, and ensure it's just the city name
+    const cleanCityName = (cityName: string): string => {
+      if (!cityName) return '';
+      
+      // Remove any numbers and special characters, keep only letters and spaces
+      let cleaned = cityName.replace(/[0-9]/g, '').replace(/[^\w\s]/g, '');
+      
+      // Remove extra spaces and trim
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
+      
+      // If the cleaned name is too short, return empty
+      if (cleaned.length < 2) return '';
+      
+      return cleaned;
+    };
+
+    // Better parsing for city and state
+    if (addressParts.length > 3) {
+      // First, find pincode
+      for (let i = addressParts.length - 1; i >= 0; i--) {
+        const part = addressParts[i];
+        if (/\d{6}/.test(part)) {
+          pincode = part.match(/\d{6}/)?.[0] || pincode;
+          break;
+        }
+      }
+
+      // Find state by looking for exact matches in our state list
+      for (let i = addressParts.length - 1; i >= 0; i--) {
+        const part = addressParts[i];
+        // Skip if it's a pincode
+        if (/\d{6}/.test(part)) continue;
+        
+        // Look for exact state match
+        const matchingState = indianStates.find(s => 
+          s.name.toLowerCase() === part.toLowerCase()
+        );
+        
+        if (matchingState) {
+          state = matchingState.name;
+          break;
+        }
+      }
+
+      // Find city - look for parts that are not states, pincodes, or common address words
+      const commonAddressWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'india', 'puram', 'palayam', 'patti'];
+      const commonSuffixes = ['puram', 'palayam', 'patti', 'nagar', 'colony'];
+      
+      // First, try to find a part that looks like a major city (not a locality)
+      for (let i = 1; i < addressParts.length - 1; i++) {
+        const part = addressParts[i];
+        
+        // Skip if it's a pincode, state, or common address word
+        if (/\d{6}/.test(part)) continue;
+        if (indianStates.some(s => s.name.toLowerCase() === part.toLowerCase())) continue;
+        if (commonAddressWords.some(word => part.toLowerCase().includes(word))) continue;
+        
+        // Skip if it ends with common locality suffixes
+        if (commonSuffixes.some(suffix => part.toLowerCase().endsWith(suffix))) continue;
+        
+        // If this part looks like a city (not too short, not a number, not a locality)
+        if (part.length > 2 && !/^\d+$/.test(part)) {
+          city = cleanCityName(part);
+          break;
+        }
+      }
+      
+      // If no city found, try to find the most likely city name
+      if (!city) {
+        for (let i = 1; i < addressParts.length - 1; i++) {
+          const part = addressParts[i];
+          
+          // Skip if it's a pincode or state
+          if (/\d{6}/.test(part)) continue;
+          if (indianStates.some(s => s.name.toLowerCase() === part.toLowerCase())) continue;
+          
+          // If this part looks like a city (not too short, not a number)
+          if (part.length > 2 && !/^\d+$/.test(part)) {
+            city = cleanCityName(part);
+            break;
+          }
+        }
+      }
+    }
+
+    // Clean the final city name
+    city = cleanCityName(city);
+
+    return { addressLine1, addressLine2, addressLine3, city, state, pincode };
+  };
+
+  // Function to map GSTIN state data to our state names
+  const mapGstinStateToStateName = (gstinState: string): string => {
+    if (!gstinState) return '';
+    
+    const stateLower = gstinState.toLowerCase();
+    
+    // Direct matches
+    const directMatch = indianStates.find(state => 
+      state.name.toLowerCase() === stateLower ||
+      state.name.toLowerCase().includes(stateLower) ||
+      stateLower.includes(state.name.toLowerCase())
+    );
+    
+    if (directMatch) {
+      return directMatch.name;
+    }
+    
+    // Common abbreviations and variations
+    const stateMappings: { [key: string]: string } = {
+      'tn': 'Tamil Nadu',
+      'tamilnadu': 'Tamil Nadu',
+      'tamil nadu': 'Tamil Nadu',
+      'ap': 'Andhra Pradesh',
+      'andhrapradesh': 'Andhra Pradesh',
+      'andhra pradesh': 'Andhra Pradesh',
+      'ka': 'Karnataka',
+      'karnataka': 'Karnataka',
+      'mh': 'Maharashtra',
+      'maharashtra': 'Maharashtra',
+      'dl': 'Delhi',
+      'delhi': 'Delhi',
+      'gj': 'Gujarat',
+      'gujarat': 'Gujarat',
+      'up': 'Uttar Pradesh',
+      'uttarpradesh': 'Uttar Pradesh',
+      'uttar pradesh': 'Uttar Pradesh',
+      'wb': 'West Bengal',
+      'westbengal': 'West Bengal',
+      'west bengal': 'West Bengal',
+      'hr': 'Haryana',
+      'haryana': 'Haryana',
+      'pb': 'Punjab',
+      'punjab': 'Punjab',
+      'mp': 'Madhya Pradesh',
+      'madhyapradesh': 'Madhya Pradesh',
+      'madhya pradesh': 'Madhya Pradesh',
+      'rj': 'Rajasthan',
+      'rajasthan': 'Rajasthan',
+      'kl': 'Kerala',
+      'kerala': 'Kerala',
+      'or': 'Odisha',
+      'odisha': 'Odisha',
+      'orissa': 'Odisha',
+      'jh': 'Jharkhand',
+      'jharkhand': 'Jharkhand',
+      'ct': 'Chhattisgarh',
+      'chhattisgarh': 'Chhattisgarh',
+      'chattisgarh': 'Chhattisgarh',
+      'as': 'Assam',
+      'assam': 'Assam',
+      'br': 'Bihar',
+      'bihar': 'Bihar',
+      'uk': 'Uttarakhand',
+      'uttarakhand': 'Uttarakhand',
+      'ut': 'Uttarakhand',
+      'hp': 'Himachal Pradesh',
+      'himachalpradesh': 'Himachal Pradesh',
+      'himachal pradesh': 'Himachal Pradesh',
+      'ga': 'Goa',
+      'goa': 'Goa',
+      'mn': 'Manipur',
+      'manipur': 'Manipur',
+      'ml': 'Meghalaya',
+      'meghalaya': 'Meghalaya',
+      'mz': 'Mizoram',
+      'mizoram': 'Mizoram',
+      'nl': 'Nagaland',
+      'nagaland': 'Nagaland',
+      'ar': 'Arunachal Pradesh',
+      'arunachalpradesh': 'Arunachal Pradesh',
+      'arunachal pradesh': 'Arunachal Pradesh',
+      'sk': 'Sikkim',
+      'sikkim': 'Sikkim',
+      'tr': 'Tripura',
+      'tripura': 'Tripura',
+      'an': 'Andaman and Nicobar Islands',
+      'andamanandnicobar': 'Andaman and Nicobar Islands',
+      'andaman and nicobar': 'Andaman and Nicobar Islands',
+      'ch': 'Chandigarh',
+      'chandigarh': 'Chandigarh',
+      'dn': 'Dadra and Nagar Haveli and Daman and Diu',
+      'dadraandnagarhaveli': 'Dadra and Nagar Haveli and Daman and Diu',
+      'ld': 'Ladakh',
+      'ladakh': 'Ladakh',
+      'py': 'Puducherry',
+      'puducherry': 'Puducherry',
+      'lk': 'Lakshadweep',
+      'lakshadweep': 'Lakshadweep',
+      'jk': 'Jammu and Kashmir',
+      'jammuandkashmir': 'Jammu and Kashmir',
+      'jammu and kashmir': 'Jammu and Kashmir',
+      'tg': 'Telangana',
+      'telangana': 'Telangana',
+    };
+    
+    // Check for mapped state
+    const mappedState = stateMappings[stateLower];
+    if (mappedState) {
+      return mappedState;
+    }
+    
+    // If no match found, return the original state name
+    return gstinState;
   };
 
   const handleGstinLookup = async () => {
@@ -98,56 +356,118 @@ export default function AddSupplierScreen() {
     }
 
     setIsLoadingGstin(true);
-    
     try {
       const result = await verifyGSTIN(gstinUpper);
-      
-      if (result.error) {
-        Alert.alert('GSTIN Verification Failed', result.message || 'Invalid GSTIN number');
-      } else if (result.taxpayerInfo) {
+      if (!result.error && result.taxpayerInfo) {
         const gstinData = result.taxpayerInfo;
+        const address = gstinData.pradr?.addr;
         
-        // Auto-fill business information from GSTIN data
+        // Create a formatted address string from GSTIN data
+        const addressString = address ? 
+          `${address.bno || ''} ${address.bnm || ''}, ${address.st || ''}, ${address.city || ''}, ${address.stcd || ''}, ${address.pncd || ''}`.trim() : '';
+        
+        // Parse the address string to find state and city
+        const addressParts = addressString.split(',').map((part: string) => part.trim());
+        let foundState = '';
+        let foundCity = '';
+        
+        // Find state by matching with our state list
+        for (let i = addressParts.length - 1; i >= 0; i--) {
+          const part = addressParts[i];
+          
+          // Skip if it's a pincode
+          if (/\d{6}/.test(part)) continue;
+          
+          // Look for exact state match in our state list
+          const matchingState = indianStates.find(state => 
+            state.name.toLowerCase() === part.toLowerCase()
+          );
+          
+          if (matchingState) {
+            foundState = matchingState.name;
+            // The city is the part before the state
+            if (i > 0) {
+              foundCity = addressParts[i - 1];
+            }
+            break;
+          }
+        }
+        
+        // Clean city name - remove numbers and extra spaces
+        const cleanCityName = (cityName: string): string => {
+          if (!cityName) return '';
+          let cleaned = cityName.replace(/[0-9]/g, '').replace(/[^\w\s]/g, '');
+          cleaned = cleaned.replace(/\s+/g, ' ').trim();
+          return cleaned.length >= 2 ? cleaned : '';
+        };
+        
+        // Use the parsed address data
         setFormData(prev => ({
           ...prev,
           businessName: gstinData.tradeNam || gstinData.lgnm || '',
-          name: gstinData.lgnm || '',
           gstin: gstinUpper,
-          address: gstinData.pradr?.addr ? 
-            `${gstinData.pradr.addr.bno || ''} ${gstinData.pradr.addr.bnm || ''}, ${gstinData.pradr.addr.st || ''}, ${gstinData.pradr.addr.loc || ''}, ${gstinData.pradr.addr.city || ''}, ${gstinData.pradr.addr.stcd || ''} - ${gstinData.pradr.addr.pncd || ''}`.replace(/\s+/g, ' ').trim() : '',
+          addressLine1: address ? `${address.bno || ''} ${address.bnm || ''}`.trim() : '',
+          addressLine2: address?.st || '',
+          addressLine3: '',
+          city: cleanCityName(foundCity),
+          state: foundState,
+          pincode: address?.pncd || '',
         }));
-
         setShowGstinModal(false);
-        setGstinSearch('');
-        Alert.alert('GSTIN Found', 'Business details have been auto-filled. Please complete the remaining information.');
+        Alert.alert('Success', 'Business details auto-filled from GSTIN');
       } else {
-        Alert.alert('GSTIN Not Found', 'No data found for this GSTIN number');
+        Alert.alert('GSTIN Lookup Failed', result.message || 'Unable to verify GSTIN');
       }
     } catch (error) {
-      console.error('GSTIN lookup error:', error);
-      Alert.alert('Network Error', 'Please check your connection and try again');
+      Alert.alert('Error', 'Failed to verify GSTIN. Please try again.');
     } finally {
       setIsLoadingGstin(false);
     }
   };
 
-  const handleCategorySelect = (category: string) => {
-    const newCategories = selectedCategories.includes(category)
-      ? selectedCategories.filter(cat => cat !== category)
-      : [...selectedCategories, category];
-    
-    setSelectedCategories(newCategories);
-    updateFormData('categories', newCategories);
+  const handleStateSelect = (state: string) => {
+    updateFormData('state', state);
+    setShowStateModal(false);
+    setStateSearch('');
   };
 
+  const filteredStates = indianStates.filter(state =>
+    state.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
+    state.code.includes(stateSearch)
+  );
 
+  const handleAddressSelect = (address: any) => {
+    // Use the shared parsing function
+    const parsedAddress = parseAddressComponents(
+      address.formatted_address,
+      address.city,
+      address.state,
+      address.pincode
+    );
+
+    setFormData(prev => ({
+      ...prev,
+      addressLine1: parsedAddress.addressLine1,
+      addressLine2: parsedAddress.addressLine2,
+      addressLine3: parsedAddress.addressLine3,
+      city: parsedAddress.city,
+      state: parsedAddress.state,
+      pincode: parsedAddress.pincode,
+    }));
+    
+    setShowMap(false);
+    setAddressSearch('');
+  };
 
   const isFormValid = () => {
     return (
-      formData.name.trim().length > 0 &&
+      formData.businessName.trim().length > 0 &&
       formData.contactPerson.trim().length > 0 &&
-      formData.mobile.trim().length > 0 &&
-      formData.address.trim().length > 0 &&
+      formData.mobile.trim().length === 10 &&
+      formData.addressLine1.trim().length > 0 &&
+      formData.city.trim().length > 0 &&
+      formData.pincode.trim().length > 0 &&
+      formData.state.trim().length > 0 &&
       formData.gstin.trim().length > 0
     );
   };
@@ -162,14 +482,12 @@ export default function AddSupplierScreen() {
 
     const supplierData = {
       id: `SUPP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: formData.name.trim(),
       businessName: formData.businessName.trim(),
       contactPerson: formData.contactPerson.trim(),
       mobile: formData.mobile.trim(),
       email: formData.email.trim(),
-      address: formData.address.trim(),
+      address: `${formData.addressLine1.trim()}, ${formData.addressLine2.trim() ? formData.addressLine2.trim() + ', ' : ''}${formData.addressLine3.trim() ? formData.addressLine3.trim() + ', ' : ''}${formData.city.trim()}, ${formData.pincode.trim()}, ${formData.state.trim()}`,
       gstin: formData.gstin.trim(),
-      categories: formData.categories,
       notes: formData.notes.trim(),
       supplierScore: 85,
       onTimeDelivery: 90,
@@ -195,7 +513,7 @@ export default function AddSupplierScreen() {
       Alert.alert('Success', 'Supplier added successfully', [
         {
           text: 'OK',
-          onPress: () => router.push('/purchasing/suppliers')
+          onPress: () => router.replace('/purchasing/suppliers')
         }
       ]);
       setIsSubmitting(false);
@@ -230,7 +548,7 @@ export default function AddSupplierScreen() {
           >
             {/* GSTIN Lookup Section */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>GSTIN Lookup</Text>
+              <Text style={styles.sectionTitle}>GSTIN Lookup (Optional)</Text>
               <Text style={styles.sectionSubtitle}>
                 Enter GSTIN to auto-fill business details
               </Text>
@@ -268,28 +586,17 @@ export default function AddSupplierScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Legal Name *</Text>
-                <View style={styles.inputContainer}>
-                  <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    value={formData.name}
-                    onChangeText={(text) => updateFormData('name', text)}
-                    placeholder="Enter legal name"
-                    placeholderTextColor={Colors.textLight}
-                    autoCapitalize="words"
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
                 <Text style={styles.label}>Contact Person *</Text>
                 <View style={styles.inputContainer}>
                   <User size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     value={formData.contactPerson}
-                    onChangeText={(text) => updateFormData('contactPerson', text)}
+                    onChangeText={(text) => {
+                      // Remove any numeric characters
+                      const cleanText = text.replace(/[0-9]/g, '');
+                      updateFormData('contactPerson', cleanText);
+                    }}
                     placeholder="Enter contact person name"
                     placeholderTextColor={Colors.textLight}
                     autoCapitalize="words"
@@ -332,48 +639,171 @@ export default function AddSupplierScreen() {
               </View>
 
               <View style={styles.inputGroup}>
+                <Text style={styles.label}>GSTIN/PAN *</Text>
+                <View style={styles.inputContainer}>
+                  <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    value={formData.gstin}
+                    onChangeText={(text) => {
+                      const upperText = text.toUpperCase();
+                      // Auto-detect GSTIN vs PAN and set appropriate max length
+                      const isGSTIN = /^\d/.test(upperText);
+                      const maxLength = isGSTIN ? 15 : 10;
+                      const limitedText = upperText.slice(0, maxLength);
+                      updateFormData('gstin', limitedText);
+                    }}
+                    placeholder="Enter GSTIN (15 digits) or PAN (10 characters)"
+                    placeholderTextColor={Colors.textLight}
+                    autoCapitalize="characters"
+                    maxLength={15}
+                  />
+                </View>
+                <Text style={styles.helperText}>
+                  {formData.gstin ? 
+                    (/^\d/.test(formData.gstin) ? 'GSTIN detected (15 digits)' : 'PAN detected (10 characters)') : 
+                    'GSTIN starts with number, PAN starts with letter'
+                  }
+                </Text>
+              </View>
+            </View>
+
+            {/* Address Information */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Address Information</Text>
+              
+              <View style={styles.addressHeader}>
                 <Text style={styles.label}>Address *</Text>
+                <TouchableOpacity
+                  style={styles.mapButton}
+                  onPress={() => setShowMap(true)}
+                  activeOpacity={0.7}
+                >
+                  <Map size={20} color={Colors.primary} />
+                  <Text style={styles.mapButtonText}>Use Map</Text>
+                </TouchableOpacity>
+              </View>
+
+              {showMap ? (
+                <View style={styles.mapContainer}>
+                  <AddressAutocomplete
+                    placeholder="Search for address..."
+                    value={addressSearch}
+                    onChangeText={setAddressSearch}
+                    onAddressSelect={handleAddressSelect}
+                  />
+                  <TouchableOpacity
+                    style={styles.manualButton}
+                    onPress={() => {
+                      setShowMap(false);
+                      setAddressSearch('');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.manualButtonText}>Fill Manually Instead</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Address Line 1 *</Text>
+                    <View style={styles.inputContainer}>
+                      <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
+                      <TextInput
+                        style={styles.input}
+                        value={formData.addressLine1}
+                        onChangeText={(text) => updateFormData('addressLine1', text)}
+                        placeholder="Enter address line 1"
+                        placeholderTextColor={Colors.textLight}
+                      />
+                    </View>
+                  </View>
+                </>
+              )}
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Address Line 2</Text>
                 <View style={styles.inputContainer}>
                   <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
-                    value={formData.address}
-                    onChangeText={(text) => updateFormData('address', text)}
-                    placeholder="Enter complete address"
+                    value={formData.addressLine2}
+                    onChangeText={(text) => updateFormData('addressLine2', text)}
+                    placeholder="Enter address line 2 (optional)"
                     placeholderTextColor={Colors.textLight}
-                    multiline
-                    numberOfLines={3}
                   />
                 </View>
               </View>
-            </View>
 
-            {/* Business Details */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Business Details</Text>
-              
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Categories</Text>
+                <Text style={styles.label}>Address Line 3</Text>
+                <View style={styles.inputContainer}>
+                  <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    value={formData.addressLine3}
+                    onChangeText={(text) => updateFormData('addressLine3', text)}
+                    placeholder="Enter address line 3 (optional)"
+                    placeholderTextColor={Colors.textLight}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.rowContainer}>
+                <View style={[styles.inputGroup, styles.halfWidth]}>
+                  <Text style={styles.label}>City *</Text>
+                  <View style={styles.inputContainer}>
+                    <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.city}
+                      onChangeText={(text) => updateFormData('city', text)}
+                      placeholder="Enter city"
+                      placeholderTextColor={Colors.textLight}
+                      autoCapitalize="words"
+                    />
+                  </View>
+                </View>
+
+                <View style={[styles.inputGroup, styles.halfWidth]}>
+                  <Text style={styles.label}>Pincode *</Text>
+                  <View style={styles.inputContainer}>
+                    <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      value={formData.pincode}
+                      onChangeText={(text) => updateFormData('pincode', text.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="Enter pincode"
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType="numeric"
+                      maxLength={6}
+                    />
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>State *</Text>
                 <TouchableOpacity
                   style={styles.dropdown}
-                  onPress={() => setShowCategoryModal(true)}
+                  onPress={() => setShowStateModal(true)}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.dropdownText,
-                    selectedCategories.length === 0 && styles.placeholderText
+                    !formData.state && styles.placeholderText
                   ]}>
-                    {selectedCategories.length > 0 
-                      ? `${selectedCategories.length} category${selectedCategories.length > 1 ? 'ies' : 'y'} selected`
-                      : 'Select categories'
-                    }
+                    {formData.state || 'Select state'}
                   </Text>
-                  <Plus size={20} color={Colors.textLight} />
+                  <ChevronDown size={20} color={Colors.textLight} />
                 </TouchableOpacity>
               </View>
+            </View>
 
+            {/* Additional Information */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Additional Information</Text>
               
-
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Notes</Text>
                 <View style={styles.inputContainer}>
@@ -476,66 +906,62 @@ export default function AddSupplierScreen() {
         </View>
       </Modal>
 
-      {/* Category Selection Modal */}
+      {/* State Selection Modal */}
       <Modal
-        visible={showCategoryModal}
+        visible={showStateModal}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowCategoryModal(false)}
+        onRequestClose={() => setShowStateModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Categories</Text>
+              <Text style={styles.modalTitle}>Select State</Text>
               <TouchableOpacity
                 style={styles.closeButton}
-                onPress={() => setShowCategoryModal(false)}
+                onPress={() => setShowStateModal(false)}
                 activeOpacity={0.7}
               >
                 <X size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
 
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Search States</Text>
+              <View style={styles.modalInputContainer}>
+                <Search size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.modalInput}
+                  value={stateSearch}
+                  onChangeText={setStateSearch}
+                  placeholder="Search by state name or code..."
+                  placeholderTextColor={Colors.textLight}
+                  autoFocus={true}
+                />
+              </View>
+            </View>
+
             <ScrollView style={styles.modalScrollView}>
-              {supplierCategories.map((category) => (
+              {filteredStates.map((state) => (
                 <TouchableOpacity
-                  key={category}
-                  style={[
-                    styles.modalItem,
-                    selectedCategories.includes(category) && styles.selectedOption
-                  ]}
-                  onPress={() => handleCategorySelect(category)}
+                  key={state.code}
+                  style={styles.stateOption}
+                  onPress={() => handleStateSelect(state.name)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[
-                    styles.modalItemText,
-                    selectedCategories.includes(category) && styles.selectedOptionText
-                  ]}>
-                    {category}
-                  </Text>
-                  {selectedCategories.includes(category) && (
-                    <View style={styles.selectedIndicator}>
-                      <Text style={styles.selectedText}>✓</Text>
-                    </View>
-                  )}
+                  <Text style={styles.stateName}>{state.name}</Text>
+                  <Text style={styles.stateCode}>Code: {state.code}</Text>
                 </TouchableOpacity>
               ))}
+              {filteredStates.length === 0 && (
+                <View style={styles.noResultsContainer}>
+                  <Text style={styles.noResultsText}>No states found matching "{stateSearch}"</Text>
+                </View>
+              )}
             </ScrollView>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.confirmButton}
-                onPress={() => setShowCategoryModal(false)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.confirmButtonText}>Done</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
-
-      
     </View>
   );
 }
@@ -548,38 +974,31 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
-  keyboardView: {
-    flex: 1,
-  },
   header: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+    padding: 8,
+    marginRight: 8,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: Colors.text,
+  },
+  keyboardView: {
+    flex: 1,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
+    padding: 16,
   },
   section: {
     marginBottom: 24,
@@ -602,15 +1021,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.grey[50],
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    borderRadius: 12,
+    borderRadius: 8,
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
+    paddingVertical: 12,
   },
   gstinButtonText: {
-    flex: 1,
     fontSize: 16,
-    color: Colors.text,
+    color: Colors.primary,
     fontWeight: '500',
   },
   inputGroup: {
@@ -618,46 +1035,27 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
     color: Colors.text,
     marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
+    backgroundColor: Colors.background,
     borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    paddingHorizontal: 12,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: 8,
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.grey[50],
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 12,
-    paddingHorizontal: 16,
     paddingVertical: 12,
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: Colors.text,
-    flex: 1,
-  },
-  placeholderText: {
-    color: Colors.textLight,
   },
   rowContainer: {
     flexDirection: 'row',
@@ -666,31 +1064,33 @@ const styles = StyleSheet.create({
   halfWidth: {
     flex: 1,
   },
-  currencySymbol: {
+  dropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  dropdownText: {
     fontSize: 16,
-    fontWeight: '600',
     color: Colors.text,
-    marginRight: 8,
+  },
+  placeholderText: {
+    color: Colors.textLight,
   },
   submitSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    padding: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
   },
   submitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
     paddingVertical: 16,
+    borderRadius: 8,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
   },
   enabledButton: {
     backgroundColor: Colors.primary,
@@ -716,129 +1116,149 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     backgroundColor: Colors.background,
-    borderRadius: 20,
+    borderRadius: 12,
     width: '90%',
-    maxWidth: 400,
     maxHeight: '80%',
-    alignSelf: 'center',
-    marginTop: 'auto',
-    marginBottom: 'auto',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
   },
   modalTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
   },
   closeButton: {
-    padding: 8,
+    padding: 4,
   },
   modalInputGroup: {
-    marginBottom: 16,
-    paddingHorizontal: 20,
+    padding: 16,
   },
   modalLabel: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
     color: Colors.text,
     marginBottom: 8,
   },
   modalInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
+    backgroundColor: Colors.background,
     borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    paddingHorizontal: 12,
   },
   modalInput: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    marginLeft: 12,
-  },
-  modalScrollView: {
-    maxHeight: 300,
-  },
-  modalItem: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[100],
-  },
-  modalItemText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  selectedOption: {
-    backgroundColor: '#f0f4ff',
-  },
-  selectedOptionText: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  selectedIndicator: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  selectedText: {
-    color: Colors.background,
-    fontSize: 14,
-    fontWeight: 'bold',
+    paddingVertical: 12,
   },
   modalActions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    padding: 16,
+    gap: 12,
   },
   cancelButton: {
-    backgroundColor: Colors.grey[200],
+    flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    alignItems: 'center',
   },
   cancelButtonText: {
-    color: Colors.text,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
+    color: Colors.text,
   },
   confirmButton: {
-    backgroundColor: Colors.primary,
+    flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
   },
   confirmButtonText: {
-    color: Colors.background,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
+    color: Colors.background,
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  stateOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  stateName: {
+    fontSize: 16,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  stateCode: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  noResultsContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  helperText: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  addressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  mapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  mapButtonText: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '500',
+  },
+  mapContainer: {
+    marginBottom: 16,
+  },
+  manualButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  manualButtonText: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '500',
   },
 }); 
