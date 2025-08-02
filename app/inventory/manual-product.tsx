@@ -404,7 +404,7 @@ export default function ManualProductScreen() {
         Alert.alert('Success', 'Product added to inventory successfully', [
           {
             text: 'OK',
-            onPress: () => router.push('/inventory')
+            onPress: () => router.back()
           }
         ]);
       }

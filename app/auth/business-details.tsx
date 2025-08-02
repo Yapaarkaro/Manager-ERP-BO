@@ -48,10 +48,12 @@ export default function BusinessDetailsScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Auto-fill data from GSTIN verification (only once)
   useEffect(() => {
-    if (type === 'GSTIN' && gstinData && !hasAutoFilled) {
+    if (!isInitialized && type === 'GSTIN' && gstinData && !hasAutoFilled) {
+      setIsInitialized(true);
       try {
         const parsedData = JSON.parse(gstinData as string);
         if (parsedData) {
@@ -100,7 +102,7 @@ export default function BusinessDetailsScreen() {
         console.error('Error parsing GSTIN data:', error);
       }
     }
-  }, [type, gstinData, hasAutoFilled]);
+  }, [type, gstinData, isInitialized]); // Added isInitialized to prevent multiple runs
 
   const isFormValid = () => {
     return (
@@ -392,7 +394,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: COLORS.black,
-    outlineStyle: 'none',
   },
   selectButton: {
     flexDirection: 'row',

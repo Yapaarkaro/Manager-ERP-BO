@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { 
   ArrowLeft, 
   Building2, 
@@ -102,6 +102,7 @@ const indianStates = [
 ];
 
 export default function AddSupplierScreen() {
+  const { returnToStockIn } = useLocalSearchParams();
   const [formData, setFormData] = useState<SupplierFormData>({
     businessName: '',
     contactPerson: '',
@@ -513,7 +514,29 @@ export default function AddSupplierScreen() {
       Alert.alert('Success', 'Supplier added successfully', [
         {
           text: 'OK',
-          onPress: () => router.replace('/purchasing/suppliers')
+          onPress: () => {
+            // Check if we should return to stock-in
+            if (returnToStockIn === 'true') {
+              // Return to stock-in with the new supplier data
+              const supplierData = {
+                name: formData.contactPerson,
+                gstin: formData.gstin,
+                businessName: formData.businessName,
+                address: `${formData.addressLine1}, ${formData.addressLine2 ? formData.addressLine2 + ', ' : ''}${formData.addressLine3 ? formData.addressLine3 + ', ' : ''}${formData.city}, ${formData.pincode}, ${formData.state}`,
+              };
+              
+              // Navigate back to stock-in with supplier data
+              router.push({
+                pathname: '/inventory/stock-in/manual',
+                params: {
+                  newSupplier: JSON.stringify(supplierData)
+                }
+              });
+            } else {
+              // Return to suppliers list
+              router.replace('/purchasing/suppliers');
+            }
+          }
         }
       ]);
       setIsSubmitting(false);
