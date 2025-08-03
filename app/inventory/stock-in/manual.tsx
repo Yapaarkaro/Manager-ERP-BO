@@ -26,6 +26,7 @@ import {
   Camera,
   Ruler,
   ChevronDown,
+  Edit,
 } from 'lucide-react-native';
 
 const Colors = {
@@ -70,6 +71,7 @@ const cessTypes = [
 interface StockInProduct {
   id: string;
   name: string;
+  barcode: string;
   quantity: number;
   purchasePrice: number;
   discount: number;
@@ -79,10 +81,13 @@ interface StockInProduct {
   cessRate: number;
   cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
   cessAmount: number;
+  cessUnit?: string;
   primaryUnit: string;
   secondaryUnit: string;
   useCompoundUnit: boolean;
   conversionRatio: string;
+  priceUnit: 'primary' | 'secondary';
+  hsnCode?: string;
 }
 
 interface ManualStockInData {
@@ -102,6 +107,8 @@ interface ManualStockInData {
   totalAmount: number;
   discountType: 'percentage' | 'amount';
   discountValue: number;
+  roundOffAmount: number;
+  finalAmount: number;
   notes: string;
 }
 
@@ -126,6 +133,8 @@ export default function ManualStockInScreen() {
     totalAmount: 0,
     discountType: 'amount',
     discountValue: 0,
+    roundOffAmount: 0,
+    finalAmount: 0,
     notes: '',
   });
 
@@ -144,15 +153,20 @@ export default function ManualStockInScreen() {
   const [showSecondaryUnitDropdown, setShowSecondaryUnitDropdown] = useState(false);
   const [primaryUnitSearch, setPrimaryUnitSearch] = useState('');
   const [secondaryUnitSearch, setSecondaryUnitSearch] = useState('');
+  const [editingProduct, setEditingProduct] = useState<StockInProduct | null>(null);
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
   const [newProductData, setNewProductData] = useState({
     name: '',
     category: '',
+    barcode: '',
     hsnCode: '',
     purchasePrice: '',
+    priceUnit: 'primary' as 'primary' | 'secondary',
     gstRate: 18,
     cessRate: 0,
     cessType: 'none' as 'none' | 'value' | 'quantity' | 'value_and_quantity',
     cessAmount: 0,
+    cessUnit: '',
     cessAmountType: 'percentage' as 'percentage' | 'amount',
     primaryUnit: 'Piece',
     secondaryUnit: 'None',
@@ -175,6 +189,7 @@ export default function ManualStockInScreen() {
     const newProduct: StockInProduct = {
       id: selectedProduct.id,
       name: selectedProduct.name,
+      barcode: selectedProduct.barcode || '',
       quantity: 1,
       purchasePrice: 0,
       discount: 0,
@@ -184,17 +199,26 @@ export default function ManualStockInScreen() {
       cessRate: 0,
       cessType: 'value',
       cessAmount: 0,
-      primaryUnit: '', // Default unit
+      cessUnit: '',
+      primaryUnit: 'Piece', // Default unit
       secondaryUnit: 'None',
       useCompoundUnit: false,
       conversionRatio: '',
+      priceUnit: 'primary',
+      hsnCode: '',
     };
     
     // Check if this is a new product that needs tax configuration
     if (selectedProduct.isNewProduct) {
       setShowTaxModal(true);
     } else {
-      updateFormData('products', [...formData.products, newProduct]);
+      const updatedProducts = [...formData.products, newProduct];
+      updateFormData('products', updatedProducts);
+      
+      // Recalculate total amount immediately
+      const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
+      updateFormData('totalAmount', total);
+      
       setSelectedProduct(null);
       setShowProductModal(false);
     }
@@ -206,6 +230,7 @@ export default function ManualStockInScreen() {
     const newProduct: StockInProduct = {
       id: selectedProduct.id,
       name: selectedProduct.name,
+      barcode: selectedProduct.barcode || '',
       quantity: 1,
       purchasePrice: 0,
       discount: 0,
@@ -215,13 +240,22 @@ export default function ManualStockInScreen() {
       cessRate,
       cessType: cessType as 'value' | 'quantity' | 'value_and_quantity',
       cessAmount,
-      primaryUnit: '', // Default unit
+      cessUnit: '',
+      primaryUnit: 'Piece', // Default unit
       secondaryUnit: 'None',
       useCompoundUnit: false,
       conversionRatio: '',
+      priceUnit: 'primary',
+      hsnCode: '',
     };
     
-    updateFormData('products', [...formData.products, newProduct]);
+    const updatedProducts = [...formData.products, newProduct];
+    updateFormData('products', updatedProducts);
+    
+    // Recalculate total amount immediately
+    const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
+    updateFormData('totalAmount', total);
+    
     setSelectedProduct(null);
     setShowProductModal(false);
     setShowTaxModal(false);
@@ -238,12 +272,15 @@ export default function ManualStockInScreen() {
     const scannedProduct = {
       name: 'Scanned Product',
       category: 'Electronics',
+      barcode: '1234567890123',
       hsnCode: '8471',
       purchasePrice: '1500',
+      priceUnit: 'primary' as 'primary' | 'secondary',
       gstRate: 18,
       cessRate: 0,
       cessType: 'none' as 'none' | 'value' | 'quantity' | 'value_and_quantity',
       cessAmount: 0,
+      cessUnit: '',
       cessAmountType: 'percentage' as 'percentage' | 'amount',
       primaryUnit: 'Piece',
       secondaryUnit: 'None',
@@ -284,6 +321,7 @@ export default function ManualStockInScreen() {
       const productToAdd: StockInProduct = {
         id: newProduct.id,
         name: newProduct.name,
+        barcode: newProduct.barcode || '',
         quantity: 1,
         purchasePrice: newProduct.price || 0,
         discount: 0,
@@ -297,6 +335,8 @@ export default function ManualStockInScreen() {
         secondaryUnit: newProduct.secondaryUnit || 'None',
         useCompoundUnit: newProduct.useCompoundUnit || false,
         conversionRatio: newProduct.conversionRatio || '',
+        priceUnit: 'primary',
+        hsnCode: newProduct.hsnCode || '',
       };
       
       updateFormData('products', [...formData.products, productToAdd]);
@@ -312,6 +352,7 @@ export default function ManualStockInScreen() {
         const productToAdd: StockInProduct = {
           id: productData.id,
           name: productData.name,
+          barcode: productData.barcode || '',
           quantity: 1,
           purchasePrice: productData.price || 0,
           discount: 0,
@@ -325,6 +366,8 @@ export default function ManualStockInScreen() {
           secondaryUnit: productData.secondaryUnit || 'None',
           useCompoundUnit: productData.useCompoundUnit || false,
           conversionRatio: productData.conversionRatio || '',
+          priceUnit: 'primary',
+          hsnCode: productData.hsnCode || '',
         };
         
         updateFormData('products', [...formData.products, productToAdd]);
@@ -346,12 +389,107 @@ export default function ManualStockInScreen() {
     }
   }, [newSupplierParam]);
 
+  // Calculate round-off amount
+  const calculateRoundOff = (amount: number) => {
+    const decimalPart = amount % 1;
+    if (decimalPart === 0) return 0;
+    
+    if (decimalPart < 0.5) {
+      return -decimalPart; // Deduct the decimal part
+    } else {
+      return 1 - decimalPart; // Add to reach next whole number
+    }
+  };
+
+  // Recalculate total amount and round-off whenever products or discount changes
+  useEffect(() => {
+    const total = formData.products.reduce((sum, product) => sum + product.totalPrice, 0);
+    updateFormData('totalAmount', total);
+    
+    // Calculate amount after discount
+    let amountAfterDiscount = total;
+    if (formData.discountValue > 0) {
+      if (formData.discountType === 'percentage') {
+        amountAfterDiscount = total - (total * formData.discountValue / 100);
+      } else {
+        amountAfterDiscount = total - formData.discountValue;
+      }
+    }
+    
+    // Calculate round-off amount based on amount after discount
+    const roundOffAmount = calculateRoundOff(amountAfterDiscount);
+    updateFormData('roundOffAmount', roundOffAmount);
+    
+    // Calculate final amount
+    const finalAmount = amountAfterDiscount + roundOffAmount;
+    updateFormData('finalAmount', finalAmount);
+  }, [formData.products, formData.discountValue, formData.discountType]);
+
+  // Helper function to calculate effective price for compound units
+  const calculateEffectivePrice = (product: StockInProduct) => {
+    if (product.useCompoundUnit && product.conversionRatio) {
+      const conversionRatio = parseFloat(product.conversionRatio);
+      if (conversionRatio > 0) {
+        // For compound units, always calculate based on pieces
+        // If price is per piece, use as is
+        if (product.priceUnit === 'secondary') {
+          return product.purchasePrice;
+        }
+        // If price is per box, convert to per piece
+        else if (product.priceUnit === 'primary') {
+          return product.purchasePrice / conversionRatio;
+        }
+      }
+    }
+    return product.purchasePrice;
+  };
+
+  // Helper function to calculate base price for products
+  const calculateBasePrice = (product: StockInProduct) => {
+    if (product.useCompoundUnit && product.conversionRatio) {
+      const conversionRatio = parseFloat(product.conversionRatio);
+      const piecesPerUnit = conversionRatio;
+      const totalPieces = product.quantity * piecesPerUnit;
+      const pricePerPiece = calculateEffectivePrice(product);
+      return totalPieces * pricePerPiece;
+    } else {
+      const effectivePrice = calculateEffectivePrice(product);
+      return effectivePrice * product.quantity;
+    }
+  };
+
+  // Helper function to calculate CESS amount
+  const calculateCessAmount = (product: StockInProduct) => {
+    const basePrice = calculateBasePrice(product);
+    
+    switch (product.cessType) {
+      case 'none':
+        return 0;
+      case 'value':
+        // CESS based on value (percentage)
+        return basePrice * (product.cessRate / 100);
+      case 'quantity':
+        // CESS based on quantity (₹ per unit)
+        return product.quantity * product.cessAmount;
+      case 'value_and_quantity':
+        // CESS based on both value and quantity
+        const valueCess = basePrice * (product.cessRate / 100);
+        const quantityCess = product.quantity * product.cessAmount;
+        return valueCess + quantityCess;
+      default:
+        return 0;
+    }
+  };
+
   const updateProduct = (productId: string, field: keyof StockInProduct, value: any) => {
     const updatedProducts = formData.products.map(product => {
       if (product.id === productId) {
         const updated = { ...product, [field]: value };
-        // Recalculate total price
-        updated.totalPrice = (updated.purchasePrice * updated.quantity) * (1 - updated.discount / 100);
+        // Recalculate total price including GST and CESS
+        const basePrice = calculateBasePrice(updated);
+        const gstAmount = basePrice * (updated.gstRate / 100);
+        const cessAmount = calculateCessAmount(updated);
+        updated.totalPrice = basePrice + gstAmount + cessAmount;
         return updated;
       }
       return product;
@@ -359,9 +497,60 @@ export default function ManualStockInScreen() {
     
     updateFormData('products', updatedProducts);
     
-    // Recalculate total amount
+    // Recalculate total amount immediately
     const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
     updateFormData('totalAmount', total);
+  };
+
+  const handleEditProduct = (product: StockInProduct) => {
+    setEditingProduct(product);
+    setShowEditProductModal(true);
+  };
+
+  const handleUpdateProduct = () => {
+    if (editingProduct && editingProduct.name && editingProduct.purchasePrice > 0 && editingProduct.quantity > 0) {
+      // Validate CESS fields based on type
+      let cessValidation = true;
+      let validationMessage = '';
+      
+      if (editingProduct.cessType === 'value') {
+        if (editingProduct.cessRate <= 0) {
+          cessValidation = false;
+          validationMessage = 'Please enter CESS rate for value-based CESS';
+        }
+              } else if (editingProduct.cessType === 'quantity') {
+          if (editingProduct.cessAmount <= 0 || !editingProduct.cessUnit) {
+            cessValidation = false;
+            validationMessage = 'Please enter CESS amount and select unit for quantity-based CESS';
+          }
+        } else if (editingProduct.cessType === 'value_and_quantity') {
+          if (editingProduct.cessRate <= 0 || editingProduct.cessAmount <= 0 || !editingProduct.cessUnit) {
+            cessValidation = false;
+            validationMessage = 'Please enter both CESS rate and amount, and select unit for value and quantity CESS';
+          }
+        }
+      
+      if (!cessValidation) {
+        Alert.alert('CESS Configuration', validationMessage);
+        return;
+      }
+      
+      // Update the product in the form data with recalculated total
+      const updatedProduct = { ...editingProduct };
+      const basePrice = calculateBasePrice(updatedProduct);
+      const gstAmount = basePrice * (updatedProduct.gstRate / 100);
+      const cessAmount = calculateCessAmount(updatedProduct);
+      updatedProduct.totalPrice = basePrice + gstAmount + cessAmount;
+      
+      const updatedProducts = formData.products.map(product => 
+        product.id === editingProduct.id ? updatedProduct : product
+      );
+      updateFormData('products', updatedProducts);
+      setShowEditProductModal(false);
+      setEditingProduct(null);
+    } else {
+      Alert.alert('Incomplete Form', 'Please fill in all required fields');
+    }
   };
 
   const removeProduct = (productId: string) => {
@@ -445,7 +634,20 @@ export default function ManualStockInScreen() {
               <TextInput
                 style={styles.input}
                 value={formData.invoiceDate}
-                onChangeText={(text) => updateFormData('invoiceDate', text)}
+                onChangeText={(text) => {
+                  // Format date as DD-MM-YYYY
+                  let formattedText = text.replace(/[^0-9]/g, '');
+                  if (formattedText.length >= 2) {
+                    formattedText = formattedText.slice(0, 2) + '-' + formattedText.slice(2);
+                  }
+                  if (formattedText.length >= 5) {
+                    formattedText = formattedText.slice(0, 5) + '-' + formattedText.slice(5);
+                  }
+                  if (formattedText.length > 10) {
+                    formattedText = formattedText.slice(0, 10);
+                  }
+                  updateFormData('invoiceDate', formattedText);
+                }}
                 placeholder="DD-MM-YYYY"
                 placeholderTextColor={Colors.textLight}
                 keyboardType="numeric"
@@ -559,17 +761,31 @@ export default function ManualStockInScreen() {
                   <View key={product.id} style={styles.productCard}>
                     <View style={styles.productHeader}>
                       <Text style={styles.productName}>{product.name}</Text>
-                      <TouchableOpacity
-                        onPress={() => removeProduct(product.id)}
-                        activeOpacity={0.7}
-                      >
-                        <X size={16} color={Colors.error} />
-                      </TouchableOpacity>
+                      <View style={styles.productActions}>
+                        <TouchableOpacity
+                          onPress={() => handleEditProduct(product)}
+                          activeOpacity={0.7}
+                          style={styles.editButton}
+                        >
+                          <Edit size={16} color={Colors.primary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => removeProduct(product.id)}
+                          activeOpacity={0.7}
+                        >
+                          <X size={16} color={Colors.error} />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     
                     <View style={styles.productDetails}>
                       <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>Quantity:</Text>
+                        <Text style={styles.productLabel}>
+                          Quantity ({product.primaryUnit}):
+                          {product.useCompoundUnit && product.conversionRatio && (
+                            <Text style={styles.piecesInfo}> ({product.conversionRatio} pieces per {product.primaryUnit})</Text>
+                          )}
+                        </Text>
                         <TextInput
                           style={styles.quantityInput}
                           value={product.quantity.toString()}
@@ -593,32 +809,33 @@ export default function ManualStockInScreen() {
                         </View>
                       </View>
                       
-                      <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>Discount (%):</Text>
-                        <View style={styles.priceInputContainer}>
-                          <Percent size={16} color={Colors.textLight} />
-                          <TextInput
-                            style={styles.priceInput}
-                            value={product.discount.toString()}
-                            onChangeText={(text) => updateProduct(product.id, 'discount', parseFloat(text) || 0)}
-                            keyboardType="decimal-pad"
-                            placeholder="0"
-                          />
-                        </View>
-                      </View>
+
                       
                       <View style={styles.productRow}>
                         <Text style={styles.productLabel}>GST ({product.gstRate}%):</Text>
                         <Text style={styles.taxAmount}>
-                          ₹{((product.purchasePrice * product.quantity) * product.gstRate / 100).toFixed(2)}
+                          ₹{(calculateBasePrice(product) * product.gstRate / 100).toFixed(2)}
                         </Text>
                       </View>
                       
-                      {product.cessRate > 0 && (
+                      {product.cessType !== 'none' && (
                         <View style={styles.productRow}>
-                          <Text style={styles.productLabel}>CESS ({product.cessRate}%):</Text>
+                          <Text style={styles.productLabel}>
+                            CESS {(() => {
+                              switch (product.cessType) {
+                                case 'value':
+                                  return `(${product.cessRate}%)`;
+                                case 'quantity':
+                                  return `(₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                case 'value_and_quantity':
+                                  return `(${product.cessRate}% + ₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                default:
+                                  return '';
+                              }
+                            })()}:
+                          </Text>
                           <Text style={styles.taxAmount}>
-                            ₹{product.cessAmount.toFixed(2)}
+                            ₹{calculateCessAmount(product).toFixed(2)}
                           </Text>
                         </View>
                       )}
@@ -696,6 +913,43 @@ export default function ManualStockInScreen() {
             <View style={styles.totalSection}>
               <Text style={styles.totalLabel}>Total Amount:</Text>
               <Text style={styles.totalAmount}>₹{formData.totalAmount.toFixed(2)}</Text>
+            </View>
+          </View>
+
+          {/* Amount After Discount */}
+          {formData.discountValue > 0 && (
+            <View style={styles.section}>
+              <View style={styles.totalSection}>
+                <Text style={styles.totalLabel}>After Discount:</Text>
+                <Text style={styles.totalAmount}>
+                  ₹{(formData.totalAmount - (formData.discountType === 'percentage' 
+                    ? (formData.totalAmount * formData.discountValue / 100) 
+                    : formData.discountValue)).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Round Off */}
+          <View style={styles.section}>
+            <View style={styles.totalSection}>
+              <Text style={styles.totalLabel}>Round Off:</Text>
+              <Text style={[
+                styles.totalAmount, 
+                { color: formData.roundOffAmount > 0 ? Colors.success : formData.roundOffAmount < 0 ? Colors.error : Colors.text }
+              ]}>
+                {formData.roundOffAmount > 0 ? '+' : ''}₹{formData.roundOffAmount.toFixed(2)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Final Amount */}
+          <View style={styles.section}>
+            <View style={styles.totalSection}>
+              <Text style={[styles.totalLabel, { fontWeight: 'bold' }]}>Final Amount:</Text>
+              <Text style={[styles.totalAmount, { fontWeight: 'bold', color: Colors.primary }]}>
+                ₹{formData.finalAmount.toFixed(0)}
+              </Text>
             </View>
           </View>
 
@@ -911,7 +1165,12 @@ export default function ManualStockInScreen() {
                   <View style={styles.taxSection}>
                     <Text style={styles.taxLabel}>CESS Type</Text>
                     <View style={styles.taxButtons}>
-                      {['value', 'quantity', 'value_and_quantity'].map((type) => (
+                      {[
+                        { type: 'none', label: 'No CESS' },
+                        { type: 'value', label: 'Value Based (%)' },
+                        { type: 'quantity', label: 'Quantity Based (₹/unit)' },
+                        { type: 'value_and_quantity', label: 'Value + Quantity' }
+                      ].map(({ type, label }) => (
                         <TouchableOpacity
                           key={type}
                           style={[
@@ -922,7 +1181,7 @@ export default function ManualStockInScreen() {
                           activeOpacity={0.7}
                         >
                           <Text style={[styles.taxButtonText, { color: Colors.warning }]}>
-                            {type.replace('_', ' ').toUpperCase()}
+                            {label}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -963,51 +1222,82 @@ export default function ManualStockInScreen() {
                     <Text style={styles.scanButtonText}>Scan Product Barcode</Text>
                   </TouchableOpacity>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Product Name *</Text>
-                    <View style={styles.inputContainer}>
-                      <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        value={newProductData.name}
-                        onChangeText={(text) => setNewProductData(prev => ({ ...prev, name: text }))}
-                        placeholder="Enter product name"
-                        placeholderTextColor={Colors.textLight}
-                      />
+                  {/* Basic Information */}
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Basic Information</Text>
+                    
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Product Name *</Text>
+                      <View style={styles.inputContainer}>
+                        <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.name}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, name: text }))}
+                          placeholder="Enter product name"
+                          placeholderTextColor={Colors.textLight}
+                        />
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Category *</Text>
-                    <View style={styles.inputContainer}>
-                      <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        value={newProductData.category}
-                        onChangeText={(text) => setNewProductData(prev => ({ ...prev, category: text }))}
-                        placeholder="Enter category"
-                        placeholderTextColor={Colors.textLight}
-                      />
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Category *</Text>
+                      <View style={styles.inputContainer}>
+                        <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.category}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, category: text }))}
+                          placeholder="Enter category"
+                          placeholderTextColor={Colors.textLight}
+                        />
+                      </View>
                     </View>
-                  </View>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>HSN Code</Text>
-                    <View style={styles.inputContainer}>
-                      <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        value={newProductData.hsnCode}
-                        onChangeText={(text) => setNewProductData(prev => ({ ...prev, hsnCode: text }))}
-                        placeholder="Enter HSN code"
-                        placeholderTextColor={Colors.textLight}
-                      />
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Barcode</Text>
+                      <View style={styles.inputContainer}>
+                        <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.barcode}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, barcode: text }))}
+                          placeholder="Enter barcode or scan"
+                          placeholderTextColor={Colors.textLight}
+                        />
+                        <TouchableOpacity
+                          style={styles.scanIcon}
+                          onPress={handleScanProduct}
+                          activeOpacity={0.7}
+                        >
+                          <Camera size={16} color={Colors.primary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>HSN Code</Text>
+                      <View style={styles.inputContainer}>
+                        <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.hsnCode}
+                          onChangeText={(text) => {
+                            const numericText = text.replace(/[^0-9]/g, '');
+                            setNewProductData(prev => ({ ...prev, hsnCode: numericText }))
+                          }}
+                          placeholder="Enter HSN code (numbers only)"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="numeric"
+                          maxLength={8}
+                        />
+                      </View>
                     </View>
                   </View>
 
                   {/* Unit of Measurement Section */}
-                  <View style={styles.unitSection}>
-                    <Text style={styles.unitLabel}>Unit of Measurement</Text>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Unit of Measurement</Text>
                     
                     <View style={styles.unitTypeContainer}>
                       <Text style={styles.unitSubLabel}>Unit Type:</Text>
@@ -1201,160 +1491,280 @@ export default function ManualStockInScreen() {
                     )}
                   </View>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Purchase Price *</Text>
-                    <View style={styles.inputContainer}>
-                      <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        value={newProductData.purchasePrice}
-                        onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
-                        placeholder="0.00"
-                        placeholderTextColor={Colors.textLight}
-                        keyboardType="decimal-pad"
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.taxSection}>
-                    <Text style={styles.taxLabel}>GST Rate (%)</Text>
-                    <View style={styles.taxButtons}>
-                      {[0, 5, 12, 18, 28].map((rate) => (
-                        <TouchableOpacity
-                          key={rate}
-                          style={[
-                            styles.taxButton,
-                            { backgroundColor: newProductData.gstRate === rate ? Colors.primary : Colors.primary + '20' }
-                          ]}
-                          onPress={() => setNewProductData(prev => ({ ...prev, gstRate: rate }))}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.taxButtonText, 
-                            { color: newProductData.gstRate === rate ? Colors.background : Colors.primary }
-                          ]}>
-                            {rate}%
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-
-                  {/* CESS Calculation Section */}
-                  <View style={styles.cessSection}>
-                    <Text style={styles.cessLabel}>CESS Calculation (Optional)</Text>
+                  {/* Purchase Price Section */}
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Pricing Information</Text>
                     
-                    <View style={styles.cessTypeContainer}>
-                      <Text style={styles.cessSubLabel}>CESS Type:</Text>
-                      <View style={styles.cessTypeButtons}>
-                        {cessTypes.map((type) => (
+                    {!newProductData.useCompoundUnit ? (
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Purchase Price *</Text>
+                        <View style={styles.inputContainer}>
+                          <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                          <TextInput
+                            style={styles.input}
+                            value={newProductData.purchasePrice}
+                            onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
+                            placeholder="0.00"
+                            placeholderTextColor={Colors.textLight}
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        {/* Price Unit Selection for Compound Units */}
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.label}>Price Unit *</Text>
+                          <View style={styles.priceUnitContainer}>
+                            <TouchableOpacity
+                              style={[
+                                styles.priceUnitButton,
+                                newProductData.priceUnit === 'primary' && styles.activePriceUnitButton
+                              ]}
+                              onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'primary' }))}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.priceUnitButtonText,
+                                newProductData.priceUnit === 'primary' && styles.activePriceUnitButtonText
+                              ]}>
+                                Per {newProductData.primaryUnit}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.priceUnitButton,
+                                newProductData.priceUnit === 'secondary' && styles.activePriceUnitButton
+                              ]}
+                              onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'secondary' }))}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.priceUnitButtonText,
+                                newProductData.priceUnit === 'secondary' && styles.activePriceUnitButtonText
+                              ]}>
+                                Per {newProductData.secondaryUnit}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        
+                        {/* Purchase Price Input */}
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.label}>Purchase Price per {newProductData.priceUnit === 'primary' ? newProductData.primaryUnit : newProductData.secondaryUnit} *</Text>
+                          <View style={styles.inputContainer}>
+                            <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                            <TextInput
+                              style={styles.input}
+                              value={newProductData.purchasePrice}
+                              onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
+                              placeholder="0.00"
+                              placeholderTextColor={Colors.textLight}
+                              keyboardType="decimal-pad"
+                            />
+                          </View>
+                        </View>
+                      </>
+                    )}
+                  </View>
+
+                  {/* Tax Information Section */}
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Tax Information</Text>
+                    
+                    <View style={styles.taxSection}>
+                      <Text style={styles.taxLabel}>GST Rate (%)</Text>
+                      <View style={styles.taxButtons}>
+                        {[0, 5, 12, 18, 28].map((rate) => (
                           <TouchableOpacity
-                            key={type.value}
+                            key={rate}
                             style={[
-                              styles.cessTypeButton,
-                              { backgroundColor: newProductData.cessType === type.value ? Colors.primary : Colors.primary + '20' }
+                              styles.taxButton,
+                              { backgroundColor: newProductData.gstRate === rate ? Colors.primary : Colors.primary + '20' }
                             ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, cessType: type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity' }))}
+                            onPress={() => setNewProductData(prev => ({ ...prev, gstRate: rate }))}
                             activeOpacity={0.7}
                           >
                             <Text style={[
-                              styles.cessTypeButtonText, 
-                              { color: newProductData.cessType === type.value ? Colors.background : Colors.primary }
+                              styles.taxButtonText, 
+                              { color: newProductData.gstRate === rate ? Colors.background : Colors.primary }
                             ]}>
-                              {type.label}
+                              {rate}%
                             </Text>
                           </TouchableOpacity>
                         ))}
                       </View>
                     </View>
 
-                    {newProductData.cessType !== 'none' && (
-                      <View style={styles.cessAmountContainer}>
-                        <Text style={styles.cessSubLabel}>CESS Amount:</Text>
-                        <View style={styles.cessAmountToggle}>
-                          <TouchableOpacity
-                            style={[
-                              styles.cessToggleButton,
-                              { backgroundColor: newProductData.cessAmountType === 'percentage' ? Colors.primary : Colors.grey[200] }
-                            ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, cessAmountType: 'percentage' }))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.cessToggleText,
-                              { color: newProductData.cessAmountType === 'percentage' ? Colors.background : Colors.text }
-                            ]}>
-                              %
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.cessToggleButton,
-                              { backgroundColor: newProductData.cessAmountType === 'amount' ? Colors.primary : Colors.grey[200] }
-                            ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, cessAmountType: 'amount' }))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.cessToggleText,
-                              { color: newProductData.cessAmountType === 'amount' ? Colors.background : Colors.text }
-                            ]}>
-                              ₹
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View style={styles.inputContainer}>
-                          {newProductData.cessAmountType === 'percentage' ? (
-                            <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
-                          ) : (
-                            <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                          )}
-                          <TextInput
-                            style={styles.input}
-                            value={newProductData.cessAmount.toString()}
-                            onChangeText={(text) => setNewProductData(prev => ({ ...prev, cessAmount: parseFloat(text) || 0 }))}
-                            placeholder={newProductData.cessAmountType === 'percentage' ? "0.00" : "0.00"}
-                            placeholderTextColor={Colors.textLight}
-                            keyboardType="decimal-pad"
-                          />
+                    {/* CESS Calculation Section */}
+                    <View style={styles.cessSection}>
+                      <Text style={styles.cessLabel}>CESS Calculation (Optional)</Text>
+                    
+                      <View style={styles.cessTypeContainer}>
+                        <Text style={styles.cessSubLabel}>CESS Type:</Text>
+                        <View style={styles.cessTypeButtons}>
+                          {[
+                            { value: 'none', label: 'No CESS' },
+                            { value: 'value', label: 'Value Based (%)' },
+                            { value: 'quantity', label: 'Quantity Based (₹/unit)' },
+                            { value: 'value_and_quantity', label: 'Value + Quantity' }
+                          ].map((type) => (
+                            <TouchableOpacity
+                              key={type.value}
+                              style={[
+                                styles.cessTypeButton,
+                                { backgroundColor: newProductData.cessType === type.value ? Colors.primary : Colors.primary + '20' }
+                              ]}
+                              onPress={() => setNewProductData(prev => ({ ...prev, cessType: type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity' }))}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.cessTypeButtonText, 
+                                { color: newProductData.cessType === type.value ? Colors.background : Colors.primary }
+                              ]}>
+                                {type.label}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
                         </View>
                       </View>
-                    )}
+
+                      {/* CESS Rate (%) - Show for 'value' and 'value_and_quantity' */}
+                      {(newProductData.cessType === 'value' || newProductData.cessType === 'value_and_quantity') && (
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.label}>CESS Rate (%) *</Text>
+                          <View style={styles.inputContainer}>
+                            <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
+                            <TextInput
+                              style={styles.input}
+                              value={newProductData.cessRate.toString()}
+                              onChangeText={(text) => setNewProductData(prev => ({ ...prev, cessRate: parseFloat(text) || 0 }))}
+                              placeholder="0"
+                              placeholderTextColor={Colors.textLight}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                        </View>
+                      )}
+
+                      {/* CESS Amount (₹ per unit) - Show for 'quantity' and 'value_and_quantity' */}
+                      {(newProductData.cessType === 'quantity' || newProductData.cessType === 'value_and_quantity') && (
+                        <>
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.label}>CESS Amount (₹ per unit) *</Text>
+                            <View style={styles.inputContainer}>
+                              <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                              <TextInput
+                                style={styles.input}
+                                value={newProductData.cessAmount.toString()}
+                                onChangeText={(text) => setNewProductData(prev => ({ ...prev, cessAmount: parseFloat(text) || 0 }))}
+                                placeholder="0.00"
+                                placeholderTextColor={Colors.textLight}
+                                keyboardType="decimal-pad"
+                              />
+                            </View>
+                          </View>
+                          
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.label}>CESS Unit *</Text>
+                            <TouchableOpacity
+                              style={styles.inputContainer}
+                              onPress={() => {
+                                Alert.alert(
+                                  'Select CESS Unit',
+                                  'Choose the unit for CESS calculation',
+                                  [
+                                    { text: 'Piece', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Piece' })) },
+                                    { text: 'Kilogram', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Kilogram' })) },
+                                    { text: 'Liter', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Liter' })) },
+                                    { text: 'Box', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Box' })) },
+                                    { text: 'Pack', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Pack' })) },
+                                    { text: 'Cancel', style: 'cancel' }
+                                  ]
+                                );
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Ruler size={20} color={Colors.textLight} style={styles.inputIcon} />
+                              <Text style={[styles.input, { color: newProductData.cessUnit ? Colors.text : Colors.textLight }]}>
+                                {newProductData.cessUnit || 'Select unit'}
+                              </Text>
+                              <ChevronDown size={16} color={Colors.textLight} style={{ marginLeft: 'auto' }} />
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      )}
+                    </View>
                   </View>
 
                   <TouchableOpacity
                     style={styles.addSelectedButton}
                     onPress={() => {
+                      // Basic validation
+                      if (!newProductData.name || !newProductData.category || !newProductData.purchasePrice || !newProductData.primaryUnit) {
+                        Alert.alert('Incomplete Form', 'Please fill in all required fields');
+                        return;
+                      }
+                      
+                      // CESS validation based on type
+                      if (newProductData.cessType === 'value' && newProductData.cessRate <= 0) {
+                        Alert.alert('CESS Configuration', 'Please enter CESS rate for value-based CESS');
+                        return;
+                      }
+                      
+                      if (newProductData.cessType === 'quantity' && (newProductData.cessAmount <= 0 || !newProductData.cessUnit)) {
+                        Alert.alert('CESS Configuration', 'Please enter CESS amount and select unit for quantity-based CESS');
+                        return;
+                      }
+                      
+                      if (newProductData.cessType === 'value_and_quantity' && (newProductData.cessRate <= 0 || newProductData.cessAmount <= 0 || !newProductData.cessUnit)) {
+                        Alert.alert('CESS Configuration', 'Please enter both CESS rate and amount, and select unit for value and quantity CESS');
+                        return;
+                      }
+                      
                       if (newProductData.name && newProductData.category && newProductData.purchasePrice && newProductData.primaryUnit) {
                         const productToAdd: StockInProduct = {
                           id: `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                           name: newProductData.name,
+                          barcode: newProductData.barcode || '',
                           quantity: 1,
                           purchasePrice: parseFloat(newProductData.purchasePrice),
                           discount: 0,
-                          totalPrice: parseFloat(newProductData.purchasePrice),
+                          totalPrice: 0, // Will be calculated properly
                           isNewProduct: true,
                           gstRate: newProductData.gstRate,
                           cessRate: newProductData.cessType === 'none' ? 0 : newProductData.cessRate,
                           cessType: newProductData.cessType,
                           cessAmount: newProductData.cessType === 'none' ? 0 : newProductData.cessAmount,
+                          cessUnit: newProductData.cessUnit || '',
                           primaryUnit: newProductData.primaryUnit,
                           secondaryUnit: newProductData.secondaryUnit,
                           useCompoundUnit: newProductData.useCompoundUnit,
                           conversionRatio: newProductData.conversionRatio,
+                          priceUnit: newProductData.priceUnit,
                         };
                         
-                        updateFormData('products', [...formData.products, productToAdd]);
+                        // Calculate proper total price including GST and CESS
+                        const basePrice = calculateBasePrice(productToAdd);
+                        const gstAmount = basePrice * (productToAdd.gstRate / 100);
+                        const cessAmount = calculateCessAmount(productToAdd);
+                        productToAdd.totalPrice = basePrice + gstAmount + cessAmount;
+                        
+                        const updatedProducts = [...formData.products, productToAdd];
+                        updateFormData('products', updatedProducts);
                         setShowCreateProductModal(false);
                         setNewProductData({
                           name: '',
                           category: '',
+                          barcode: '',
                           hsnCode: '',
                           purchasePrice: '',
+                          priceUnit: 'primary',
                           gstRate: 18,
                           cessRate: 0,
                           cessType: 'none',
                           cessAmount: 0,
+                          cessUnit: '',
                           cessAmountType: 'percentage',
                           primaryUnit: 'Piece',
                           secondaryUnit: 'None',
@@ -1374,13 +1784,239 @@ export default function ManualStockInScreen() {
             </View>
           </Modal>
 
+          {/* Edit Product Modal */}
+          <Modal
+            visible={showEditProductModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowEditProductModal(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Edit Product</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowEditProductModal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={24} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+                
+                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                  {editingProduct && (
+                    <>
+                      {/* Product Name */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Product Name *</Text>
+                        <View style={styles.inputContainer}>
+                          <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
+                          <TextInput
+                            style={styles.input}
+                            value={editingProduct.name}
+                            onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, name: text } : null)}
+                            placeholder="Enter product name"
+                            placeholderTextColor={Colors.textLight}
+                          />
+                        </View>
+                      </View>
+
+                      {/* Purchase Price */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Purchase Price *</Text>
+                        <View style={styles.inputContainer}>
+                          <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                          <TextInput
+                            style={styles.input}
+                            value={editingProduct.purchasePrice.toString()}
+                            onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, purchasePrice: parseFloat(text) || 0 } : null)}
+                            placeholder="0.00"
+                            placeholderTextColor={Colors.textLight}
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                      </View>
+
+                      {/* Quantity */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Quantity ({editingProduct.primaryUnit}) *</Text>
+                        <View style={styles.inputContainer}>
+                          <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                          <TextInput
+                            style={styles.input}
+                            value={editingProduct.quantity.toString()}
+                            onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, quantity: parseInt(text) || 0 } : null)}
+                            placeholder="0"
+                            placeholderTextColor={Colors.textLight}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                      </View>
+
+                      {/* Pieces per Box (for compound units) */}
+                      {editingProduct.useCompoundUnit && (
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.label}>Pieces per {editingProduct.primaryUnit}</Text>
+                          <View style={styles.inputContainer}>
+                            <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                            <TextInput
+                              style={styles.input}
+                              value={editingProduct.conversionRatio}
+                              onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, conversionRatio: text } : null)}
+                              placeholder="0"
+                              placeholderTextColor={Colors.textLight}
+                              keyboardType="numeric"
+                            />
+                          </View>
+                        </View>
+                      )}
+
+                      {/* GST Rate */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>GST Rate (%)</Text>
+                        <View style={styles.taxButtons}>
+                          {[0, 5, 12, 18, 28].map((rate) => (
+                            <TouchableOpacity
+                              key={rate}
+                              style={[
+                                styles.taxButton,
+                                { backgroundColor: editingProduct.gstRate === rate ? Colors.primary : Colors.primary + '20' }
+                              ]}
+                              onPress={() => setEditingProduct(prev => prev ? { ...prev, gstRate: rate } : null)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.taxButtonText, 
+                                { color: editingProduct.gstRate === rate ? Colors.background : Colors.primary }
+                              ]}>
+                                {rate}%
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* CESS Type */}
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>CESS Type</Text>
+                        <View style={styles.taxButtons}>
+                          {[
+                            { type: 'none', label: 'No CESS' },
+                            { type: 'value', label: 'Value Based (%)' },
+                            { type: 'quantity', label: 'Quantity Based (₹/unit)' },
+                            { type: 'value_and_quantity', label: 'Value + Quantity' }
+                          ].map(({ type, label }) => (
+                            <TouchableOpacity
+                              key={type}
+                              style={[
+                                styles.taxButton,
+                                { backgroundColor: editingProduct.cessType === type ? Colors.warning : Colors.warning + '20' }
+                              ]}
+                              onPress={() => setEditingProduct(prev => prev ? { ...prev, cessType: type as 'none' | 'value' | 'quantity' | 'value_and_quantity' } : null)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[
+                                styles.taxButtonText, 
+                                { color: editingProduct.cessType === type ? Colors.background : Colors.warning }
+                              ]}>
+                                {label}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* CESS Rate/Amount (only show if CESS is enabled) */}
+                      {editingProduct.cessType !== 'none' && (
+                        <>
+                          {/* CESS Rate (%) - Show for 'value' and 'value_and_quantity' */}
+                          {(editingProduct.cessType === 'value' || editingProduct.cessType === 'value_and_quantity') && (
+                            <View style={styles.inputGroup}>
+                              <Text style={styles.label}>CESS Rate (%) *</Text>
+                              <View style={styles.inputContainer}>
+                                <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
+                                <TextInput
+                                  style={styles.input}
+                                  value={editingProduct.cessRate.toString()}
+                                  onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, cessRate: parseFloat(text) || 0 } : null)}
+                                  placeholder="0"
+                                  placeholderTextColor={Colors.textLight}
+                                  keyboardType="numeric"
+                                />
+                              </View>
+                            </View>
+                          )}
+
+                                                {/* CESS Amount (₹ per unit) - Show for 'quantity' and 'value_and_quantity' */}
+                      {(editingProduct.cessType === 'quantity' || editingProduct.cessType === 'value_and_quantity') && (
+                        <>
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.label}>CESS Amount (₹ per unit) *</Text>
+                            <View style={styles.inputContainer}>
+                              <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                              <TextInput
+                                style={styles.input}
+                                value={editingProduct.cessAmount.toString()}
+                                onChangeText={(text) => setEditingProduct(prev => prev ? { ...prev, cessAmount: parseFloat(text) || 0 } : null)}
+                                placeholder="0.00"
+                                placeholderTextColor={Colors.textLight}
+                                keyboardType="decimal-pad"
+                              />
+                            </View>
+                          </View>
+                          
+                          <View style={styles.inputGroup}>
+                            <Text style={styles.label}>CESS Unit *</Text>
+                            <TouchableOpacity
+                              style={styles.inputContainer}
+                              onPress={() => {
+                                Alert.alert(
+                                  'Select CESS Unit',
+                                  'Choose the unit for CESS calculation',
+                                  [
+                                    { text: 'Piece', onPress: () => setEditingProduct(prev => prev ? { ...prev, cessUnit: 'Piece' } : null) },
+                                    { text: 'Kilogram', onPress: () => setEditingProduct(prev => prev ? { ...prev, cessUnit: 'Kilogram' } : null) },
+                                    { text: 'Liter', onPress: () => setEditingProduct(prev => prev ? { ...prev, cessUnit: 'Liter' } : null) },
+                                    { text: 'Box', onPress: () => setEditingProduct(prev => prev ? { ...prev, cessUnit: 'Box' } : null) },
+                                    { text: 'Pack', onPress: () => setEditingProduct(prev => prev ? { ...prev, cessUnit: 'Pack' } : null) },
+                                    { text: 'Cancel', style: 'cancel' }
+                                  ]
+                                );
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Ruler size={20} color={Colors.textLight} style={styles.inputIcon} />
+                              <Text style={[styles.input, { color: editingProduct.cessUnit ? Colors.text : Colors.textLight }]}>
+                                {editingProduct.cessUnit || 'Select unit'}
+                              </Text>
+                              <ChevronDown size={16} color={Colors.textLight} style={{ marginLeft: 'auto' }} />
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      )}
+                        </>
+                      )}
+
+                      <TouchableOpacity
+                        style={styles.addSelectedButton}
+                        onPress={handleUpdateProduct}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.addSelectedButtonText}>Update Product</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
           {/* Primary Unit Modal */}
           <Modal
             visible={showPrimaryUnitModal}
             transparent
             animationType="fade"
             onRequestClose={() => setShowPrimaryUnitModal(false)}
-            onShow={() => console.log('Primary unit modal shown')}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -1424,7 +2060,6 @@ export default function ManualStockInScreen() {
             transparent
             animationType="fade"
             onRequestClose={() => setShowSecondaryUnitModal(false)}
-            onShow={() => console.log('Secondary unit modal shown')}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -1468,7 +2103,6 @@ export default function ManualStockInScreen() {
             transparent
             animationType="fade"
             onRequestClose={() => setShowPrimaryUnitModal(false)}
-            onShow={() => console.log('Primary unit modal shown')}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -1512,7 +2146,6 @@ export default function ManualStockInScreen() {
             transparent
             animationType="fade"
             onRequestClose={() => setShowSecondaryUnitModal(false)}
-            onShow={() => console.log('Secondary unit modal shown')}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -2201,5 +2834,62 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  modalSection: {
+    marginBottom: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  modalSectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.primary,
+  },
+  scanIcon: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  priceUnitContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  priceUnitButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.primary + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activePriceUnitButton: {
+    backgroundColor: Colors.primary,
+  },
+  priceUnitButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  activePriceUnitButtonText: {
+    color: Colors.background,
+  },
+  productActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editButton: {
+    padding: 4,
+  },
+  piecesInfo: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontStyle: 'italic',
   },
 }); 
