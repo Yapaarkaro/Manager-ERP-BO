@@ -98,7 +98,7 @@ export default function StockInConfirmationScreen() {
         [
           {
             text: 'OK',
-            onPress: () => router.push('/inventory')
+            onPress: () => router.replace('/dashboard')
           }
         ]
       );

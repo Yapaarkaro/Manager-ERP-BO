@@ -50,6 +50,9 @@ interface PurchaseOrder {
   poNumber: string;
   supplierName: string;
   supplierGSTIN: string;
+  supplierAddress: string;
+  supplierPhone: string;
+  supplierEmail: string;
   orderDate: string;
   expectedDelivery: string;
   totalAmount: number;
@@ -63,6 +66,9 @@ const mockPOs: PurchaseOrder[] = [
     poNumber: 'PO-2024-001',
     supplierName: 'ABC Suppliers Pvt Ltd',
     supplierGSTIN: '27ABCDE1234F1Z5',
+    supplierAddress: '123, Industrial Area, Mumbai - 400001',
+    supplierPhone: '+91 98765 43210',
+    supplierEmail: 'contact@abcsuppliers.com',
     orderDate: '2024-01-15',
     expectedDelivery: '2024-01-25',
     totalAmount: 50000,
@@ -102,6 +108,9 @@ const mockPOs: PurchaseOrder[] = [
     poNumber: 'PO-2024-002',
     supplierName: 'XYZ Electronics',
     supplierGSTIN: '29XYZABC5678G9H0',
+    supplierAddress: '456, Tech Park, Bangalore - 560001',
+    supplierPhone: '+91 87654 32109',
+    supplierEmail: 'info@xyzelectronics.com',
     orderDate: '2024-01-20',
     expectedDelivery: '2024-01-30',
     totalAmount: 75000,
@@ -137,7 +146,7 @@ export default function POSearchScreen() {
     if (!selectedPO) return;
     
     router.push({
-      pathname: '/inventory/stock-in/verify-stock',
+      pathname: '/inventory/stock-in/invoice-input',
       params: {
         poData: JSON.stringify(selectedPO)
       }
@@ -301,17 +310,21 @@ export default function POSearchScreen() {
               ))
             )}
           </ScrollView>
+        </View>
 
-          {/* Search Bar at Bottom */}
-          <View style={styles.bottomSearchContainer}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by PO number or supplier name..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
+        {/* Floating Search Bar */}
+        <View style={styles.floatingSearchContainer}>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by PO number or supplier name..."
+                placeholderTextColor={Colors.textLight}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -521,15 +534,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.background,
   },
-  bottomSearchContainer: {
+  floatingSearchContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    backgroundColor: Colors.background,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  searchContainer: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    backgroundColor: Colors.background,
+    borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
   },
 }); 

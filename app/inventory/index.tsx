@@ -223,6 +223,10 @@ export default function InventoryScreen() {
     router.push('/inventory/low-stock');
   };
 
+  const handleStockDiscrepanciesPress = () => {
+    router.push('/inventory/stock-discrepancies');
+  };
+
   const getUrgencyColor = (urgency: string) => {
     switch (urgency) {
       case 'critical': return Colors.error;
@@ -396,13 +400,22 @@ export default function InventoryScreen() {
         
         <Text style={styles.headerTitle}>Inventory Management</Text>
         
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={handleAddProduct}
-          activeOpacity={0.7}
-        >
-          <Plus size={24} color={Colors.primary} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={handleStockDiscrepanciesPress}
+            activeOpacity={0.7}
+          >
+            <AlertTriangle size={20} color={Colors.error} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={handleAddProduct}
+            activeOpacity={0.7}
+          >
+            <Plus size={24} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Total Stock Value */}
@@ -521,6 +534,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
     flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addButton: {
     width: 40,

@@ -1,4 +1,8 @@
 import React, { useState, useEffect } from 'react';
+
+// TODO: REMOVE TEST BYPASS BEFORE PRODUCTION DEPLOYMENT
+// Test bypass: Mobile number '1234567890' automatically redirects to dashboard
+// This bypass should be removed when deploying to production
 import {
   View,
   Text,
@@ -30,6 +34,17 @@ export default function MobileScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => {
+    // Test bypass: Auto-navigate to dashboard for test number
+    if (mobileNumber === '1234567890' && !isNavigating) {
+      setIsValid(true);
+      setIsNavigating(true);
+      // Simulate API call delay
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 500);
+      return;
+    }
+    
     // Auto-navigate when 10 digits are entered (only once)
     if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber) && !isNavigating) {
       setIsValid(true);
@@ -76,6 +91,11 @@ export default function MobileScreen() {
         <Text style={styles.subtitle}>
           We'll send you a verification code to confirm your mobile number
         </Text>
+        
+        {/* Test bypass info - REMOVE BEFORE PRODUCTION */}
+        <Text style={styles.testInfo}>
+          💡 Test mode: Use 1234567890 to skip authentication
+        </Text>
 
         <View style={styles.inputContainer}>
           <TextInput
@@ -97,7 +117,12 @@ export default function MobileScreen() {
 
         {isValid && (
           <View style={styles.successContainer}>
-            <Text style={styles.successText}>Proceeding to verification...</Text>
+            <Text style={styles.successText}>
+              {mobileNumber === '1234567890' 
+                ? 'Test mode: Proceeding to dashboard...' 
+                : 'Proceeding to verification...'
+              }
+            </Text>
           </View>
         )}
 
@@ -147,8 +172,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.gray,
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: 16,
     lineHeight: 22,
+  },
+  testInfo: {
+    fontSize: 14,
+    color: COLORS.primary,
+    textAlign: 'center',
+    marginBottom: 32,
+    paddingHorizontal: 20,
+    fontStyle: 'italic',
   },
   inputContainer: {
     marginBottom: 16,

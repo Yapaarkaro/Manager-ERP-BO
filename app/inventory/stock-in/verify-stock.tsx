@@ -61,19 +61,32 @@ interface PurchaseOrder {
 }
 
 export default function VerifyStockScreen() {
-  const { poData } = useLocalSearchParams();
+  const { poData, invoiceNumber, invoiceDate, ewayBillNumber, vehicleNumber, vehicleType } = useLocalSearchParams();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showProductModal, setShowProductModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<POProduct | null>(null);
   const [receivedQuantity, setReceivedQuantity] = useState('');
   const [hasDiscrepancies, setHasDiscrepancies] = useState(false);
+  const [allQuantitiesMatch, setAllQuantitiesMatch] = useState(false);
 
   useEffect(() => {
     if (poData) {
       try {
         const parsedPO = JSON.parse(poData as string);
         setPo(parsedPO);
+        
+        // Check for discrepancies
+        const hasDiscrepancies = parsedPO.products.some((product: POProduct) => 
+          product.receivedQuantity !== product.billedQuantity
+        );
+        setHasDiscrepancies(hasDiscrepancies);
+
+        // Check if all quantities match
+        const allMatch = parsedPO.products.every((product: POProduct) => 
+          product.receivedQuantity === product.billedQuantity
+        );
+        setAllQuantitiesMatch(allMatch);
       } catch (error) {
         console.error('Error parsing PO data:', error);
         Alert.alert('Error', 'Invalid PO data');
@@ -84,7 +97,7 @@ export default function VerifyStockScreen() {
 
   const handleProductSelect = (product: POProduct) => {
     setSelectedProduct(product);
-    setReceivedQuantity(product.receivedQuantity.toString());
+    setReceivedQuantity(product.receivedQuantity > 0 ? product.receivedQuantity.toString() : '');
     setShowProductModal(true);
   };
 
@@ -114,11 +127,17 @@ export default function VerifyStockScreen() {
       const updatedPO = { ...po, products: updatedProducts };
       setPo(updatedPO);
       
-      // Check for discrepancies
-      const hasDiscrepancies = updatedProducts.some(p => 
-        p.receivedQuantity !== p.billedQuantity
-      );
-      setHasDiscrepancies(hasDiscrepancies);
+          // Check for discrepancies
+    const hasDiscrepancies = updatedProducts.some(p => 
+      p.receivedQuantity !== p.billedQuantity
+    );
+    setHasDiscrepancies(hasDiscrepancies);
+
+    // Check if all quantities match
+    const allMatch = updatedProducts.every(p => 
+      p.receivedQuantity === p.billedQuantity
+    );
+    setAllQuantitiesMatch(allMatch);
     }
 
     setShowProductModal(false);
@@ -138,6 +157,23 @@ export default function VerifyStockScreen() {
       pathname: '/inventory/stock-in/discrepancy-report',
       params: {
         poData: JSON.stringify(po)
+      }
+    });
+  };
+
+  const handleRecordStockIn = () => {
+    if (!po) return;
+    
+    // Navigate to confirmation page
+    router.push({
+      pathname: '/inventory/stock-in/stock-confirmation',
+      params: {
+        poData: JSON.stringify(po),
+        invoiceNumber: invoiceNumber as string,
+        invoiceDate: invoiceDate as string,
+        ewayBillNumber: ewayBillNumber as string,
+        vehicleNumber: vehicleNumber as string,
+        vehicleType: vehicleType as string,
       }
     });
   };
@@ -222,6 +258,41 @@ export default function VerifyStockScreen() {
             <Text style={styles.poDetails}>
               Order Date: {po.orderDate} | Expected: {po.expectedDelivery}
             </Text>
+            {invoiceNumber && (
+              <View style={styles.invoiceInfo}>
+                <View style={styles.invoiceLeftColumn}>
+                  <View style={styles.invoiceRow}>
+                    <Text style={styles.invoiceLabel}>Invoice Number:</Text>
+                    <Text style={styles.invoiceValue}>{invoiceNumber}</Text>
+                  </View>
+                  {invoiceDate && (
+                    <View style={styles.invoiceRow}>
+                      <Text style={styles.invoiceLabel}>Invoice Date:</Text>
+                      <Text style={styles.invoiceValue}>{invoiceDate}</Text>
+                    </View>
+                  )}
+                </View>
+                {(ewayBillNumber || vehicleNumber) && (
+                  <View style={styles.invoiceRightColumn}>
+                    {ewayBillNumber && (
+                      <View style={styles.invoiceRow}>
+                        <Text style={styles.invoiceLabel}>E-way Bill:</Text>
+                        <Text style={styles.invoiceValue}>{ewayBillNumber}</Text>
+                      </View>
+                    )}
+                    {vehicleNumber && (
+                      <View style={styles.invoiceRow}>
+                        <Text style={styles.invoiceLabel}>Vehicle:</Text>
+                        <Text style={styles.invoiceValue}>
+                          {vehicleNumber}
+                          {vehicleType && ` (${vehicleType})`}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Search Bar */}
@@ -294,8 +365,22 @@ export default function VerifyStockScreen() {
             ))}
           </ScrollView>
 
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
+        </View>
+
+        {/* Floating Action Buttons */}
+        {allQuantitiesMatch ? (
+          <View style={styles.floatingButtonContainer}>
+            <TouchableOpacity
+              style={styles.recordStockInButton}
+              onPress={handleRecordStockIn}
+              activeOpacity={0.8}
+            >
+              <Check size={20} color={Colors.background} />
+              <Text style={styles.recordStockInButtonText}>Record Stock In</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.floatingButtonsContainer}>
             <TouchableOpacity
               style={styles.scanButton}
               onPress={handleScanBarcode}
@@ -311,12 +396,12 @@ export default function VerifyStockScreen() {
                 onPress={handleReportDiscrepancy}
                 activeOpacity={0.8}
               >
-                <AlertTriangle size={20} color={Colors.background} />
-                <Text style={styles.reportButtonText}>Report Discrepancy</Text>
+                <AlertTriangle size={18} color={Colors.error} />
+                <Text style={styles.reportButtonText}>Report Issues</Text>
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        )}
 
         {/* Quantity Update Modal */}
         <Modal
@@ -350,10 +435,18 @@ export default function VerifyStockScreen() {
                       <TextInput
                         style={styles.quantityInput}
                         value={receivedQuantity}
-                        onChangeText={setReceivedQuantity}
+                        onChangeText={(text) => {
+                          // Auto-remove "0" if it's the only character and user is typing
+                          if (receivedQuantity === '0' && text.length > 1) {
+                            setReceivedQuantity(text.substring(1));
+                          } else {
+                            setReceivedQuantity(text);
+                          }
+                        }}
                         placeholder="0"
                         placeholderTextColor={Colors.textLight}
                         keyboardType="numeric"
+                        autoFocus
                       />
                     </View>
                     
@@ -443,6 +536,34 @@ const styles = StyleSheet.create({
   poDetails: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  invoiceInfo: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  invoiceLeftColumn: {
+    flex: 1,
+  },
+  invoiceRightColumn: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  invoiceRow: {
+    marginBottom: 4,
+  },
+  invoiceLabel: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  invoiceValue: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -539,20 +660,65 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  actionButtons: {
+  floatingButtonContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    backgroundColor: Colors.background,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  floatingButtonsContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     gap: 12,
-    marginTop: 20,
   },
-  scanButton: {
-    flex: 1,
-    backgroundColor: Colors.primary,
+  recordStockInButton: {
+    backgroundColor: Colors.success,
     borderRadius: 12,
     paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+  },
+  recordStockInButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.background,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  scanButton: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    borderRadius: 25,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
   },
   scanButtonText: {
     fontSize: 16,
@@ -561,18 +727,28 @@ const styles = StyleSheet.create({
   },
   reportButton: {
     flex: 1,
-    backgroundColor: Colors.error,
-    borderRadius: 12,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.error,
+    borderRadius: 25,
     paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
   },
   reportButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: Colors.background,
+    color: Colors.error,
   },
   modalOverlay: {
     flex: 1,

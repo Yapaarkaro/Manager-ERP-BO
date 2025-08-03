@@ -742,7 +742,7 @@ export default function ManualStockInScreen() {
                 onPress={() => setShowProductModal(true)}
                 activeOpacity={0.7}
               >
-                <Plus size={20} color={Colors.primary} />
+                <Plus size={20} color={Colors.background} />
                 <Text style={styles.addButtonText}>Add Product</Text>
               </TouchableOpacity>
             </View>

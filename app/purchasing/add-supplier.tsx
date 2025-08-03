@@ -102,7 +102,7 @@ const indianStates = [
 ];
 
 export default function AddSupplierScreen() {
-  const { returnToStockIn } = useLocalSearchParams();
+  const { returnToStockIn, returnToAddProduct } = useLocalSearchParams();
   const [formData, setFormData] = useState<SupplierFormData>({
     businessName: '',
     contactPerson: '',
@@ -515,8 +515,27 @@ export default function AddSupplierScreen() {
         {
           text: 'OK',
           onPress: () => {
+            // Check if we should return to add product page
+            if (returnToAddProduct === 'true') {
+              // Return to add product page with the new supplier data
+              const supplierData = {
+                id: `SUPP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                name: formData.contactPerson,
+                gstin: formData.gstin,
+                businessName: formData.businessName,
+                address: `${formData.addressLine1}, ${formData.addressLine2 ? formData.addressLine2 + ', ' : ''}${formData.addressLine3 ? formData.addressLine3 + ', ' : ''}${formData.city}, ${formData.pincode}, ${formData.state}`,
+              };
+              
+              // Navigate back to add product page with supplier data
+              router.replace({
+                pathname: '/inventory/manual-product',
+                params: {
+                  newSupplier: JSON.stringify(supplierData)
+                }
+              });
+            }
             // Check if we should return to stock-in
-            if (returnToStockIn === 'true') {
+            else if (returnToStockIn === 'true') {
               // Return to stock-in with the new supplier data
               const supplierData = {
                 name: formData.contactPerson,

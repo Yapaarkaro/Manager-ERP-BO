@@ -57,7 +57,7 @@ interface DailySalesData {
     card: { gross: number; returns: number; net: number; };
     others: { gross: number; returns: number; net: number; };
   };
-  invoices: Array<{
+  invoices: {
     id: string;
     invoiceNumber: string;
     customerName: string;
@@ -69,7 +69,7 @@ interface DailySalesData {
     time: string;
     status: 'sale' | 'return';
     originalInvoice?: string;
-  }>;
+  }[];
 }
 
 const mockDailySalesData: DailySalesData[] = [

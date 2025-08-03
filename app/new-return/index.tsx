@@ -58,7 +58,7 @@ interface Invoice {
     shipToAddress?: string;
     paymentTerms?: string;
   };
-  items: Array<{
+  items: {
     id: string;
     name: string;
     quantity: number;
@@ -67,7 +67,7 @@ interface Invoice {
     taxRate: number;
     taxAmount: number;
     total: number;
-  }>;
+  }[];
 }
 
 // Mock recent invoices for return processing

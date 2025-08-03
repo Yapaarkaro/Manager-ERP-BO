@@ -59,6 +59,8 @@ const primaryUnits = [
   'Carton', 'Crate', 'Gallon', 'Ounce', 'Pound'
 ];
 
+const customUnitPlaceholder = 'Custom Unit';
+
 const secondaryUnits = [
   'None', 'Piece', 'Kilogram', 'Gram', 'Liter', 'Milliliter', 'Meter', 
   'Centimeter', 'Box', 'Pack', 'Set', 'Pair', 'Dozen', 'Ton', 'Quintal', 
@@ -70,9 +72,10 @@ const secondaryUnits = [
 const taxRates = [0, 5, 12, 18, 28];
 
 const cessTypes = [
+  { value: 'none', label: 'No CESS' },
   { value: 'value', label: 'Based on Value' },
   { value: 'quantity', label: 'Based on Quantity' },
-  { value: 'value_quantity', label: 'Based on Value & Quantity' },
+  { value: 'value_and_quantity', label: 'Based on Value & Quantity' },
 ];
 
 const unitConversions: { [key: string]: { [key: string]: number } } = {
@@ -131,22 +134,28 @@ interface ProductFormData {
   secondaryUnit: string;
   useCompoundUnit: boolean;
   conversionRatio: string;
-  cessType: string;
-  purchasePrice: string;
-  salesPrice: string;
+  priceUnit: 'primary' | 'secondary';
+  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
   cessRate: number;
   cessAmount: string;
-  cessAmountType: 'amount' | 'percentage';
+  cessUnit: string;
+  purchasePrice: string;
+  salesPrice: string;
+  mrp: string;
   minStockLevel: string;
   maxStockLevel: string;
   openingStock: string;
-  supplier: string;
+  preferredSupplier: string;
   location: string;
   productImage: string | null;
+  // Advanced options
+  batchNumber: string;
+  expiryDate: string;
+  showAdvancedOptions: boolean;
 }
 
 export default function ManualProductScreen() {
-  const { scannedData, isScanned, returnToStockIn, supplierId } = useLocalSearchParams();
+  const { scannedData, isScanned, returnToStockIn, supplierId, newSupplier } = useLocalSearchParams();
   
   const [formData, setFormData] = useState<ProductFormData>({
     name: '',
@@ -157,20 +166,26 @@ export default function ManualProductScreen() {
     taxRate: 18,
     cessRate: 0,
     cessAmount: '',
-    cessAmountType: 'amount',
+    cessUnit: '',
     primaryUnit: 'Piece',
     secondaryUnit: 'None',
     useCompoundUnit: false,
     conversionRatio: '',
-    cessType: 'value',
+    priceUnit: 'primary',
+    cessType: 'none',
     purchasePrice: '',
     salesPrice: '',
+    mrp: '',
     minStockLevel: '',
     maxStockLevel: '',
     openingStock: '',
-    supplier: '',
-    location: 'Main Warehouse',
+    preferredSupplier: '',
+    location: 'Primary Address',
     productImage: null,
+    // Advanced options
+    batchNumber: '',
+    expiryDate: '',
+    showAdvancedOptions: false,
   });
 
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -189,7 +204,13 @@ export default function ManualProductScreen() {
   const [categorySearch, setCategorySearch] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
+  const [primaryUnitSearch, setPrimaryUnitSearch] = useState('');
+  const [secondaryUnitSearch, setSecondaryUnitSearch] = useState('');
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [customPrimaryUnit, setCustomPrimaryUnit] = useState('');
+  const [customSecondaryUnit, setCustomSecondaryUnit] = useState('');
+  const [showCustomPrimaryUnitModal, setShowCustomPrimaryUnitModal] = useState(false);
+  const [showCustomSecondaryUnitModal, setShowCustomSecondaryUnitModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const categorySearchRef = useRef<TextInput>(null);
@@ -216,12 +237,35 @@ export default function ManualProductScreen() {
     if (supplierId && typeof supplierId === 'string') {
       setFormData(prev => ({
         ...prev,
-        supplier: supplierId
+        preferredSupplier: supplierId
       }));
     }
   }, [supplierId]);
 
-  const updateFormData = (field: keyof ProductFormData, value: string | number | null) => {
+  // Handle new supplier from add supplier page
+  // This preserves all existing form data when returning from adding a supplier
+  useEffect(() => {
+    if (newSupplier && typeof newSupplier === 'string') {
+      try {
+        const supplierData = JSON.parse(newSupplier);
+        // Add the new supplier to the mock suppliers list
+        mockSuppliers.push({
+          id: supplierData.id,
+          name: supplierData.businessName,
+          type: 'business'
+        });
+        // Set the new supplier as preferred supplier without losing other form data
+        setFormData(prev => ({
+          ...prev,
+          preferredSupplier: supplierData.id
+        }));
+      } catch (error) {
+        console.error('Error parsing new supplier data:', error);
+      }
+    }
+  }, [newSupplier]);
+
+  const updateFormData = (field: keyof ProductFormData, value: string | number | boolean | null) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -256,11 +300,13 @@ export default function ManualProductScreen() {
   const handleUnitSelect = (unit: string) => {
     setFormData(prev => ({ ...prev, primaryUnit: unit }));
     setShowUnitModal(false);
+    setPrimaryUnitSearch('');
   };
 
   const handleSecondaryUnitSelect = (unit: string) => {
     setFormData(prev => ({ ...prev, secondaryUnit: unit }));
     setShowSecondaryUnitModal(false);
+    setSecondaryUnitSearch('');
   };
 
   const handleTaxRateSelect = (rate: number) => {
@@ -268,11 +314,13 @@ export default function ManualProductScreen() {
     setShowTaxModal(false);
   };
 
-  const handleCessTypeSelect = (type: string) => {
+  const handleCessTypeSelect = (type: 'none' | 'value' | 'quantity' | 'value_and_quantity') => {
     setFormData(prev => ({ ...prev, cessType: type }));
     setShowCessTypeModal(false);
-    // Show cess amount/rate modal after type selection
-    setTimeout(() => setShowCessAmountModal(true), 300);
+    // Show cess amount/rate modal after type selection if not 'none'
+    if (type !== 'none') {
+      setTimeout(() => setShowCessAmountModal(true), 300);
+    }
   };
 
   const handleCessAmountSubmit = (amount: string) => {
@@ -295,7 +343,7 @@ export default function ManualProductScreen() {
   };
 
   const handleSupplierSelect = (supplierId: string) => {
-    setFormData(prev => ({ ...prev, supplier: supplierId }));
+    setFormData(prev => ({ ...prev, preferredSupplier: supplierId }));
     setShowSupplierModal(false);
   };
 
@@ -311,7 +359,7 @@ export default function ManualProductScreen() {
     setShowImageModal(false);
   };
 
-  const handlePriceChange = (field: 'purchasePrice' | 'salesPrice', text: string) => {
+  const handlePriceChange = (field: 'purchasePrice' | 'salesPrice' | 'mrp', text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
     const parts = cleaned.split('.');
     if (parts.length <= 2 && parts[0].length <= 8) {
@@ -360,12 +408,14 @@ export default function ManualProductScreen() {
       conversionRatio: formData.conversionRatio,
       cessType: formData.cessType,
       cessAmount: formData.cessAmount,
+      cessRate: formData.cessRate,
+      cessUnit: formData.cessUnit,
       purchasePrice: parseFloat(formData.purchasePrice),
       salesPrice: parseFloat(formData.salesPrice),
       minStockLevel: parseInt(formData.minStockLevel),
       maxStockLevel: parseInt(formData.maxStockLevel),
       currentStock: parseInt(formData.openingStock),
-      supplier: formData.supplier,
+      supplier: formData.preferredSupplier,
       location: formData.location,
       productImage: formData.productImage,
       createdAt: new Date().toISOString(),
@@ -453,6 +503,35 @@ export default function ManualProductScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Preferred Supplier & Location - Moved to top for better flow */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Preferred Supplier & Location</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Preferred Supplier</Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowSupplierModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.dropdownText,
+                  !formData.preferredSupplier && styles.placeholderText
+                ]}>
+                  {formData.preferredSupplier ? getSupplierName(formData.preferredSupplier) : 'Select preferred supplier'}
+                </Text>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Storage Location</Text>
+              <View style={styles.locationContainer}>
+                <Text style={styles.locationText}>Primary Address</Text>
+                <Text style={styles.comingSoonText}>Other locations coming soon</Text>
+              </View>
+            </View>
+          </View>
+
           {/* Product Image */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Product Image</Text>
@@ -582,36 +661,51 @@ export default function ManualProductScreen() {
               </View>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Tax Rate *</Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowTaxModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.dropdownText}>
-                  {formData.taxRate}% GST
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>CESS Calculation</Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowCessTypeModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.dropdownText}>
-                  {formData.cessAmount ? 
-                    `${formData.cessAmount} ${formData.cessAmountType === 'amount' ? '₹' : '%'} ${formData.cessType === 'value' ? '' : formData.cessType === 'quantity' ? 'per unit' : 'per unit'} (${cessTypes.find(t => t.value === formData.cessType)?.label})` : 
-                    'Select CESS calculation method'
-                  }
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
+
+            {/* Advanced Options Toggle */}
+            <TouchableOpacity
+              style={[styles.advancedToggle, formData.showAdvancedOptions && styles.advancedToggleActive]}
+              onPress={() => updateFormData('showAdvancedOptions', !formData.showAdvancedOptions)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.advancedToggleText, formData.showAdvancedOptions && styles.advancedToggleTextActive]}>
+                {formData.showAdvancedOptions ? 'Hide Advanced Options' : 'Show Advanced Options'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Advanced Options Fields */}
+            {formData.showAdvancedOptions && (
+              <View style={styles.advancedOptionsContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Batch Number</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.batchNumber}
+                      onChangeText={(text) => updateFormData('batchNumber', text)}
+                      placeholder="Enter batch number"
+                      placeholderTextColor={Colors.textLight}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+                </View>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Expiry Date</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.expiryDate}
+                      onChangeText={(text) => updateFormData('expiryDate', text)}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType="numeric"
+                      maxLength={10}
+                    />
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
 
           {/* Units of Measurement */}
@@ -681,53 +775,45 @@ export default function ManualProductScreen() {
             )}
           </View>
 
-          {/* Pricing */}
+          {/* Tax Information */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Pricing</Text>
+            <Text style={styles.sectionTitle}>Tax Information</Text>
             
-            <View style={styles.rowContainer}>
-              <View style={[styles.inputGroup, styles.halfWidth]}>
-                <Text style={styles.label}>Purchase Price *</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.currencySymbol}>₹</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.purchasePrice}
-                    onChangeText={(text) => handlePriceChange('purchasePrice', text)}
-                    placeholder="0.00"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-
-              <View style={[styles.inputGroup, styles.halfWidth]}>
-                <Text style={styles.label}>Sales Price *</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.currencySymbol}>₹</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.salesPrice}
-                    onChangeText={(text) => handlePriceChange('salesPrice', text)}
-                    placeholder="0.00"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Tax Rate *</Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowTaxModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.dropdownText}>
+                  {formData.taxRate}% GST
+                </Text>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </TouchableOpacity>
             </View>
 
-            {formData.purchasePrice && formData.salesPrice && (
-              <View style={styles.marginContainer}>
-                <Text style={styles.marginLabel}>Profit Margin:</Text>
-                <Text style={styles.marginValue}>
-                  {((parseFloat(formData.salesPrice) - parseFloat(formData.purchasePrice)) / parseFloat(formData.purchasePrice) * 100).toFixed(1)}%
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>CESS Calculation</Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowCessTypeModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.dropdownText}>
+                  {formData.cessType === 'none' ? 'No CESS' : 
+                   formData.cessType === 'value' ? `Value Based (${formData.cessRate}%)` :
+                   formData.cessType === 'quantity' ? `Quantity Based (₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
+                   formData.cessType === 'value_and_quantity' ? `Value & Quantity (${formData.cessRate}% + ₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
+                   'Select CESS calculation method'
+                  }
                 </Text>
-              </View>
-            )}
+                <ChevronDown size={20} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          {/* Stock Levels */}
+          {/* Stock Management */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Stock Management</Text>
             
@@ -770,41 +856,194 @@ export default function ManualProductScreen() {
             </View>
           </View>
 
-          {/* Supplier & Location */}
+          {/* Pricing */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Supplier & Location</Text>
+            <Text style={styles.sectionTitle}>Pricing</Text>
             
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Supplier</Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowSupplierModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.dropdownText,
-                  !formData.supplier && styles.placeholderText
-                ]}>
-                  {formData.supplier ? getSupplierName(formData.supplier) : 'Select supplier'}
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
+            {formData.useCompoundUnit && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Price Unit *</Text>
+                <View style={styles.priceUnitContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.priceUnitButton,
+                      formData.priceUnit === 'primary' && styles.activePriceUnitButton
+                    ]}
+                    onPress={() => updateFormData('priceUnit', 'primary')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.priceUnitButtonText,
+                      formData.priceUnit === 'primary' && styles.activePriceUnitButtonText
+                    ]}>
+                      Per {formData.primaryUnit}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.priceUnitButton,
+                      formData.priceUnit === 'secondary' && styles.activePriceUnitButton
+                    ]}
+                    onPress={() => updateFormData('priceUnit', 'secondary')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.priceUnitButtonText,
+                      formData.priceUnit === 'secondary' && styles.activePriceUnitButtonText
+                    ]}>
+                      Per {formData.secondaryUnit}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            
+            <View style={styles.rowContainer}>
+              <View style={[styles.inputGroup, styles.halfWidth]}>
+                <Text style={styles.label}>Purchase Price *</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.currencySymbol}>₹</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.purchasePrice}
+                    onChangeText={(text) => handlePriceChange('purchasePrice', text)}
+                    placeholder="0.00"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+              <View style={[styles.inputGroup, styles.halfWidth]}>
+                <Text style={styles.label}>Sales Price *</Text>
+                <View style={styles.inputContainer}>
+                  <Text style={styles.currencySymbol}>₹</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.salesPrice}
+                    onChangeText={(text) => handlePriceChange('salesPrice', text)}
+                    placeholder="0.00"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
             </View>
-
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Storage Location</Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowLocationModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.dropdownText}>
-                  {formData.location}
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
+              <Text style={styles.label}>MRP (Maximum Retail Price)</Text>
+              <View style={styles.inputContainer}>
+                <Text style={styles.currencySymbol}>₹</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.mrp}
+                  onChangeText={(text) => handlePriceChange('mrp', text)}
+                  placeholder="0.00"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                />
+              </View>
             </View>
+            {formData.purchasePrice && formData.salesPrice && (
+              <View style={styles.marginContainer}>
+                <Text style={styles.marginLabel}>Profit Margin:</Text>
+                <Text style={styles.marginValue}>
+                  {((parseFloat(formData.salesPrice) - parseFloat(formData.purchasePrice)) / parseFloat(formData.purchasePrice) * 100).toFixed(1)}%
+                </Text>
+              </View>
+            )}
+            
+            {/* Opening Stock Summary */}
+            {formData.purchasePrice && formData.openingStock && (
+              <View style={styles.summaryContainer}>
+                <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Base Price:</Text>
+                  <Text style={styles.summaryValue}>
+                    ₹{(parseFloat(formData.purchasePrice) * parseInt(formData.openingStock)).toFixed(2)}
+                  </Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>GST ({formData.taxRate}%):</Text>
+                  <Text style={styles.summaryValue}>
+                    ₹{((parseFloat(formData.purchasePrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
+                  </Text>
+                </View>
+                {formData.cessType !== 'none' && (
+                  <>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>CESS:</Text>
+                      <Text style={styles.summaryValue}>
+                        ₹{(() => {
+                          const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                          switch (formData.cessType) {
+                            case 'value':
+                              return (basePrice * formData.cessRate / 100).toFixed(2);
+                            case 'quantity':
+                              return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2);
+                            case 'value_and_quantity':
+                              const valueCess = basePrice * formData.cessRate / 100;
+                              const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                              return (valueCess + quantityCess).toFixed(2);
+                            default:
+                              return '0.00';
+                          }
+                        })()}
+                      </Text>
+                    </View>
+                    <View style={styles.cessCalculationRow}>
+                      <Text style={styles.cessCalculationLabel}>CESS Calculation:</Text>
+                      <Text style={styles.cessCalculationText}>
+                        {(() => {
+                          const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                          switch (formData.cessType) {
+                            case 'value':
+                              return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) = ₹${(basePrice * formData.cessRate / 100).toFixed(2)}`;
+                            case 'quantity':
+                              return `${formData.cessAmount} × ${parseInt(formData.openingStock)} ${formData.cessUnit} = ₹${(parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2)}`;
+                            case 'value_and_quantity':
+                              const valueCess = basePrice * formData.cessRate / 100;
+                              const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                              return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) + ${formData.cessAmount} × ${parseInt(formData.openingStock)} ${formData.cessUnit} = ₹${(valueCess + quantityCess).toFixed(2)}`;
+                            default:
+                              return 'No CESS applied';
+                          }
+                        })()}
+                      </Text>
+                    </View>
+                  </>
+                )}
+                <View style={[styles.summaryRow, styles.totalRow]}>
+                  <Text style={styles.totalLabel}>Total Value:</Text>
+                  <Text style={styles.totalValue}>
+                    ₹{(() => {
+                      const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                      const gstAmount = (basePrice * formData.taxRate) / 100;
+                      let cessAmount = 0;
+                      
+                      switch (formData.cessType) {
+                        case 'value':
+                          cessAmount = basePrice * formData.cessRate / 100;
+                          break;
+                        case 'quantity':
+                          cessAmount = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                          break;
+                        case 'value_and_quantity':
+                          const valueCess = basePrice * formData.cessRate / 100;
+                          const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                          cessAmount = valueCess + quantityCess;
+                          break;
+                      }
+                      
+                      return (basePrice + gstAmount + cessAmount).toFixed(2);
+                    })()}
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
+
+
+
+
         </ScrollView>
 
         {/* Submit Button */}
@@ -963,7 +1202,7 @@ export default function ManualProductScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Set CESS Amount</Text>
+              <Text style={styles.modalTitle}>Set CESS Details</Text>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => setShowCessAmountModal(false)}
@@ -973,61 +1212,72 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.modalInputGroup}>
-              <Text style={styles.modalLabel}>Amount Type</Text>
-              <View style={styles.toggleContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.toggleButton,
-                    formData.cessAmountType === 'amount' && styles.activeToggleButton,
-                  ]}
-                  onPress={() => updateFormData('cessAmountType', 'amount')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.toggleButtonText,
-                    formData.cessAmountType === 'amount' && styles.activeToggleButtonText,
-                  ]}>
-                    ₹ Amount
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.toggleButton,
-                    formData.cessAmountType === 'percentage' && styles.activeToggleButton,
-                  ]}
-                  onPress={() => updateFormData('cessAmountType', 'percentage')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.toggleButtonText,
-                    formData.cessAmountType === 'percentage' && styles.activeToggleButtonText,
-                  ]}>
-                    % Percentage
-                  </Text>
-                </TouchableOpacity>
+            {(formData.cessType === 'value' || formData.cessType === 'value_and_quantity') && (
+              <View style={styles.modalInputGroup}>
+                <Text style={styles.modalLabel}>CESS Rate (%)</Text>
+                <View style={styles.modalInputContainer}>
+                  <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.modalInput}
+                    value={formData.cessRate.toString()}
+                    onChangeText={(text) => updateFormData('cessRate', parseFloat(text) || 0)}
+                    placeholder="0"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="numeric"
+                    autoFocus
+                  />
+                </View>
               </View>
-            </View>
+            )}
 
-            <View style={styles.modalInputGroup}>
-              <Text style={styles.modalLabel}>
-                {formData.cessAmountType === 'amount' ? 'CESS Amount (₹)' : 'CESS Percentage (%)'}
-              </Text>
-              <View style={styles.modalInputContainer}>
-                <Text style={styles.currencySymbol}>
-                  {formData.cessAmountType === 'amount' ? '₹' : '%'}
-                </Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={formData.cessAmount}
-                  onChangeText={(text) => updateFormData('cessAmount', text.replace(/[^0-9.]/g, ''))}
-                  placeholder={formData.cessAmountType === 'amount' ? "0.00" : "0"}
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                  autoFocus={true}
-                />
-              </View>
-            </View>
+            {(formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity') && (
+              <>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>CESS Amount (₹ per unit)</Text>
+                  <View style={styles.modalInputContainer}>
+                    <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.modalInput}
+                      value={formData.cessAmount}
+                      onChangeText={(text) => updateFormData('cessAmount', text.replace(/[^0-9.]/g, ''))}
+                      placeholder="0.00"
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                </View>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>CESS Unit</Text>
+                  <TouchableOpacity
+                    style={styles.modalInputContainer}
+                    onPress={() => {
+                      const availableUnits = [formData.primaryUnit];
+                      if (formData.useCompoundUnit && formData.secondaryUnit !== 'None') {
+                        availableUnits.push(formData.secondaryUnit);
+                      }
+                      
+                      Alert.alert(
+                        'Select CESS Unit',
+                        'Choose the unit for CESS calculation',
+                        [
+                          ...availableUnits.map(unit => ({ 
+                            text: unit, 
+                            onPress: () => updateFormData('cessUnit', unit) 
+                          })),
+                          { text: 'Cancel', style: 'cancel' }
+                        ]
+                      );
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.modalInput, { color: formData.cessUnit ? Colors.text : Colors.textLight }]}>
+                      {formData.cessUnit || 'Select unit'}
+                    </Text>
+                    <ChevronDown size={16} color={Colors.textLight} style={{ marginLeft: 'auto' }} />
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
 
             <View style={styles.modalActions}>
               <TouchableOpacity
@@ -1040,10 +1290,14 @@ export default function ManualProductScreen() {
               <TouchableOpacity
                 style={[
                   styles.confirmButton,
-                  !formData.cessAmount.trim() && styles.disabledButton
+                  ((!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity')) ||
+                   (!formData.cessAmount && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity')) ||
+                   (!formData.cessUnit && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity'))) && styles.disabledButton
                 ]}
-                onPress={() => handleCessAmountSubmit(formData.cessAmount)}
-                disabled={!formData.cessAmount.trim()}
+                onPress={() => setShowCessAmountModal(false)}
+                disabled={(!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity')) ||
+                         (!formData.cessAmount && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity')) ||
+                         (!formData.cessUnit && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity'))}
                 activeOpacity={0.7}
               >
                 <Text style={styles.confirmButtonText}>Set CESS</Text>
@@ -1116,12 +1370,10 @@ export default function ManualProductScreen() {
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            
             <View style={styles.modalContent}>
               <Text style={styles.modalDescription}>
                 Choose how CESS should be calculated for this product
               </Text>
-              
               {cessTypes.map((type) => (
                 <TouchableOpacity
                   key={type.value}
@@ -1129,7 +1381,7 @@ export default function ManualProductScreen() {
                     styles.modalOption,
                     formData.cessType === type.value && styles.selectedOption
                   ]}
-                  onPress={() => handleCessTypeSelect(type.value)}
+                  onPress={() => handleCessTypeSelect(type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity')}
                   activeOpacity={0.7}
                 >
                   <Text style={[
@@ -1277,7 +1529,10 @@ export default function ManualProductScreen() {
         visible={showUnitModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowUnitModal(false)}
+        onRequestClose={() => {
+          setShowUnitModal(false);
+          setPrimaryUnitSearch('');
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -1285,15 +1540,46 @@ export default function ManualProductScreen() {
               <Text style={styles.modalTitle}>Select Primary Unit</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
-                onPress={() => setShowUnitModal(false)}
+                onPress={() => {
+                  setShowUnitModal(false);
+                  setPrimaryUnitSearch('');
+                }}
                 activeOpacity={0.7}
               >
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            
+            <View style={styles.searchContainer}>
+              <Search size={18} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={primaryUnitSearch}
+                onChangeText={setPrimaryUnitSearch}
+                placeholder="Search units..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
             <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              {primaryUnits.map((unit) => (
+              {/* Custom Unit Option */}
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowUnitModal(false);
+                  setTimeout(() => setShowCustomPrimaryUnitModal(true), 300);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add Custom Unit</Text>
+                </View>
+              </TouchableOpacity>
+              
+              {primaryUnits
+                .filter(unit => 
+                  unit.toLowerCase().includes(primaryUnitSearch.toLowerCase())
+                )
+                .map((unit) => (
                 <TouchableOpacity
                   key={unit}
                   style={[
@@ -1321,7 +1607,10 @@ export default function ManualProductScreen() {
         visible={showSecondaryUnitModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowSecondaryUnitModal(false)}
+        onRequestClose={() => {
+          setShowSecondaryUnitModal(false);
+          setSecondaryUnitSearch('');
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -1329,15 +1618,46 @@ export default function ManualProductScreen() {
               <Text style={styles.modalTitle}>Select Secondary Unit</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
-                onPress={() => setShowSecondaryUnitModal(false)}
+                onPress={() => {
+                  setShowSecondaryUnitModal(false);
+                  setSecondaryUnitSearch('');
+                }}
                 activeOpacity={0.7}
               >
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            
+            <View style={styles.searchContainer}>
+              <Search size={18} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={secondaryUnitSearch}
+                onChangeText={setSecondaryUnitSearch}
+                placeholder="Search units..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
             <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              {secondaryUnits.map((unit) => (
+              {/* Custom Unit Option */}
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowSecondaryUnitModal(false);
+                  setTimeout(() => setShowCustomSecondaryUnitModal(true), 300);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add Custom Unit</Text>
+                </View>
+              </TouchableOpacity>
+              
+              {secondaryUnits
+                .filter(unit => 
+                  unit.toLowerCase().includes(secondaryUnitSearch.toLowerCase())
+                )
+                .map((unit) => (
                 <TouchableOpacity
                   key={unit}
                   style={[
@@ -1360,7 +1680,7 @@ export default function ManualProductScreen() {
         </View>
       </Modal>
 
-      {/* Supplier Modal */}
+      {/* Preferred Supplier Modal */}
       <Modal
         visible={showSupplierModal}
         transparent={true}
@@ -1370,7 +1690,7 @@ export default function ManualProductScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Supplier</Text>
+              <Text style={styles.modalTitle}>Select Preferred Supplier</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => setShowSupplierModal(false)}
@@ -1379,7 +1699,6 @@ export default function ManualProductScreen() {
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            
             <View style={styles.searchContainer}>
               <Search size={18} color={Colors.textLight} />
               <TextInput
@@ -1390,21 +1709,41 @@ export default function ManualProductScreen() {
                 placeholderTextColor={Colors.textLight}
               />
             </View>
-            
             <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {/* Add New Supplier Option */}
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowSupplierModal(false);
+                  // Navigate to add supplier screen with return parameter and replace current screen
+                  router.replace({
+                    pathname: '/purchasing/add-supplier',
+                    params: {
+                      returnToAddProduct: 'true'
+                    }
+                  });
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add New Supplier</Text>
+                </View>
+              </TouchableOpacity>
+              {/* Existing suppliers list */}
               {filteredSuppliers.map((supplier) => (
                 <TouchableOpacity
                   key={supplier.id}
                   style={[
                     styles.modalOption,
-                    formData.supplier === supplier.id && styles.selectedOption
+                    formData.preferredSupplier === supplier.id && styles.selectedOption
                   ]}
                   onPress={() => handleSupplierSelect(supplier.id)}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.modalOptionText,
-                    formData.supplier === supplier.id && styles.selectedOptionText
+                    formData.preferredSupplier === supplier.id && styles.selectedOptionText
                   ]}>
                     {supplier.name}
                   </Text>
@@ -1511,6 +1850,154 @@ export default function ManualProductScreen() {
               >
                 <Upload size={24} color={Colors.primary} />
                 <Text style={styles.imageOptionText}>Choose from Gallery</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Primary Unit Modal */}
+      <Modal
+        visible={showCustomPrimaryUnitModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowCustomPrimaryUnitModal(false);
+          setCustomPrimaryUnit('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Custom Primary Unit</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowCustomPrimaryUnitModal(false);
+                  setCustomPrimaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Custom Unit Name *</Text>
+              <View style={styles.modalInputContainer}>
+                <TextInput
+                  style={styles.modalInput}
+                  value={customPrimaryUnit}
+                  onChangeText={setCustomPrimaryUnit}
+                  placeholder="Enter custom unit name"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  autoFocus={true}
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowCustomPrimaryUnitModal(false);
+                  setCustomPrimaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  !customPrimaryUnit.trim() && styles.disabledButton
+                ]}
+                onPress={() => {
+                  if (customPrimaryUnit.trim()) {
+                    setFormData(prev => ({ ...prev, primaryUnit: customPrimaryUnit.trim() }));
+                    setCustomPrimaryUnit('');
+                    setShowCustomPrimaryUnitModal(false);
+                  }
+                }}
+                disabled={!customPrimaryUnit.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmButtonText}>Add Custom Unit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Secondary Unit Modal */}
+      <Modal
+        visible={showCustomSecondaryUnitModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowCustomSecondaryUnitModal(false);
+          setCustomSecondaryUnit('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Custom Secondary Unit</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => {
+                  setShowCustomSecondaryUnitModal(false);
+                  setCustomSecondaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Custom Unit Name *</Text>
+              <View style={styles.modalInputContainer}>
+                <TextInput
+                  style={styles.modalInput}
+                  value={customSecondaryUnit}
+                  onChangeText={setCustomSecondaryUnit}
+                  placeholder="Enter custom unit name"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  autoFocus={true}
+                />
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowCustomSecondaryUnitModal(false);
+                  setCustomSecondaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  !customSecondaryUnit.trim() && styles.disabledButton
+                ]}
+                onPress={() => {
+                  if (customSecondaryUnit.trim()) {
+                    setFormData(prev => ({ ...prev, secondaryUnit: customSecondaryUnit.trim() }));
+                    setCustomSecondaryUnit('');
+                    setShowCustomSecondaryUnitModal(false);
+                  }
+                }}
+                disabled={!customSecondaryUnit.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmButtonText}>Add Custom Unit</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2076,5 +2563,145 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     marginLeft: 12,
+  },
+  advancedToggle: {
+    marginTop: 8,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  advancedToggleActive: {
+    backgroundColor: Colors.primary,
+  },
+  advancedToggleText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  advancedToggleTextActive: {
+    color: Colors.background,
+  },
+  advancedOptionsContainer: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 8,
+  },
+  locationContainer: {
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  locationText: {
+    fontSize: 16,
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  comingSoonText: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  priceUnitContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 12,
+    padding: 4,
+  },
+  priceUnitButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  activePriceUnitButton: {
+    backgroundColor: Colors.background,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  priceUnitButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  activePriceUnitButtonText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  summaryContainer: {
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  cessCalculationRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  cessCalculationLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textLight,
+    marginBottom: 4,
+  },
+  cessCalculationText: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    lineHeight: 16,
+  },
+  totalRow: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    paddingTop: 8,
+    marginTop: 8,
+  },
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  totalValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
   },
 });
