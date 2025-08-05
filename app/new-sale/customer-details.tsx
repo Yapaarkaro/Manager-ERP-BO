@@ -21,6 +21,7 @@ import {
   X
 } from 'lucide-react-native';
 
+
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -355,7 +356,7 @@ export default function CustomerDetailsScreen() {
             </View>
           )}
 
-          {customer.isBusinessCustomer && customer.businessName && (
+          {customer.isBusinessCustomer && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Ship-to Address</Text>
               <View style={styles.inputContainer}>
@@ -386,7 +387,13 @@ export default function CustomerDetailsScreen() {
               <TextInput
                 style={[styles.input, styles.addressInput]}
                 value={customer.isBusinessCustomer && customer.businessAddress ? customer.businessAddress : customer.address}
-                onChangeText={(text) => setCustomer(prev => ({ ...prev, address: text }))}
+                onChangeText={(text) => {
+                  if (customer.isBusinessCustomer && customer.businessAddress) {
+                    setCustomer(prev => ({ ...prev, businessAddress: text }));
+                  } else {
+                    setCustomer(prev => ({ ...prev, address: text }));
+                  }
+                }}
                 placeholder="Enter address"
                 placeholderTextColor={Colors.textLight}
                 multiline

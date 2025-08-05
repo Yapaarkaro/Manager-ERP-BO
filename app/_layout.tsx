@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import Toast from 'react-native-toast-message';
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -53,6 +54,16 @@ export default function RootLayout() {
         <Stack.Screen name="inventory/add-product" />
         <Stack.Screen name="inventory/scan-product" />
         <Stack.Screen name="inventory/manual-product" />
+        <Stack.Screen name="inventory/stock-management" />
+        <Stack.Screen name="inventory/stock-in" />
+        <Stack.Screen name="inventory/stock-in/manual" />
+        <Stack.Screen name="inventory/stock-in/po-search" />
+        <Stack.Screen name="inventory/stock-in/qr-scan" />
+        <Stack.Screen name="inventory/stock-in/confirmation" />
+        <Stack.Screen name="inventory/stock-in/verify-stock" />
+        <Stack.Screen name="inventory/stock-in/stock-confirmation" />
+        <Stack.Screen name="inventory/stock-in/invoice-input" />
+        <Stack.Screen name="inventory/stock-in/discrepancy-report" />
         <Stack.Screen name="invoice-details" />
         <Stack.Screen name="receivables" />
         <Stack.Screen name="receivables/customer-details" />
@@ -77,6 +88,7 @@ export default function RootLayout() {
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="auto" />
+      <Toast />
     </>
   );
 }

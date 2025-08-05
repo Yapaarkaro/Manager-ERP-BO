@@ -4,11 +4,13 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   TextInput,
   Alert,
   ScrollView,
+  Dimensions,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft,
@@ -18,6 +20,16 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react-native';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+// Calculate responsive values with platform-specific adjustments
+const headerPaddingHorizontal = Math.max(16, screenWidth * 0.04);
+const headerPaddingVertical = Math.max(12, screenHeight * 0.015) + (Platform.OS === 'android' ? 8 : 0);
+const backButtonWidth = Math.max(40, screenWidth * 0.1);
+const backButtonHeight = Math.max(40, screenHeight * 0.05);
+const backButtonMarginRight = Math.max(16, screenWidth * 0.04);
+const headerTitleFontSize = Math.max(18, screenWidth * 0.045);
 
 const Colors = {
   background: '#FFFFFF',
@@ -132,41 +144,52 @@ export default function InvoiceInputScreen() {
 
   if (!po) {
     return (
-      <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-              activeOpacity={0.7}
-            >
-              <ArrowLeft size={24} color={Colors.text} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Invoice Details</Text>
-          </View>
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading PO data...</Text>
-          </View>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
+      <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              // Try to go back, if no previous screen, go to stock in options
+              try {
+                router.back();
+              } catch (error) {
+                router.replace('/inventory/stock-in');
+              }
+            }}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
-          
           <Text style={styles.headerTitle}>Invoice Details</Text>
         </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading PO data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            // Try to go back, if no previous screen, go to stock in options
+            try {
+              router.back();
+            } catch (error) {
+              router.replace('/inventory/stock-in');
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Invoice Details</Text>
+      </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* PO Information */}
@@ -358,7 +381,6 @@ export default function InvoiceInputScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
-    </View>
   );
 }
 
@@ -367,31 +389,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  safeArea: {
-    flex: 1,
-  },
   header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: headerPaddingHorizontal,
+    paddingVertical: headerPaddingVertical,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[100],
+    width: backButtonWidth,
+    height: backButtonHeight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: backButtonMarginRight,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: headerTitleFontSize,
     fontWeight: '600',
     color: Colors.text,
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

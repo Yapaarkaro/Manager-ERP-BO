@@ -6,10 +6,10 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   Modal,
   Image,
 } from 'react-native';
+import { showError } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { 
@@ -89,7 +89,7 @@ export default function PaymentScreen() {
 
   const handleCompletePayment = () => {
     if (!selectedPaymentMethod) {
-      Alert.alert('Payment Method Required', 'Please select a payment method');
+      showError('Please select a payment method', 'Payment Method Required');
       return;
     }
 
@@ -103,7 +103,7 @@ export default function PaymentScreen() {
     switch (selectedPaymentMethod) {
       case 'cash':
         if (!cashReceived || parseFloat(cashReceived) < amount) {
-          Alert.alert('Insufficient Cash', 'Cash received must be at least the invoice amount');
+          showError('Cash received must be at least the invoice amount', 'Insufficient Cash');
           return;
         }
         paymentData.cashReceived = parseFloat(cashReceived);
@@ -112,7 +112,7 @@ export default function PaymentScreen() {
 
       case 'card':
         if (!cardNumber || !expiryDate || !cvv || !cardHolderName) {
-          Alert.alert('Incomplete Card Details', 'Please fill in all card details');
+          showError('Please fill in all card details', 'Incomplete Card Details');
           return;
         }
         paymentData.cardDetails = {
@@ -125,15 +125,15 @@ export default function PaymentScreen() {
 
       case 'others':
         if (!selectedOthersMethod) {
-          Alert.alert('Payment Method Required', 'Please select bank transfer or cheque');
+          showError('Please select bank transfer or cheque', 'Payment Method Required');
           return;
         }
         if (selectedOthersMethod === 'bank_transfer' && !selectedBankAccount) {
-          Alert.alert('Bank Account Required', 'Please select a bank account');
+          showError('Please select a bank account', 'Bank Account Required');
           return;
         }
         if (selectedOthersMethod === 'cheque' && !chequeNumber) {
-          Alert.alert('Cheque Number Required', 'Please enter cheque number');
+          showError('Please enter cheque number', 'Cheque Number Required');
           return;
         }
         paymentData.othersMethod = selectedOthersMethod;

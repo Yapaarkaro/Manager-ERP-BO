@@ -7,9 +7,9 @@ import {
   ScrollView,
   TextInput,
   Image,
-  Alert,
   Modal,
 } from 'react-native';
+import { showError } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { 
@@ -24,7 +24,8 @@ import {
   Ruler,
   Hash,
   Percent,
-  X
+  X,
+  Upload
 } from 'lucide-react-native';
 
 const Colors = {
@@ -94,6 +95,16 @@ interface CartProduct {
   discountValue?: number;
   brand?: string;
   originalPrice?: number;
+  // HSN/SAC and Batch fields
+  hsnCode?: string;
+  batchNumber?: string;
+  // Unit fields
+  primaryUnit?: string;
+  // CESS fields
+  cessType?: 'none' | 'value' | 'quantity' | 'value_and_quantity';
+  cessRate?: number;
+  cessAmount?: number;
+  cessUnit?: string;
 }
 
 export default function CartScreen() {
@@ -194,6 +205,23 @@ export default function CartScreen() {
     const taxRate = item.taxRate || 0;
     const taxAmount = basePrice * (taxRate / 100);
     
+    // Calculate CESS
+    let cessAmount = 0;
+    if (item.cessType && item.cessType !== 'none') {
+      if (item.cessType === 'value') {
+        // Value-based CESS (percentage of base price)
+        cessAmount = basePrice * ((item.cessRate || 0) / 100);
+      } else if (item.cessType === 'quantity') {
+        // Quantity-based CESS (fixed amount per unit)
+        cessAmount = (item.cessAmount || 0) * item.quantity;
+      } else if (item.cessType === 'value_and_quantity') {
+        // Both value and quantity CESS
+        const valueCess = basePrice * ((item.cessRate || 0) / 100);
+        const quantityCess = (item.cessAmount || 0) * item.quantity;
+        cessAmount = valueCess + quantityCess;
+      }
+    }
+    
     return {
       subtotal: item.price * item.quantity,
       discountAmount: item.discountValue && item.discountValue > 0 
@@ -202,7 +230,8 @@ export default function CartScreen() {
           : item.discountValue)
         : 0,
       taxAmount: taxAmount,
-      total: basePrice + taxAmount
+      cessAmount: cessAmount,
+      total: basePrice + taxAmount + cessAmount
     };
   };
 
@@ -221,8 +250,17 @@ export default function CartScreen() {
     const subtotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
     const invoiceDiscount = calculateInvoiceDiscount();
     const tax = cartItems.reduce((total, item) => total + calculateItemTotal(item).taxAmount, 0);
+    const cess = cartItems.reduce((total, item) => total + calculateItemTotal(item).cessAmount, 0);
     
-    return subtotal - invoiceDiscount + tax;
+    const total = subtotal - invoiceDiscount + tax + cess;
+    
+    // Apply round-off logic
+    const decimalPart = total % 1;
+    if (decimalPart < 0.50) {
+      return Math.floor(total); // Round down to nearest whole number
+    } else {
+      return Math.ceil(total); // Round up to nearest whole number
+    }
   };
 
   const formatPrice = (price: number) => {
@@ -233,9 +271,17 @@ export default function CartScreen() {
     }).format(price);
   };
 
+  const formatGSTDisplay = (taxRate: number) => {
+    if (!taxRate || taxRate === 0) return '0%';
+    
+    // For GST rates, show as (CGST%+SGST%)
+    const halfRate = taxRate / 2;
+    return `(${halfRate}%+${halfRate}%)`;
+  };
+
   const handleContinue = () => {
     if (cartItems.length === 0) {
-      Alert.alert('Empty Cart', 'Please add some products to continue');
+      showError('Please add some products to continue', 'Empty Cart');
       return;
     }
 
@@ -349,7 +395,20 @@ export default function CartScreen() {
                       <Minus size={16} color={Colors.text} />
                     </TouchableOpacity>
                     
-                    <Text style={styles.quantity}>{item.quantity}</Text>
+                    <TextInput
+                      style={styles.quantityInput}
+                      value={item.quantity.toString()}
+                      onChangeText={(text) => {
+                        const newQuantity = parseInt(text) || 0;
+                        if (newQuantity >= 0) {
+                          updateQuantity(item.id, newQuantity);
+                        }
+                      }}
+                      keyboardType="numeric"
+                      textAlign="center"
+                      placeholder="0"
+                      placeholderTextColor={Colors.textLight}
+                    />
                     
                     <TouchableOpacity
                       style={styles.quantityButton}
@@ -372,6 +431,16 @@ export default function CartScreen() {
               <Plus size={20} color={Colors.primary} />
               <Text style={styles.addNewProductText}>Add New Product</Text>
             </TouchableOpacity>
+
+            {/* Floating Total Display */}
+            <View style={styles.floatingTotalContainer}>
+              <View style={styles.floatingTotalContent}>
+                <Text style={styles.floatingTotalLabel}>Total Bill Amount:</Text>
+                <Text style={styles.floatingTotalAmount}>
+                  {formatPrice(calculateTotal())}
+                </Text>
+              </View>
+            </View>
 
             {/* Invoice Discount Section */}
             <View style={styles.discountSection}>
@@ -435,11 +504,79 @@ export default function CartScreen() {
                 </Text>
               </View>
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Tax:</Text>
+                <Text style={styles.totalLabel}>GST:</Text>
                 <Text style={styles.totalAmount}>
                   {formatPrice(cartItems.reduce((total, item) => total + calculateItemTotal(item).taxAmount, 0))}
                 </Text>
               </View>
+              
+              {/* GST Breakdown */}
+              {cartItems.some(item => item.taxRate && item.taxRate > 0) && (
+                <View style={styles.taxBreakdownContainer}>
+                  <Text style={styles.taxBreakdownLabel}>GST Breakdown:</Text>
+                  {cartItems.map((item, index) => {
+                    if (item.taxRate && item.taxRate > 0) {
+                      const itemTotal = item.price * item.quantity;
+                      const cgstAmount = (itemTotal * (item.taxRate / 100)) / 2;
+                      const sgstAmount = (itemTotal * (item.taxRate / 100)) / 2;
+                      
+                      return (
+                        <View key={index} style={styles.taxBreakdownRow}>
+                          <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                          <Text style={styles.taxBreakdownText}>
+                            CGST ({item.taxRate / 2}%): {formatPrice(cgstAmount)} | 
+                            SGST ({item.taxRate / 2}%): {formatPrice(sgstAmount)}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })}
+                </View>
+              )}
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>CESS:</Text>
+                <Text style={styles.totalAmount}>
+                  {formatPrice(cartItems.reduce((total, item) => total + calculateItemTotal(item).cessAmount, 0))}
+                </Text>
+              </View>
+              
+              {/* CESS Breakdown */}
+              {cartItems.some(item => item.cessType && item.cessType !== 'none') && (
+                <View style={styles.taxBreakdownContainer}>
+                  <Text style={styles.taxBreakdownLabel}>CESS Breakdown:</Text>
+                  {cartItems.map((item, index) => {
+                    if (item.cessType && item.cessType !== 'none') {
+                      const itemTotal = item.price * item.quantity;
+                      let cessAmount = 0;
+                      let cessDescription = '';
+                      
+                      if (item.cessType === 'value') {
+                        cessAmount = itemTotal * ((item.cessRate || 0) / 100);
+                        cessDescription = `Value-based (${item.cessRate}% of ₹${itemTotal.toFixed(2)})`;
+                      } else if (item.cessType === 'quantity') {
+                        cessAmount = (item.cessAmount || 0) * item.quantity;
+                        cessDescription = `Quantity-based (₹${item.cessAmount} × ${item.quantity} units)`;
+                      } else if (item.cessType === 'value_and_quantity') {
+                        const valueCess = itemTotal * ((item.cessRate || 0) / 100);
+                        const quantityCess = (item.cessAmount || 0) * item.quantity;
+                        cessAmount = valueCess + quantityCess;
+                        cessDescription = `Value + Quantity (${item.cessRate}% + ₹${item.cessAmount} × ${item.quantity})`;
+                      }
+                      
+                      return (
+                        <View key={index} style={styles.taxBreakdownRow}>
+                          <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                          <Text style={styles.taxBreakdownText}>
+                            {formatPrice(cessAmount)} - {cessDescription}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
+                  })}
+                </View>
+              )}
               <View style={[styles.totalRow, styles.grandTotalRow]}>
                 <Text style={styles.grandTotalLabel}>Total:</Text>
                 <Text style={styles.grandTotalAmount}>
@@ -532,6 +669,8 @@ interface ProductEditData {
   primaryUnit: string;
   secondaryUnit?: string;
   conversionRatio?: number;
+  hsnCode: string;
+  batchNumber: string;
   cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
   cessRate?: number;
   cessAmount?: number;
@@ -556,6 +695,10 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
   const [primaryUnit, setPrimaryUnit] = useState('Pieces');
   const [secondaryUnit, setSecondaryUnit] = useState('');
   const [conversionRatio, setConversionRatio] = useState('');
+  
+  // HSN/SAC and Batch Number
+  const [hsnCode, setHsnCode] = useState(product.hsnCode || '');
+  const [batchNumber, setBatchNumber] = useState(product.batchNumber || '');
   
   // CESS
   const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity'>('none');
@@ -654,6 +797,16 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
       taxRate: parseFloat(taxRate) || 0,
       discountType,
       discountValue: parseFloat(discountValue) || 0,
+      // Include HSN/SAC and Batch data
+      hsnCode,
+      batchNumber,
+      // Include Unit data
+      primaryUnit,
+      // Include CESS data
+      cessType,
+      cessRate: parseFloat(cessRate) || 0,
+      cessAmount: parseFloat(cessAmount) || 0,
+      cessUnit,
     };
     onSave(updatedProduct);
   };
@@ -673,7 +826,25 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
     
     // Apply tax
     const taxAmount = finalPrice * (parseFloat(taxRate) / 100);
-    const total = finalPrice + taxAmount;
+    
+    // Calculate CESS
+    let calculatedCessAmount = 0;
+    if (cessType && cessType !== 'none') {
+      if (cessType === 'value') {
+        // Value-based CESS (percentage of base price)
+        calculatedCessAmount = finalPrice * ((parseFloat(cessRate) || 0) / 100);
+      } else if (cessType === 'quantity') {
+        // Quantity-based CESS (fixed amount per unit)
+        calculatedCessAmount = (parseFloat(cessAmount) || 0) * editedProduct.quantity;
+      } else if (cessType === 'value_and_quantity') {
+        // Both value and quantity CESS
+        const valueCess = finalPrice * ((parseFloat(cessRate) || 0) / 100);
+        const quantityCess = (parseFloat(cessAmount) || 0) * editedProduct.quantity;
+        calculatedCessAmount = valueCess + quantityCess;
+      }
+    }
+    
+    const total = finalPrice + taxAmount + calculatedCessAmount;
     
     return {
       basePrice,
@@ -683,6 +854,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
           : parseFloat(discountValue))
         : 0,
       taxAmount,
+      cessAmount: calculatedCessAmount,
       total
     };
   };
@@ -841,6 +1013,42 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
                             placeholder="0.00"
                             placeholderTextColor={Colors.textLight}
                             keyboardType="decimal-pad"
+                          />
+                        </View>
+
+                        {/* HSN/SAC Code Input */}
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.inputLabel}>HSN/SAC Code (8 digits)</Text>
+                          <TextInput
+                            style={styles.input}
+                            value={hsnCode}
+                            onChangeText={(text) => {
+                              // Limit to 8 numeric characters
+                              const numericOnly = text.replace(/[^0-9]/g, '');
+                              if (numericOnly.length <= 8) {
+                                setHsnCode(numericOnly);
+                              }
+                            }}
+                            placeholder="12345678"
+                            placeholderTextColor={Colors.textLight}
+                            keyboardType="numeric"
+                            maxLength={8}
+                          />
+                        </View>
+
+                        {/* Batch Number Input */}
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.inputLabel}>Batch Number</Text>
+                          <TextInput
+                            style={styles.input}
+                            value={batchNumber}
+                            onChangeText={setBatchNumber}
+                            placeholder="Enter batch number"
+                            placeholderTextColor={Colors.textLight}
+                            keyboardType="default"
+                            autoCorrect={false}
+                            autoCapitalize="none"
+                            spellCheck={false}
                           />
                         </View>
 
@@ -1505,6 +1713,10 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
  function AddNewProductModal({ onSave, onCancel, formatPrice }: AddNewProductModalProps) {
    const [productName, setProductName] = useState('');
    const [productCategory, setProductCategory] = useState('');
+   const [productImages, setProductImages] = useState<string[]>([]);
+     const [hsnCode, setHsnCode] = useState('');
+  const [batchNumber, setBatchNumber] = useState('');
+  const [barcode, setBarcode] = useState('');
    const [price, setPrice] = useState('');
    const [taxRate, setTaxRate] = useState('0');
    const [discountType, setDiscountType] = useState<'percentage' | 'amount'>('percentage');
@@ -1543,6 +1755,9 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
    const [customPrimaryUnit, setCustomPrimaryUnit] = useState('');
    const [customSecondaryUnit, setCustomSecondaryUnit] = useState('');
    const [customCessUnit, setCustomCessUnit] = useState('');
+   
+   // Barcode scanning
+   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
 
    const handlePrimaryUnitSelect = (unit: string) => {
      setPrimaryUnit(unit);
@@ -1603,9 +1818,25 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
      }
    };
 
+   const handleBarcodeScan = (scannedBarcode: string) => {
+     setBarcode(scannedBarcode);
+     setShowBarcodeScanner(false);
+   };
+
+   const handleManualBarcode = () => {
+     setShowBarcodeScanner(false);
+   };
+
+   const handleProductImageSelect = () => {
+     // For now, we'll use a placeholder image
+     // In a real app, this would open image picker
+     const newImage = `https://via.placeholder.com/60x60/3f66ac/ffffff?text=Product${productImages.length + 1}`;
+     setProductImages([...productImages, newImage]);
+   };
+
    const handleSave = () => {
      if (!productName.trim() || !price.trim()) {
-       Alert.alert('Error', 'Please enter product name and price');
+       showError('Please enter product name and price', 'Error');
        return;
      }
 
@@ -1613,14 +1844,25 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
        id: Date.now().toString(),
        name: productName.trim(),
        price: parseFloat(price),
-       image: 'https://via.placeholder.com/60x60',
+       image: productImages.length > 0 ? productImages[0] : 'https://via.placeholder.com/60x60',
        category: productCategory.trim() || 'General',
        quantity: 1,
+       barcode: barcode.trim() || undefined,
        taxRate: parseFloat(taxRate) || 0,
        discountType,
        discountValue: parseFloat(discountValue) || 0,
        brand: '',
        originalPrice: parseFloat(price),
+       // Include HSN/SAC and Batch data
+       hsnCode: hsnCode.trim() || undefined,
+       batchNumber: batchNumber.trim() || undefined,
+       // Include Unit data
+       primaryUnit: primaryUnit || 'Piece',
+       // Include CESS data
+       cessType,
+       cessRate: parseFloat(cessRate) || 0,
+       cessAmount: parseFloat(cessAmount) || 0,
+       cessUnit,
      };
 
      onSave(newProduct);
@@ -1643,6 +1885,23 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
      const taxRateValue = parseFloat(taxRate) || 0;
      const taxAmount = finalPrice * (taxRateValue / 100);
      
+     // Calculate CESS
+     let calculatedCessAmount = 0;
+     if (cessType && cessType !== 'none') {
+       if (cessType === 'value') {
+         // Value-based CESS (percentage of base price)
+         calculatedCessAmount = finalPrice * ((parseFloat(cessRate) || 0) / 100);
+       } else if (cessType === 'quantity') {
+         // Quantity-based CESS (fixed amount per unit)
+         calculatedCessAmount = (parseFloat(cessAmount) || 0) * 1; // For preview, quantity is 1
+       } else if (cessType === 'value_and_quantity') {
+         // Both value and quantity CESS
+         const valueCess = finalPrice * ((parseFloat(cessRate) || 0) / 100);
+         const quantityCess = (parseFloat(cessAmount) || 0) * 1; // For preview, quantity is 1
+         calculatedCessAmount = valueCess + quantityCess;
+       }
+     }
+     
      return {
        basePrice,
        discountAmount: parseFloat(discountValue) > 0
@@ -1651,7 +1910,8 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
            : parseFloat(discountValue))
          : 0,
        taxAmount: taxAmount,
-       finalPrice: finalPrice + taxAmount
+       cessAmount: calculatedCessAmount,
+       finalPrice: finalPrice + taxAmount + calculatedCessAmount
      };
    };
 
@@ -1671,11 +1931,11 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
              </TouchableOpacity>
            </View>
 
-           <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+           <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
              {/* Product Info */}
              <View style={styles.productInfoSection}>
                <Image
-                 source={{ uri: 'https://via.placeholder.com/60x60' }}
+                 source={{ uri: productImages.length > 0 ? productImages[0] : 'https://via.placeholder.com/60x60' }}
                  style={styles.modalProductImage}
                />
                <View style={styles.modalProductDetails}>
@@ -1683,6 +1943,41 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
                  <Text style={styles.modalProductCategory}>General</Text>
                  <Text style={styles.modalProductBarcode}>No barcode</Text>
                </View>
+             </View>
+
+             {/* Product Photo Selection */}
+             <View style={styles.inputGroup}>
+               <Text style={styles.inputLabel}>Product Photos</Text>
+               <TouchableOpacity
+                 style={styles.productImageButton}
+                 onPress={handleProductImageSelect}
+                 activeOpacity={0.7}
+               >
+                 <Plus size={20} color={Colors.primary} />
+                 <Text style={styles.productImageButtonText}>Add Product Photo</Text>
+               </TouchableOpacity>
+               {productImages.length > 0 && (
+                 <View style={styles.productImagesGrid}>
+                   {productImages.map((image, index) => (
+                     <View key={index} style={styles.productImageCard}>
+                       <Image
+                         source={{ uri: image }}
+                         style={styles.productImageSquare}
+                       />
+                       <TouchableOpacity
+                         style={styles.removeImageButton}
+                         onPress={() => {
+                           const newImages = productImages.filter((_, i) => i !== index);
+                           setProductImages(newImages);
+                         }}
+                         activeOpacity={0.7}
+                       >
+                         <X size={16} color={Colors.background} />
+                       </TouchableOpacity>
+                     </View>
+                   ))}
+                 </View>
+               )}
              </View>
 
              {/* Product Name Input */}
@@ -1707,6 +2002,64 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
                  placeholder="Enter category"
                  placeholderTextColor={Colors.textLight}
                />
+             </View>
+
+             {/* HSN/SAC Code Input */}
+             <View style={styles.inputGroup}>
+               <Text style={styles.inputLabel}>HSN/SAC Code (8 digits)</Text>
+               <TextInput
+                 style={styles.input}
+                 value={hsnCode}
+                 onChangeText={(text) => {
+                   // Limit to 8 numeric characters
+                   const numericOnly = text.replace(/[^0-9]/g, '');
+                   if (numericOnly.length <= 8) {
+                     setHsnCode(numericOnly);
+                   }
+                 }}
+                 placeholder="12345678"
+                 placeholderTextColor={Colors.textLight}
+                 keyboardType="numeric"
+                 maxLength={8}
+               />
+             </View>
+
+             {/* Batch Number Input */}
+             <View style={styles.inputGroup}>
+               <Text style={styles.inputLabel}>Batch Number</Text>
+               <TextInput
+                 style={styles.input}
+                 value={batchNumber}
+                 onChangeText={setBatchNumber}
+                 placeholder="Enter batch number"
+                 placeholderTextColor={Colors.textLight}
+                 keyboardType="default"
+                 autoCorrect={false}
+                 autoCapitalize="none"
+                 spellCheck={false}
+               />
+               </View>
+
+               {/* Barcode Input */}
+             <View style={styles.inputGroup}>
+               <Text style={styles.inputLabel}>Barcode</Text>
+               <View style={styles.barcodeInputContainer}>
+                 <TextInput
+                   style={styles.barcodeInput}
+                   value={barcode}
+                   onChangeText={setBarcode}
+                   placeholder="Enter barcode or scan"
+                   placeholderTextColor={Colors.textLight}
+                   keyboardType="numeric"
+                 />
+                 <TouchableOpacity
+                   style={styles.scanButton}
+                   onPress={() => setShowBarcodeScanner(true)}
+                   activeOpacity={0.7}
+                 >
+                   <Scan size={20} color={Colors.background} />
+                 </TouchableOpacity>
+               </View>
              </View>
 
              {/* Unit of Measurement */}
@@ -1997,7 +2350,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
                onPress={handleSave}
                activeOpacity={0.7}
              >
-               <Text style={styles.saveButtonText}>Add Product</Text>
+               <Text style={styles.saveButtonText}>Add This Product to Inventory & Continue</Text>
              </TouchableOpacity>
            </View>
          </View>
@@ -2485,6 +2838,53 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
            </View>
          </View>
        </Modal>
+
+       {/* Barcode Scanner Modal */}
+       <Modal
+         visible={showBarcodeScanner}
+         transparent
+         animationType="slide"
+         onRequestClose={() => setShowBarcodeScanner(false)}
+       >
+         <View style={styles.modalOverlay}>
+           <View style={styles.modalContainer}>
+             <View style={styles.modalHeader}>
+               <Text style={styles.modalTitle}>Scan Barcode</Text>
+               <TouchableOpacity
+                 onPress={() => setShowBarcodeScanner(false)}
+                 activeOpacity={0.7}
+               >
+                 <X size={24} color={Colors.textLight} />
+               </TouchableOpacity>
+             </View>
+             
+             <View style={styles.modalContent}>
+               <Text style={styles.inputLabel}>Barcode Scanner</Text>
+               <Text style={styles.modalProductBarcode}>
+                 Point camera at barcode to scan
+               </Text>
+               
+               <View style={styles.modalActions}>
+                 <TouchableOpacity
+                   style={styles.cancelButton}
+                   onPress={() => setShowBarcodeScanner(false)}
+                   activeOpacity={0.7}
+                 >
+                   <Text style={styles.cancelButtonText}>Cancel</Text>
+                 </TouchableOpacity>
+                 
+                 <TouchableOpacity
+                   style={styles.saveButton}
+                   onPress={handleManualBarcode}
+                   activeOpacity={0.7}
+                 >
+                   <Text style={styles.saveButtonText}>Manual Input</Text>
+                 </TouchableOpacity>
+               </View>
+             </View>
+           </View>
+         </View>
+       </Modal>
      </Modal>
    );
  }
@@ -2796,6 +3196,81 @@ const styles = StyleSheet.create({
     minWidth: 16,
     textAlign: 'center',
   },
+  quantityInput: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.text,
+    marginHorizontal: 6,
+    minWidth: 30,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    backgroundColor: Colors.background,
+  },
+  floatingTotalContainer: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  floatingTotalContent: {
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  floatingTotalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.background,
+  },
+  floatingTotalAmount: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.background,
+  },
+  gstRateText: {
+    fontSize: 10,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+  },
+  taxBreakdownContainer: {
+    marginLeft: 16,
+    marginBottom: 8,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.grey[300],
+  },
+  taxBreakdownLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textLight,
+    marginBottom: 4,
+  },
+  taxBreakdownRow: {
+    marginBottom: 2,
+  },
+  taxBreakdownItem: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 1,
+  },
+  taxBreakdownText: {
+    fontSize: 10,
+    color: Colors.textLight,
+    lineHeight: 12,
+  },
   itemActions: {
     flex: 1,
     alignItems: 'flex-end',
@@ -2940,18 +3415,10 @@ const styles = StyleSheet.create({
   scanButton: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: '#3f66ac',
+    borderRadius: 8,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
   },
   // Modal Styles
   modalOverlay: {
@@ -3140,29 +3607,32 @@ const styles = StyleSheet.create({
     color: Colors.success,
   },
   modalActions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
     gap: 12,
+    backgroundColor: Colors.background,
   },
   cancelButton: {
-    flex: 1,
+    width: '100%',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.grey[300],
     alignItems: 'center',
+    backgroundColor: Colors.background,
   },
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '500',
     color: Colors.text,
+    textAlign: 'center',
   },
   saveButton: {
-    flex: 1,
+    width: '100%',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -3173,6 +3643,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.background,
+    textAlign: 'center',
   },
   // Cart item action styles
   itemTotals: {
@@ -3273,5 +3744,88 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: Colors.primary,
     marginLeft: 8,
+  },
+  barcodeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  barcodeInput: {
+    flex: 1,
+    height: 48,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: Colors.text,
+    backgroundColor: Colors.background,
+  },
+  productImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    backgroundColor: Colors.background,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  productImageButtonText: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '500',
+  },
+  productImagePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  productImageThumbnail: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  productImagePreviewText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  productImagesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 12,
+    gap: 8,
+  },
+  productImageCard: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  productImageSquare: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

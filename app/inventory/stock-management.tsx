@@ -4,14 +4,16 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   ArrowLeft,
   Package,
   ArrowUpRight,
   ArrowDownLeft,
+  ShoppingCart,
+  ArrowRight,
 } from 'lucide-react-native';
 
 const Colors = {
@@ -39,25 +41,35 @@ export default function StockManagementScreen() {
     router.push('/inventory/stock-out');
   };
 
+  const handleNewSale = () => {
+    router.push('/new-sale');
+  };
+
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Stock Management</Text>
-        </View>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            // Try to go back, if no previous screen, go to dashboard
+            try {
+              router.back();
+            } catch (error) {
+              router.replace('/dashboard');
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Stock Management</Text>
+      </View>
 
         <View style={styles.content}>
           <Text style={styles.description}>
-            Choose the type of stock operation you want to perform
+            Choose the type of stock operation or sales process you want to perform
           </Text>
 
           {/* Stock In Option */}
@@ -72,10 +84,10 @@ export default function StockManagementScreen() {
             <View style={styles.optionContent}>
               <Text style={styles.optionTitle}>Stock In</Text>
               <Text style={styles.optionDescription}>
-                Add new inventory to your stock. Record purchases, receipts, and incoming goods.
+                Add new inventory from purchase invoices, receipts, and incoming goods.
               </Text>
               <View style={styles.optionFeatures}>
-                <Text style={styles.featureText}>• Manual entry with supplier details</Text>
+                <Text style={styles.featureText}>• Purchase invoice processing</Text>
                 <Text style={styles.featureText}>• PO-based verification</Text>
                 <Text style={styles.featureText}>• QR code scanning</Text>
               </View>
@@ -94,18 +106,30 @@ export default function StockManagementScreen() {
             <View style={styles.optionContent}>
               <Text style={styles.optionTitle}>Stock Out</Text>
               <Text style={styles.optionDescription}>
-                Record inventory that leaves your stock. Track sales, transfers, and adjustments.
+                Record inventory adjustments, damages, transfers, and other non-sales removals.
               </Text>
               <View style={styles.optionFeatures}>
-                <Text style={styles.featureText}>• Sales-based stock out</Text>
-                <Text style={styles.featureText}>• Transfer to other locations</Text>
-                <Text style={styles.featureText}>• Manual adjustments</Text>
+                <Text style={styles.featureText}>• Damaged/expired items</Text>
+                <Text style={styles.featureText}>• Internal use & samples</Text>
+                <Text style={styles.featureText}>• Inventory adjustments</Text>
               </View>
             </View>
           </TouchableOpacity>
+
+          {/* New Sale Section */}
+          <View style={styles.newSaleSection}>
+            <Text style={styles.newSaleQuestion}>Looking to make a sale?</Text>
+            <TouchableOpacity
+              style={styles.newSaleButton}
+              onPress={handleNewSale}
+              activeOpacity={0.8}
+            >
+              <ShoppingCart size={20} color={Colors.background} />
+              <Text style={styles.newSaleButtonText}>Create New Sale</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
-    </View>
   );
 }
 
@@ -113,9 +137,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
-  },
-  safeArea: {
-    flex: 1,
   },
   header: {
     backgroundColor: Colors.background,
@@ -129,21 +150,20 @@ const styles = StyleSheet.create({
   backButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[100],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
+    flex: 1,
   },
   content: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingVertical: 24,
+    paddingVertical: 20,
   },
   description: {
     fontSize: 16,
@@ -201,5 +221,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.textLight,
     lineHeight: 18,
+  },
+  newSaleSection: {
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  newSaleQuestion: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  newSaleButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  newSaleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.background,
+    marginLeft: 8,
   },
 }); 

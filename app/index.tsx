@@ -30,6 +30,7 @@ const COLORS = {
   black: '#000000',
   gray: '#6B7280',
   lightGray: '#F3F4F6',
+  darkGray: '#9CA3AF',
 };
 
 const onboardingData = [
@@ -72,7 +73,6 @@ const onboardingData = [
 
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const handleNext = () => {
@@ -80,10 +80,6 @@ export default function OnboardingScreen() {
       const nextIndex = currentIndex + 1;
       animateTransition(() => {
         setCurrentIndex(nextIndex);
-        scrollViewRef.current?.scrollTo({
-          x: nextIndex * width,
-          animated: true,
-        });
       });
     }
   };
@@ -93,10 +89,6 @@ export default function OnboardingScreen() {
       const prevIndex = currentIndex - 1;
       animateTransition(() => {
         setCurrentIndex(prevIndex);
-        scrollViewRef.current?.scrollTo({
-          x: prevIndex * width,
-          animated: true,
-        });
       });
     }
   };
@@ -121,70 +113,70 @@ export default function OnboardingScreen() {
     router.push('/auth/mobile');
   };
 
-  const renderSlide = (item: typeof onboardingData[0], index: number) => {
-    const IconComponent = item.icon;
+  const renderContent = () => {
+    const currentItem = onboardingData[currentIndex];
+    const IconComponent = currentItem.icon;
     
     return (
-      <View key={item.id} style={styles.slide}>
-        <LinearGradient colors={item.gradient} style={styles.slideBackground}>
-          <Animated.View style={[styles.slideContent, { opacity: fadeAnim }]}>
-            <View style={styles.iconContainer}>
-              <View style={styles.iconCircle}>
-                <IconComponent size={48} color={COLORS.primary} strokeWidth={2} />
-              </View>
+      <LinearGradient colors={currentItem.gradient} style={styles.slideBackground}>
+        <Animated.View style={[styles.slideContent, { opacity: fadeAnim }]}>
+          <View style={styles.iconContainer}>
+            <View style={styles.iconCircle}>
+              <IconComponent size={48} color={COLORS.primary} strokeWidth={2} />
             </View>
-            
-            <View style={styles.textContainer}>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.subtitle}>{item.subtitle}</Text>
-            </View>
+          </View>
+          
+          <View style={styles.textContainer}>
+            <Text style={styles.title}>{currentItem.title}</Text>
+            <Text style={styles.subtitle}>{currentItem.subtitle}</Text>
+          </View>
 
-            <View style={styles.dotsContainer}>
-              {onboardingData.map((_, dotIndex) => (
-                <View
-                  key={dotIndex}
-                  style={[
-                    styles.dot,
-                    dotIndex === currentIndex ? styles.activeDot : styles.inactiveDot,
-                  ]}
-                />
-              ))}
-            </View>
-          </Animated.View>
-        </LinearGradient>
-      </View>
+          <View style={styles.dotsContainer}>
+            {onboardingData.map((_, dotIndex) => (
+              <View
+                key={dotIndex}
+                style={[
+                  styles.dot,
+                  dotIndex === currentIndex ? styles.activeDot : styles.inactiveDot,
+                ]}
+              />
+            ))}
+          </View>
+        </Animated.View>
+      </LinearGradient>
     );
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        ref={scrollViewRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        scrollEnabled={false}
-        style={styles.scrollView}
-      >
-        {onboardingData.map((item, index) => renderSlide(item, index))}
-      </ScrollView>
+      <View style={styles.contentArea}>
+        {renderContent()}
+      </View>
 
-      <View style={styles.navigationContainer}>
-        <TouchableOpacity
-          style={[
-            styles.navButton,
-            styles.prevButton,
-            currentIndex === 0 && styles.disabledButton,
-          ]}
-          onPress={handlePrevious}
-          disabled={currentIndex === 0}
-        >
-          <ArrowLeft size={24} color={currentIndex === 0 ? COLORS.gray : COLORS.white} />
-        </TouchableOpacity>
+      <View style={[
+        styles.navigationContainer,
+        currentIndex === 0 && styles.navigationContainerFirstSlide
+      ]}>
+        {currentIndex > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.navButton,
+              styles.prevButton,
+            ]}
+            onPress={handlePrevious}
+          >
+            <ArrowLeft size={24} color={COLORS.white} />
+          </TouchableOpacity>
+        )}
 
         {currentIndex === onboardingData.length - 1 ? (
           <TouchableOpacity style={styles.getStartedButton} onPress={handleGetStarted}>
             <Text style={styles.getStartedText}>Start 30-Day Free Trial</Text>
+            <ArrowRight size={20} color={COLORS.primary} />
+          </TouchableOpacity>
+        ) : currentIndex === 0 ? (
+          <TouchableOpacity style={styles.getStartedButton} onPress={handleNext}>
+            <Text style={styles.getStartedText}>Get Started</Text>
             <ArrowRight size={20} color={COLORS.primary} />
           </TouchableOpacity>
         ) : (
@@ -202,12 +194,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
   },
-  scrollView: {
+  contentArea: {
     flex: 1,
-  },
-  slide: {
-    width,
-    height,
   },
   slideBackground: {
     flex: 1,
@@ -265,16 +253,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: COLORS.lightGray,
   },
   activeDot: {
     backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   inactiveDot: {
-    backgroundColor: COLORS.lightGray,
+    backgroundColor: COLORS.darkGray,
   },
   navigationContainer: {
     position: 'absolute',
@@ -284,6 +283,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  navigationContainerFirstSlide: {
+    justifyContent: 'center',
   },
   navButton: {
     width: 56,

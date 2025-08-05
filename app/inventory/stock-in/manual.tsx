@@ -4,12 +4,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   TextInput,
   Modal,
   Alert,
+  Dimensions,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft,
@@ -28,6 +30,17 @@ import {
   ChevronDown,
   Edit,
 } from 'lucide-react-native';
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+// Calculate responsive values with platform-specific adjustments
+const headerPaddingHorizontal = Math.max(16, screenWidth * 0.04);
+const headerPaddingVertical = Math.max(12, screenHeight * 0.015) + (Platform.OS === 'android' ? 8 : 0);
+const backButtonWidth = Math.max(40, screenWidth * 0.1);
+const backButtonHeight = Math.max(40, screenHeight * 0.05);
+const backButtonMarginRight = Math.max(16, screenWidth * 0.04);
+const headerTitleFontSize = Math.max(18, screenWidth * 0.045);
+const totalCountFontSize = Math.max(14, screenWidth * 0.035);
 
 const Colors = {
   background: '#FFFFFF',
@@ -161,6 +174,8 @@ export default function ManualStockInScreen() {
     barcode: '',
     hsnCode: '',
     purchasePrice: '',
+    salePrice: '',
+    mrp: '',
     priceUnit: 'primary' as 'primary' | 'secondary',
     gstRate: 18,
     cessRate: 0,
@@ -275,6 +290,8 @@ export default function ManualStockInScreen() {
       barcode: '1234567890123',
       hsnCode: '8471',
       purchasePrice: '1500',
+      salePrice: '1800',
+      mrp: '2000',
       priceUnit: 'primary' as 'primary' | 'secondary',
       gstRate: 18,
       cessRate: 0,
@@ -590,20 +607,32 @@ export default function ManualStockInScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Manual Stock In</Text>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            // Try to go back, if no previous screen, go to stock in options
+            try {
+              router.back();
+            } catch (error) {
+              router.replace('/inventory/stock-in');
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Manual Stock In</Text>
+        
+        <View style={styles.headerRight}>
+          <Text style={styles.totalCount}>
+            {formData.products.length} products
+          </Text>
         </View>
+      </View>
 
         <ScrollView 
           style={styles.scrollView}
@@ -1491,82 +1520,7 @@ export default function ManualStockInScreen() {
                     )}
                   </View>
 
-                  {/* Purchase Price Section */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Pricing Information</Text>
-                    
-                    {!newProductData.useCompoundUnit ? (
-                      <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Purchase Price *</Text>
-                        <View style={styles.inputContainer}>
-                          <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                          <TextInput
-                            style={styles.input}
-                            value={newProductData.purchasePrice}
-                            onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
-                            placeholder="0.00"
-                            placeholderTextColor={Colors.textLight}
-                            keyboardType="decimal-pad"
-                          />
-                        </View>
-                      </View>
-                    ) : (
-                      <>
-                        {/* Price Unit Selection for Compound Units */}
-                        <View style={styles.inputGroup}>
-                          <Text style={styles.label}>Price Unit *</Text>
-                          <View style={styles.priceUnitContainer}>
-                            <TouchableOpacity
-                              style={[
-                                styles.priceUnitButton,
-                                newProductData.priceUnit === 'primary' && styles.activePriceUnitButton
-                              ]}
-                              onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'primary' }))}
-                              activeOpacity={0.7}
-                            >
-                              <Text style={[
-                                styles.priceUnitButtonText,
-                                newProductData.priceUnit === 'primary' && styles.activePriceUnitButtonText
-                              ]}>
-                                Per {newProductData.primaryUnit}
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[
-                                styles.priceUnitButton,
-                                newProductData.priceUnit === 'secondary' && styles.activePriceUnitButton
-                              ]}
-                              onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'secondary' }))}
-                              activeOpacity={0.7}
-                            >
-                              <Text style={[
-                                styles.priceUnitButtonText,
-                                newProductData.priceUnit === 'secondary' && styles.activePriceUnitButtonText
-                              ]}>
-                                Per {newProductData.secondaryUnit}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                        
-                        {/* Purchase Price Input */}
-                        <View style={styles.inputGroup}>
-                          <Text style={styles.label}>Purchase Price per {newProductData.priceUnit === 'primary' ? newProductData.primaryUnit : newProductData.secondaryUnit} *</Text>
-                          <View style={styles.inputContainer}>
-                            <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                            <TextInput
-                              style={styles.input}
-                              value={newProductData.purchasePrice}
-                              onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
-                              placeholder="0.00"
-                              placeholderTextColor={Colors.textLight}
-                              keyboardType="decimal-pad"
-                            />
-                          </View>
-                        </View>
-                      </>
-                    )}
-                  </View>
+                  
 
                   {/* Tax Information Section */}
                   <View style={styles.modalSection}>
@@ -1670,15 +1624,19 @@ export default function ManualStockInScreen() {
                             <TouchableOpacity
                               style={styles.inputContainer}
                               onPress={() => {
+                                const availableUnits = [newProductData.primaryUnit];
+                                if (newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None') {
+                                  availableUnits.push(newProductData.secondaryUnit);
+                                }
+                                
                                 Alert.alert(
                                   'Select CESS Unit',
                                   'Choose the unit for CESS calculation',
                                   [
-                                    { text: 'Piece', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Piece' })) },
-                                    { text: 'Kilogram', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Kilogram' })) },
-                                    { text: 'Liter', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Liter' })) },
-                                    { text: 'Box', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Box' })) },
-                                    { text: 'Pack', onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: 'Pack' })) },
+                                    ...availableUnits.map(unit => ({
+                                      text: unit,
+                                      onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: unit }))
+                                    })),
                                     { text: 'Cancel', style: 'cancel' }
                                   ]
                                 );
@@ -1697,11 +1655,127 @@ export default function ManualStockInScreen() {
                     </View>
                   </View>
 
+                  {/* Pricing Information Section */}
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Pricing Information</Text>
+                    
+                    {/* Price Unit Selection */}
+                    {newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None' ? (
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Price Unit *</Text>
+                        <View style={styles.priceUnitContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.priceUnitButton,
+                              newProductData.priceUnit === 'primary' && styles.activePriceUnitButton
+                            ]}
+                            onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'primary' }))}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[
+                              styles.priceUnitButtonText,
+                              newProductData.priceUnit === 'primary' && styles.activePriceUnitButtonText
+                            ]}>
+                              Per {newProductData.primaryUnit}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.priceUnitButton,
+                              newProductData.priceUnit === 'secondary' && styles.activePriceUnitButton
+                            ]}
+                            onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'secondary' }))}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[
+                              styles.priceUnitButtonText,
+                              newProductData.priceUnit === 'secondary' && styles.activePriceUnitButtonText
+                            ]}>
+                              Per {newProductData.secondaryUnit}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Price Unit *</Text>
+                        <View style={styles.priceUnitContainer}>
+                          <TouchableOpacity
+                            style={[
+                              styles.priceUnitButton,
+                              styles.activePriceUnitButton
+                            ]}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[
+                              styles.priceUnitButtonText,
+                              styles.activePriceUnitButtonText
+                            ]}>
+                              Per {newProductData.primaryUnit}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+
+                    {/* Purchase Price */}
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>
+                        Purchase Price {newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None' 
+                          ? `per ${newProductData.priceUnit === 'primary' ? newProductData.primaryUnit : newProductData.secondaryUnit}` 
+                          : ''} *
+                      </Text>
+                      <View style={styles.inputContainer}>
+                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.purchasePrice}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
+                          placeholder="0.00"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    </View>
+
+                    {/* Sale Price */}
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Sale Price *</Text>
+                      <View style={styles.inputContainer}>
+                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.salePrice}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, salePrice: text }))}
+                          placeholder="0.00"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    </View>
+
+                    {/* MRP */}
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>MRP *</Text>
+                      <View style={styles.inputContainer}>
+                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                        <TextInput
+                          style={styles.input}
+                          value={newProductData.mrp}
+                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, mrp: text }))}
+                          placeholder="0.00"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    </View>
+                  </View>
+
                   <TouchableOpacity
-                    style={styles.addSelectedButton}
+                    style={[styles.addSelectedButton, { marginTop: 30, marginBottom: 30 }]}
                     onPress={() => {
                       // Basic validation
-                      if (!newProductData.name || !newProductData.category || !newProductData.purchasePrice || !newProductData.primaryUnit) {
+                      if (!newProductData.name || !newProductData.category || !newProductData.purchasePrice || !newProductData.salePrice || !newProductData.mrp || !newProductData.primaryUnit) {
                         Alert.alert('Incomplete Form', 'Please fill in all required fields');
                         return;
                       }
@@ -1750,6 +1824,32 @@ export default function ManualStockInScreen() {
                         const cessAmount = calculateCessAmount(productToAdd);
                         productToAdd.totalPrice = basePrice + gstAmount + cessAmount;
                         
+                        // Save to inventory (mock implementation)
+                        const inventoryProduct = {
+                          id: productToAdd.id,
+                          name: productToAdd.name,
+                          category: newProductData.category,
+                          barcode: productToAdd.barcode,
+                          hsnCode: newProductData.hsnCode,
+                          purchasePrice: parseFloat(newProductData.purchasePrice),
+                          salePrice: parseFloat(newProductData.salePrice),
+                          mrp: parseFloat(newProductData.mrp),
+                          gstRate: productToAdd.gstRate,
+                          cessRate: productToAdd.cessRate,
+                          cessType: productToAdd.cessType,
+                          cessAmount: productToAdd.cessAmount,
+                          cessUnit: productToAdd.cessUnit,
+                          primaryUnit: productToAdd.primaryUnit,
+                          secondaryUnit: productToAdd.secondaryUnit,
+                          useCompoundUnit: productToAdd.useCompoundUnit,
+                          conversionRatio: productToAdd.conversionRatio,
+                          priceUnit: productToAdd.priceUnit,
+                          stockQuantity: 0, // Will be updated when stock-in is completed
+                        };
+                        
+                        // In a real app, this would save to a database
+                        console.log('Product saved to inventory:', inventoryProduct);
+                        
                         const updatedProducts = [...formData.products, productToAdd];
                         updateFormData('products', updatedProducts);
                         setShowCreateProductModal(false);
@@ -1759,6 +1859,8 @@ export default function ManualStockInScreen() {
                           barcode: '',
                           hsnCode: '',
                           purchasePrice: '',
+                          salePrice: '',
+                          mrp: '',
                           priceUnit: 'primary',
                           gstRate: 18,
                           cessRate: 0,
@@ -1777,7 +1879,7 @@ export default function ManualStockInScreen() {
                     }}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.addSelectedButtonText}>Add Product to Stock In</Text>
+                    <Text style={styles.addSelectedButtonText}>Save to Inventory & Add to Stock In</Text>
                   </TouchableOpacity>
                 </ScrollView>
               </View>
@@ -2183,7 +2285,6 @@ export default function ManualStockInScreen() {
             </View>
           </Modal>
         </SafeAreaView>
-      </View>
     );
   }
 
@@ -2192,31 +2293,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  safeArea: {
-    flex: 1,
-  },
   header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: headerPaddingHorizontal,
+    paddingVertical: headerPaddingVertical,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[100],
+    width: backButtonWidth,
+    height: backButtonHeight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: backButtonMarginRight,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: headerTitleFontSize,
     fontWeight: '600',
     color: Colors.text,
+    flex: 1,
+  },
+  headerRight: {
+    alignItems: 'flex-end',
+  },
+  totalCount: {
+    fontSize: totalCountFontSize,
+    color: Colors.textLight,
   },
   scrollView: {
     flex: 1,
@@ -2246,9 +2350,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 48,
   },
   inputIcon: {
     marginRight: 12,
@@ -2268,7 +2373,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
+    minHeight: 48,
   },
   dropdownContent: {
     flexDirection: 'row',
@@ -2429,6 +2535,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxHeight: '80%',
+    maxWidth: 500,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2447,6 +2554,7 @@ const styles = StyleSheet.create({
   modalContent: {
     paddingHorizontal: 20,
     paddingVertical: 20,
+    paddingBottom: 100,
   },
   modalOption: {
     flexDirection: 'row',
