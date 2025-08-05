@@ -20,8 +20,11 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Customer Pre-selection**: Direct sales from customer profiles
 - **Barcode Scanning**: Quick product identification
 - **Payment Processing**: Multiple payment methods support
-- **Invoice Generation**: Professional invoice creation
+- **Invoice Generation**: Professional tax invoice creation with GST/CESS breakdown
 - **Sales History**: Complete transaction records
+- **Editable Quantity Input**: Type quantities directly for faster input
+- **Round-off Calculations**: Automatic rounding for precise billing
+- **Business Customer Support**: Full business details on invoices (GSTIN, business name, address)
 
 ### 📦 **Inventory Management**
 - **Product Catalog**: Comprehensive product database
@@ -31,6 +34,16 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Barcode Integration**: Scan-based product management
 - **Stock Discrepancies**: Identify and resolve inventory issues
 - **Manual Product Entry**: Add products with detailed specifications
+- **Stock Out Management**: Comprehensive stock removal workflow
+  - **Reason Selection**: Expired, Damaged, Sample Given, Internal Use, Inventory Shrinkage, Disposed, Recalled, Other
+  - **Product Search & Scan**: Find products by search or barcode scanning
+  - **Quantity Management**: Dynamic stock calculation with "will remain" updates
+  - **Proof Documentation**: Mandatory proof images for each stocked-out product
+  - **Notes & Documentation**: Detailed notes for each stock out item
+  - **Confirmation Flow**: Review all details before final confirmation
+- **HSN/SAC Code Management**: 8-digit numeric codes for tax compliance
+- **Batch Number Tracking**: Product batch identification for quality control
+- **Unit Management**: Primary and compound unit support with conversion ratios
 
 ### 👥 **Customer Management**
 - **Customer Database**: Complete customer profiles
@@ -40,6 +53,7 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Credit Limits**: Customer credit management
 - **Sales History**: Track customer purchase patterns
 - **Direct Sales**: Quick sales from customer profiles
+- **Address Autocomplete**: Fast address entry with suggestions
 
 ### 🤝 **Supplier Management**
 - **Supplier Database**: Comprehensive supplier profiles
@@ -56,6 +70,8 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Bank Account Management**: Multiple account support
 - **Payment Methods**: UPI, Card, Bank Transfer support
 - **Financial Reports**: Comprehensive reporting
+- **CESS Calculation**: Advanced CESS support (value-based, quantity-based, combined)
+- **GST Breakdown**: CGST/SGST split display and calculation
 
 ### 📍 **Location Management**
 - **Branch Management**: Multi-location business support
@@ -90,6 +106,14 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Customer Reports**: Customer behavior insights
 - **Financial Reports**: Comprehensive financial analytics
 
+### 🔔 **Notification System**
+- **In-App Notifications**: Consistent toast message system
+- **Success Notifications**: Green toast for successful operations
+- **Error Notifications**: Red toast for error messages
+- **Info Notifications**: Yellow toast for informational messages
+- **Auto-dismiss**: Notifications disappear after 3 seconds
+- **Swipeable**: Users can swipe to dismiss notifications
+
 ## 🛠️ Technical Stack
 
 ### **Frontend Framework**
@@ -105,6 +129,7 @@ The Manager ERP Business Owner App is a React Native application built with Expo
 - **Lucide React Native**: Modern icon library
 - **React Native Safe Area**: Safe area handling
 - **Custom Components**: Tailored business components
+- **React Native Toast Message**: Consistent notification system
 
 ### **State Management**
 - **React Hooks**: Local state management
@@ -126,6 +151,8 @@ Manager-ERP-BO/
 │   ├── auth/              # Authentication flow
 │   ├── dashboard.tsx      # Main dashboard
 │   ├── inventory/         # Inventory management
+│   │   ├── stock-out/     # Stock out workflow
+│   │   └── stock-management.tsx
 │   ├── new-sale/         # Sales process
 │   ├── new-return/       # Returns management
 │   ├── people/           # Customer & staff management
@@ -139,6 +166,8 @@ Manager-ERP-BO/
 ├── components/            # Reusable UI components
 ├── hooks/                # Custom React hooks
 ├── services/             # API services
+├── utils/                # Utility functions
+│   └── notifications.ts  # Toast notification system
 ├── data/                 # Static data files
 └── assets/               # Images and static assets
 ```
@@ -149,6 +178,7 @@ Manager-ERP-BO/
 - Central action hub for quick access
 - Animated expansion with multiple options
 - Context-aware actions based on current screen
+- Stock management integration
 
 #### **Hamburger Menu**
 - Navigation to all major sections
@@ -159,6 +189,13 @@ Manager-ERP-BO/
 - Consistent input styling
 - Validation and error handling
 - Modal-based complex inputs
+- Address autocomplete integration
+
+#### **Notification System**
+- Toast-based notifications
+- Three types: success, error, info
+- Auto-dismiss functionality
+- Swipeable on mobile devices
 
 ## 🚀 Getting Started
 
@@ -211,17 +248,22 @@ npx expo build:android
 
 ### **Sales Process**
 1. **Product Selection**: Browse or scan products
-2. **Cart Management**: Add/remove items, adjust quantities
-3. **Customer Details**: Select existing or add new customer
+2. **Cart Management**: Add/remove items, adjust quantities with editable input
+3. **Customer Details**: Select existing or add new customer (business/individual)
 4. **Payment Processing**: Choose payment method and complete transaction
-5. **Invoice Generation**: Create and send professional invoice
+5. **Invoice Generation**: Create and send professional tax invoice with GST/CESS breakdown
 
 ### **Inventory Management**
-1. **Product Addition**: Manual entry or barcode scanning
+1. **Product Addition**: Manual entry or barcode scanning with HSN/SAC codes
 2. **Category Management**: Organize products by categories
 3. **Stock Tracking**: Monitor inventory levels
 4. **Low Stock Alerts**: Automatic notifications for reordering
 5. **Stock Reconciliation**: Identify and resolve discrepancies
+6. **Stock Out Process**: 
+   - Select reason for stock removal
+   - Search or scan products
+   - Specify quantities and add proof images
+   - Review and confirm stock out
 
 ### **Customer Management**
 1. **Customer Registration**: Business or individual customer setup
@@ -229,6 +271,7 @@ npx expo build:android
 3. **Profile Management**: Complete customer profiles
 4. **Sales History**: Track customer purchase patterns
 5. **Direct Sales**: Quick sales from customer profiles
+6. **Address Management**: Autocomplete address entry
 
 ### **Supplier Management**
 1. **Supplier Registration**: Add new suppliers with verification
@@ -241,6 +284,7 @@ npx expo build:android
 2. **Expense Tracking**: Record and categorize business expenses
 3. **Bank Account Management**: Multiple account support
 4. **Financial Reporting**: Comprehensive financial analytics
+5. **Tax Calculations**: Advanced GST and CESS calculations
 
 ## 🔧 Configuration
 
@@ -275,11 +319,25 @@ interface Product {
   stock: number;
   supplier: string;
   location: string;
-  cessType: 'value' | 'quantity' | 'value_and_quantity';
-  cessAmount: string;
-  cessAmountType: 'amount' | 'percentage';
-  uom: string;
-  uomType: 'primary' | 'compound';
+  batchNumber?: string;
+  primaryUnit?: string;
+  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
+  cessRate?: number;
+  cessAmount?: number;
+  cessUnit?: string;
+}
+```
+
+#### **Stock Out Item**
+```typescript
+interface StockOutItem {
+  productId: string;
+  productName: string;
+  currentStock: number;
+  quantityToRemove: number;
+  willRemain: number;
+  notes: string;
+  proofImage?: string;
 }
 ```
 
@@ -294,6 +352,7 @@ interface Customer {
   address: string;
   gstin?: string;
   businessName?: string;
+  businessAddress?: string;
   contactPerson?: string;
   paymentTerms?: string;
   creditLimit?: string;
@@ -342,8 +401,9 @@ interface BankAccount {
 - **Intuitive Navigation**: Easy-to-use interface
 - **Form Validation**: Real-time input validation
 - **Loading States**: Visual feedback during operations
-- **Error Handling**: User-friendly error messages
+- **Error Handling**: User-friendly error messages with toast notifications
 - **Responsive Design**: Works across different screen sizes
+- **Consistent Button Layout**: Floating action buttons with proper positioning
 
 ### **Accessibility**
 - **Touch Targets**: Properly sized interactive elements
@@ -400,6 +460,22 @@ export const verifyGSTIN = async (gstin: string) => {
 ```
 
 ### **Internal APIs**
+
+#### **Notification System**
+```typescript
+// Utils: utils/notifications.ts
+export const showSuccess = (message: string, title?: string) => {
+  // Shows success toast notification
+}
+
+export const showError = (message: string, title?: string) => {
+  // Shows error toast notification
+}
+
+export const showInfo = (message: string, title?: string) => {
+  // Shows info toast notification
+}
+```
 
 #### **Data Management**
 - **Local Storage**: AsyncStorage for persistent data
@@ -462,7 +538,18 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔄 Version History
 
-### **Current Version**: 1.0.0
+### **Current Version**: 1.1.0
+- **Stock Out Management**: Complete workflow for stock removal with proof documentation
+- **Enhanced Invoice System**: Professional tax invoices with GST/CESS breakdown
+- **Notification System**: Consistent in-app toast notifications
+- **HSN/SAC Code Support**: 8-digit numeric codes for tax compliance
+- **Batch Number Tracking**: Product batch identification
+- **Business Customer Support**: Full business details on invoices
+- **Address Autocomplete**: Fast address entry with suggestions
+- **Editable Quantity Input**: Direct quantity typing for faster input
+- **Round-off Calculations**: Automatic rounding for precise billing
+
+### **Previous Version**: 1.0.0
 - **Initial Release**: Complete ERP functionality
 - **Core Features**: Sales, inventory, customer, supplier management
 - **Financial Tools**: Payment processing, expense tracking
@@ -472,9 +559,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Contact
 
 For business inquiries or technical support:
-- **Email**: [contact@managererp.com]
+- **Email**: support@getmanager.in
+- **Website**: getmanager.in
 - **GitHub**: [https://github.com/your-org/manager-erp-bo]
-- **Documentation**: [https://docs.managererp.com]
+- **Documentation**: [https://docs.getmanager.in]
 
 ---
 
