@@ -71,6 +71,32 @@ export default function ConfirmationScreen() {
   };
 
   const handleConfirm = () => {
+    // Log final stock out confirmation
+    console.log('=== STOCK OUT CONFIRMED ===');
+    console.log('Reason:', data.reason);
+    console.log('Total Items:', totalItems);
+    console.log('Total Quantity:', totalItems);
+    console.log('Total Value:', formatPrice(totalValue));
+    console.log('General Notes:', data.generalNotes);
+    data.items.forEach((item, index) => {
+      console.log(`Confirmed Item ${index + 1}:`);
+      console.log('  Product ID:', item.product.id);
+      console.log('  Product Name:', item.product.name);
+      console.log('  Current Stock:', item.product.currentStock);
+      console.log('  Quantity Removed:', item.quantityToRemove);
+      console.log('  Remaining Stock:', item.product.currentStock - item.quantityToRemove);
+      console.log('  Unit Price:', formatPrice(item.product.unitPrice));
+      console.log('  Total Value:', formatPrice(item.quantityToRemove * item.product.unitPrice));
+      console.log('  Notes:', item.notes);
+      console.log('  Has Proof Image:', !!item.proofImage);
+      console.log('  Category:', item.product.category);
+      console.log('  Supplier:', item.product.supplier);
+      console.log('  Location:', item.product.location);
+      console.log('  Primary Unit:', item.product.primaryUnit);
+    });
+    console.log('Confirmed at:', new Date().toISOString());
+    console.log('==========================');
+
     showInfo('Are you sure you want to proceed with this stock out? This action cannot be undone.', 'Confirm Stock Out');
     // Here you would typically make an API call to process the stock out
     // For now, we'll just navigate to success screen after a short delay

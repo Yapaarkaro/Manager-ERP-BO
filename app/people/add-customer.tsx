@@ -27,6 +27,7 @@ import {
   AlertTriangle
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
+import { dataStore, Customer } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -168,7 +169,6 @@ export default function AddCustomerScreen() {
 
   const isFormValid = () => {
     const baseValidation = (
-      formData.name.trim().length > 0 &&
       formData.mobile.trim().length > 0 &&
       formData.address.trim().length > 0
     );
@@ -179,7 +179,7 @@ export default function AddCustomerScreen() {
         formData.contactPerson.trim().length > 0;
     }
 
-    return baseValidation;
+    return baseValidation && formData.name.trim().length > 0;
   };
 
   const handleSubmit = async () => {
@@ -190,7 +190,7 @@ export default function AddCustomerScreen() {
 
     setIsSubmitting(true);
 
-    const customerData = {
+    const customerData: Customer = {
       id: `CUST_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
       businessName: formData.businessName.trim(),
@@ -203,7 +203,6 @@ export default function AddCustomerScreen() {
       categories: formData.categories,
       paymentTerms: formData.paymentTerms,
       creditLimit: formData.creditLimit ? parseFloat(formData.creditLimit) : 0,
-      notes: formData.notes.trim(),
       avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
       customerScore: 85,
       onTimePayment: 90,
@@ -222,6 +221,9 @@ export default function AddCustomerScreen() {
       status: 'active',
       createdAt: new Date().toISOString(),
     };
+
+    // Add customer to data store
+    dataStore.addCustomer(customerData);
 
     console.log('Creating new customer:', customerData);
     
@@ -342,20 +344,7 @@ export default function AddCustomerScreen() {
                     </View>
                   </View>
 
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Legal Name *</Text>
-                    <View style={styles.inputContainer}>
-                      <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
-                        style={styles.input}
-                        value={formData.name}
-                        onChangeText={(text) => updateFormData('name', text)}
-                        placeholder="Enter legal name"
-                        placeholderTextColor={Colors.textLight}
-                        autoCapitalize="words"
-                      />
-                    </View>
-                  </View>
+
                 </>
               )}
 

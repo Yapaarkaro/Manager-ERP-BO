@@ -38,59 +38,7 @@ const Colors = {
 };
 
 // Mock suppliers data
-const mockSuppliers = [
-  {
-    id: 'SUP-001',
-    name: 'Apple India Pvt Ltd',
-    businessName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Rajesh Kumar',
-    mobile: '+91 98765 43210',
-    email: 'orders@apple.com',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 92,
-    onTimeDelivery: 95,
-    qualityRating: 4.8,
-    productCount: 25,
-    categories: ['Smartphones', 'Laptops', 'Audio', 'Accessories'],
-    paymentTerms: 'Net 30 Days',
-    deliveryTime: '3-5 Business Days',
-  },
-  {
-    id: 'SUP-002',
-    name: 'Samsung Electronics',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Priya Sharma',
-    mobile: '+91 87654 32109',
-    email: 'business@samsung.com',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 88,
-    onTimeDelivery: 90,
-    qualityRating: 4.6,
-    productCount: 32,
-    categories: ['Smartphones', 'Tablets', 'Audio', 'Home Appliances'],
-    paymentTerms: 'Net 15 Days',
-    deliveryTime: '2-4 Business Days',
-  },
-  {
-    id: 'SUP-003',
-    name: 'Dell Technologies',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Amit Singh',
-    mobile: '+91 76543 21098',
-    email: 'sales@dell.com',
-    avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 85,
-    onTimeDelivery: 88,
-    qualityRating: 4.5,
-    productCount: 18,
-    categories: ['Laptops', 'Desktops', 'Servers', 'Accessories'],
-    paymentTerms: 'Net 45 Days',
-    deliveryTime: '5-7 Business Days',
-  },
-];
+const mockSuppliers = [];
 
 export default function SelectSupplierScreen() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -522,7 +470,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

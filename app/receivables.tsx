@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowDownLeft, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
+import { dataStore, Receivable } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -29,136 +30,37 @@ const Colors = {
   }
 };
 
-interface Receivable {
-  id: string;
-  customerName: string;
-  customerType: 'individual' | 'business';
-  businessName?: string;
-  gstin?: string;
-  mobile: string;
-  email?: string;
-  address: string;
-  totalReceivable: number;
-  overdueAmount: number;
-  invoiceCount: number;
-  oldestInvoiceDate: string;
-  daysPastDue: number;
-  creditLimit?: number;
-  paymentTerms?: string;
-  lastPaymentDate?: string;
-  lastPaymentAmount?: number;
-  customerAvatar: string;
-  status: 'current' | 'overdue' | 'critical';
-}
+// Using Receivable interface from dataStore
 
-const mockReceivables: Receivable[] = [
-  {
-    id: '1',
-    customerName: 'TechCorp Solutions Pvt Ltd',
-    customerType: 'business',
-    businessName: 'TechCorp Solutions Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    mobile: '+91 87654 32109',
-    email: 'accounts@techcorp.com',
-    address: '456, Electronic City, Phase 2, Bangalore, Karnataka - 560100',
-    totalReceivable: 125000,
-    overdueAmount: 45000,
-    invoiceCount: 3,
-    oldestInvoiceDate: '2024-01-05',
-    daysPastDue: 25,
-    creditLimit: 500000,
-    paymentTerms: 'Net 30 Days',
-    lastPaymentDate: '2024-01-10',
-    lastPaymentAmount: 75000,
-    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: '2',
-    customerName: 'Global Enterprises Ltd',
-    customerType: 'business',
-    businessName: 'Global Enterprises Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    mobile: '+91 99887 76655',
-    email: 'finance@globalent.com',
-    address: '567, Bandra West, Mumbai, Maharashtra - 400050',
-    totalReceivable: 89000,
-    overdueAmount: 89000,
-    invoiceCount: 2,
-    oldestInvoiceDate: '2023-12-15',
-    daysPastDue: 45,
-    creditLimit: 300000,
-    paymentTerms: 'Net 15 Days',
-    lastPaymentDate: '2023-12-20',
-    lastPaymentAmount: 50000,
-    customerAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'critical'
-  },
-  {
-    id: '3',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    mobile: '+91 98765 43210',
-    address: '123, MG Road, Bangalore, Karnataka - 560001',
-    totalReceivable: 35000,
-    overdueAmount: 0,
-    invoiceCount: 1,
-    oldestInvoiceDate: '2024-01-20',
-    daysPastDue: 0,
-    lastPaymentDate: '2024-01-15',
-    lastPaymentAmount: 25000,
-    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-  {
-    id: '4',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    mobile: '+91 76543 21098',
-    address: '321, Jayanagar, 4th Block, Bangalore, Karnataka - 560011',
-    totalReceivable: 22000,
-    overdueAmount: 12000,
-    invoiceCount: 2,
-    oldestInvoiceDate: '2024-01-08',
-    daysPastDue: 15,
-    lastPaymentDate: '2024-01-12',
-    lastPaymentAmount: 18000,
-    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: '5',
-    customerName: 'Metro Retail Chain',
-    customerType: 'business',
-    businessName: 'Metro Retail Chain Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    mobile: '+91 88776 65544',
-    email: 'payments@metroretail.com',
-    address: '890, Connaught Place, New Delhi, Delhi - 110001',
-    totalReceivable: 156000,
-    overdueAmount: 0,
-    invoiceCount: 4,
-    oldestInvoiceDate: '2024-01-18',
-    daysPastDue: 0,
-    creditLimit: 750000,
-    paymentTerms: 'Net 45 Days',
-    lastPaymentDate: '2024-01-22',
-    lastPaymentAmount: 95000,
-    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-];
+const mockReceivables: Receivable[] = [];
 
 export default function ReceivablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredReceivables, setFilteredReceivables] = useState(mockReceivables);
+  const [receivables, setReceivables] = useState<Receivable[]>([]);
+  const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>([]);
+
+  // Subscribe to data store changes
+  React.useEffect(() => {
+    const unsubscribe = dataStore.subscribe(() => {
+      const allReceivables = dataStore.getReceivables();
+      setReceivables(allReceivables);
+      setFilteredReceivables(allReceivables);
+    });
+
+    // Initial load
+    const allReceivables = dataStore.getReceivables();
+    setReceivables(allReceivables);
+    setFilteredReceivables(allReceivables);
+
+    return unsubscribe;
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredReceivables(mockReceivables);
+      setFilteredReceivables(receivables);
     } else {
-      const filtered = mockReceivables.filter(receivable =>
+      const filtered = receivables.filter(receivable =>
         receivable.customerName.toLowerCase().includes(query.toLowerCase()) ||
         receivable.businessName?.toLowerCase().includes(query.toLowerCase()) ||
         receivable.mobile.includes(query) ||
@@ -796,7 +698,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

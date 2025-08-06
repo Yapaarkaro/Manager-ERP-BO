@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    outlineStyle: 'none',
+    
   },
   addressInput: {
     minHeight: 80,
@@ -1121,7 +1121,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     paddingVertical: 8,
-    outlineStyle: 'none',
+    
   },
   modalContent: {
     maxHeight: 400,

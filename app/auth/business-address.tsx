@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Navigation, CreditCard as Edit, MapPin } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
+import OlaMapView from '@/components/OlaMapView';
 import * as Location from 'expo-location';
 
 const { width, height } = Dimensions.get('window');
@@ -48,94 +49,43 @@ export default function BusinessAddressScreen() {
   useEffect(() => {
     // Get user's current location and initialize map
     getCurrentLocationAndInitMap();
+    
+    // Ensure search bar is empty when screen loads
+    setSearchQuery('');
   }, []);
 
-  useEffect(() => {
-    // Initialize map when component mounts (web only)
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js';
-      script.onload = () => {
-        const link = document.createElement('link');
-        link.href = 'https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css';
-        link.rel = 'stylesheet';
-        document.head.appendChild(link);
-        
-        // Initialize map after script loads
-        if (userLocation) {
-          initializeMap(userLocation);
-        }
-      };
-      document.head.appendChild(script);
-    }
-  }, [userLocation]);
+
 
   const getCurrentLocationAndInitMap = async () => {
     setIsGettingLocation(true);
     
     try {
-      if (Platform.OS === 'web') {
-        // Use browser's native geolocation API for web
-        if (!navigator.geolocation) {
-          throw new Error('Geolocation is not supported by this browser');
-        }
+      // Use expo-location for native platforms
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
         
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const userCoords = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-            
-            setUserLocation(userCoords);
-            setIsGettingLocation(false);
-          },
-          (error) => {
-            console.error('Web geolocation error:', error);
-            Alert.alert(
-              'Location Error',
-              'Could not get your current location. Using default location (Delhi).',
-              [{ text: 'OK' }]
-            );
-            
-            const defaultLocation = { lat: 28.6139, lng: 77.2090 };
-            setUserLocation(defaultLocation);
-            setIsGettingLocation(false);
-          },
-          {
-            enableHighAccuracy: false,
-            timeout: 10000,
-            maximumAge: 60000
-          }
-        );
+        const userCoords = {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+        };
+        
+        setUserLocation(userCoords);
       } else {
-        // Use expo-location for native platforms
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
-          
-          const userCoords = {
-            lat: location.coords.latitude,
-            lng: location.coords.longitude,
-          };
-          
-          setUserLocation(userCoords);
-        } else {
-          Alert.alert(
-            'Location Access',
-            'Location permission denied. Using default location.',
-            [{ text: 'OK' }]
-          );
-          // Default to Delhi if location access denied
-          const defaultLocation = { lat: 28.6139, lng: 77.2090 };
-          setUserLocation(defaultLocation);
-        }
-        
-        setIsGettingLocation(false);
+        Alert.alert(
+          'Location Access',
+          'Location permission denied. Using default location.',
+          [{ text: 'OK' }]
+        );
+        // Default to Delhi if location access denied
+        const defaultLocation = { lat: 28.6139, lng: 77.2090 };
+        setUserLocation(defaultLocation);
       }
+      
+      setIsGettingLocation(false);
     } catch (error) {
       console.error('Location error:', error);
       
@@ -152,122 +102,87 @@ export default function BusinessAddressScreen() {
   };
 
   const initializeMap = async (location: { lat: number; lng: number }) => {
-    if (Platform.OS !== 'web') {
-      // For mobile platforms, we'll show a placeholder
-      setIsMapLoading(false);
+    // For iOS, the OlaMapView component handles map initialization
+    if (Platform.OS === 'ios') {
+      setIsMapLoading(true);
       return;
     }
     
-    if (!mapContainerRef.current) return;
-    
-    try {
-      setIsMapLoading(true);
-      
-      // Wait for MapLibre to be available
-      const checkMapLibre = () => {
-        if (typeof window !== 'undefined' && (window as any).maplibregl) {
-          const maplibregl = (window as any).maplibregl;
-          
-          // Use OpenStreetMap tiles via MapLibre
-          const map = new maplibregl.Map({
-            container: mapContainerRef.current,
-            style: {
-              version: 8,
-              sources: {
-                'osm-tiles': {
-                  type: 'raster',
-                  tiles: [
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
-                  ],
-                  tileSize: 256,
-                  attribution: '© OpenStreetMap contributors'
-                }
+    // For web platforms, use the existing MapLibre implementation
+    if (Platform.OS === 'web' && mapContainerRef.current) {
+      try {
+        setIsMapLoading(true);
+        
+        // Wait for MapLibre to be available
+        const checkMapLibre = () => {
+          if (typeof window !== 'undefined' && (window as any).maplibregl) {
+            const maplibregl = (window as any).maplibregl;
+            
+            // Use OpenStreetMap tiles via MapLibre
+            const map = new maplibregl.Map({
+              container: mapContainerRef.current,
+              style: {
+                version: 8,
+                sources: {
+                  'osm-tiles': {
+                    type: 'raster',
+                    tiles: [
+                      'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                    ],
+                    tileSize: 256,
+                    attribution: '© OpenStreetMap contributors'
+                  }
+                },
+                layers: [
+                  {
+                    id: 'osm-tiles',
+                    type: 'raster',
+                    source: 'osm-tiles'
+                  }
+                ]
               },
-              layers: [
-                {
-                  id: 'osm-tiles',
-                  type: 'raster',
-                  source: 'osm-tiles'
-                }
-              ]
-            },
-            center: [location.lng, location.lat],
-            zoom: 16,
-          });
+              center: [location.lng, location.lat],
+              zoom: 16,
+            });
 
-          setMapInstance(map);
+            setMapInstance(map);
 
-          // Wait for map to load
-          map.on('load', () => {
-            setIsMapLoading(false);
-            console.log('Map loaded successfully');
-          });
+            // Wait for map to load
+            map.on('load', () => {
+              setIsMapLoading(false);
+              console.log('Map loaded successfully');
+            });
 
-          // Add click handler to map
-          map.on('click', (e: any) => {
-            const { lng, lat } = e.lngLat;
-            handleMapClick(lat, lng);
-          });
+            // Add click handler to map
+            map.on('click', (e: any) => {
+              const { lng, lat } = e.lngLat;
+              handleMapClick(lat, lng);
+            });
 
-          console.log('Map initialized successfully');
-        } else {
-          setTimeout(checkMapLibre, 100);
-        }
-      };
-      
-      checkMapLibre();
-    } catch (error) {
-      console.error('Error initializing map:', error);
-      setIsMapLoading(false);
-      Alert.alert('Map Error', 'Failed to load map. Please try again.');
+            console.log('Map initialized successfully');
+          } else {
+            setTimeout(checkMapLibre, 100);
+          }
+        };
+        
+        checkMapLibre();
+      } catch (error) {
+        console.error('Error initializing map:', error);
+        setIsMapLoading(false);
+        Alert.alert('Map Error', 'Failed to load map. Please try again.');
+      }
     }
   };
 
   const addMarkerToMap = (lat: number, lng: number, address: string, isDraggable: boolean = true) => {
-    if (!mapInstance || Platform.OS !== 'web') return;
-
-    try {
-      const maplibregl = (window as any).maplibregl;
-      
-      // Remove existing marker
-      if (currentMarker) {
-        currentMarker.remove();
-      }
-
-      // Create marker element
-      const markerElement = document.createElement('div');
-      markerElement.style.width = '30px';
-      markerElement.style.height = '30px';
-      markerElement.style.backgroundColor = '#3f66ac';
-      markerElement.style.borderRadius = '50%';
-      markerElement.style.border = '3px solid #ffffff';
-      markerElement.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-      markerElement.style.cursor = isDraggable ? 'grab' : 'pointer';
-
-      // Add marker to map
-      const marker = new maplibregl.Marker({
-        element: markerElement,
-        draggable: isDraggable,
-      })
-        .setLngLat([lng, lat])
-        .addTo(mapInstance);
-
-      // Add drag end event listener
-      if (isDraggable) {
-        marker.on('dragend', () => {
-          const lngLat = marker.getLngLat();
-          handleMarkerDragEnd(lngLat.lat, lngLat.lng);
-        });
-      }
-
-      setCurrentMarker(marker);
-    } catch (error) {
-      console.error('Error adding marker:', error);
-    }
+    // Map functionality not available in React Native
+    console.log('Map marker functionality not available in React Native');
   };
 
   const handleMarkerDragEnd = async (lat: number, lng: number) => {
     try {
+      console.log('🔄 Reverse geocoding for coordinates:', lat, lng);
+      
       // Reverse geocode the dragged location
       const requestId = `reverse-geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       const response = await fetch(
@@ -283,10 +198,13 @@ export default function BusinessAddressScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('Reverse geocoding response:', data);
+        console.log('🔄 Reverse geocoding response:', data);
         
         if (data.results && data.results.length > 0) {
           const result = data.results[0];
+          console.log('🔄 Processing result:', result);
+          
+          // Handle Ola Maps API response format
           const addressComponents = result.address_components || [];
           
           const getComponent = (types: string[]) => {
@@ -310,12 +228,55 @@ export default function BusinessAddressScreen() {
             lng,
           };
           
+          console.log('🔄 Parsed address data:', addressData);
           setSelectedAddress(addressData);
-          setSearchQuery(addressData.formatted_address);
+        } else {
+          console.log('🔄 No results found in reverse geocoding response');
+          // Fallback: create basic address data from coordinates
+          const addressData: SelectedAddress = {
+            street: '',
+            area: '',
+            city: '',
+            state: '',
+            pincode: '',
+            formatted_address: `Location at ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            stateCode: '',
+            lat,
+            lng,
+          };
+          setSelectedAddress(addressData);
         }
+      } else {
+        console.error('🔄 Reverse geocoding failed with status:', response.status);
+        // Fallback: create basic address data from coordinates
+        const addressData: SelectedAddress = {
+          street: '',
+          area: '',
+          city: '',
+          state: '',
+          pincode: '',
+          formatted_address: `Location at ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+          stateCode: '',
+          lat,
+          lng,
+        };
+        setSelectedAddress(addressData);
       }
     } catch (error) {
-      console.error('Reverse geocoding error:', error);
+      console.error('🔄 Reverse geocoding error:', error);
+      // Fallback: create basic address data from coordinates
+      const addressData: SelectedAddress = {
+        street: '',
+        area: '',
+        city: '',
+        state: '',
+        pincode: '',
+        formatted_address: `Location at ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+        stateCode: '',
+        lat,
+        lng,
+      };
+      setSelectedAddress(addressData);
     }
   };
 
@@ -742,8 +703,13 @@ export default function BusinessAddressScreen() {
           >
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Primary Business Address</Text>
+          <Text style={styles.headerTitle}>
+            {addressType === 'branch'
+              ? 'Branch Address'
+              : addressType === 'warehouse'
+              ? 'Warehouse Address'
+              : 'Primary Business Address'}
+          </Text>
         </View>
 
         {/* Search Bar */}
@@ -760,63 +726,24 @@ export default function BusinessAddressScreen() {
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
-          {Platform.OS === 'web' ? (
-            <div
-              ref={mapContainerRef}
-              style={{
-                width: '100%',
-                height: '100%',
-                borderRadius: 0,
-                backgroundColor: '#f8fafc',
-              }}
-            />
-          ) : (
-            <View style={styles.mapPlaceholder}>
-              <MapPin size={48} color="#64748b" />
-              <Text style={styles.mapPlaceholderText}>
-                {Platform.OS === 'web' ? 'Loading map...' : 'Use search to find your address'}
-              </Text>
-              <Text style={styles.mapPlaceholderSubtext}>
-                {Platform.OS === 'web' 
-                  ? 'Interactive map will load shortly' 
-                  : 'Search above or use current location button'}
-              </Text>
-            </View>
-          )}
-          
-          {/* Current Location Button - Floating */}
-          <TouchableOpacity
-            style={styles.floatingLocationButton}
-            onPress={handleGetCurrentLocation}
-            disabled={isGettingLocation}
-            activeOpacity={0.7}
-          >
-            <Navigation size={20} color="#16a34a" />
-          </TouchableOpacity>
-          
-          {/* Map Loading Overlay */}
-          {(isGettingLocation || isMapLoading) && (
-            <View style={styles.mapOverlay}>
-              <Text style={styles.mapOverlayText}>
-                {isGettingLocation ? 'Getting your location...' : 'Loading map...'}
-              </Text>
-            </View>
-          )}
-          
-          {/* Selected Address Display */}
-          {selectedAddress && (
-            <View style={styles.selectedAddressIndicator}>
-              <Text style={styles.selectedAddressText} numberOfLines={2}>
-                📍 {selectedAddress.formatted_address}
-              </Text>
-              {Platform.OS === 'web' && (
-                <Text style={styles.dragHintText}>
-                  💡 Drag the pin to fine-tune your location
-                </Text>
-              )}
-            </View>
-          )}
+          <OlaMapView
+            initialLocation={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined}
+            onMapClick={handleMapClick}
+            onMarkerDragEnd={handleMarkerDragEnd}
+            selectedLocation={selectedAddress ? { lat: selectedAddress.lat || 0, lng: selectedAddress.lng || 0 } : undefined}
+            onMapLoad={() => setIsMapLoading(false)}
+          />
         </View>
+
+        {/* Selected Address Display - Only show when address is selected */}
+        {selectedAddress && (
+          <View style={styles.selectedAddressContainer}>
+            <Text style={styles.selectedAddressLabel}>Selected Address:</Text>
+            <Text style={styles.selectedAddressText} numberOfLines={2}>
+              📍 {selectedAddress.formatted_address}
+            </Text>
+          </View>
+        )}
 
         {/* Bottom Action Buttons */}
         <View style={styles.bottomContainer}>
@@ -1025,5 +952,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#3f66ac',
+  },
+  selectedAddressContainer: {
+    backgroundColor: '#f8fafc',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  selectedAddressLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+    marginBottom: 4,
   },
 });

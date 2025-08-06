@@ -36,59 +36,7 @@ const Colors = {
 };
 
 // Mock customers with receivables
-const mockCustomersWithReceivables = [
-  {
-    id: '1',
-    customerName: 'TechCorp Solutions Pvt Ltd',
-    customerType: 'business',
-    businessName: 'TechCorp Solutions Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    mobile: '+91 87654 32109',
-    totalReceivable: 125000,
-    overdueAmount: 45000,
-    invoiceCount: 3,
-  },
-  {
-    id: '2',
-    customerName: 'Global Enterprises Ltd',
-    customerType: 'business',
-    businessName: 'Global Enterprises Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    mobile: '+91 99887 76655',
-    totalReceivable: 89000,
-    overdueAmount: 89000,
-    invoiceCount: 2,
-  },
-  {
-    id: '3',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    mobile: '+91 98765 43210',
-    totalReceivable: 35000,
-    overdueAmount: 0,
-    invoiceCount: 1,
-  },
-  {
-    id: '4',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    mobile: '+91 76543 21098',
-    totalReceivable: 22000,
-    overdueAmount: 12000,
-    invoiceCount: 2,
-  },
-  {
-    id: '5',
-    customerName: 'Metro Retail Chain',
-    customerType: 'business',
-    businessName: 'Metro Retail Chain Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    mobile: '+91 88776 65544',
-    totalReceivable: 156000,
-    overdueAmount: 0,
-    invoiceCount: 4,
-  },
-];
+const mockCustomersWithReceivables = [];
 
 export default function ReceivePaymentScreen() {
   const { customerId, customerData } = useLocalSearchParams();
@@ -432,7 +380,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

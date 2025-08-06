@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
+import { dataStore, Customer } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -59,155 +60,29 @@ interface Customer {
   categories: string[];
 }
 
-const mockCustomers: Customer[] = [
-  {
-    id: 'CUST-001',
-    name: 'TechCorp Solutions Pvt Ltd',
-    businessName: 'TechCorp Solutions Pvt Ltd',
-    customerType: 'business',
-    contactPerson: 'Rajesh Kumar',
-    mobile: '+91 98765 43210',
-    email: 'orders@techcorp.com',
-    address: '123, Electronic City, Phase 1, Bangalore, Karnataka - 560100',
-    gstin: '29ABCDE1234F2Z6',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    customerScore: 94,
-    onTimePayment: 96,
-    satisfactionRating: 4.9,
-    responseTime: 1.5,
-    totalOrders: 52,
-    completedOrders: 50,
-    pendingOrders: 1,
-    cancelledOrders: 1,
-    returnedOrders: 2,
-    totalValue: 3200000,
-    averageOrderValue: 61538,
-    returnRate: 3.8,
-    lastOrderDate: '2024-01-15',
-    joinedDate: '2023-02-15',
-    status: 'active',
-    paymentTerms: 'Net 30 Days',
-    creditLimit: 500000,
-    categories: ['Smartphones', 'Laptops', 'Audio', 'Accessories']
-  },
-  {
-    id: 'CUST-002',
-    name: 'Global Enterprises Ltd',
-    businessName: 'Global Enterprises Ltd',
-    customerType: 'business',
-    contactPerson: 'Priya Sharma',
-    mobile: '+91 87654 32109',
-    email: 'procurement@globalent.com',
-    address: '456, Bandra West, Mumbai, Maharashtra - 400050',
-    gstin: '27FGHIJ5678K3L9',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    customerScore: 89,
-    onTimePayment: 92,
-    satisfactionRating: 4.7,
-    responseTime: 2.1,
-    totalOrders: 38,
-    completedOrders: 36,
-    pendingOrders: 1,
-    cancelledOrders: 1,
-    returnedOrders: 3,
-    totalValue: 2100000,
-    averageOrderValue: 55263,
-    returnRate: 7.9,
-    lastOrderDate: '2024-01-12',
-    joinedDate: '2023-04-20',
-    status: 'active',
-    paymentTerms: 'Net 15 Days',
-    creditLimit: 300000,
-    categories: ['Smartphones', 'Tablets', 'Audio', 'Home Appliances']
-  },
-  {
-    id: 'CUST-003',
-    name: 'Rajesh Kumar',
-    customerType: 'individual',
-    contactPerson: 'Rajesh Kumar',
-    mobile: '+91 76543 21098',
-    email: 'rajesh@email.com',
-    address: '789, MG Road, Pune, Maharashtra - 411001',
-    avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    customerScore: 87,
-    onTimePayment: 89,
-    satisfactionRating: 4.5,
-    responseTime: 3.2,
-    totalOrders: 15,
-    completedOrders: 14,
-    pendingOrders: 1,
-    cancelledOrders: 0,
-    returnedOrders: 1,
-    totalValue: 450000,
-    averageOrderValue: 30000,
-    returnRate: 6.7,
-    lastOrderDate: '2024-01-10',
-    joinedDate: '2023-08-12',
-    status: 'active',
-    categories: ['Smartphones', 'Audio', 'Accessories']
-  },
-  {
-    id: 'CUST-004',
-    name: 'Metro Retail Chain',
-    businessName: 'Metro Retail Chain Pvt Ltd',
-    customerType: 'business',
-    contactPerson: 'Amit Singh',
-    mobile: '+91 99887 76655',
-    email: 'orders@metroretail.com',
-    address: '321, Jayanagar, 4th Block, Bangalore, Karnataka - 560011',
-    gstin: '29PQRST5678U9V0',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    customerScore: 91,
-    onTimePayment: 94,
-    satisfactionRating: 4.8,
-    responseTime: 1.8,
-    totalOrders: 42,
-    completedOrders: 40,
-    pendingOrders: 2,
-    cancelledOrders: 0,
-    returnedOrders: 1,
-    totalValue: 1800000,
-    averageOrderValue: 42857,
-    returnRate: 2.4,
-    lastOrderDate: '2024-01-14',
-    joinedDate: '2023-06-08',
-    status: 'active',
-    paymentTerms: 'Net 45 Days',
-    creditLimit: 750000,
-    categories: ['Smartphones', 'Laptops', 'Audio', 'Gaming']
-  },
-  {
-    id: 'CUST-005',
-    name: 'Sunita Devi',
-    customerType: 'individual',
-    contactPerson: 'Sunita Devi',
-    mobile: '+91 88776 65544',
-    email: 'sunita@email.com',
-    address: '567, Whitefield, Bangalore, Karnataka - 560066',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    customerScore: 82,
-    onTimePayment: 85,
-    satisfactionRating: 4.3,
-    responseTime: 4.5,
-    totalOrders: 8,
-    completedOrders: 7,
-    pendingOrders: 1,
-    cancelledOrders: 0,
-    returnedOrders: 2,
-    totalValue: 180000,
-    averageOrderValue: 22500,
-    returnRate: 25.0,
-    lastOrderDate: '2024-01-08',
-    joinedDate: '2023-11-12',
-    status: 'active',
-    categories: ['Smartphones', 'Accessories']
-  },
-];
+const mockCustomers: Customer[] = [];
 
 export default function CustomersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredCustomers, setFilteredCustomers] = useState(mockCustomers);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'business' | 'high_score'>('all');
+
+  // Subscribe to data store changes
+  React.useEffect(() => {
+    const unsubscribe = dataStore.subscribe(() => {
+      const allCustomers = dataStore.getCustomers();
+      setCustomers(allCustomers);
+      applyFilters(searchQuery, selectedFilter);
+    });
+
+    // Initial load
+    const allCustomers = dataStore.getCustomers();
+    setCustomers(allCustomers);
+    setFilteredCustomers(allCustomers);
+
+    return unsubscribe;
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -220,7 +95,7 @@ export default function CustomersScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockCustomers;
+    let filtered = customers;
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -571,9 +446,9 @@ export default function CustomersScreen() {
           contentContainerStyle={styles.filterScrollContent}
         >
           {[
-            { key: 'all', label: 'All Customers', count: mockCustomers.length },
-            { key: 'business', label: 'Business Only', count: mockCustomers.filter(c => c.customerType === 'business').length },
-            { key: 'high_score', label: 'High Score', count: mockCustomers.filter(c => c.customerScore >= 85).length },
+                          { key: 'all', label: 'All Customers', count: customers.length },
+              { key: 'business', label: 'Business Only', count: customers.filter(c => c.customerType === 'business').length },
+              { key: 'high_score', label: 'High Score', count: customers.filter(c => c.customerScore >= 85).length },
           ].map((filter) => (
             <TouchableOpacity
               key={filter.key}
@@ -1026,7 +901,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

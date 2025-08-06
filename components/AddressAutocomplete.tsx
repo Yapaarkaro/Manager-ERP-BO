@@ -8,13 +8,14 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
-import { Search, MapPin } from 'lucide-react-native';
+import { Search, MapPin, Edit3 } from 'lucide-react-native';
 
 interface AddressAutocompleteProps {
   placeholder?: string;
   value: string;
   onChangeText: (text: string) => void;
   onAddressSelect: (address: any) => void;
+  onManualEntry?: () => void;
 }
 
 interface AddressSuggestion {
@@ -35,6 +36,7 @@ export default function AddressAutocomplete({
   value,
   onChangeText,
   onAddressSelect,
+  onManualEntry,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -181,9 +183,31 @@ export default function AddressAutocomplete({
   };
 
   const handleSuggestionSelect = (suggestion: AddressSuggestion) => {
-    onAddressSelect(suggestion);
+    console.log('🏠 Selected address from search:', suggestion);
+    
+    // IMMEDIATELY close suggestions and clear all states
     setShowSuggestions(false);
     setSuggestions([]);
+    
+    // Clear the search input (like the working business address screen)
+    onChangeText('');
+    
+    // Call the parent's onAddressSelect
+    onAddressSelect(suggestion);
+  };
+
+  const handleManualEntry = () => {
+    // Close suggestions
+    setShowSuggestions(false);
+    setSuggestions([]);
+    
+    // Blur the input to ensure suggestions are hidden
+    // inputRef.current?.blur(); // This line is removed as per the edit hint
+    
+    // Call the manual entry callback if provided
+    if (onManualEntry) {
+      onManualEntry();
+    }
   };
 
   const handleInputFocus = () => {
@@ -193,10 +217,8 @@ export default function AddressAutocomplete({
   };
 
   const handleInputBlur = () => {
-    // Delay hiding suggestions to allow for selection
-    setTimeout(() => {
-      setShowSuggestions(false);
-    }, 200);
+    // Hide suggestions immediately
+    setShowSuggestions(false);
   };
 
   return (
@@ -219,14 +241,16 @@ export default function AddressAutocomplete({
         )}
       </View>
 
-      {showSuggestions && suggestions.length > 0 && (
+
+
+      {showSuggestions && (
         <View style={styles.suggestionsContainer}>
           <ScrollView
             style={styles.suggestionsList}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {suggestions.map((suggestion, index) => (
+            {suggestions.length > 0 && suggestions.map((suggestion, index) => (
               <TouchableOpacity
                 key={`${suggestion.place_id}-${index}`}
                 style={styles.suggestionItem}
@@ -244,9 +268,13 @@ export default function AddressAutocomplete({
                 </View>
               </TouchableOpacity>
             ))}
+            
+
           </ScrollView>
         </View>
       )}
+
+
     </View>
   );
 }
@@ -328,4 +356,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
   },
+
 });

@@ -840,14 +840,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  summaryLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
+
   netSalesRow: {
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],

@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, ShoppingCart, FileText, X } from 'lucide-react-native';
+import { dataStore, Sale, SaleItem } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -31,6 +32,85 @@ export default function SaleSuccessScreen() {
   const { paymentData } = useLocalSearchParams();
   const payment = JSON.parse(paymentData as string);
   const [showInvoice, setShowInvoice] = useState(false);
+
+  // Debug: Log customer data
+  React.useEffect(() => {
+    console.log('=== SUCCESS SCREEN CUSTOMER DATA ===');
+    console.log('Customer:', payment.customer);
+    console.log('Payment Terms:', payment.customer.paymentTerms);
+    console.log('Business Name:', payment.customer.businessName);
+    console.log('Is Business Customer:', payment.customer.isBusinessCustomer);
+    console.log('====================================');
+  }, []);
+
+  // Log successful sale completion and add to data store
+  React.useEffect(() => {
+    console.log('=== SALE COMPLETED SUCCESSFULLY ===');
+    console.log('Invoice Number:', invoiceNumber);
+    console.log('Customer:', payment.customer.name);
+    console.log('Customer Type:', payment.customer.customerType);
+    console.log('Total Amount:', formatAmount(payment.total));
+    console.log('Payment Method:', getPaymentMethodText());
+    console.log('Items Count:', payment.cartItems.length);
+    console.log('Completed at:', new Date().toISOString());
+    payment.cartItems.forEach((item: any, index: number) => {
+      console.log(`Item ${index + 1}:`);
+      console.log('  Product Name:', item.name);
+      console.log('  Quantity:', item.quantity);
+      console.log('  Unit Price:', formatAmount(item.price));
+      console.log('  Total:', formatAmount(item.price * item.quantity));
+      console.log('  Tax Rate:', item.taxRate + '%');
+      console.log('  HSN Code:', item.hsnCode);
+      console.log('  Batch Number:', item.batchNumber);
+      console.log('  Primary Unit:', item.primaryUnit);
+    });
+    console.log('==================================');
+
+    // Create sale data and add to data store
+    const saleItems: SaleItem[] = payment.cartItems.map((item: any) => ({
+      productId: item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      productName: item.name,
+      quantity: item.quantity,
+      unitPrice: item.price,
+      totalPrice: item.price * item.quantity,
+      taxRate: item.taxRate || 0,
+      taxAmount: (item.price * item.quantity) * ((item.taxRate || 0) / 100),
+      cessType: item.cessType || 'none',
+      cessRate: item.cessRate || 0,
+      cessAmount: item.cessAmount ?? 0,
+      hsnCode: item.hsnCode || item.category,
+      batchNumber: item.batchNumber,
+      primaryUnit: item.primaryUnit || 'unit',
+    }));
+
+    const subtotal = saleItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const taxAmount = saleItems.reduce((sum, item) => sum + item.taxAmount, 0);
+    const cessAmount = saleItems.reduce((sum, item) => sum + (item.cessAmount ?? 0), 0);
+    const totalAmount = subtotal + taxAmount + cessAmount;
+
+    const sale: Sale = {
+      id: `SALE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      invoiceNumber: invoiceNumber,
+      customerId: payment.customer.id || `CUST_${Date.now()}`,
+      customerName: payment.customer.name,
+      customerType: payment.customer.isBusinessCustomer ? 'business' : 'individual',
+      items: saleItems,
+      subtotal: subtotal,
+      taxAmount: taxAmount,
+      cessAmount: cessAmount,
+      totalAmount: totalAmount,
+      paidAmount: payment.amount,
+      balanceAmount: payment.balance || 0,
+      paymentMethod: payment.method,
+      othersMethod: payment.othersMethod,
+      saleDate: new Date().toISOString(),
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+    };
+
+    // Add sale to data store
+    dataStore.addSale(sale);
+  }, []);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -284,9 +364,27 @@ export default function SaleSuccessScreen() {
                     {payment.customer.gstin && (
                       <Text style={styles.customerGSTIN}>GSTIN: {payment.customer.gstin}</Text>
                     )}
+                    {payment.customer.paymentTerms && (
+                      <Text style={styles.customerPaymentTerms}>Payment Terms: {payment.customer.paymentTerms}</Text>
+                    )}
+                    
+                    {/* Bill-to Address */}
+                    <Text style={styles.addressLabel}>Bill-to Address:</Text>
                     <Text style={styles.customerAddress}>
                       {payment.customer.businessAddress || payment.customer.address}
                     </Text>
+                    
+                    {/* Ship-to Address (if different) */}
+                    {payment.customer.shipToAddress && 
+                     payment.customer.shipToAddress.trim() !== '' && 
+                     payment.customer.shipToAddress !== payment.customer.businessAddress && (
+                      <>
+                        <Text style={styles.addressLabel}>Ship-to Address:</Text>
+                        <Text style={styles.customerAddress}>
+                          {payment.customer.shipToAddress}
+                        </Text>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
@@ -343,14 +441,14 @@ export default function SaleSuccessScreen() {
                   
                   return (
                     <View key={index} style={styles.tableRow}>
-                      <View style={[styles.tableCell, styles.srColumn]}>
+                      <View style={[styles.srColumn]}>
                         <Text style={styles.srNumber}>{index + 1}</Text>
                       </View>
-                      <View style={[styles.tableCell, styles.itemColumn]}>
+                      <View style={[styles.itemColumn]}>
                         <Text style={styles.itemName}>{item.name}</Text>
                         <Text style={styles.itemHSN}>HSN: {item.hsnCode || item.category}</Text>
                       </View>
-                      <View style={[styles.tableCell, styles.detailsColumn]}>
+                      <View style={[styles.detailsColumn]}>
                         <Text style={styles.itemDetails}>
                           {item.quantity} × {formatAmount(item.price)} per {item.primaryUnit || 'unit'}
                         </Text>
@@ -766,12 +864,6 @@ const styles = StyleSheet.create({
   invoiceInfo: {
     alignItems: 'flex-end',
   },
-  invoiceNumberText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.primary,
-    marginBottom: 4,
-  },
   invoiceDate: {
     fontSize: 12,
     color: Colors.textLight,
@@ -808,9 +900,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textLight,
   },
+  customerPaymentTerms: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
   customerAddress: {
     fontSize: 12,
     color: Colors.textLight,
+    marginBottom: 2,
+  },
+  addressLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 8,
     marginBottom: 2,
   },
   taxBreakdownSection: {
@@ -878,12 +982,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   tableCell: {
-    fontSize: 11,
-    color: Colors.text,
+    // Layout styles for View components
   },
   srColumn: {
     flex: 0.5,
-    textAlign: 'center',
+    alignItems: 'center',
   },
   itemColumn: {
     flex: 2,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { productStore, Product } from '@/utils/productStore';
 import { 
   ArrowLeft, 
   Search, 
   Scan,
   Plus,
-  ShoppingCart
+  ShoppingCart,
+  Package
 } from 'lucide-react-native';
 
 const Colors = {
@@ -35,78 +37,42 @@ const Colors = {
   }
 };
 
-interface RecentProduct {
-  id: string;
-  name: string;
-  price: number;
-  image: string;
-  lastBilled: string;
-  category: string;
-}
 
-const recentProducts: RecentProduct[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro',
-    price: 129900,
-    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '2 hours ago',
-    category: 'Electronics'
-  },
-  {
-    id: '2',
-    name: 'Samsung Galaxy S23',
-    price: 89999,
-    image: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '5 hours ago',
-    category: 'Electronics'
-  },
-  {
-    id: '3',
-    name: 'MacBook Air M2',
-    price: 114900,
-    image: 'https://images.pexels.com/photos/205421/pexels-photo-205421.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '1 day ago',
-    category: 'Computers'
-  },
-  {
-    id: '4',
-    name: 'AirPods Pro',
-    price: 24900,
-    image: 'https://images.pexels.com/photos/3780681/pexels-photo-3780681.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '2 days ago',
-    category: 'Audio'
-  },
-  {
-    id: '5',
-    name: 'iPad Pro 11"',
-    price: 81900,
-    image: 'https://images.pexels.com/photos/1334597/pexels-photo-1334597.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '3 days ago',
-    category: 'Tablets'
-  },
-  {
-    id: '6',
-    name: 'Apple Watch Series 8',
-    price: 45900,
-    image: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    lastBilled: '1 week ago',
-    category: 'Wearables'
-  },
-];
 
 export default function NewSaleScreen() {
   const { preSelectedCustomer } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
-  const handleProductSelect = (product: RecentProduct) => {
+  // Load products from store
+  useEffect(() => {
+    const products = productStore.getProducts();
+    setRecentProducts(products);
+  }, []);
+
+  // Subscribe to product store changes
+  useEffect(() => {
+    const unsubscribe = productStore.subscribe(() => {
+      const products = productStore.getProducts();
+      setRecentProducts(products);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleProductSelect = (product: Product) => {
     // Navigate to cart with selected product
     router.push({
       pathname: '/new-sale/cart',
       params: {
         selectedProducts: JSON.stringify([{
           ...product,
-          quantity: 1
+          quantity: 1,
+          price: product.salesPrice,
+          // Ensure CESS fields are passed
+          cessType: product.cessType || 'none',
+          cessRate: product.cessRate || 0,
+          cessAmount: product.cessAmount || 0,
+          cessUnit: product.cessUnit || ''
         }]),
         preSelectedCustomer: preSelectedCustomer
       }
@@ -198,12 +164,12 @@ export default function NewSaleScreen() {
                 <Text style={styles.productCategory}>
                   {product.category}
                 </Text>
-                <Text style={styles.productPrice}>
-                  {formatPrice(product.price)}
-                </Text>
-                <Text style={styles.lastBilled}>
-                  Last billed: {product.lastBilled}
-                </Text>
+                            <Text style={styles.productPrice}>
+              {formatPrice(product.salesPrice)}
+            </Text>
+                                  <Text style={styles.lastBilled}>
+                    Stock: {product.currentStock} {product.primaryUnit}
+                  </Text>
               </View>
               <View style={styles.addButton}>
                 <Plus size={16} color="#ffffff" />
@@ -402,7 +368,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     marginLeft: 12,
-    outlineStyle: 'none',
   },
   scanButton: {
     width: 48,

@@ -19,6 +19,7 @@ const Colors = {
   success: '#059669',
   error: '#DC2626',
   warning: '#D97706',
+  orange: '#F97316',
   grey: {
     50: '#F9FAFB',
     100: '#F3F4F6',

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
+import { dataStore, Supplier } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -481,15 +482,17 @@ export default function AddSupplierScreen() {
 
     setIsSubmitting(true);
 
-    const supplierData = {
+    const newSupplier: Supplier = {
       id: `SUPP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: formData.contactPerson.trim(),
       businessName: formData.businessName.trim(),
+      supplierType: 'business',
       contactPerson: formData.contactPerson.trim(),
       mobile: formData.mobile.trim(),
       email: formData.email.trim(),
       address: `${formData.addressLine1.trim()}, ${formData.addressLine2.trim() ? formData.addressLine2.trim() + ', ' : ''}${formData.addressLine3.trim() ? formData.addressLine3.trim() + ', ' : ''}${formData.city.trim()}, ${formData.pincode.trim()}, ${formData.state.trim()}`,
       gstin: formData.gstin.trim(),
-      notes: formData.notes.trim(),
+      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
       supplierScore: 85,
       onTimeDelivery: 90,
       qualityRating: 4.5,
@@ -498,17 +501,21 @@ export default function AddSupplierScreen() {
       completedOrders: 0,
       pendingOrders: 0,
       cancelledOrders: 0,
-      returnedOrders: 0,
       totalValue: 0,
-      averageOrderValue: 0,
-      returnRate: 0,
       lastOrderDate: null,
       joinedDate: new Date().toISOString(),
       status: 'active',
+      paymentTerms: 'Net 30 Days',
+      deliveryTime: '3-5 Business Days',
+      categories: ['Electronics', 'Accessories'],
+      productCount: 0,
       createdAt: new Date().toISOString(),
     };
 
-    console.log('Creating new supplier:', supplierData);
+    // Add supplier to data store
+    dataStore.addSupplier(newSupplier);
+
+    console.log('Creating new supplier:', newSupplier);
     
     setTimeout(() => {
       Alert.alert('Success', 'Supplier added successfully', [
@@ -519,7 +526,7 @@ export default function AddSupplierScreen() {
             if (returnToAddProduct === 'true') {
               // Return to add product page with the new supplier data
               const supplierData = {
-                id: `SUPP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                id: newSupplier.id,
                 name: formData.contactPerson,
                 gstin: formData.gstin,
                 businessName: formData.businessName,

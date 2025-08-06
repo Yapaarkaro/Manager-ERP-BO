@@ -10,10 +10,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import {
-  ArrowLeft,
-  Search,
-  Package,
+import { productStore, Product } from '@/utils/productStore';
+import { 
+  ArrowLeft, 
+  Search, 
+  Scan,
+  Check,
+  Package
 } from 'lucide-react-native';
 
 const Colors = {
@@ -32,87 +35,34 @@ const Colors = {
   }
 };
 
-interface Product {
-  id: string;
-  name: string;
-  image: string;
-  category: string;
-  currentStock: number;
-  unitPrice: number;
-  barcode: string;
-  supplier: string;
-  location: string;
-  primaryUnit: string;
-}
 
-const mockProducts: Product[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro 128GB',
-    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 25,
-    unitPrice: 115000,
-    barcode: '1234567890123',
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - A1',
-    primaryUnit: 'Piece',
-  },
-  {
-    id: '2',
-    name: 'Samsung Galaxy S23 Ultra',
-    image: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 7,
-    unitPrice: 110000,
-    barcode: '2345678901234',
-    supplier: 'Samsung Electronics',
-    location: 'Main Warehouse - A2',
-    primaryUnit: 'Piece',
-  },
-  {
-    id: '3',
-    name: 'MacBook Pro 14" M2',
-    image: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 12,
-    unitPrice: 180000,
-    barcode: '3456789012345',
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - B1',
-    primaryUnit: 'Piece',
-  },
-  {
-    id: '4',
-    name: 'Dell XPS 13 Plus',
-    image: 'https://images.pexels.com/photos/7974/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 8,
-    unitPrice: 140000,
-    barcode: '4567890123456',
-    supplier: 'Dell Technologies',
-    location: 'Main Warehouse - B2',
-    primaryUnit: 'Piece',
-  },
-];
 
 export default function ManualProductScreen() {
   const { reason } = useLocalSearchParams<{ reason: string }>();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredProducts, setFilteredProducts] = useState(mockProducts);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
+
+  // Load products from store
+  useEffect(() => {
+    const products = productStore.getProducts();
+    setFilteredProducts(products);
+  }, []);
+
+  // Subscribe to product store changes
+  useEffect(() => {
+    const unsubscribe = productStore.subscribe(() => {
+      const products = productStore.getProducts();
+      setFilteredProducts(products);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (searchQuery.trim() === '') {
-      setFilteredProducts(mockProducts);
+      setFilteredProducts(productStore.getProducts());
     } else {
-      const filtered = mockProducts.filter(product =>
-        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.supplier.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.barcode.includes(searchQuery)
-      );
-      setFilteredProducts(filtered);
+      setFilteredProducts(productStore.searchProducts(searchQuery));
     }
   }, [searchQuery]);
 
@@ -130,6 +80,23 @@ export default function ManualProductScreen() {
     if (selectedProducts.length === 0) {
       return;
     }
+
+    // Log selected products for stock out
+    console.log('=== PRODUCTS SELECTED FOR STOCK OUT (MANUAL) ===');
+    console.log('Reason:', reason);
+    selectedProducts.forEach((product, index) => {
+      console.log(`Product ${index + 1}:`);
+      console.log('  ID:', product.id);
+      console.log('  Name:', product.name);
+      console.log('  Current Stock:', product.currentStock);
+      console.log('  Unit Price:', product.unitPrice);
+      console.log('  Category:', product.category);
+      console.log('  Supplier:', product.supplier);
+      console.log('  Location:', product.location);
+      console.log('  Primary Unit:', product.primaryUnit);
+    });
+    console.log('Selected at:', new Date().toISOString());
+    console.log('==============================================');
 
     router.push({
       pathname: '/inventory/stock-out/stock-details',

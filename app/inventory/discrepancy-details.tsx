@@ -1116,7 +1116,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 16,
     minHeight: 100,
-    outlineStyle: 'none',
+    
   },
   addNoteSubmitButton: {
     backgroundColor: Colors.primary,

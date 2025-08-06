@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { productStore, Product } from '@/utils/productStore';
 import { 
   ArrowLeft, 
   Search, 
@@ -40,174 +42,33 @@ const Colors = {
   }
 };
 
-interface Product {
-  id: string;
-  name: string;
-  image: string;
-  category: string;
-  currentStock: number;
-  minStockLevel: number;
-  maxStockLevel: number;
-  unitPrice: number;
-  salesPrice: number;
-  hsnCode: string;
-  barcode: string;
-  taxRate: number;
-  supplier: string;
-  location: string;
-  lastRestocked: string;
-  stockValue: number;
-  primaryUnit: string;
-  secondaryUnit?: string;
-  urgencyLevel: 'normal' | 'low' | 'critical';
-}
 
-const mockProducts: Product[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro 128GB',
-    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 25,
-    minStockLevel: 10,
-    maxStockLevel: 50,
-    unitPrice: 115000,
-    salesPrice: 129900,
-    hsnCode: '85171200',
-    batchNumber: 'BATCH-IP14-2024-001',
-    barcode: '1234567890123',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - A1',
-    lastRestocked: '2024-01-10',
-    stockValue: 2875000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'normal'
-  },
-  {
-    id: '2',
-    name: 'Samsung Galaxy S23 Ultra',
-    image: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 7,
-    minStockLevel: 15,
-    maxStockLevel: 40,
-    unitPrice: 110000,
-    salesPrice: 124999,
-    hsnCode: '85171200',
-    batchNumber: 'BATCH-SG23-2024-002',
-    barcode: '2345678901234',
-    taxRate: 18,
-    supplier: 'Samsung Electronics',
-    location: 'Main Warehouse - A2',
-    lastRestocked: '2024-01-08',
-    stockValue: 770000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'low'
-  },
-  {
-    id: '3',
-    name: 'MacBook Air M2',
-    image: 'https://images.pexels.com/photos/205421/pexels-photo-205421.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 5,
-    minStockLevel: 12,
-    maxStockLevel: 30,
-    unitPrice: 100000,
-    salesPrice: 114900,
-    hsnCode: '84713000',
-    batchNumber: 'BATCH-MBA-2024-003',
-    barcode: '3456789012345',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - B1',
-    lastRestocked: '2024-01-05',
-    stockValue: 500000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'critical'
-  },
-  {
-    id: '4',
-    name: 'AirPods Pro 2nd Gen',
-    image: 'https://images.pexels.com/photos/3780681/pexels-photo-3780681.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Audio',
-    currentStock: 2,
-    minStockLevel: 20,
-    maxStockLevel: 60,
-    unitPrice: 22000,
-    salesPrice: 24900,
-    hsnCode: '85183000',
-    batchNumber: 'BATCH-APP-2024-004',
-    barcode: '4567890123456',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - C1',
-    lastRestocked: '2024-01-12',
-    stockValue: 44000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'critical'
-  },
-  {
-    id: '5',
-    name: 'Dell XPS 13',
-    image: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 15,
-    minStockLevel: 8,
-    maxStockLevel: 25,
-    unitPrice: 75000,
-    salesPrice: 89999,
-    hsnCode: '84713000',
-    batchNumber: 'BATCH-DX13-2024-005',
-    barcode: '5678901234567',
-    taxRate: 18,
-    supplier: 'Dell Technologies',
-    location: 'Main Warehouse - B2',
-    lastRestocked: '2024-01-07',
-    stockValue: 1125000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'normal'
-  },
-  {
-    id: '6',
-    name: 'Sony WH-1000XM4',
-    image: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Audio',
-    currentStock: 12,
-    minStockLevel: 15,
-    maxStockLevel: 35,
-    unitPrice: 25000,
-    salesPrice: 29990,
-    hsnCode: '85183000',
-    batchNumber: 'BATCH-SWH-2024-006',
-    barcode: '6789012345678',
-    taxRate: 18,
-    supplier: 'Sony India',
-    location: 'Main Warehouse - C2',
-    lastRestocked: '2024-01-09',
-    stockValue: 300000,
-    primaryUnit: 'Piece',
-    urgencyLevel: 'low'
-  },
-];
 
 export default function InventoryScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredProducts, setFilteredProducts] = useState(mockProducts);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+
+  // Refresh products when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshProducts();
+    }, [])
+  );
+
+  // Subscribe to product store changes
+  useEffect(() => {
+    const unsubscribe = productStore.subscribe(() => {
+      refreshProducts();
+    });
+    return unsubscribe;
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredProducts(mockProducts);
+      setFilteredProducts(productStore.getProducts());
     } else {
-      const filtered = mockProducts.filter(product =>
-        product.name.toLowerCase().includes(query.toLowerCase()) ||
-        product.category.toLowerCase().includes(query.toLowerCase()) ||
-        product.supplier.toLowerCase().includes(query.toLowerCase()) ||
-        product.hsnCode.includes(query) ||
-        product.barcode.includes(query)
-      );
-      setFilteredProducts(filtered);
+      setFilteredProducts(productStore.searchProducts(query));
     }
   };
 
@@ -222,7 +83,24 @@ export default function InventoryScreen() {
   };
 
   const handleAddProduct = () => {
+    console.log('=== NAVIGATING TO ADD PRODUCT SCREEN ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('========================================');
     router.push('/inventory/add-product');
+  };
+
+  // Function to refresh products (called when returning from add product)
+  const refreshProducts = () => {
+    const products = productStore.getProducts();
+    setFilteredProducts(products);
+    console.log('=== PRODUCTS REFRESHED ===');
+    console.log('Total products:', products.length);
+    if (products.length > 0) {
+      products.forEach((product: Product, index: number) => {
+        console.log(`Product ${index + 1}:`, product.name, '-', product.category);
+      });
+    }
+    console.log('==========================');
   };
 
   const handleLowStockPress = () => {
@@ -267,10 +145,10 @@ export default function InventoryScreen() {
   };
 
   const totalStockValue = filteredProducts.reduce((sum, product) => sum + product.stockValue, 0);
-  const lowStockItems = mockProducts.filter(product => 
+  const lowStockItems = productStore.getProducts().filter(product => 
     product.currentStock <= product.minStockLevel
   ).length;
-  const criticalItems = mockProducts.filter(product => 
+  const criticalItems = productStore.getProducts().filter(product => 
     product.urgencyLevel === 'critical'
   ).length;
 
@@ -466,6 +344,18 @@ export default function InventoryScreen() {
             <Text style={styles.emptyStateText}>
               {searchQuery ? 'No products match your search criteria' : 'Add your first product to get started'}
             </Text>
+            {productStore.getProductCount() > 0 && (
+              <TouchableOpacity
+                style={[styles.addButton, { backgroundColor: Colors.error, marginTop: 16 }]}
+                onPress={() => {
+                  productStore.clearProducts();
+                  console.log('=== ALL PRODUCTS CLEARED ===');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.alertButtonText, { color: Colors.background }]}>Clear All Products (Test)</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           filteredProducts.map(renderProductCard)
@@ -884,7 +774,6 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
   },
   filterButton: {
     width: 32,

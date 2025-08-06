@@ -333,7 +333,7 @@ export default function StaffScreen() {
 
   const handleEditStaff = (staffId: string) => {
     router.push({
-      pathname: '/people/edit-staff',
+      pathname: '/people/add-staff',
       params: { staffId }
     });
   };
@@ -1189,7 +1189,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

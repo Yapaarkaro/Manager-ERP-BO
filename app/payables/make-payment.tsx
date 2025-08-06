@@ -36,61 +36,7 @@ const Colors = {
 };
 
 // Mock suppliers with payables
-const mockSuppliersWithPayables = [
-  {
-    id: '1',
-    supplierName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    mobile: '+91 87654 32109',
-    totalPayable: 850000,
-    overdueAmount: 250000,
-    billCount: 4,
-  },
-  {
-    id: '2',
-    supplierName: 'Samsung Electronics',
-    supplierType: 'business',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    mobile: '+91 99887 76655',
-    totalPayable: 650000,
-    overdueAmount: 650000,
-    billCount: 3,
-  },
-  {
-    id: '3',
-    supplierName: 'Dell Technologies',
-    supplierType: 'business',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    mobile: '+91 88776 65544',
-    totalPayable: 420000,
-    overdueAmount: 0,
-    billCount: 2,
-  },
-  {
-    id: '4',
-    supplierName: 'Local Electronics Supplier',
-    supplierType: 'individual',
-    mobile: '+91 98765 43210',
-    totalPayable: 180000,
-    overdueAmount: 80000,
-    billCount: 2,
-  },
-  {
-    id: '5',
-    supplierName: 'Tech Distributors Ltd',
-    supplierType: 'business',
-    businessName: 'Tech Distributors Ltd',
-    gstin: '29PQRST5678U9V0',
-    mobile: '+91 76543 21098',
-    totalPayable: 320000,
-    overdueAmount: 0,
-    billCount: 3,
-  },
-];
+const mockSuppliersWithPayables = [];
 
 export default function MakePaymentScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();
@@ -434,7 +380,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
     color: '#047857',
     fontWeight: '600',
     textAlign: 'right',
-    outlineStyle: 'none',
+    
   },
   fieldHint: {
     fontSize: 12,

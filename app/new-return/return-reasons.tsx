@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 16,
     minHeight: 80,
-    outlineStyle: 'none',
+    
   },
   customReasonButton: {
     backgroundColor: Colors.error,

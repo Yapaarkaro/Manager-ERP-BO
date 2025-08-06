@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: Colors.text,
-    outlineStyle: 'none',
+    
   },
   searchCloseButton: {
     padding: 4,
@@ -652,7 +652,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.text,
     lineHeight: 20,
-    outlineStyle: 'none',
+    
   },
   sendButton: {
     width: 40,

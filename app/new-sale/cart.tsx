@@ -12,6 +12,7 @@ import {
 import { showError } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { productStore, Product } from '@/utils/productStore';
 import { 
   ArrowLeft, 
   Search, 
@@ -25,7 +26,8 @@ import {
   Hash,
   Percent,
   X,
-  Upload
+  Upload,
+  Package
 } from 'lucide-react-native';
 
 const Colors = {
@@ -116,12 +118,60 @@ export default function CartScreen() {
   const [invoiceDiscountType, setInvoiceDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [invoiceDiscountValue, setInvoiceDiscountValue] = useState('');
   const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState('');
+
+  // Logging function to track product additions to cart
+  const logProductToCart = (product: CartProduct) => {
+    console.log('=== PRODUCT ADDED TO CART ===');
+    console.log('Product ID:', product.id);
+    console.log('Product Name:', product.name);
+    console.log('Price:', product.price);
+    console.log('Quantity:', product.quantity);
+    console.log('Category:', product.category);
+    console.log('Tax Rate:', product.taxRate);
+    console.log('HSN Code:', product.hsnCode);
+    console.log('Batch Number:', product.batchNumber);
+    console.log('Primary Unit:', product.primaryUnit);
+    console.log('CESS Type:', product.cessType);
+    console.log('CESS Rate:', product.cessRate);
+    console.log('CESS Amount:', product.cessAmount);
+    console.log('CESS Unit:', product.cessUnit);
+    console.log('Added at:', new Date().toISOString());
+    console.log('============================');
+  };
+
+  // Logging function to track new product creation
+  const logNewProductCreation = (product: CartProduct) => {
+    console.log('=== NEW PRODUCT CREATED ===');
+    console.log('Product ID:', product.id);
+    console.log('Product Name:', product.name);
+    console.log('Price:', product.price);
+    console.log('Category:', product.category);
+    console.log('Barcode:', product.barcode);
+    console.log('Tax Rate:', product.taxRate);
+    console.log('HSN Code:', product.hsnCode);
+    console.log('Batch Number:', product.batchNumber);
+    console.log('Primary Unit:', product.primaryUnit);
+    console.log('CESS Type:', product.cessType);
+    console.log('CESS Rate:', product.cessRate);
+    console.log('CESS Amount:', product.cessAmount);
+    console.log('CESS Unit:', product.cessUnit);
+    console.log('Created at:', new Date().toISOString());
+    console.log('==========================');
+  };
 
   useEffect(() => {
     if (selectedProducts) {
       try {
         const products = JSON.parse(selectedProducts as string);
         setCartItems(products);
+        // Log products added from selection
+        products.forEach((product: CartProduct) => {
+          logProductToCart(product);
+        });
       } catch (error) {
         console.error('Error parsing selected products:', error);
       }
@@ -153,7 +203,41 @@ export default function CartScreen() {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    // Implement product search functionality
+    if (query.trim() === '') {
+      setSearchResults([]);
+    } else {
+      const results = productStore.searchProducts(query);
+      setSearchResults(results);
+    }
+  };
+
+  const handleSearchModalOpen = () => {
+    setShowSearchModal(true);
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
+  const handleSearchModalClose = () => {
+    setShowSearchModal(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
+  const handleProductSelectFromSearch = (product: Product) => {
+    const cartProduct: CartProduct = {
+      ...product,
+      quantity: 1,
+      price: product.salesPrice,
+      // Ensure CESS fields are passed
+      cessType: product.cessType || 'none',
+      cessRate: product.cessRate || 0,
+      cessAmount: product.cessAmount || 0,
+      cessUnit: product.cessUnit || ''
+    };
+    
+    setCartItems(prev => [...prev, cartProduct]);
+    logProductToCart(cartProduct);
+    handleSearchModalClose();
   };
 
   const handleEditProduct = (product: CartProduct) => {
@@ -182,11 +266,37 @@ export default function CartScreen() {
 
   const handleSaveNewProduct = (newProduct: CartProduct) => {
     setCartItems(prev => [...prev, newProduct]);
+    logNewProductCreation(newProduct);
     setShowAddProductModal(false);
   };
 
   const handleCancelAddProduct = () => {
     setShowAddProductModal(false);
+  };
+
+  const handlePriceEditStart = (item: CartProduct) => {
+    setEditingPriceId(item.id);
+    setEditingPriceValue(item.price.toString());
+  };
+
+  const handlePriceEditSave = (itemId: string) => {
+    const newPrice = parseFloat(editingPriceValue) || 0;
+    if (newPrice > 0) {
+      setCartItems(prev => 
+        prev.map(item => 
+          item.id === itemId 
+            ? { ...item, price: newPrice }
+            : item
+        )
+      );
+    }
+    setEditingPriceId(null);
+    setEditingPriceValue('');
+  };
+
+  const handlePriceEditCancel = () => {
+    setEditingPriceId(null);
+    setEditingPriceValue('');
   };
 
   const calculateItemTotal = (item: CartProduct) => {
@@ -359,9 +469,46 @@ export default function CartScreen() {
 
                   {/* Right: Price */}
                   <View style={styles.rightSection}>
-                    <Text style={styles.productPrice}>
-                      {formatPrice(item.price)}
-                    </Text>
+                    {editingPriceId === item.id ? (
+                      <View style={styles.priceEditContainer}>
+                        <TextInput
+                          style={styles.priceEditInput}
+                          value={editingPriceValue}
+                          onChangeText={setEditingPriceValue}
+                          keyboardType="decimal-pad"
+                          placeholder="0"
+                          placeholderTextColor={Colors.textLight}
+                          autoFocus
+                          onBlur={() => handlePriceEditSave(item.id)}
+                          onSubmitEditing={() => handlePriceEditSave(item.id)}
+                        />
+                        <TouchableOpacity
+                          style={styles.priceEditSaveButton}
+                          onPress={() => handlePriceEditSave(item.id)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.priceEditSaveText}>✓</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.priceEditCancelButton}
+                          onPress={handlePriceEditCancel}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.priceEditCancelText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.priceDisplay}
+                        onPress={() => handlePriceEditStart(item)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.productPrice}>
+                          {formatPrice(item.price)}
+                        </Text>
+                        <Text style={styles.priceEditHint}>Tap to edit</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
 
@@ -432,15 +579,7 @@ export default function CartScreen() {
               <Text style={styles.addNewProductText}>Add New Product</Text>
             </TouchableOpacity>
 
-            {/* Floating Total Display */}
-            <View style={styles.floatingTotalContainer}>
-              <View style={styles.floatingTotalContent}>
-                <Text style={styles.floatingTotalLabel}>Total Bill Amount:</Text>
-                <Text style={styles.floatingTotalAmount}>
-                  {formatPrice(calculateTotal())}
-                </Text>
-              </View>
-            </View>
+
 
             {/* Invoice Discount Section */}
             <View style={styles.discountSection}>
@@ -608,16 +747,16 @@ export default function CartScreen() {
         {/* Search and Scan */}
         <View style={styles.floatingSearchContainer}>
           <View style={styles.searchContainer}>
-            <View style={styles.searchBar}>
+            <TouchableOpacity
+              style={styles.searchBar}
+              onPress={handleSearchModalOpen}
+              activeOpacity={0.7}
+            >
               <Search size={20} color={Colors.textLight} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search more products..."
-                placeholderTextColor={Colors.textLight}
-                value={searchQuery}
-                onChangeText={handleSearch}
-              />
-            </View>
+              <Text style={styles.searchInput}>
+                Search more products...
+              </Text>
+            </TouchableOpacity>
             
             <TouchableOpacity
               style={styles.scanButton}
@@ -647,6 +786,86 @@ export default function CartScreen() {
           onCancel={handleCancelAddProduct}
           formatPrice={formatPrice}
         />
+      )}
+
+      {/* Search Products Modal */}
+      {showSearchModal && (
+        <Modal
+          visible={showSearchModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+        >
+          <SafeAreaView style={styles.searchModalContainer}>
+            {/* Header */}
+            <View style={styles.searchModalHeader}>
+              <TouchableOpacity
+                style={styles.searchModalCloseButton}
+                onPress={handleSearchModalClose}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.text} />
+              </TouchableOpacity>
+              <Text style={styles.searchModalTitle}>Search Products</Text>
+            </View>
+
+            {/* Search Input */}
+            <View style={styles.modalSearchContainer}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                style={styles.modalSearchInput}
+                placeholder="Search products by name, category, HSN code..."
+                placeholderTextColor={Colors.textLight}
+                value={searchQuery}
+                onChangeText={handleSearch}
+                autoFocus
+              />
+            </View>
+
+            {/* Search Results */}
+            <ScrollView style={styles.searchModalContent}>
+              {searchResults.length === 0 && searchQuery.trim() !== '' ? (
+                <View style={styles.noResultsContainer}>
+                  <Package size={48} color={Colors.textLight} />
+                  <Text style={styles.noResultsTitle}>No products found</Text>
+                  <Text style={styles.noResultsText}>
+                    Try searching with different keywords
+                  </Text>
+                </View>
+              ) : searchQuery.trim() === '' ? (
+                <View style={styles.noResultsContainer}>
+                  <Search size={48} color={Colors.textLight} />
+                  <Text style={styles.noResultsTitle}>Search Products</Text>
+                  <Text style={styles.noResultsText}>
+                    Type to search for products in your inventory
+                  </Text>
+                </View>
+              ) : (
+                searchResults.map((product) => (
+                  <TouchableOpacity
+                    key={product.id}
+                    style={styles.searchResultItem}
+                    onPress={() => handleProductSelectFromSearch(product)}
+                    activeOpacity={0.7}
+                  >
+                    <Image source={{ uri: product.image }} style={styles.searchResultImage} />
+                    <View style={styles.searchResultInfo}>
+                      <Text style={styles.searchResultName}>{product.name}</Text>
+                      <Text style={styles.searchResultCategory}>{product.category}</Text>
+                      <Text style={styles.searchResultStock}>
+                        Stock: {product.currentStock} {product.primaryUnit}
+                      </Text>
+                    </View>
+                    <View style={styles.searchResultPrice}>
+                      <Text style={styles.searchResultPriceText}>
+                        {formatPrice(product.salesPrice)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
       )}
     </SafeAreaView>
   );
@@ -692,7 +911,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
   
   // Unit of Measurement
   const [unitType, setUnitType] = useState<'primary' | 'compound'>('primary');
-  const [primaryUnit, setPrimaryUnit] = useState('Pieces');
+  const [primaryUnit, setPrimaryUnit] = useState(product.primaryUnit || 'Pieces');
   const [secondaryUnit, setSecondaryUnit] = useState('');
   const [conversionRatio, setConversionRatio] = useState('');
   
@@ -701,10 +920,10 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
   const [batchNumber, setBatchNumber] = useState(product.batchNumber || '');
   
   // CESS
-  const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity'>('none');
-  const [cessRate, setCessRate] = useState('');
-  const [cessAmount, setCessAmount] = useState('');
-  const [cessUnit, setCessUnit] = useState('');
+  const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity'>(product.cessType || 'none');
+  const [cessRate, setCessRate] = useState((product.cessRate || 0).toString());
+  const [cessAmount, setCessAmount] = useState((product.cessAmount || 0).toString());
+  const [cessUnit, setCessUnit] = useState(product.cessUnit || '');
 
   const [showCessTypeModal, setShowCessTypeModal] = useState(false);
   const [cessTypeSearch, setCessTypeSearch] = useState('');
@@ -2258,34 +2477,34 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
                <Text style={styles.sectionTitle}>Discount</Text>
                
                {/* Discount Type Toggle */}
-               <View style={styles.discountTypeContainer}>
-                 <TouchableOpacity
-                   style={[
-                     styles.discountTypeButton,
-                     discountType === 'percentage' && styles.activeDiscountTypeButton
-                   ]}
-                   onPress={() => setDiscountType('percentage')}
-                   activeOpacity={0.7}
-                 >
-                   <Text style={[
-                     styles.discountTypeText,
-                     discountType === 'percentage' && styles.activeDiscountTypeText
-                   ]}>%</Text>
-                 </TouchableOpacity>
-                 <TouchableOpacity
-                   style={[
-                     styles.discountTypeButton,
-                     discountType === 'amount' && styles.activeDiscountTypeButton
-                   ]}
-                   onPress={() => setDiscountType('amount')}
-                   activeOpacity={0.7}
-                 >
-                   <Text style={[
-                     styles.discountTypeText,
-                     discountType === 'amount' && styles.activeDiscountTypeText
-                   ]}>₹</Text>
-                 </TouchableOpacity>
-               </View>
+                               <View style={styles.discountTypeContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.discountTypeButton,
+                      discountType === 'percentage' && styles.activeDiscountTypeButton
+                    ]}
+                    onPress={() => setDiscountType('percentage')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.discountTypeText,
+                      discountType === 'percentage' && styles.activeDiscountTypeText
+                    ]}>%</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.discountTypeButton,
+                      discountType === 'amount' && styles.activeDiscountTypeButton
+                    ]}
+                    onPress={() => setDiscountType('amount')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.discountTypeText,
+                      discountType === 'amount' && styles.activeDiscountTypeText
+                    ]}>₹</Text>
+                  </TouchableOpacity>
+                </View>
                
                {/* Discount Value Input */}
                <View style={styles.inputGroup}>
@@ -3210,35 +3429,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     backgroundColor: Colors.background,
   },
-  floatingTotalContainer: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  floatingTotalContent: {
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  floatingTotalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  floatingTotalAmount: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.background,
-  },
+
   gstRateText: {
     fontSize: 10,
     color: Colors.textLight,
@@ -3530,11 +3721,13 @@ const styles = StyleSheet.create({
   },
   discountTypeContainer: {
     flexDirection: 'row',
-    backgroundColor: Colors.grey[100],
+    backgroundColor: Colors.grey[50],
     borderRadius: 8,
-    padding: 4,
+    padding: 2,
     marginBottom: 12,
-    flex: 1,
+    width: 120,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
   },
   discountTypeButton: {
     flex: 1,
@@ -3542,26 +3735,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 6,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   activeDiscountTypeButton: {
-    backgroundColor: Colors.background,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    backgroundColor: Colors.primary,
   },
   discountTypeText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 16,
+    fontWeight: '600',
     color: Colors.textLight,
   },
   activeDiscountTypeText: {
-    color: Colors.primary,
-    fontWeight: '600',
+    color: Colors.background,
+    fontWeight: '700',
   },
   previewSection: {
     backgroundColor: Colors.grey[50],
@@ -3748,7 +3934,145 @@ const styles = StyleSheet.create({
   barcodeInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  // Search modal styles
+  searchModalContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  searchModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  searchModalCloseButton: {
+    padding: 8,
+  },
+  searchModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    marginLeft: 16,
+  },
+  searchModalContent: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  searchResultImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  searchResultInfo: {
+    flex: 1,
+  },
+  searchResultName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  searchResultCategory: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginBottom: 2,
+  },
+  searchResultStock: {
+    fontSize: 12,
+    color: Colors.textLight,
+  },
+  searchResultPrice: {
+    alignItems: 'flex-end',
+  },
+  searchResultPriceText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  // Inline price editing styles
+  priceEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  priceEditInput: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 16,
+    color: Colors.text,
+    backgroundColor: Colors.background,
+    minWidth: 80,
+    textAlign: 'center',
+  },
+  priceEditSaveButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.success,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priceEditSaveText: {
+    fontSize: 12,
+    color: Colors.background,
+    fontWeight: '600',
+  },
+  priceEditCancelButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priceEditCancelText: {
+    fontSize: 12,
+    color: Colors.background,
+    fontWeight: '600',
+  },
+  priceDisplay: {
+    alignItems: 'center',
+  },
+  priceEditHint: {
+    fontSize: 10,
+    color: Colors.textLight,
+    marginTop: 2,
   },
   barcodeInput: {
     flex: 1,

@@ -142,6 +142,34 @@ export default function PaymentScreen() {
         break;
     }
 
+    // Log payment completion
+    console.log('=== PAYMENT COMPLETED ===');
+    console.log('Payment Method:', selectedPaymentMethod);
+    console.log('Customer:', customer.name);
+    console.log('Customer Type:', customer.customerType);
+    console.log('Total Amount:', formatAmount(amount));
+    console.log('Items Count:', JSON.parse(cartItems as string).length);
+    console.log('Cash Received:', selectedPaymentMethod === 'cash' ? formatAmount(parseFloat(cashReceived)) : 'N/A');
+    console.log('Balance:', selectedPaymentMethod === 'cash' ? formatAmount(calculateBalance()) : 'N/A');
+    console.log('Card Number:', selectedPaymentMethod === 'card' ? cardNumber : 'N/A');
+    console.log('Card Holder:', selectedPaymentMethod === 'card' ? cardHolderName : 'N/A');
+    console.log('Others Method:', selectedPaymentMethod === 'others' ? selectedOthersMethod : 'N/A');
+    console.log('Bank Account:', selectedPaymentMethod === 'others' ? selectedBankAccount : 'N/A');
+    console.log('Cheque Number:', selectedPaymentMethod === 'others' ? chequeNumber : 'N/A');
+    JSON.parse(cartItems as string).forEach((item: any, index: number) => {
+      console.log(`Item ${index + 1}:`);
+      console.log('  Product Name:', item.name);
+      console.log('  Quantity:', item.quantity);
+      console.log('  Unit Price:', formatAmount(item.price));
+      console.log('  Total:', formatAmount(item.price * item.quantity));
+      console.log('  Tax Rate:', item.taxRate + '%');
+      console.log('  HSN Code:', item.hsnCode);
+      console.log('  Batch Number:', item.batchNumber);
+      console.log('  Primary Unit:', item.primaryUnit);
+    });
+    console.log('Completed at:', new Date().toISOString());
+    console.log('========================');
+
     // Navigate to success screen
     router.push({
       pathname: '/new-sale/success',
@@ -712,7 +740,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    outlineStyle: 'none',
+    
   },
   balanceContainer: {
     backgroundColor: Colors.grey[50],

@@ -90,6 +90,10 @@ export const verifyGSTIN = async (gstNo: string): Promise<GSTINVerificationRespo
     return {
       error: true,
       message: 'Failed to verify GSTIN. Please check your internet connection and try again.',
+      filing: [],
+      compliance: {
+        filingFrequency: null
+      }
     };
   }
 };

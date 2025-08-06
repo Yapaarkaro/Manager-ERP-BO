@@ -674,7 +674,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     marginLeft: 12,
-    outlineStyle: 'none',
+    
   },
   scanButton: {
     width: 48,

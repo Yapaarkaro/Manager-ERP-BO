@@ -834,7 +834,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#334155',
     paddingVertical: 8,
-    outlineStyle: 'none',
+    
   },
   modalContent: {
     maxHeight: 350,

@@ -1166,7 +1166,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,
@@ -1278,7 +1278,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: Colors.text,
-    outlineStyle: 'none',
+    
   },
   applyCustomButton: {
     backgroundColor: Colors.primary,

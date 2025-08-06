@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { productStore, Product } from '@/utils/productStore';
+import { dataStore, Supplier as StoreSupplier } from '@/utils/dataStore';
 import { 
   ArrowLeft, 
   Package, 
@@ -115,13 +117,14 @@ const storageLocations = [
   'Others'
 ];
 
-const mockSuppliers = [
-  { id: '1', name: 'Apple India Pvt Ltd', type: 'business' },
-  { id: '2', name: 'Samsung Electronics', type: 'business' },
-  { id: '3', name: 'Dell Technologies', type: 'business' },
-  { id: '4', name: 'Sony India', type: 'business' },
-  { id: '5', name: 'Local Electronics Supplier', type: 'individual' },
-];
+interface Supplier {
+  id: string;
+  name: string;
+  type: 'business' | 'individual';
+}
+
+// Get suppliers from data store - will be updated via useEffect
+let mockSuppliers: Supplier[] = [];
 
 interface ProductFormData {
   name: string;
@@ -241,6 +244,28 @@ export default function ManualProductScreen() {
       }));
     }
   }, [supplierId]);
+
+  // Subscribe to data store changes for suppliers
+  useEffect(() => {
+    const unsubscribe = dataStore.subscribe(() => {
+      const allSuppliers = dataStore.getSuppliers();
+      mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
+        id: supplier.id,
+        name: supplier.businessName || supplier.name,
+        type: supplier.supplierType,
+      }));
+    });
+
+    // Initial load
+    const allSuppliers = dataStore.getSuppliers();
+    mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
+      id: supplier.id,
+      name: supplier.businessName || supplier.name,
+      type: supplier.supplierType,
+    }));
+
+    return unsubscribe;
+  }, []);
 
   // Handle new supplier from add supplier page
   // This preserves all existing form data when returning from adding a supplier
@@ -395,33 +420,39 @@ export default function ManualProductScreen() {
 
     setIsSubmitting(true);
 
-    const productData = {
+    const productData: Product = {
       id: `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
+      image: formData.productImage || 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
       category: formData.category !== 'Others' ? formData.category : formData.customCategory.trim(),
       hsnCode: formData.hsnCode.trim(),
       barcode: formData.barcode.trim(),
       taxRate: formData.taxRate,
       primaryUnit: formData.primaryUnit,
       secondaryUnit: formData.secondaryUnit !== 'None' ? formData.secondaryUnit : undefined,
-      useCompoundUnit: formData.useCompoundUnit,
-      conversionRatio: formData.conversionRatio,
-      cessType: formData.cessType,
-      cessAmount: formData.cessAmount,
-      cessRate: formData.cessRate,
-      cessUnit: formData.cessUnit,
-      purchasePrice: parseFloat(formData.purchasePrice),
+      unitPrice: parseFloat(formData.purchasePrice),
       salesPrice: parseFloat(formData.salesPrice),
       minStockLevel: parseInt(formData.minStockLevel),
       maxStockLevel: parseInt(formData.maxStockLevel),
       currentStock: parseInt(formData.openingStock),
       supplier: formData.preferredSupplier,
       location: formData.location,
-      productImage: formData.productImage,
-      createdAt: new Date().toISOString(),
+      lastRestocked: new Date().toISOString(),
+      stockValue: parseFloat(formData.purchasePrice) * parseInt(formData.openingStock),
+      urgencyLevel: 'normal',
+      batchNumber: formData.batchNumber || '',
+      // CESS fields
+      cessType: formData.cessType,
+      cessRate: formData.cessRate,
+      cessAmount: parseFloat(formData.cessAmount) || 0,
+      cessUnit: formData.cessUnit,
     };
 
     console.log('Creating new product:', productData);
+    
+    // Add product to store
+    productStore.addProduct(productData);
+    console.log('Product added to store. Total products:', productStore.getProductCount());
     
     setTimeout(() => {
       if (returnToStockIn === 'true') {
@@ -429,7 +460,7 @@ export default function ManualProductScreen() {
         const stockInProductData = {
           id: productData.id,
           name: productData.name,
-          price: productData.purchasePrice,
+          price: productData.unitPrice,
           gstRate: productData.taxRate,
           cessRate: parseFloat(formData.cessAmount) || 0,
           cessType: formData.cessType,
@@ -454,7 +485,16 @@ export default function ManualProductScreen() {
         Alert.alert('Success', 'Product added to inventory successfully', [
           {
             text: 'OK',
-            onPress: () => router.back()
+            onPress: () => {
+              // Navigate back and trigger refresh
+              router.back();
+              // Add a small delay to ensure navigation completes
+                              setTimeout(() => {
+                  console.log('=== PRODUCT ADDED - NAVIGATING BACK ===');
+                  console.log('Total products in store:', productStore.getProductCount());
+                  console.log('==========================================');
+                }, 100);
+            }
           }
         ]);
       }
@@ -476,8 +516,10 @@ export default function ManualProductScreen() {
 
   const getSupplierName = (supplierId: string) => {
     const supplier = mockSuppliers.find(s => s.id === supplierId);
-    return supplier ? supplier.name : '';
+    return supplier ? supplier.name : 'Unknown Supplier';
   };
+
+
 
   return (
     <View style={styles.container}>
@@ -1251,21 +1293,34 @@ export default function ManualProductScreen() {
                   <TouchableOpacity
                     style={styles.modalInputContainer}
                     onPress={() => {
-                      const availableUnits = [formData.primaryUnit];
-                      if (formData.useCompoundUnit && formData.secondaryUnit !== 'None') {
+                      const availableUnits = [];
+                      if (formData.primaryUnit) {
+                        availableUnits.push(formData.primaryUnit);
+                      }
+                      if (formData.useCompoundUnit && formData.secondaryUnit && formData.secondaryUnit !== 'None') {
                         availableUnits.push(formData.secondaryUnit);
+                      }
+                      
+                      if (availableUnits.length === 0) {
+                        Alert.alert('No Units Available', 'Please set primary unit first');
+                        return;
+                      }
+                      
+                      if (formData.useCompoundUnit && (!formData.secondaryUnit || formData.secondaryUnit === 'None')) {
+                        Alert.alert('Secondary Unit Required', 'Please select secondary unit first');
+                        return;
                       }
                       
                       Alert.alert(
                         'Select CESS Unit',
-                        'Choose the unit for CESS calculation',
-                        [
-                          ...availableUnits.map(unit => ({ 
-                            text: unit, 
-                            onPress: () => updateFormData('cessUnit', unit) 
-                          })),
-                          { text: 'Cancel', style: 'cancel' }
-                        ]
+                        'Choose the unit for CESS calculation:',
+                        availableUnits.map(unit => ({
+                          text: unit,
+                          onPress: () => {
+                            console.log('Selecting CESS unit:', unit);
+                            updateFormData('cessUnit', unit);
+                          }
+                        }))
                       );
                     }}
                     activeOpacity={0.7}
@@ -1484,7 +1539,7 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
             
-            <View style={styles.modalContent}>
+            <View style={styles.conversionModalContent}>
               <Text style={styles.conversionQuestion}>
                 How many {formData.secondaryUnit} are in 1 {formData.primaryUnit}?
               </Text>
@@ -1503,6 +1558,9 @@ export default function ManualProductScreen() {
                 <Text style={styles.conversionLabel}> {formData.secondaryUnit}</Text>
               </View>
               
+            </View>
+            
+            <View style={styles.conversionButtonContainer}>
               <TouchableOpacity
                 style={[
                   styles.conversionSubmitButton,
@@ -2003,6 +2061,8 @@ export default function ManualProductScreen() {
           </View>
         </View>
       </Modal>
+
+
     </View>
   );
 }
@@ -2241,8 +2301,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     maxHeight: '80%',
     alignSelf: 'center',
-    marginTop: 'auto',
-    marginBottom: 'auto',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -2488,11 +2547,22 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
+    width: '100%',
   },
   conversionSubmitButtonText: {
     color: Colors.background,
     fontSize: 16,
     fontWeight: '600',
+  },
+  conversionModalContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 0,
+  },
+  conversionButtonContainer: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   modalDescription: {
     fontSize: 14,
@@ -2557,6 +2627,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  disabledInput: {
+    backgroundColor: Colors.grey[100],
+    borderColor: Colors.grey[300],
+    opacity: 0.6,
   },
   modalInput: {
     flex: 1,

@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, Package, TrendingUp, TrendingDown, Eye, MessageCircle, X, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
+import { dataStore, Supplier } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -30,180 +31,31 @@ const Colors = {
   }
 };
 
-interface Supplier {
-  id: string;
-  name: string;
-  businessName?: string;
-  supplierType: 'business' | 'individual';
-  contactPerson: string;
-  mobile: string;
-  email?: string;
-  address: string;
-  gstin?: string;
-  avatar: string;
-  supplierScore: number;
-  onTimeDelivery: number;
-  qualityRating: number;
-  responseTime: number;
-  totalOrders: number;
-  completedOrders: number;
-  pendingOrders: number;
-  cancelledOrders: number;
-  totalValue: number;
-  lastOrderDate: string;
-  joinedDate: string;
-  status: 'active' | 'inactive' | 'suspended';
-  paymentTerms: string;
-  deliveryTime: string;
-  categories: string[];
-  productCount: number;
-}
+// Using Supplier interface from dataStore
 
-const mockSuppliers: Supplier[] = [
-  {
-    id: 'SUP-001',
-    name: 'Apple India Pvt Ltd',
-    businessName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Rajesh Kumar',
-    mobile: '+91 98765 43210',
-    email: 'orders@apple.com',
-    address: '123, Electronic City, Phase 1, Bangalore, Karnataka - 560100',
-    gstin: '29ABCDE1234F2Z6',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 92,
-    onTimeDelivery: 95,
-    qualityRating: 4.8,
-    responseTime: 2.5,
-    totalOrders: 45,
-    completedOrders: 42,
-    pendingOrders: 2,
-    cancelledOrders: 1,
-    totalValue: 2500000,
-    lastOrderDate: '2024-01-15',
-    joinedDate: '2023-03-15',
-    status: 'active',
-    paymentTerms: 'Net 30 Days',
-    deliveryTime: '3-5 Business Days',
-    categories: ['Smartphones', 'Laptops', 'Audio', 'Accessories'],
-    productCount: 25
-  },
-  {
-    id: 'SUP-002',
-    name: 'Samsung Electronics',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Priya Sharma',
-    mobile: '+91 87654 32109',
-    email: 'business@samsung.com',
-    address: '456, Bandra West, Mumbai, Maharashtra - 400050',
-    gstin: '27FGHIJ5678K3L9',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 88,
-    onTimeDelivery: 90,
-    qualityRating: 4.6,
-    responseTime: 3.2,
-    totalOrders: 38,
-    completedOrders: 35,
-    pendingOrders: 1,
-    cancelledOrders: 2,
-    totalValue: 1800000,
-    lastOrderDate: '2024-01-12',
-    joinedDate: '2023-05-20',
-    status: 'active',
-    paymentTerms: 'Net 15 Days',
-    deliveryTime: '2-4 Business Days',
-    categories: ['Smartphones', 'Tablets', 'Audio', 'Home Appliances'],
-    productCount: 32
-  },
-  {
-    id: 'SUP-003',
-    name: 'Dell Technologies',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    supplierType: 'business',
-    contactPerson: 'Amit Singh',
-    mobile: '+91 76543 21098',
-    email: 'sales@dell.com',
-    address: '789, Connaught Place, New Delhi, Delhi - 110001',
-    gstin: '07KLMNO9012P3Q4',
-    avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 85,
-    onTimeDelivery: 88,
-    qualityRating: 4.5,
-    responseTime: 4.1,
-    totalOrders: 28,
-    completedOrders: 25,
-    pendingOrders: 2,
-    cancelledOrders: 1,
-    totalValue: 1200000,
-    lastOrderDate: '2024-01-10',
-    joinedDate: '2023-07-10',
-    status: 'active',
-    paymentTerms: 'Net 45 Days',
-    deliveryTime: '5-7 Business Days',
-    categories: ['Laptops', 'Desktops', 'Servers', 'Accessories'],
-    productCount: 18
-  },
-  {
-    id: 'SUP-004',
-    name: 'Local Electronics Supplier',
-    supplierType: 'individual',
-    contactPerson: 'Vikram Patel',
-    mobile: '+91 99887 76655',
-    email: 'vikram@electronics.com',
-    address: '321, MG Road, Pune, Maharashtra - 411001',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 78,
-    onTimeDelivery: 82,
-    qualityRating: 4.2,
-    responseTime: 5.8,
-    totalOrders: 15,
-    completedOrders: 13,
-    pendingOrders: 1,
-    cancelledOrders: 1,
-    totalValue: 450000,
-    lastOrderDate: '2024-01-08',
-    joinedDate: '2023-09-12',
-    status: 'active',
-    paymentTerms: 'Cash on Delivery',
-    deliveryTime: '1-2 Business Days',
-    categories: ['Accessories', 'Cables', 'Chargers'],
-    productCount: 12
-  },
-  {
-    id: 'SUP-005',
-    name: 'Tech Distributors Ltd',
-    businessName: 'Tech Distributors Ltd',
-    supplierType: 'business',
-    contactPerson: 'Meera Joshi',
-    mobile: '+91 88776 65544',
-    email: 'orders@techdist.com',
-    address: '567, Jayanagar, 4th Block, Bangalore, Karnataka - 560011',
-    gstin: '29PQRST5678U9V0',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    supplierScore: 90,
-    onTimeDelivery: 93,
-    qualityRating: 4.7,
-    responseTime: 2.8,
-    totalOrders: 32,
-    completedOrders: 30,
-    pendingOrders: 1,
-    cancelledOrders: 1,
-    totalValue: 1600000,
-    lastOrderDate: '2024-01-14',
-    joinedDate: '2023-04-08',
-    status: 'active',
-    paymentTerms: 'Net 30 Days',
-    deliveryTime: '2-3 Business Days',
-    categories: ['Smartphones', 'Laptops', 'Audio', 'Gaming'],
-    productCount: 28
-  },
-];
+const mockSuppliers: Supplier[] = [];
 
 export default function SuppliersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredSuppliers, setFilteredSuppliers] = useState(mockSuppliers);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'high_score'>('all');
+
+  // Subscribe to data store changes
+  React.useEffect(() => {
+    const unsubscribe = dataStore.subscribe(() => {
+      const allSuppliers = dataStore.getSuppliers();
+      setSuppliers(allSuppliers);
+      applyFilters(searchQuery, selectedFilter);
+    });
+
+    // Initial load
+    const allSuppliers = dataStore.getSuppliers();
+    setSuppliers(allSuppliers);
+    setFilteredSuppliers(allSuppliers);
+
+    return unsubscribe;
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -216,7 +68,7 @@ export default function SuppliersScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockSuppliers;
+    let filtered = suppliers;
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -417,7 +269,7 @@ export default function SuppliersScreen() {
           <View style={styles.orderSummaryRow}>
             <Text style={styles.orderSummaryLabel}>Last Order:</Text>
             <Text style={styles.orderSummaryValue}>
-              {formatDate(supplier.lastOrderDate)}
+              {supplier.lastOrderDate ? formatDate(supplier.lastOrderDate) : 'No orders yet'}
             </Text>
           </View>
         </View>
@@ -524,9 +376,9 @@ export default function SuppliersScreen() {
           contentContainerStyle={styles.filterScrollContent}
         >
           {[
-            { key: 'all', label: 'All', count: mockSuppliers.length },
-            { key: 'active', label: 'Active', count: mockSuppliers.filter(s => s.status === 'active').length },
-            { key: 'high_score', label: 'High Score', count: mockSuppliers.filter(s => s.supplierScore >= 85).length },
+                          { key: 'all', label: 'All', count: suppliers.length },
+              { key: 'active', label: 'Active', count: suppliers.filter(s => s.status === 'active').length },
+              { key: 'high_score', label: 'High Score', count: suppliers.filter(s => s.supplierScore >= 85).length },
           ].map((filter) => (
             <TouchableOpacity
               key={filter.key}
@@ -995,7 +847,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

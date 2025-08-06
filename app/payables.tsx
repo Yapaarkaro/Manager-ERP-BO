@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowUpRight, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
+import { dataStore, Payable } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -29,139 +30,37 @@ const Colors = {
   }
 };
 
-interface Payable {
-  id: string;
-  supplierName: string;
-  supplierType: 'business' | 'individual';
-  businessName?: string;
-  gstin?: string;
-  mobile: string;
-  email?: string;
-  address: string;
-  totalPayable: number;
-  overdueAmount: number;
-  billCount: number;
-  oldestBillDate: string;
-  daysPastDue: number;
-  creditLimit?: number;
-  paymentTerms?: string;
-  lastPaymentDate?: string;
-  lastPaymentAmount?: number;
-  supplierAvatar: string;
-  status: 'current' | 'overdue' | 'critical';
-}
+// Using Payable interface from dataStore
 
-const mockPayables: Payable[] = [
-  {
-    id: '1',
-    supplierName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    mobile: '+91 87654 32109',
-    email: 'accounts@apple.com',
-    address: '456, Electronic City, Phase 2, Bangalore, Karnataka - 560100',
-    totalPayable: 850000,
-    overdueAmount: 250000,
-    billCount: 4,
-    oldestBillDate: '2024-01-05',
-    daysPastDue: 25,
-    creditLimit: 2000000,
-    paymentTerms: 'Net 30 Days',
-    lastPaymentDate: '2024-01-10',
-    lastPaymentAmount: 500000,
-    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: '2',
-    supplierName: 'Samsung Electronics',
-    supplierType: 'business',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    mobile: '+91 99887 76655',
-    email: 'finance@samsung.com',
-    address: '567, Bandra West, Mumbai, Maharashtra - 400050',
-    totalPayable: 650000,
-    overdueAmount: 650000,
-    billCount: 3,
-    oldestBillDate: '2023-12-15',
-    daysPastDue: 45,
-    creditLimit: 1500000,
-    paymentTerms: 'Net 15 Days',
-    lastPaymentDate: '2023-12-20',
-    lastPaymentAmount: 300000,
-    supplierAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'critical'
-  },
-  {
-    id: '3',
-    supplierName: 'Dell Technologies',
-    supplierType: 'business',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    mobile: '+91 88776 65544',
-    email: 'payments@dell.com',
-    address: '890, Connaught Place, New Delhi, Delhi - 110001',
-    totalPayable: 420000,
-    overdueAmount: 0,
-    billCount: 2,
-    oldestBillDate: '2024-01-18',
-    daysPastDue: 0,
-    creditLimit: 1000000,
-    paymentTerms: 'Net 45 Days',
-    lastPaymentDate: '2024-01-22',
-    lastPaymentAmount: 200000,
-    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-  {
-    id: '4',
-    supplierName: 'Local Electronics Supplier',
-    supplierType: 'individual',
-    mobile: '+91 98765 43210',
-    address: '123, MG Road, Bangalore, Karnataka - 560001',
-    totalPayable: 180000,
-    overdueAmount: 80000,
-    billCount: 2,
-    oldestBillDate: '2024-01-08',
-    daysPastDue: 15,
-    lastPaymentDate: '2024-01-12',
-    lastPaymentAmount: 100000,
-    supplierAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: '5',
-    supplierName: 'Tech Distributors Ltd',
-    supplierType: 'business',
-    businessName: 'Tech Distributors Ltd',
-    gstin: '29PQRST5678U9V0',
-    mobile: '+91 76543 21098',
-    email: 'billing@techdist.com',
-    address: '321, Jayanagar, 4th Block, Bangalore, Karnataka - 560011',
-    totalPayable: 320000,
-    overdueAmount: 0,
-    billCount: 3,
-    oldestBillDate: '2024-01-20',
-    daysPastDue: 0,
-    lastPaymentDate: '2024-01-25',
-    lastPaymentAmount: 150000,
-    supplierAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-];
+const mockPayables: Payable[] = [];
 
 export default function PayablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredPayables, setFilteredPayables] = useState(mockPayables);
+  const [payables, setPayables] = useState<Payable[]>([]);
+  const [filteredPayables, setFilteredPayables] = useState<Payable[]>([]);
+
+  // Subscribe to data store changes
+  React.useEffect(() => {
+    const unsubscribe = dataStore.subscribe(() => {
+      const allPayables = dataStore.getPayables();
+      setPayables(allPayables);
+      setFilteredPayables(allPayables);
+    });
+
+    // Initial load
+    const allPayables = dataStore.getPayables();
+    setPayables(allPayables);
+    setFilteredPayables(allPayables);
+
+    return unsubscribe;
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredPayables(mockPayables);
+      setFilteredPayables(payables);
     } else {
-      const filtered = mockPayables.filter(payable =>
+      const filtered = payables.filter(payable =>
         payable.supplierName.toLowerCase().includes(query.toLowerCase()) ||
         payable.businessName?.toLowerCase().includes(query.toLowerCase()) ||
         payable.mobile.includes(query) ||
@@ -799,7 +698,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    outlineStyle: 'none',
+    
   },
   filterButton: {
     width: 32,

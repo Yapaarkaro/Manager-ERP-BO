@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
     color: Colors.success,
     fontWeight: '600',
     textAlign: 'right',
-    outlineStyle: 'none',
+    
   },
   paymentMethodsContainer: {
     marginBottom: 24,

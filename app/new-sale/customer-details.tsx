@@ -8,6 +8,9 @@ import {
   TextInput,
   Alert,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -18,8 +21,11 @@ import {
   MapPin, 
   Building2,
   Search,
-  X
+  X,
+  Mail
 } from 'lucide-react-native';
+import AddressAutocomplete from '@/components/AddressAutocomplete';
+import { dataStore, Customer as StoreCustomer } from '@/utils/dataStore';
 
 
 const Colors = {
@@ -48,6 +54,9 @@ interface Customer {
   businessAddress?: string;
   shipToAddress?: string;
   paymentTerms?: string;
+  selectedBusinessAddress?: any;
+  selectedShipToAddress?: any;
+  email?: string;
 }
 
 const presetPaymentTerms = [
@@ -74,6 +83,39 @@ export default function CustomerDetailsScreen() {
   const [isLoadingGstin, setIsLoadingGstin] = useState(false);
   const [showPaymentTermsModal, setShowPaymentTermsModal] = useState(false);
   const [customPaymentTerms, setCustomPaymentTerms] = useState('');
+  
+  // Separate search query states for address autocomplete
+  const [businessAddressSearch, setBusinessAddressSearch] = useState('');
+  const [shipToAddressSearch, setShipToAddressSearch] = useState('');
+  
+  // Customer search functionality
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
+  
+  // Get existing customers from data store
+  const existingCustomers: Customer[] = dataStore.getCustomers().map(storeCustomer => ({
+    name: storeCustomer.name,
+    mobile: storeCustomer.mobile,
+    address: storeCustomer.address,
+    isBusinessCustomer: storeCustomer.customerType === 'business',
+    gstin: storeCustomer.gstin,
+    businessName: storeCustomer.businessName,
+    businessAddress: storeCustomer.address,
+    paymentTerms: storeCustomer.paymentTerms,
+    email: storeCustomer.email,
+  }));
+  
+  // Manual address entry modal states
+  const [showManualAddressModal, setShowManualAddressModal] = useState(false);
+  const [manualAddressType, setManualAddressType] = useState<'business' | 'ship-to'>('business');
+  const [manualAddress, setManualAddress] = useState({
+    addressLine1: '',
+    addressLine2: '',
+    additionalLines: [] as string[],
+    city: '',
+    pincode: '',
+    state: '',
+  });
 
   // Pre-fill customer data if provided
   useEffect(() => {
@@ -87,6 +129,29 @@ export default function CustomerDetailsScreen() {
       }
     }
   }, [preSelectedCustomer]);
+
+  // Filter customers based on search query
+  useEffect(() => {
+    if (customerSearch.trim()) {
+      const filtered = existingCustomers.filter(customer => {
+        const searchTerm = customerSearch.toLowerCase();
+        return (
+          customer.name.toLowerCase().includes(searchTerm) ||
+          customer.mobile.includes(searchTerm) ||
+          (customer.businessName && customer.businessName.toLowerCase().includes(searchTerm))
+        );
+      });
+      setFilteredCustomers(filtered);
+    } else {
+      setFilteredCustomers([]);
+    }
+  }, [customerSearch]);
+
+  const handleExistingCustomerSelect = (selectedCustomer: Customer) => {
+    setCustomer(selectedCustomer);
+    setCustomerSearch('');
+    setFilteredCustomers([]);
+  };
 
   const handleGstinLookup = async () => {
     const gstinUpper = gstinSearch.toUpperCase().trim();
@@ -150,6 +215,111 @@ export default function CustomerDetailsScreen() {
     }
   };
 
+  const handleBusinessAddressSelect = (address: any) => {
+    setCustomer(prev => ({ 
+      ...prev, 
+      selectedBusinessAddress: address,
+      businessAddress: address.formatted_address 
+    }));
+    // Clear the search query
+    setBusinessAddressSearch('');
+  };
+
+  const handleShipToAddressSelect = (address: any) => {
+    setCustomer(prev => ({ 
+      ...prev, 
+      selectedShipToAddress: address,
+      shipToAddress: address.formatted_address 
+    }));
+    // Clear the search query
+    setShipToAddressSearch('');
+  };
+
+  const handleBusinessAddressManualEntry = () => {
+    setManualAddressType('business');
+    setManualAddress({
+      addressLine1: '',
+      addressLine2: '',
+      additionalLines: [],
+      city: '',
+      pincode: '',
+      state: '',
+    });
+    setShowManualAddressModal(true);
+  };
+
+  const handleShipToAddressManualEntry = () => {
+    setManualAddressType('ship-to');
+    setManualAddress({
+      addressLine1: '',
+      addressLine2: '',
+      additionalLines: [],
+      city: '',
+      pincode: '',
+      state: '',
+    });
+    setShowManualAddressModal(true);
+  };
+
+  const handleManualAddressSubmit = () => {
+    const newAddress = {
+      ...manualAddress,
+      addressLine1: manualAddress.addressLine1.trim(),
+      addressLine2: manualAddress.addressLine2.trim(),
+      city: manualAddress.city.trim(),
+      pincode: manualAddress.pincode.trim(),
+      state: manualAddress.state.trim(),
+    };
+
+    if (!newAddress.addressLine1) {
+      Alert.alert('Address Line 1 Required', 'Please enter the first line of the address.');
+      return;
+    }
+
+    if (!newAddress.city) {
+      Alert.alert('City Required', 'Please enter the city.');
+      return;
+    }
+
+    if (!newAddress.pincode) {
+      Alert.alert('Pincode Required', 'Please enter the pincode.');
+      return;
+    }
+
+    if (!newAddress.state) {
+      Alert.alert('State Required', 'Please enter the state.');
+      return;
+    }
+
+    // Build the complete address string
+    const addressParts = [
+      newAddress.addressLine1,
+      newAddress.addressLine2,
+      ...newAddress.additionalLines,
+      newAddress.city,
+      newAddress.pincode,
+      newAddress.state
+    ].filter(part => part.length > 0);
+    
+    const completeAddress = addressParts.join(', ');
+
+    if (manualAddressType === 'business') {
+      setCustomer(prev => ({ 
+        ...prev, 
+        businessAddress: completeAddress,
+        selectedBusinessAddress: { formatted_address: completeAddress }
+      }));
+      setShowManualAddressModal(false);
+    } else {
+      setCustomer(prev => ({ 
+        ...prev, 
+        shipToAddress: completeAddress,
+        selectedShipToAddress: { formatted_address: completeAddress }
+      }));
+      setShowManualAddressModal(false);
+    }
+  };
+
   const handleContinueToPayment = () => {
     if (!customer.name.trim() || !customer.mobile.trim()) {
       Alert.alert('Incomplete Details', 'Please fill in customer name and mobile number');
@@ -194,19 +364,24 @@ export default function CustomerDetailsScreen() {
           
           <Text style={styles.headerTitle}>Customer Details</Text>
           
-          <View style={styles.headerRight}>
-            <Text style={styles.totalAmount}>
-              {formatAmount(totalAmount as string)}
-            </Text>
-          </View>
+
         </View>
       </SafeAreaView>
 
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'android' ? 0 : 20}
+        enabled={Platform.OS === 'android'}
       >
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled={Platform.OS === 'android'}
+          keyboardDismissMode={Platform.OS === 'android' ? 'on-drag' : 'interactive'}
+        >
         {/* Customer Type Toggle */}
         <View style={styles.customerTypeContainer}>
           <Text style={styles.sectionTitle}>Customer Type</Text>
@@ -265,6 +440,80 @@ export default function CustomerDetailsScreen() {
         {/* Customer Details Form */}
         <View style={styles.formContainer}>
           <View style={styles.inputGroup}>
+            <Text style={styles.label}>Search Existing Customers</Text>
+            <View style={styles.inputContainer}>
+              <Search size={20} color={Colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                value={customerSearch}
+                onChangeText={setCustomerSearch}
+                placeholder="Search by name, mobile, or business name"
+                placeholderTextColor={Colors.textLight}
+                returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                blurOnSubmit={Platform.OS === 'android'}
+              />
+            </View>
+            {filteredCustomers.length > 0 && (
+              <View style={styles.customerSearchResults}>
+                {filteredCustomers.map((existingCustomer, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.customerSearchResult}
+                    onPress={() => handleExistingCustomerSelect(existingCustomer)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.customerSearchResultName}>
+                      {existingCustomer.isBusinessCustomer ? existingCustomer.businessName : existingCustomer.name}
+                    </Text>
+                    <Text style={styles.customerSearchResultDetails}>
+                      {existingCustomer.mobile} • {existingCustomer.isBusinessCustomer ? 'Business' : 'Individual'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {customer.isBusinessCustomer && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Business Name *</Text>
+              <View style={styles.inputContainer}>
+                <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={customer.businessName || ''}
+                  onChangeText={(text) => setCustomer(prev => ({ ...prev, businessName: text }))}
+                  placeholder="Enter business name"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                  blurOnSubmit={Platform.OS === 'android'}
+                />
+              </View>
+            </View>
+          )}
+
+          {customer.isBusinessCustomer && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>GSTIN</Text>
+              <View style={styles.inputContainer}>
+                <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  value={customer.gstin || ''}
+                  onChangeText={(text) => setCustomer(prev => ({ ...prev, gstin: text.toUpperCase() }))}
+                  placeholder="Enter GSTIN number"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="characters"
+                  maxLength={15}
+                  returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                  blurOnSubmit={Platform.OS === 'android'}
+                />
+              </View>
+            </View>
+          )}
+
+          <View style={styles.inputGroup}>
             <Text style={styles.label}>
               {customer.isBusinessCustomer ? 'Contact Person Name *' : 'Customer Name *'}
             </Text>
@@ -277,6 +526,8 @@ export default function CustomerDetailsScreen() {
                 placeholder="Enter name"
                 placeholderTextColor={Colors.textLight}
                 autoCapitalize="words"
+                returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                blurOnSubmit={Platform.OS === 'android'}
               />
             </View>
           </View>
@@ -293,26 +544,31 @@ export default function CustomerDetailsScreen() {
                 placeholderTextColor={Colors.textLight}
                 keyboardType="numeric"
                 maxLength={10}
+                returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                blurOnSubmit={Platform.OS === 'android'}
               />
             </View>
           </View>
 
-          {customer.isBusinessCustomer && customer.businessName && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Business Name</Text>
-              <View style={styles.inputContainer}>
-                <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  value={customer.businessName}
-                  onChangeText={(text) => setCustomer(prev => ({ ...prev, businessName: text }))}
-                  placeholder="Business name"
-                  placeholderTextColor={Colors.textLight}
-                  editable={false}
-                />
-              </View>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Email</Text>
+            <View style={styles.inputContainer}>
+              <Mail size={20} color={Colors.textLight} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                value={customer.email || ''}
+                onChangeText={(text) => setCustomer(prev => ({ ...prev, email: text }))}
+                placeholder="Enter email address"
+                placeholderTextColor={Colors.textLight}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
+                blurOnSubmit={Platform.OS === 'android'}
+              />
             </View>
-          )}
+          </View>
+
+
 
           {customer.isBusinessCustomer && (
             <View style={styles.inputGroup}>
@@ -356,52 +612,66 @@ export default function CustomerDetailsScreen() {
             </View>
           )}
 
-          {customer.isBusinessCustomer && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Ship-to Address</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>
+              {customer.isBusinessCustomer && customer.businessAddress ? 'Business Address' : 'Address'}
+            </Text>
+            {customer.isBusinessCustomer ? (
+              <>
+                <AddressAutocomplete
+                  placeholder="Search for business address..."
+                  value={businessAddressSearch}
+                  onChangeText={setBusinessAddressSearch}
+                  onAddressSelect={handleBusinessAddressSelect}
+                  onManualEntry={handleBusinessAddressManualEntry}
+                />
+                {customer.selectedBusinessAddress && (
+                  <View style={styles.selectedAddressContainer}>
+                    <Text style={styles.selectedAddressText}>
+                      📍 {customer.selectedBusinessAddress.formatted_address}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
               <View style={styles.inputContainer}>
                 <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
                   style={[styles.input, styles.addressInput]}
-                  value={customer.shipToAddress}
-                  onChangeText={(text) => setCustomer(prev => ({ ...prev, shipToAddress: text }))}
-                  placeholder="Enter shipping address (if different from business address)"
+                  value={customer.address}
+                  onChangeText={(text) => setCustomer(prev => ({ ...prev, address: text }))}
+                  placeholder="Enter address"
                   placeholderTextColor={Colors.textLight}
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
               </View>
+            )}
+          </View>
+
+          {customer.isBusinessCustomer && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Ship-to Address</Text>
+              <AddressAutocomplete
+                placeholder="Search for shipping address..."
+                value={shipToAddressSearch}
+                onChangeText={setShipToAddressSearch}
+                onAddressSelect={handleShipToAddressSelect}
+                onManualEntry={handleShipToAddressManualEntry}
+              />
+              {customer.selectedShipToAddress && (
+                <View style={styles.selectedAddressContainer}>
+                  <Text style={styles.selectedAddressText}>
+                    📍 {customer.selectedShipToAddress.formatted_address}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.fieldHint}>
                 Leave blank if same as business address
               </Text>
             </View>
           )}
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              {customer.isBusinessCustomer && customer.businessAddress ? 'Business Address' : 'Address'}
-            </Text>
-            <View style={styles.inputContainer}>
-              <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
-              <TextInput
-                style={[styles.input, styles.addressInput]}
-                value={customer.isBusinessCustomer && customer.businessAddress ? customer.businessAddress : customer.address}
-                onChangeText={(text) => {
-                  if (customer.isBusinessCustomer && customer.businessAddress) {
-                    setCustomer(prev => ({ ...prev, businessAddress: text }));
-                  } else {
-                    setCustomer(prev => ({ ...prev, address: text }));
-                  }
-                }}
-                placeholder="Enter address"
-                placeholderTextColor={Colors.textLight}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-            </View>
-          </View>
         </View>
 
         <TouchableOpacity
@@ -412,6 +682,7 @@ export default function CustomerDetailsScreen() {
           <Text style={styles.continueButtonText}>Continue to Payment</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* GSTIN Lookup Modal */}
       <Modal
@@ -520,6 +791,117 @@ export default function CustomerDetailsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Manual Address Entry Modal */}
+      <Modal
+        visible={showManualAddressModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowManualAddressModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {manualAddressType === 'business' ? 'Business Address' : 'Ship-to Address'}
+              </Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowManualAddressModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalContent}>
+              <Text style={styles.modalDescription}>
+                Please enter the full address for {manualAddressType === 'business' ? 'Business' : 'Ship-to'}
+              </Text>
+
+
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>Address Line 1 *</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.addressLine1}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, addressLine1: text }))}
+                  placeholder="e.g., 123 Main St"
+                  placeholderTextColor={Colors.textLight}
+                />
+              </View>
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>Address Line 2</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.addressLine2}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, addressLine2: text }))}
+                  placeholder="e.g., Apt 4B"
+                  placeholderTextColor={Colors.textLight}
+                />
+              </View>
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>Additional Lines</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.additionalLines.join(', ')}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, additionalLines: text.split(',').map(line => line.trim()) }))}
+                  placeholder="e.g., Suite 100, Floor 5"
+                  placeholderTextColor={Colors.textLight}
+                />
+              </View>
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>City *</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.city}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, city: text }))}
+                  placeholder="e.g., New York"
+                  placeholderTextColor={Colors.textLight}
+                />
+              </View>
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>Pincode *</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.pincode}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, pincode: text }))}
+                  placeholder="e.g., 10001"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="numeric"
+                  maxLength={6}
+                />
+              </View>
+
+              <View style={styles.manualAddressInputGroup}>
+                <Text style={styles.manualAddressLabel}>State *</Text>
+                <TextInput
+                  style={styles.manualAddressInput}
+                  value={manualAddress.state}
+                  onChangeText={(text) => setManualAddress(prev => ({ ...prev, state: text }))}
+                  placeholder="e.g., NY"
+                  placeholderTextColor={Colors.textLight}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={styles.manualAddressSubmitButton}
+                onPress={handleManualAddressSubmit}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.manualAddressSubmitButtonText}>
+                  {manualAddressType === 'business' ? 'Save Business Address' : 'Save Ship-to Address'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -567,6 +949,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   customerTypeContainer: {
     marginBottom: 24,
@@ -635,7 +1020,7 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: Colors.grey[50],
     borderWidth: 1,
     borderColor: Colors.grey[200],
@@ -645,13 +1030,11 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: 12,
-    marginTop: 2,
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    outlineStyle: 'none',
   },
   addressInput: {
     minHeight: 80,
@@ -731,6 +1114,7 @@ const styles = StyleSheet.create({
   gstinInputContainer: {
     marginBottom: 20,
   },
+
   gstinInput: {
     backgroundColor: Colors.grey[50],
     borderWidth: 1,
@@ -742,7 +1126,6 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontFamily: 'monospace',
     letterSpacing: 1,
-    outlineStyle: 'none',
   },
   lookupButton: {
     backgroundColor: '#3f66ac',
@@ -824,6 +1207,80 @@ const styles = StyleSheet.create({
   },
   selectedPaymentTermsText: {
     color: '#3f66ac',
+    fontWeight: '600',
+  },
+  selectedAddressContainer: {
+    backgroundColor: Colors.grey[100],
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  selectedAddressText: {
+    fontSize: 14,
+    color: Colors.text,
+    textAlign: 'center',
+  },
+  customerSearchResults: {
+    marginTop: 8,
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    maxHeight: 200,
+  },
+  customerSearchResult: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  customerSearchResultName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  customerSearchResultDetails: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  manualAddressInputGroup: {
+    marginBottom: 15,
+  },
+  manualAddressLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  manualAddressInput: {
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: Colors.text,
+  },
+  manualAddressSubmitButton: {
+    backgroundColor: '#3f66ac',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  manualAddressSubmitButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
     fontWeight: '600',
   },
 });

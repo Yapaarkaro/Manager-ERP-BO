@@ -155,6 +155,30 @@ export default function StockDetailsScreen() {
       return;
     }
 
+    // Log stock out details
+    console.log('=== STOCK OUT DETAILS COMPLETED ===');
+    console.log('Reason:', reason);
+    console.log('Total Items:', itemsWithQuantities.length);
+    console.log('Total Quantity:', itemsWithQuantities.reduce((sum, item) => sum + item.quantityToRemove, 0));
+    itemsWithQuantities.forEach((item, index) => {
+      console.log(`Item ${index + 1}:`);
+      console.log('  Product ID:', item.product.id);
+      console.log('  Product Name:', item.product.name);
+      console.log('  Current Stock:', item.product.currentStock);
+      console.log('  Quantity to Remove:', item.quantityToRemove);
+      console.log('  Will Remain:', item.product.currentStock - item.quantityToRemove);
+      console.log('  Notes:', item.notes);
+      console.log('  Has Proof Image:', !!item.proofImage);
+      console.log('  Unit Price:', item.product.unitPrice);
+      console.log('  Category:', item.product.category);
+      console.log('  Supplier:', item.product.supplier);
+      console.log('  Location:', item.product.location);
+      console.log('  Primary Unit:', item.product.primaryUnit);
+    });
+    console.log('General Notes:', notes);
+    console.log('Completed at:', new Date().toISOString());
+    console.log('==================================');
+
     const stockOutData = {
       reason,
       items: itemsWithQuantities,

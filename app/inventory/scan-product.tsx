@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontFamily: 'monospace',
     letterSpacing: 1,
-    outlineStyle: 'none',
+    
   },
   submitBarcodeButton: {
     backgroundColor: Colors.primary,

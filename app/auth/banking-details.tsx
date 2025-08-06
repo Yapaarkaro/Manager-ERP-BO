@@ -763,7 +763,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1a1a1a',
     fontWeight: '500',
-    outlineStyle: 'none',
+    
   },
   errorInput: {
     borderColor: '#ef4444',
@@ -944,7 +944,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#334155',
     paddingVertical: 8,
-    outlineStyle: 'none',
+    
   },
   modalContent: {
     maxHeight: 400,

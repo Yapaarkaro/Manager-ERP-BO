@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
     color: Colors.error,
     fontWeight: '600',
     textAlign: 'right',
-    outlineStyle: 'none',
+    
   },
   paymentMethodsContainer: {
     marginBottom: 24,

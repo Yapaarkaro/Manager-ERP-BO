@@ -32,15 +32,32 @@ const Colors = {
 };
 
 export default function SuccessScreen() {
+  // Log successful stock out completion
+  React.useEffect(() => {
+    console.log('=== STOCK OUT COMPLETED SUCCESSFULLY ===');
+    console.log('Completed at:', new Date().toISOString());
+    console.log('User can now view updated inventory levels');
+    console.log('==========================================');
+  }, []);
+
   const handleGoToDashboard = () => {
+    console.log('=== NAVIGATING TO DASHBOARD ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('===============================');
     router.replace('/dashboard');
   };
 
   const handleViewInventory = () => {
+    console.log('=== NAVIGATING TO INVENTORY ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('================================');
     router.replace('/inventory');
   };
 
   const handleNewStockOut = () => {
+    console.log('=== STARTING NEW STOCK OUT ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('=============================');
     router.replace('/inventory/stock-out');
   };
 
