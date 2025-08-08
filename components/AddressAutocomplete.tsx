@@ -16,6 +16,7 @@ interface AddressAutocompleteProps {
   onChangeText: (text: string) => void;
   onAddressSelect: (address: any) => void;
   onManualEntry?: () => void;
+  isSettingQueryProgrammatically?: boolean;
 }
 
 interface AddressSuggestion {
@@ -37,6 +38,7 @@ export default function AddressAutocomplete({
   onChangeText,
   onAddressSelect,
   onManualEntry,
+  isSettingQueryProgrammatically = false,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -44,6 +46,11 @@ export default function AddressAutocomplete({
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    // Don't trigger search if query is being set programmatically
+    if (isSettingQueryProgrammatically) {
+      return;
+    }
+    
     if (value.length > 2) {
       // Debounce the search
       if (debounceRef.current) {
@@ -63,7 +70,7 @@ export default function AddressAutocomplete({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [value]);
+  }, [value, isSettingQueryProgrammatically]);
 
   const searchAddresses = async (query: string) => {
     if (!query.trim()) return;
@@ -71,6 +78,11 @@ export default function AddressAutocomplete({
     setIsLoading(true);
     try {
       const requestId = `autocomplete-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Add timeout for Android to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
         `https://api.olamaps.io/places/v1/autocomplete?input=${encodeURIComponent(query)}&api_key=${OLA_MAPS_API_KEY}`,
         {
@@ -78,9 +90,13 @@ export default function AddressAutocomplete({
           headers: {
             'X-Request-Id': requestId,
             'Content-Type': 'application/json',
+            'User-Agent': 'Manager-ERP-BO/1.0',
           },
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -110,12 +126,15 @@ export default function AddressAutocomplete({
           setShowSuggestions(false);
         }
       } else {
-        console.error('Autocomplete API error:', response.status);
+        console.error('Autocomplete API error:', response.status, response.statusText);
         setSuggestions([]);
         setShowSuggestions(false);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Autocomplete error:', error);
+      if (error.name === 'AbortError') {
+        console.log('Request timed out');
+      }
       setSuggestions([]);
       setShowSuggestions(false);
     } finally {
@@ -184,16 +203,25 @@ export default function AddressAutocomplete({
 
   const handleSuggestionSelect = (suggestion: AddressSuggestion) => {
     console.log('🏠 Selected address from search:', suggestion);
+    console.log('📱 Platform:', Platform.OS);
     
     // IMMEDIATELY close suggestions and clear all states
     setShowSuggestions(false);
     setSuggestions([]);
     
-    // Clear the search input (like the working business address screen)
-    onChangeText('');
-    
-    // Call the parent's onAddressSelect
-    onAddressSelect(suggestion);
+    // For Android, we need to ensure the touch event is fully processed
+    // before calling the parent callback
+    if (Platform.OS === 'android') {
+      // Use a longer delay for Android to ensure proper touch handling
+      setTimeout(() => {
+        console.log('📞 Calling onAddressSelect with:', suggestion);
+        onAddressSelect(suggestion);
+      }, 200);
+    } else {
+      // For iOS, call immediately
+      console.log('📞 Calling onAddressSelect with:', suggestion);
+      onAddressSelect(suggestion);
+    }
   };
 
   const handleManualEntry = () => {
@@ -235,6 +263,8 @@ export default function AddressAutocomplete({
           onBlur={handleInputBlur}
           autoCapitalize="words"
           autoCorrect={false}
+          returnKeyType="search"
+          blurOnSubmit={false}
         />
         {isLoading && (
           <Text style={styles.loadingText}>...</Text>
@@ -249,6 +279,7 @@ export default function AddressAutocomplete({
             style={styles.suggestionsList}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
           >
             {suggestions.length > 0 && suggestions.map((suggestion, index) => (
               <TouchableOpacity
@@ -256,6 +287,8 @@ export default function AddressAutocomplete({
                 style={styles.suggestionItem}
                 onPress={() => handleSuggestionSelect(suggestion)}
                 activeOpacity={0.7}
+                delayPressIn={Platform.OS === 'android' ? 50 : 0}
+                delayPressOut={Platform.OS === 'android' ? 50 : 0}
               >
                 <MapPin size={16} color="#64748b" style={styles.suggestionIcon} />
                 <View style={styles.suggestionContent}>
@@ -269,7 +302,19 @@ export default function AddressAutocomplete({
               </TouchableOpacity>
             ))}
             
-
+            {/* Manual Entry Option */}
+            <TouchableOpacity
+              style={[styles.suggestionItem, styles.manualEntryItem]}
+              onPress={handleManualEntry}
+              activeOpacity={0.7}
+              delayPressIn={Platform.OS === 'android' ? 50 : 0}
+            >
+              <Edit3 size={16} color="#64748b" style={styles.suggestionIcon} />
+              <View style={styles.suggestionContent}>
+                <Text style={styles.suggestionMain}>Enter address manually</Text>
+                <Text style={styles.suggestionSecondary}>Type your address details</Text>
+              </View>
+            </TouchableOpacity>
           </ScrollView>
         </View>
       )}
@@ -355,6 +400,11 @@ const styles = StyleSheet.create({
   suggestionSecondary: {
     fontSize: 14,
     color: '#64748b',
+  },
+  manualEntryItem: {
+    backgroundColor: '#f8fafc',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
   },
 
 });

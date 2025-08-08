@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Download, Share, Eye, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Edit3, Send, X, User, MessageCircle } from 'lucide-react-native';
+import { dataStore, Supplier } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -231,6 +232,10 @@ export default function PODetailsScreen() {
   };
 
   const handleSendToSupplier = () => {
+    // Get the actual supplier data from the data store
+    const actualSupplier = po.supplierId ? dataStore.getSupplierById(po.supplierId) : null;
+    const supplierPhoneNumber = actualSupplier?.mobile || '+919876543210';
+
     if (isEdited) {
       Alert.alert(
         'Send Updated PO to Supplier',
@@ -247,6 +252,7 @@ export default function PODetailsScreen() {
                   supplierId: po.supplierId || 'supplier_001',
                   supplierName: po.supplierType === 'business' ? po.businessName : po.supplierName,
                   supplierAvatar: po.supplierAvatar,
+                  supplierPhoneNumber: supplierPhoneNumber,
                   message: `Here is the updated PO ${po.poNumber}`,
                   poData: JSON.stringify(po),
                   isUpdated: 'true'
@@ -272,6 +278,7 @@ export default function PODetailsScreen() {
                   supplierId: po.supplierId || 'supplier_001',
                   supplierName: po.supplierType === 'business' ? po.businessName : po.supplierName,
                   supplierAvatar: po.supplierAvatar,
+                  supplierPhoneNumber: supplierPhoneNumber,
                   message: `Here is the PO ${po.poNumber}`,
                   poData: JSON.stringify(po)
                 }

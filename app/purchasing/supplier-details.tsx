@@ -177,7 +177,8 @@ export default function SupplierDetailsScreen() {
       params: {
         supplierId: supplier.id,
         supplierName: supplier.supplierType === 'business' ? supplier.businessName : supplier.name,
-        supplierAvatar: supplier.avatar
+        supplierAvatar: supplier.avatar,
+        supplierPhoneNumber: supplier.mobile
       }
     });
   };

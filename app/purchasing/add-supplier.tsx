@@ -132,6 +132,25 @@ export default function AddSupplierScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Function to convert text to camel case (capitalize first letter of each word)
+  const toCamelCase = (text: string): string => {
+    return text.replace(/\w\S*/g, (txt) => 
+      txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
+    );
+  };
+
+  // Function to handle text input with camel case formatting
+  const handleTextInput = (field: keyof SupplierFormData, text: string) => {
+    let formattedText = text;
+    
+    // Apply camel case formatting for specific fields
+    if (['businessName', 'contactPerson', 'addressLine1', 'addressLine2', 'addressLine3', 'city', 'state'].includes(field)) {
+      formattedText = toCamelCase(text);
+    }
+    
+    updateFormData(field, formattedText);
+  };
+
   // Shared function to parse address components with enhanced logic
   const parseAddressComponents = (addressString: string, rawCity?: string, rawState?: string, rawPincode?: string) => {
     const addressParts = addressString.split(',').map((part: string) => part.trim());
@@ -626,7 +645,7 @@ export default function AddSupplierScreen() {
                   <TextInput
                     style={styles.input}
                     value={formData.businessName}
-                    onChangeText={(text) => updateFormData('businessName', text)}
+                    onChangeText={(text) => handleTextInput('businessName', text)}
                     placeholder="Enter business name"
                     placeholderTextColor={Colors.textLight}
                     autoCapitalize="words"
@@ -642,9 +661,9 @@ export default function AddSupplierScreen() {
                     style={styles.input}
                     value={formData.contactPerson}
                     onChangeText={(text) => {
-                      // Remove any numeric characters
+                      // Remove any numeric characters and apply camel case
                       const cleanText = text.replace(/[0-9]/g, '');
-                      updateFormData('contactPerson', cleanText);
+                      handleTextInput('contactPerson', cleanText);
                     }}
                     placeholder="Enter contact person name"
                     placeholderTextColor={Colors.textLight}
@@ -761,7 +780,7 @@ export default function AddSupplierScreen() {
                       <TextInput
                         style={styles.input}
                         value={formData.addressLine1}
-                        onChangeText={(text) => updateFormData('addressLine1', text)}
+                        onChangeText={(text) => handleTextInput('addressLine1', text)}
                         placeholder="Enter address line 1"
                         placeholderTextColor={Colors.textLight}
                       />
@@ -777,7 +796,7 @@ export default function AddSupplierScreen() {
                   <TextInput
                     style={styles.input}
                     value={formData.addressLine2}
-                    onChangeText={(text) => updateFormData('addressLine2', text)}
+                    onChangeText={(text) => handleTextInput('addressLine2', text)}
                     placeholder="Enter address line 2 (optional)"
                     placeholderTextColor={Colors.textLight}
                   />
@@ -791,7 +810,7 @@ export default function AddSupplierScreen() {
                   <TextInput
                     style={styles.input}
                     value={formData.addressLine3}
-                    onChangeText={(text) => updateFormData('addressLine3', text)}
+                    onChangeText={(text) => handleTextInput('addressLine3', text)}
                     placeholder="Enter address line 3 (optional)"
                     placeholderTextColor={Colors.textLight}
                   />
@@ -806,7 +825,7 @@ export default function AddSupplierScreen() {
                     <TextInput
                       style={styles.input}
                       value={formData.city}
-                      onChangeText={(text) => updateFormData('city', text)}
+                      onChangeText={(text) => handleTextInput('city', text)}
                       placeholder="Enter city"
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
@@ -875,7 +894,7 @@ export default function AddSupplierScreen() {
         <View style={styles.submitSection}>
           <TouchableOpacity
             style={[
-              styles.submitButton,
+              styles.completeButton,
               isFormValid() ? styles.enabledButton : styles.disabledButton,
             ]}
             onPress={handleSubmit}
@@ -883,7 +902,7 @@ export default function AddSupplierScreen() {
             activeOpacity={0.8}
           >
             <Text style={[
-              styles.submitButtonText,
+              styles.completeButtonText,
               isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
             ]}>
               {isSubmitting ? 'Adding Supplier...' : 'Add Supplier'}
@@ -919,7 +938,7 @@ export default function AddSupplierScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={gstinSearch}
-                  onChangeText={setGstinSearch}
+                  onChangeText={(text) => setGstinSearch(text.toUpperCase())}
                   placeholder="Enter 15-digit GSTIN"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="characters"
@@ -1136,10 +1155,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
   },
-  submitButton: {
-    paddingVertical: 16,
-    borderRadius: 8,
+  completeButton: {
+    paddingVertical: 18,
+    borderRadius: 12,
     alignItems: 'center',
+    marginBottom: 30,
   },
   enabledButton: {
     backgroundColor: Colors.primary,
@@ -1147,7 +1167,7 @@ const styles = StyleSheet.create({
   disabledButton: {
     backgroundColor: Colors.grey[300],
   },
-  submitButtonText: {
+  completeButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },

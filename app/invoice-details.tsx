@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -24,6 +25,8 @@ import {
   Package,
   IndianRupee
 } from 'lucide-react-native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 const Colors = {
   background: '#FFFFFF',
@@ -57,6 +60,14 @@ export default function InvoiceDetailsScreen() {
   const invoice = JSON.parse(invoiceData as string);
   const customer = invoice.customerDetails;
   const isBusinessCustomer = invoice.customerType === 'business';
+
+  // Debug: Log invoice data to ensure it's correct
+  console.log('Invoice Details Screen - Invoice Data:', {
+    invoiceId,
+    invoiceNumber: invoice.invoiceNumber,
+    customerName: invoice.customerName,
+    date: invoice.date
+  });
 
   // Mock invoice items
   const invoiceItems: InvoiceItem[] = [
@@ -103,8 +114,230 @@ export default function InvoiceDetailsScreen() {
     });
   };
 
-  const handleDownload = () => {
-    Alert.alert('Download', 'Invoice download functionality will be implemented');
+  const handleDownload = async () => {
+    try {
+              console.log('Starting download for invoice:', invoice.invoiceNumber || 'Unknown');
+      
+      // Generate HTML content for the invoice
+      const htmlContent = generateInvoiceHTML();
+      
+      // Create a temporary HTML file
+      const fileName = `Invoice_${invoice.invoiceNumber || 'Unknown'}.html`;
+      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
+      
+      console.log('File URI:', fileUri);
+      
+      // Write HTML content to file
+      await FileSystem.writeAsStringAsync(fileUri, htmlContent, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      
+      console.log('File written successfully');
+      
+      // Share the file
+      if (await Sharing.isAvailableAsync()) {
+        console.log('Sharing is available, opening share dialog');
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/html',
+          dialogTitle: `Invoice ${invoice.invoiceNumber || 'Unknown'}`,
+        });
+      } else {
+        console.log('Sharing not available, showing success alert');
+        Alert.alert(
+          'Download Successful',
+          `Invoice saved as ${fileName}`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      Alert.alert('Download Failed', `Error generating invoice file: ${error.message}`);
+    }
+  };
+
+  const generateInvoiceHTML = () => {
+    const itemsHTML = invoiceItems.map(item => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.rate)}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.amount)}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.taxRate}%</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.taxAmount)}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.total)}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Invoice ${invoice.invoiceNumber || 'Unknown'}</title>
+          <style>
+            @media print {
+              body { margin: 0; padding: 20px; }
+              .no-print { display: none; }
+            }
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 0; 
+              padding: 20px; 
+              background-color: white;
+              color: #333;
+            }
+            .header { 
+              text-align: center; 
+              margin-bottom: 30px; 
+              border-bottom: 2px solid #3f66ac;
+              padding-bottom: 20px;
+            }
+            .invoice-title { 
+              font-size: 28px; 
+              font-weight: bold; 
+              color: #3f66ac; 
+              margin-bottom: 10px;
+            }
+            .invoice-number {
+              font-size: 18px;
+              color: #666;
+              font-weight: 600;
+            }
+            .invoice-info { 
+              margin-bottom: 20px; 
+              display: flex;
+              justify-content: space-between;
+            }
+            .info-section {
+              flex: 1;
+            }
+            .customer-info { 
+              margin-bottom: 20px; 
+              background-color: #f9f9f9;
+              padding: 15px;
+              border-radius: 8px;
+            }
+            table { 
+              width: 100%; 
+              border-collapse: collapse; 
+              margin-bottom: 20px; 
+              border: 1px solid #ddd;
+            }
+            th { 
+              background-color: #3f66ac; 
+              color: white;
+              padding: 12px; 
+              text-align: left; 
+              font-weight: bold; 
+            }
+            td { 
+              padding: 10px; 
+              border-bottom: 1px solid #eee;
+            }
+            tr:nth-child(even) {
+              background-color: #f9f9f9;
+            }
+            .summary { 
+              margin-top: 20px; 
+              background-color: #f0fdf4;
+              padding: 15px;
+              border-radius: 8px;
+              border: 1px solid #059669;
+            }
+            .summary-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+            }
+            .total { 
+              font-weight: bold; 
+              font-size: 20px; 
+              color: #059669; 
+              border-top: 2px solid #059669;
+              padding-top: 10px;
+              margin-top: 10px;
+            }
+            .business-details {
+              background-color: #f0f4ff;
+              padding: 15px;
+              border-radius: 8px;
+              margin-bottom: 20px;
+              border: 1px solid #3f66ac;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="invoice-title">TAX INVOICE</div>
+            <div class="invoice-number">Invoice No: ${invoice.invoiceNumber || 'Unknown'}</div>
+          </div>
+          
+          <div class="invoice-info">
+            <div class="info-section">
+              <p><strong>Date:</strong> ${formatDate(invoice.date)}</p>
+              <p><strong>Payment Status:</strong> ${invoice.paymentStatus || 'Paid'}</p>
+            </div>
+            <div class="info-section">
+              <p><strong>Staff:</strong> ${invoice.staffName || 'N/A'}</p>
+              <p><strong>Items:</strong> ${invoiceItems.length}</p>
+            </div>
+          </div>
+          
+          <div class="business-details">
+            <h3>Business Details</h3>
+            <p><strong>ABC Electronics Pvt Ltd</strong></p>
+            <p>123 Business Street, Tech City - 560001</p>
+            <p>GSTIN: 29ABCDE1234F1Z5</p>
+            <p>Phone: +91 98765 43210</p>
+          </div>
+          
+          <div class="customer-info">
+            <h3>Customer Details</h3>
+            <p><strong>Name:</strong> ${customer.name}</p>
+            <p><strong>Address:</strong> ${customer.address}</p>
+            <p><strong>Phone:</strong> ${customer.mobile}</p>
+            <p><strong>Type:</strong> ${isBusinessCustomer ? 'Business' : 'Individual'}</p>
+          </div>
+          
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Amount</th>
+                <th>Tax %</th>
+                <th>Tax Amount</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHTML}
+            </tbody>
+          </table>
+          
+          <div class="summary">
+            <div class="summary-row">
+              <span><strong>Subtotal:</strong></span>
+              <span>${formatAmount(subtotal)}</span>
+            </div>
+            <div class="summary-row">
+              <span><strong>Total Tax:</strong></span>
+              <span>${formatAmount(totalTax)}</span>
+            </div>
+            <div class="summary-row total">
+              <span><strong>Grand Total:</strong></span>
+              <span><strong>${formatAmount(grandTotal)}</strong></span>
+            </div>
+          </div>
+          
+          <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
+            <p>Thank you for your business!</p>
+            <p>This is a computer generated invoice.</p>
+          </div>
+        </body>
+      </html>
+    `;
   };
 
   const handleShare = () => {
@@ -128,7 +361,7 @@ export default function InvoiceDetailsScreen() {
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Invoice Details</Text>
+          <Text style={styles.headerTitle}>Tax Invoice - {invoice.invoiceNumber || 'N/A'}</Text>
           
           <View style={styles.headerActions}>
             <TouchableOpacity
@@ -380,6 +613,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+    height: '85%', // Reduce height to avoid camera notch
   },
   headerSafeArea: {
     backgroundColor: Colors.background,
@@ -390,7 +624,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 8, // Reduced padding
     backgroundColor: Colors.background,
   },
   backButton: {
@@ -420,15 +654,16 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    maxHeight: '85%', // Limit scroll view height
   },
   scrollContent: {
-    padding: 16,
+    padding: 12, // Reduced padding
   },
   invoiceHeader: {
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
+    padding: 16, // Reduced padding
+    marginBottom: 12, // Reduced margin
     borderWidth: 1,
     borderColor: Colors.grey[200],
     shadowColor: '#000',
@@ -443,8 +678,8 @@ const styles = StyleSheet.create({
   taxInvoiceSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
+    marginBottom: 12, // Reduced margin
+    paddingBottom: 12, // Reduced padding
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
   },
@@ -473,7 +708,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   irnSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   sectionTitle: {
     fontSize: 18,
@@ -484,7 +719,7 @@ const styles = StyleSheet.create({
   irnCard: {
     backgroundColor: '#f0f4ff',
     borderRadius: 12,
-    padding: 16,
+    padding: 12, // Reduced padding
     borderWidth: 1,
     borderColor: Colors.primary,
   },
@@ -542,12 +777,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   customerSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   customerCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 16,
+    padding: 12, // Reduced padding
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
@@ -614,7 +849,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   itemsSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   itemsTable: {
     backgroundColor: Colors.background,
@@ -626,7 +861,7 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: Colors.primary,
-    paddingVertical: 12,
+    paddingVertical: 8, // Reduced padding
     paddingHorizontal: 16,
   },
   tableHeaderText: {
@@ -651,7 +886,7 @@ const styles = StyleSheet.create({
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 12,
+    paddingVertical: 8, // Reduced padding
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[100],
@@ -688,12 +923,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   summarySection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   summaryCard: {
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 16,
+    padding: 12, // Reduced padding
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
@@ -701,7 +936,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 6, // Reduced padding
   },
   summaryLabel: {
     fontSize: 14,
@@ -729,12 +964,12 @@ const styles = StyleSheet.create({
     color: Colors.success,
   },
   paymentSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   paymentCard: {
     backgroundColor: '#f0fdf4',
     borderRadius: 12,
-    padding: 16,
+    padding: 12, // Reduced padding
     borderWidth: 1,
     borderColor: Colors.success,
   },
@@ -774,12 +1009,12 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   staffSection: {
-    marginBottom: 16,
+    marginBottom: 12, // Reduced margin
   },
   staffCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 16,
+    padding: 12, // Reduced padding
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },

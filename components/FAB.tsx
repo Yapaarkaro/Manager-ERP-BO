@@ -16,6 +16,7 @@ import {
   CreditCard,
   IndianRupee,
   Bell,
+  Wallet,
 } from 'lucide-react-native';
 
 interface FABProps {
@@ -36,42 +37,42 @@ const fabActions: FABAction[] = [
     title: 'Notify Staff',
     icon: Bell,
     color: '#ffffff',
-    backgroundColor: '#10b981',
+    backgroundColor: '#3f66ac',
   },
   {
     id: 'expense',
-    title: 'Expense',
+    title: 'Income/Expense',
     icon: IndianRupee,
     color: '#ffffff',
-    backgroundColor: '#ef4444',
-  },
-  {
-    id: 'payments',
-    title: 'Payment',
-    icon: CreditCard,
-    color: '#ffffff',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#3f66ac',
   },
   {
     id: 'stock',
     title: 'Stock',
     icon: Package,
     color: '#ffffff',
-    backgroundColor: '#8b5cf6',
+    backgroundColor: '#3f66ac',
+  },
+  {
+    id: 'payments',
+    title: 'Payment',
+    icon: Wallet,
+    color: '#ffffff',
+    backgroundColor: '#3f66ac',
   },
   {
     id: 'return',
     title: 'Return',
     icon: RotateCcw,
     color: '#ffffff',
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#3f66ac',
   },
   {
     id: 'new-sale',
     title: 'New Sale',
     icon: ShoppingCart,
     color: '#ffffff',
-    backgroundColor: '#06b6d4',
+    backgroundColor: '#3f66ac',
   },
 ];
 
@@ -118,9 +119,9 @@ export default function FAB({ onAction }: FABProps) {
       router.push('/payment-selection');
     }
     
-    // Navigate to add expense if expense action is pressed
+    // Navigate to income/expense toggle if expense action is pressed
     if (actionId === 'expense') {
-      router.push('/expenses/add-expense');
+      router.push('/expenses/income-expense-toggle');
     }
     
     // Navigate to notify staff if notify-staff action is pressed
@@ -138,7 +139,7 @@ export default function FAB({ onAction }: FABProps) {
 
   const rotation = rotationValue.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '45deg'],
+    outputRange: ['0deg', '90deg'],
   });
 
   return (
@@ -148,7 +149,7 @@ export default function FAB({ onAction }: FABProps) {
         const IconComponent = action.icon;
         const translateY = animationValue.interpolate({
           inputRange: [0, 1],
-          outputRange: [0, -(40 * (fabActions.length - index))],
+          outputRange: [0, -(45 * (fabActions.length - index))],
         });
         
         const opacity = animationValue.interpolate({
@@ -172,19 +173,25 @@ export default function FAB({ onAction }: FABProps) {
               },
             ]}
           >
-            <TouchableOpacity
-              style={styles.actionButtonContainer}
-              onPress={() => handleActionPress(action.id)}
-              activeOpacity={0.8}
-            >
-              <View style={[
-                styles.actionButtonTouchable,
-                { backgroundColor: action.backgroundColor },
-              ]}>
-                <IconComponent size={20} color={action.color} />
-              </View>
-              <Text style={styles.actionLabel}>{action.title}</Text>
-            </TouchableOpacity>
+            <View style={styles.actionRow}>
+              {/* Text Button (Left) */}
+              <TouchableOpacity
+                style={styles.textButton}
+                onPress={() => handleActionPress(action.id)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.textButtonLabel}>{action.title}</Text>
+              </TouchableOpacity>
+              
+              {/* Icon Button (Right) */}
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => handleActionPress(action.id)}
+                activeOpacity={0.8}
+              >
+                <IconComponent size={20} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         );
       })}
@@ -210,7 +217,11 @@ export default function FAB({ onAction }: FABProps) {
           style={styles.backdrop}
           onPress={toggleFAB}
           activeOpacity={1}
-        />
+        >
+          <View style={styles.glassLayer1} />
+          <View style={styles.glassLayer2} />
+          <View style={styles.glassLayer3} />
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -229,21 +240,54 @@ const styles = StyleSheet.create({
     left: -1000,
     right: -20,
     bottom: -20,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     zIndex: -1,
+  },
+  glassLayer1: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  glassLayer2: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  glassLayer3: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   actionButton: {
     marginBottom: 8,
     zIndex: 1,
   },
-  actionButtonContainer: {
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  actionButtonTouchable: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  textButton: {
+    backgroundColor: '#3f66ac',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    minWidth: 120,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -255,26 +299,27 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  actionLabel: {
-    backgroundColor: '#ffffff',
-    color: '#3f66ac',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    fontSize: 12,
-    fontWeight: '500',
-    marginRight: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+  textButtonLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#3f66ac',
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 2,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   mainButton: {
     width: 56,

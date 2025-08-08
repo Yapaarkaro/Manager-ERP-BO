@@ -60,6 +60,7 @@ export default function BankingDetailsScreen() {
     (prefilledAccountType as 'Savings' | 'Current') || 'Savings'
   );
   const [initialBalance, setInitialBalance] = useState(prefilledInitialBalance as string || '');
+  const [upiId, setUpiId] = useState('');
   const [ifscSelection, setIfscSelection] = useState<{start: number, end: number} | undefined>();
   const [showBankModal, setShowBankModal] = useState(false);
   const [bankSearch, setBankSearch] = useState('');
@@ -172,6 +173,18 @@ export default function BankingDetailsScreen() {
     setInitialBalance(cleaned);
   };
 
+  const validateUPI = (upi: string): boolean => {
+    // UPI ID format: username@bankname or username@upi
+    const upiRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$/;
+    return upiRegex.test(upi) && upi.length >= 5 && upi.length <= 50;
+  };
+
+  const handleUPIChange = (text: string) => {
+    // Convert to lowercase and remove spaces
+    const cleaned = text.toLowerCase().replace(/\s/g, '');
+    setUpiId(cleaned);
+  };
+
   const isFormValid = () => {
     return (
       selectedBank !== null &&
@@ -184,7 +197,9 @@ export default function BankingDetailsScreen() {
       validateIFSC(ifscCode) &&
       (accountType === 'Savings' || accountType === 'Current') &&
       initialBalance.length > 0 &&
-      !isNaN(parseFloat(initialBalance))
+      !isNaN(parseFloat(initialBalance)) &&
+      upiId.length > 0 &&
+      validateUPI(upiId)
     );
   };
 
@@ -201,6 +216,8 @@ export default function BankingDetailsScreen() {
     if (!validateIFSC(ifscCode)) return 'Invalid IFSC code format';
     if (accountType !== 'Savings' && accountType !== 'Current') return 'Please select account type';
     if (!initialBalance || isNaN(parseFloat(initialBalance))) return 'Please enter valid initial balance';
+    if (!upiId.trim()) return 'Please enter UPI ID';
+    if (!validateUPI(upiId)) return 'Please enter a valid UPI ID (e.g., username@bankname)';
     return '';
   };
 
@@ -228,6 +245,7 @@ export default function BankingDetailsScreen() {
       accountHolderName: accountHolderName.trim(),
       accountNumber: accountNumber,
       ifscCode: ifscCode,
+      upiId: upiId.trim(),
       accountType: accountType,
       initialBalance: parseFloat(initialBalance),
       isPrimary: isAddingSecondary === 'false' && editMode === 'false',
@@ -475,6 +493,38 @@ export default function BankingDetailsScreen() {
                   <Text style={styles.fieldHint}>
                     Format: 4 letters + 0 + 6 characters (e.g., SBIN0001234)
                   </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.requiredLabel}>UPI ID *</Text>
+                  <View style={[
+                    styles.inputContainer,
+                    upiId.length === 0 && styles.requiredInputContainer
+                  ]}>
+                    <CreditCard size={20} color="#D97706" style={styles.inputIcon} />
+                    <TextInput
+                      style={[
+                        styles.input,
+                        upiId.length === 0 && styles.requiredInput,
+                        upiId.length > 0 && !validateUPI(upiId) && styles.errorInput
+                      ]}
+                      value={upiId}
+                      onChangeText={handleUPIChange}
+                      placeholder="username@bankname"
+                      placeholderTextColor="#D97706"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                  <Text style={styles.requiredFieldHint}>
+                    This UPI ID will be used for all UPI-related payments
+                  </Text>
+                  {upiId.length === 0 && (
+                    <Text style={styles.requiredErrorText}>UPI ID is required for all UPI payments</Text>
+                  )}
+                  {upiId.length > 0 && !validateUPI(upiId) && (
+                    <Text style={styles.errorText}>Please enter a valid UPI ID (e.g., username@bankname)</Text>
+                  )}
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -987,5 +1037,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748b',
     fontFamily: 'monospace',
+  },
+  // Required UPI ID styles
+  requiredLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#D97706',
+    marginBottom: 8,
+  },
+  requiredInputContainer: {
+    borderColor: '#D97706',
+    borderWidth: 2,
+    backgroundColor: '#fff7ed',
+  },
+  requiredInput: {
+    color: '#D97706',
+    fontWeight: '600',
+  },
+  requiredFieldHint: {
+    fontSize: 12,
+    color: '#D97706',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  requiredErrorText: {
+    color: '#D97706',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '600',
   },
 });

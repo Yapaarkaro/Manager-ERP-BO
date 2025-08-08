@@ -10,10 +10,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Send, Search, X, Phone, Video, MoveVertical as MoreVertical, Paperclip, Camera, Mic, Check, CheckCheck } from 'lucide-react-native';
+import { ArrowLeft, Send, Search, X, Phone, Video, MoveVertical as MoreVertical, Paperclip, Camera, Mic, Check, CheckCheck, Play, Pause, Square } from 'lucide-react-native';
+import { Audio } from 'expo-av';
 
 const Colors = {
   background: '#FFFFFF',
@@ -37,12 +40,14 @@ interface ChatMessage {
   timestamp: string;
   isFromMe: boolean;
   status: 'sent' | 'delivered' | 'read';
-  type: 'text' | 'image' | 'file';
+  type: 'text' | 'image' | 'file' | 'audio';
   attachment?: {
     url: string;
     name: string;
     size?: string;
   };
+  audioUri?: string;
+  audioDuration?: number;
 }
 
 const mockMessages: ChatMessage[] = [
@@ -96,35 +101,89 @@ const mockMessages: ChatMessage[] = [
   },
   {
     id: '7',
-    text: 'Price_List_January_2024.pdf',
+    text: 'INV-035.PDF',
     timestamp: '2024-01-16T09:48:00Z',
     isFromMe: false,
     status: 'read',
     type: 'file',
     attachment: {
-      url: 'https://example.com/price-list.pdf',
-      name: 'Price_List_January_2024.pdf',
-      size: '2.3 MB'
+      url: 'https://example.com/invoice-035.pdf',
+      name: 'INV-035.PDF',
+      size: '1.8 MB'
     }
   },
   {
     id: '8',
+    text: 'Here\'s the product catalog with latest images.',
+    timestamp: '2024-01-16T10:05:00Z',
+    isFromMe: false,
+    status: 'read',
+    type: 'image',
+    attachment: {
+      url: 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400&h=300&fit=crop',
+      name: 'product_catalog.jpg',
+      size: '1.2 MB'
+    }
+  },
+  {
+    id: '9',
+    text: 'Perfect! The quality looks great.',
+    timestamp: '2024-01-16T10:08:00Z',
+    isFromMe: true,
+    status: 'read',
+    type: 'text'
+  },
+  {
+    id: '10',
     text: 'Thank you! I\'ll review this and get back to you.',
     timestamp: '2024-01-16T10:00:00Z',
     isFromMe: true,
     status: 'sent',
     type: 'text'
   },
+  {
+    id: '11',
+    text: 'Voice message',
+    timestamp: '2024-01-16T10:05:00Z',
+    isFromMe: true,
+    status: 'read',
+    type: 'audio',
+    audioUri: 'mock-audio-1.m4a',
+    audioDuration: 15
+  },
+  {
+    id: '12',
+    text: 'Voice message',
+    timestamp: '2024-01-16T10:06:00Z',
+    isFromMe: false,
+    status: 'read',
+    type: 'audio',
+    audioUri: 'mock-audio-2.m4a',
+    audioDuration: 8
+  },
 ];
 
 export default function SupplierChatScreen() {
-  const { supplierId, supplierName, supplierAvatar } = useLocalSearchParams();
+  const { supplierId, supplierName, supplierAvatar, supplierPhoneNumber } = useLocalSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [newMessage, setNewMessage] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredMessages, setFilteredMessages] = useState<ChatMessage[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
+  
+  // Audio recording states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordingTimer, setRecordingTimer] = useState<NodeJS.Timeout | null>(null);
+  const [recordingLoaded, setRecordingLoaded] = useState(false);
+  
+  // Audio playback states
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] = useState(0);
 
   useEffect(() => {
     // Scroll to bottom when messages change
@@ -132,6 +191,28 @@ export default function SupplierChatScreen() {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
   }, [messages]);
+
+  // Cleanup audio resources on unmount
+  useEffect(() => {
+    return () => {
+      const cleanup = async () => {
+        try {
+          if (sound) {
+            await sound.unloadAsync();
+          }
+          if (recording && recordingLoaded) {
+            await recording.stopAndUnloadAsync();
+          }
+          if (recordingTimer) {
+            clearInterval(recordingTimer);
+          }
+        } catch (error) {
+          // Ignore cleanup errors as they're not critical
+        }
+      };
+      cleanup();
+    };
+  }, [sound, recording, recordingTimer, recordingLoaded]);
 
   const handleSendMessage = () => {
     if (!newMessage.trim()) return;
@@ -158,6 +239,187 @@ export default function SupplierChatScreen() {
         )
       );
     }, 1000);
+  };
+
+  const handlePhoneCall = async () => {
+    try {
+      // Get supplier phone number from params or use a default
+      let supplierPhone = supplierPhoneNumber || '9876543210'; // Default number without prefix
+      
+      // Add +91 prefix if not already present
+      if (!supplierPhone.startsWith('+91') && !supplierPhone.startsWith('+')) {
+        supplierPhone = `+91${supplierPhone}`;
+      }
+      
+      console.log('Opening phone dialer with number:', supplierPhone);
+      
+      // Directly open the phone dialer without validation
+      await Linking.openURL(`tel:${supplierPhone}`);
+      
+    } catch (error) {
+      console.error('Error opening phone dialer:', error);
+      Alert.alert(
+        'Error',
+        'Unable to open phone dialer. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  // Audio recording functions
+  const startRecording = async () => {
+    try {
+      // Request permissions
+      const permission = await Audio.requestPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Required', 'Please grant microphone permission to record audio.');
+        return;
+      }
+
+      // Configure audio mode
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      
+      // Start recording
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      
+      setRecording(recording);
+      setIsRecording(true);
+      setRecordingDuration(0);
+      setRecordingLoaded(true);
+      
+      // Start timer
+      const timer = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+      setRecordingTimer(timer);
+      
+    } catch (error) {
+      console.error('Failed to start recording:', error);
+      Alert.alert('Error', 'Failed to start recording. Please try again.');
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      if (!recording) return;
+      
+      // Stop recording
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      
+      // Clear timer
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        setRecordingTimer(null);
+      }
+      
+      setIsRecording(false);
+      setRecording(null);
+      setRecordingLoaded(false);
+      
+      if (uri) {
+        // Create audio message
+        const audioMessage: ChatMessage = {
+          id: Date.now().toString(),
+          text: 'Voice message',
+          timestamp: new Date().toISOString(),
+          isFromMe: true,
+          status: 'sent',
+          type: 'audio',
+          audioUri: uri,
+          audioDuration: recordingDuration,
+        };
+        
+        setMessages(prev => [...prev, audioMessage]);
+        setRecordingDuration(0);
+      }
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+      Alert.alert('Error', 'Failed to stop recording. Please try again.');
+    }
+  };
+
+  const playAudio = async (audioUri: string, messageId: string) => {
+    try {
+      // Stop any currently playing audio
+      if (sound) {
+        await sound.unloadAsync();
+      }
+      
+      // Configure audio mode for playback
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      
+      // Check if it's a mock URI (for testing)
+      if (audioUri.includes('mock-audio')) {
+        console.log('Skipping mock audio playback');
+        return;
+      }
+      
+      // Load and play the audio
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri: audioUri },
+        { shouldPlay: true, volume: 1.0, progressUpdateIntervalMillis: 200 }
+      );
+      
+      setSound(newSound);
+      setIsPlaying(true);
+      setPlayingMessageId(messageId);
+      setAudioProgress(0);
+      
+      // Listen for playback status
+      newSound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded) {
+          if (status.didJustFinish) {
+            setIsPlaying(false);
+            setPlayingMessageId(null);
+            setAudioProgress(0);
+          } else if (status.positionMillis && status.durationMillis) {
+            const progress = (status.positionMillis / status.durationMillis) * 100;
+            setAudioProgress(progress);
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('Failed to play audio:', error);
+      setIsPlaying(false);
+      setPlayingMessageId(null);
+      setAudioProgress(0);
+    }
+  };
+
+  const stopAudio = async () => {
+    try {
+      if (sound) {
+        await sound.stopAsync();
+        await sound.unloadAsync();
+        setSound(null);
+      }
+      setIsPlaying(false);
+      setPlayingMessageId(null);
+    } catch (error) {
+      console.error('Failed to stop audio:', error);
+    }
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleSearch = (query: string) => {
@@ -233,12 +495,83 @@ export default function SupplierChatScreen() {
             {message.type === 'file' && message.attachment ? (
               <View style={styles.fileAttachment}>
                 <View style={styles.fileIcon}>
-                  <Paperclip size={16} color={Colors.primary} />
+                  <Text style={styles.fileIconText}>PDF</Text>
                 </View>
                 <View style={styles.fileInfo}>
                   <Text style={styles.fileName}>{message.attachment.name}</Text>
                   {message.attachment.size && (
                     <Text style={styles.fileSize}>{message.attachment.size}</Text>
+                  )}
+                </View>
+              </View>
+            ) : message.type === 'image' && message.attachment ? (
+              <View style={styles.imageAttachment}>
+                <Image 
+                  source={{ uri: message.attachment.url }}
+                  style={styles.messageImage}
+                  resizeMode="cover"
+                />
+                {message.text && (
+                  <Text style={[
+                    styles.messageText,
+                    message.isFromMe ? styles.myMessageText : styles.theirMessageText
+                  ]}>
+                    {message.text}
+                  </Text>
+                )}
+              </View>
+            ) : message.type === 'audio' && message.audioUri ? (
+              <View style={styles.audioMessageContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.audioPlayButton,
+                    message.isFromMe ? styles.myAudioPlayButton : styles.theirAudioPlayButton
+                  ]}
+                  onPress={() => {
+                    if (isPlaying && playingMessageId === message.id) {
+                      stopAudio();
+                    } else {
+                      playAudio(message.audioUri!, message.id);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  {isPlaying && playingMessageId === message.id ? (
+                    <Pause size={16} color={message.isFromMe ? Colors.background : Colors.primary} />
+                  ) : (
+                    <Play size={16} color={message.isFromMe ? Colors.background : Colors.primary} />
+                  )}
+                </TouchableOpacity>
+                
+                <View style={styles.audioContent}>
+                  <Text style={[
+                    styles.audioText,
+                    message.isFromMe ? styles.myMessageText : styles.theirMessageText
+                  ]}>
+                    Voice message
+                  </Text>
+                  
+                  <View style={styles.audioSeekBar}>
+                    <View style={styles.audioSeekBarBackground}>
+                      <View 
+                        style={[
+                          styles.audioSeekBarProgress,
+                          { 
+                            width: isPlaying && playingMessageId === message.id ? `${audioProgress}%` : '0%',
+                            backgroundColor: message.isFromMe ? Colors.background : Colors.primary
+                          }
+                        ]} 
+                      />
+                    </View>
+                  </View>
+                  
+                  {message.audioDuration && (
+                    <Text style={[
+                      styles.audioDuration,
+                      message.isFromMe ? styles.myMessageTime : styles.theirMessageTime
+                    ]}>
+                      {formatDuration(message.audioDuration)}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -277,6 +610,7 @@ export default function SupplierChatScreen() {
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         {/* Header */}
         <SafeAreaView style={styles.headerSafeArea}>
@@ -295,7 +629,7 @@ export default function SupplierChatScreen() {
                 style={styles.headerAvatar}
               />
               <View style={styles.headerText}>
-                <Text style={styles.headerName}>{supplierName}</Text>
+                <Text style={styles.headerName} numberOfLines={1}>{supplierName}</Text>
                 <Text style={styles.headerStatus}>Online</Text>
               </View>
             </View>
@@ -303,24 +637,17 @@ export default function SupplierChatScreen() {
             <View style={styles.headerActions}>
               <TouchableOpacity
                 style={styles.headerActionButton}
+                onPress={handlePhoneCall}
+                activeOpacity={0.7}
+              >
+                <Phone size={18} color={Colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.headerActionButton}
                 onPress={() => setShowSearch(!showSearch)}
                 activeOpacity={0.7}
               >
-                <Search size={20} color={Colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerActionButton}
-                onPress={() => console.log('Voice call')}
-                activeOpacity={0.7}
-              >
-                <Phone size={20} color={Colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerActionButton}
-                onPress={() => console.log('Video call')}
-                activeOpacity={0.7}
-              >
-                <Video size={20} color={Colors.text} />
+                <Search size={18} color={Colors.text} />
               </TouchableOpacity>
             </View>
           </View>
@@ -370,44 +697,70 @@ export default function SupplierChatScreen() {
         </ScrollView>
 
         {/* Message Input */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputRow}>
-            <TouchableOpacity
-              style={styles.attachButton}
-              onPress={() => console.log('Attach file')}
-              activeOpacity={0.7}
-            >
-              <Paperclip size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-
-            <View style={styles.textInputContainer}>
+        <View style={styles.messageInputContainer}>
+          <View style={styles.messageInputRow}>
+            <View style={styles.messageInputWrapper}>
               <TextInput
-                style={styles.textInput}
+                style={styles.messageTextInput}
                 placeholder="Type a message..."
                 placeholderTextColor={Colors.textLight}
                 value={newMessage}
                 onChangeText={setNewMessage}
                 multiline
                 maxLength={1000}
+                textAlignVertical="top"
+                android_ripple={false}
               />
+              
+              {/* Icons inside input field */}
+              <View style={styles.inputIconsContainer}>
+                <TouchableOpacity
+                  style={styles.inputIconButton}
+                  onPress={() => console.log('Attach file')}
+                  activeOpacity={0.7}
+                >
+                  <Paperclip size={16} color={Colors.textLight} />
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.inputIconButton}
+                  onPress={() => console.log('Camera')}
+                  activeOpacity={0.7}
+                >
+                  <Camera size={16} color={Colors.textLight} />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            {newMessage.trim() ? (
-              <TouchableOpacity
-                style={styles.sendButton}
-                onPress={handleSendMessage}
-                activeOpacity={0.7}
-              >
-                <Send size={20} color="#ffffff" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.micButton}
-                onPress={() => console.log('Voice message')}
-                activeOpacity={0.7}
-              >
-                <Mic size={20} color={Colors.textLight} />
-              </TouchableOpacity>
+            {/* Voice recording button outside */}
+            <TouchableOpacity
+              style={[
+                styles.voiceButton,
+                isRecording && styles.recordingButton
+              ]}
+              onPress={() => {
+                if (isRecording) {
+                  stopRecording();
+                } else {
+                  startRecording();
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              {isRecording ? (
+                <Square size={20} color={Colors.background} />
+              ) : (
+                <Mic size={20} color={Colors.background} />
+              )}
+            </TouchableOpacity>
+            
+            {/* Recording indicator */}
+            {isRecording && (
+              <View style={styles.recordingIndicator}>
+                <Text style={styles.recordingText}>
+                  Recording... {formatDuration(recordingDuration)}
+                </Text>
+              </View>
             )}
           </View>
         </View>
@@ -433,7 +786,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 4,
     backgroundColor: Colors.background,
   },
   backButton: {
@@ -449,22 +802,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 10,
   },
   headerText: {
     flex: 1,
   },
   headerName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
-    marginBottom: 2,
+    marginBottom: 1,
   },
   headerStatus: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.success,
   },
   headerActions: {
@@ -472,9 +825,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerActionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.grey[50],
     justifyContent: 'center',
     alignItems: 'center',
@@ -600,12 +953,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fileIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#DC2626',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  fileIconText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   fileInfo: {
     flex: 1,
@@ -620,53 +978,159 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255, 255, 255, 0.8)',
   },
-  inputContainer: {
+  messageInputContainer: {
     backgroundColor: Colors.background,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 8,
   },
-  inputRow: {
+  messageInputRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: 8,
   },
-  attachButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[50],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  textInputContainer: {
+  messageInputWrapper: {
     flex: 1,
     backgroundColor: Colors.grey[50],
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
     maxHeight: 100,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  textInput: {
+  messageTextInput: {
+    flex: 1,
     fontSize: 14,
     color: Colors.text,
     lineHeight: 20,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    paddingRight: 8,
   },
-  sendButton: {
+  inputIconsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  inputIconButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  micButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[50],
+  fileType: {
+    fontSize: 10,
+    color: Colors.primary,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  imageAttachment: {
+    marginBottom: 4,
+  },
+  messageImage: {
+    width: 200,
+    height: 150,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  recordingButton: {
+    backgroundColor: Colors.error,
+  },
+  audioMessageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    minWidth: 200,
+    maxWidth: 280,
+  },
+  audioPlayButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.grey[100],
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
+  },
+  myAudioPlayButton: {
+    backgroundColor: Colors.background,
+  },
+  theirAudioPlayButton: {
+    backgroundColor: Colors.grey[100],
+  },
+  audioContent: {
+    flex: 1,
+    gap: 6,
+  },
+  audioText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  audioDuration: {
+    fontSize: 11,
+    opacity: 0.8,
+    marginTop: 2,
+  },
+  audioSeekBar: {
+    height: 4,
+    marginVertical: 4,
+  },
+  audioSeekBarBackground: {
+    height: 4,
+    backgroundColor: Colors.grey[300],
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  audioSeekBarProgress: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  recordingIndicator: {
+    position: 'absolute',
+    top: -40,
+    left: 0,
+    right: 0,
+    backgroundColor: Colors.error,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  recordingText: {
+    color: Colors.background,
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

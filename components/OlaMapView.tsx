@@ -8,8 +8,9 @@ import {
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
+import AndroidMapFallback from './AndroidMapFallback';
 
 const OlaMapView = (props: any) => {
   const {
@@ -178,12 +179,29 @@ const OlaMapView = (props: any) => {
     }
   ];
 
+    // Check if we should use fallback for Android
+  const shouldUseFallback = Platform.OS === 'android' && !__DEV__;
+
+  if (shouldUseFallback) {
+    return (
+      <AndroidMapFallback
+        onLocationSelect={(lat, lng) => {
+          const newLocation = { lat, lng };
+          setMarkerLocation(newLocation);
+          onMapClick?.(lat, lng);
+        }}
+        selectedLocation={markerLocation}
+        onMapLoad={handleMapLoad}
+      />
+    );
+  }
+
   return (
     <View style={styles.container}>
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={PROVIDER_GOOGLE}
+        provider={Platform.OS === 'android' ? PROVIDER_DEFAULT : PROVIDER_GOOGLE}
         initialRegion={{
           latitude: currentLocation.lat,
           longitude: currentLocation.lng,
@@ -192,7 +210,7 @@ const OlaMapView = (props: any) => {
         }}
         onPress={handleMapPress}
         onMapReady={handleMapLoad}
-        customMapStyle={customMapStyle}
+        customMapStyle={Platform.OS === 'ios' ? customMapStyle : undefined}
         showsUserLocation={hasLocationPermission}
         showsMyLocationButton={false}
         showsCompass={true}
@@ -205,20 +223,20 @@ const OlaMapView = (props: any) => {
         scrollEnabled={true}
         rotateEnabled={true}
         pitchEnabled={true}
-              >
-          {/* Draggable marker for precise location selection */}
-          <Marker
-            coordinate={{
-              latitude: markerLocation.lat,
-              longitude: markerLocation.lng,
-            }}
-            draggable={true}
-            onDragEnd={handleMarkerDragEnd}
-            title="Selected Location"
-            description="Drag to adjust position"
-            pinColor="#3f66ac"
-          />
-        </MapView>
+      >
+        {/* Draggable marker for precise location selection */}
+        <Marker
+          coordinate={{
+            latitude: markerLocation.lat,
+            longitude: markerLocation.lng,
+          }}
+          draggable={true}
+          onDragEnd={handleMarkerDragEnd}
+          title="Selected Location"
+          description="Drag to adjust position"
+          pinColor="#3f66ac"
+        />
+      </MapView>
 
       {/* Current Location Icon */}
       <TouchableOpacity

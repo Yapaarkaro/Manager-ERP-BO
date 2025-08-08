@@ -33,6 +33,45 @@ interface SelectedAddress {
 // Ola Maps API configuration
 const OLA_MAPS_API_KEY = '7lWg0vFb2XZqdPXSOzseDmd4QaSSyNKf74TMC93i';
 
+const indianStates = [
+  { name: 'Andhra Pradesh', code: '37' },
+  { name: 'Arunachal Pradesh', code: '12' },
+  { name: 'Assam', code: '18' },
+  { name: 'Bihar', code: '10' },
+  { name: 'Chhattisgarh', code: '22' },
+  { name: 'Goa', code: '30' },
+  { name: 'Gujarat', code: '24' },
+  { name: 'Haryana', code: '06' },
+  { name: 'Himachal Pradesh', code: '02' },
+  { name: 'Jharkhand', code: '20' },
+  { name: 'Karnataka', code: '29' },
+  { name: 'Kerala', code: '32' },
+  { name: 'Madhya Pradesh', code: '23' },
+  { name: 'Maharashtra', code: '27' },
+  { name: 'Manipur', code: '14' },
+  { name: 'Meghalaya', code: '17' },
+  { name: 'Mizoram', code: '15' },
+  { name: 'Nagaland', code: '13' },
+  { name: 'Odisha', code: '21' },
+  { name: 'Punjab', code: '03' },
+  { name: 'Rajasthan', code: '08' },
+  { name: 'Sikkim', code: '11' },
+  { name: 'Tamil Nadu', code: '33' },
+  { name: 'Telangana', code: '36' },
+  { name: 'Tripura', code: '16' },
+  { name: 'Uttar Pradesh', code: '09' },
+  { name: 'Uttarakhand', code: '05' },
+  { name: 'West Bengal', code: '19' },
+  { name: 'Andaman and Nicobar Islands', code: '35' },
+  { name: 'Chandigarh', code: '04' },
+  { name: 'Dadra and Nagar Haveli and Daman and Diu', code: '26' },
+  { name: 'Delhi', code: '07' },
+  { name: 'Jammu and Kashmir', code: '01' },
+  { name: 'Ladakh', code: '38' },
+  { name: 'Lakshadweep', code: '31' },
+  { name: 'Puducherry', code: '34' },
+];
+
 export default function BusinessAddressScreen() {
   const { type, value, gstinData, name, businessName, businessType, customBusinessType } = useLocalSearchParams();
   const { addressType = 'primary', existingAddresses = '[]' } = useLocalSearchParams();
@@ -43,6 +82,8 @@ export default function BusinessAddressScreen() {
   const [isMapLoading, setIsMapLoading] = useState(true);
   const [mapInstance, setMapInstance] = useState<any>(null);
   const [currentMarker, setCurrentMarker] = useState<any>(null);
+  const [isSettingQueryProgrammatically, setIsSettingQueryProgrammatically] = useState(false);
+  const [isProgrammaticMarkerUpdate, setIsProgrammaticMarkerUpdate] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const colors = useThemeColors();
 
@@ -180,11 +221,22 @@ export default function BusinessAddressScreen() {
   };
 
   const handleMarkerDragEnd = async (lat: number, lng: number) => {
+    // Skip if this is a programmatic marker update
+    if (isProgrammaticMarkerUpdate) {
+      console.log('🔄 Skipping reverse geocoding - programmatic marker update');
+      return;
+    }
+    
     try {
       console.log('🔄 Reverse geocoding for coordinates:', lat, lng);
       
       // Reverse geocode the dragged location
       const requestId = `reverse-geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Add timeout for Android to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
         `https://api.olamaps.io/places/v1/reverse-geocode?latlng=${lat},${lng}&api_key=${OLA_MAPS_API_KEY}`,
         {
@@ -192,9 +244,13 @@ export default function BusinessAddressScreen() {
           headers: {
             'X-Request-Id': requestId,
             'Content-Type': 'application/json',
+            'User-Agent': 'Manager-ERP-BO/1.0',
           },
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -262,8 +318,11 @@ export default function BusinessAddressScreen() {
         };
         setSelectedAddress(addressData);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('🔄 Reverse geocoding error:', error);
+      if (error.name === 'AbortError') {
+        console.log('🔄 Request timed out');
+      }
       // Fallback: create basic address data from coordinates
       const addressData: SelectedAddress = {
         street: '',
@@ -387,34 +446,77 @@ export default function BusinessAddressScreen() {
   const handleAddressSelect = (addressData: any) => {
     try {
       console.log('🏠 Selected address from search:', addressData);
+      console.log('📱 Platform:', Platform.OS);
       
-      // IMMEDIATELY close suggestions and clear all states
+      // Clear search query first to hide suggestions
       setSearchQuery('');
       
       // Parse the address text into structured components
-      const addressText = addressData.formatted_address || searchQuery;
-      const parsedData = parseAddressText(addressText);
+      const addressText = addressData.formatted_address || '';
+      console.log('🔍 Address text to parse:', addressText);
       
-      console.log('📍 Parsed address components:', parsedData);
+      // First, try to use the structured data from the API
+      let processedAddress: SelectedAddress;
       
-      // Process and store the selected address data
-      const processedAddress: SelectedAddress = {
-        street: parsedData.street || addressData.street || '',
-        area: parsedData.area || addressData.area || '',
-        city: parsedData.city || addressData.city || '',
-        state: parsedData.state || addressData.state || '',
-        pincode: parsedData.pincode || addressData.pincode || '',
-        formatted_address: addressText,
-        stateCode: parsedData.state ? getGSTStateCode(parsedData.state) : '',
-      };
+      if (addressData.street || addressData.city || addressData.state) {
+        // Use the structured data from the API
+        console.log('🏠 Using structured API data:', addressData);
+        processedAddress = {
+          street: addressData.street || '',
+          area: addressData.area || '',
+          city: addressData.city || '',
+          state: addressData.state || '',
+          pincode: addressData.pincode || '',
+          formatted_address: addressText,
+          stateCode: addressData.state ? getGSTStateCode(addressData.state) : '',
+        };
+      } else {
+        // Fallback to parsing the text
+        console.log('🔍 Parsing address text manually');
+        const parsedData = parseAddressText(addressText);
+        console.log('📍 Parsed address components:', parsedData);
+        
+        processedAddress = {
+          street: parsedData.street || '',
+          area: parsedData.area || '',
+          city: parsedData.city || '',
+          state: parsedData.state || '',
+          pincode: parsedData.pincode || '',
+          formatted_address: addressText,
+          stateCode: parsedData.state ? getGSTStateCode(parsedData.state) : '',
+        };
+      }
       
       console.log('🏠 Processed address for storage:', processedAddress);
-      setSelectedAddress(processedAddress);
       
-      // Geocode to get coordinates and move map
-      if (addressText) {
-        geocodeAddress(addressText, processedAddress);
-      }
+      // For Android, use a longer delay to ensure proper state updates
+      const delay = Platform.OS === 'android' ? 300 : 100;
+      console.log('⏱️ Using delay for state update:', delay, 'ms');
+      
+      setTimeout(() => {
+        console.log('💾 Setting selected address:', processedAddress);
+        setSelectedAddress(processedAddress);
+        
+        // Geocode the address to get coordinates and move the map
+        if (addressText) {
+          console.log('🗺️ Geocoding address to move map:', addressText);
+          geocodeAddress(addressText, processedAddress);
+        }
+        
+        // Set the search query to show the selected address AFTER geocoding
+        // This prevents triggering the search again
+        setTimeout(() => {
+          setIsSettingQueryProgrammatically(true);
+          setSearchQuery(addressText);
+          // Reset the flag after a short delay
+          setTimeout(() => {
+            setIsSettingQueryProgrammatically(false);
+          }, 200);
+        }, 100);
+        
+        console.log('✅ Address set successfully');
+      }, delay);
+      
     } catch (error) {
       console.error('Error processing selected address:', error);
       // Ensure dropdown is closed even on error
@@ -425,6 +527,11 @@ export default function BusinessAddressScreen() {
   const geocodeAddress = async (addressText: string, addressData: any) => {
     try {
       const requestId = `geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Add timeout for Android to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch(
         `https://api.olamaps.io/places/v1/geocode?address=${encodeURIComponent(addressText)}&api_key=${OLA_MAPS_API_KEY}`,
         {
@@ -432,9 +539,13 @@ export default function BusinessAddressScreen() {
           headers: {
             'X-Request-Id': requestId,
             'Content-Type': 'application/json',
+            'User-Agent': 'Manager-ERP-BO/1.0',
           },
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -459,17 +570,29 @@ export default function BusinessAddressScreen() {
             }
             
             // Update the existing address with coordinates only (preserve original data)
-            setSelectedAddress(prev => ({
-              ...prev!,
-              lat,
-              lng,
-            }));
+            console.log('📍 Adding coordinates to address:', { lat, lng });
+            setSelectedAddress(prev => {
+              if (prev) {
+                const updatedAddress = {
+                  ...prev,
+                  lat,
+                  lng,
+                };
+                console.log('📍 Updated address with coordinates:', updatedAddress);
+                return updatedAddress;
+              }
+              console.log('📍 No previous address to update');
+              return prev;
+            });
             return;
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Geocoding error:', error);
+      if (error.name === 'AbortError') {
+        console.log('Geocoding request timed out');
+      }
     }
   };
 
@@ -502,6 +625,11 @@ export default function BusinessAddressScreen() {
             try {
               // Use Ola Maps Reverse Geocoding API
               const requestId = `reverse-geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+              
+              // Add timeout for Android to prevent hanging requests
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+              
               const response = await fetch(
                 `https://api.olamaps.io/places/v1/reverse-geocode?latlng=${latitude},${longitude}&api_key=${OLA_MAPS_API_KEY}`,
                 {
@@ -509,9 +637,13 @@ export default function BusinessAddressScreen() {
                   headers: {
                     'X-Request-Id': requestId,
                     'Content-Type': 'application/json',
+                    'User-Agent': 'Manager-ERP-BO/1.0',
                   },
+                  signal: controller.signal,
                 }
               );
+
+              clearTimeout(timeoutId);
 
               if (response.ok) {
                 const data = await response.json();
@@ -602,6 +734,14 @@ export default function BusinessAddressScreen() {
 
     console.log('🗺️ Confirming address from map:', selectedAddress);
     console.log('📋 Existing addresses being passed:', existingAddresses);
+    console.log('📱 Platform:', Platform.OS);
+    console.log('🏠 Address details being passed to manual form:');
+    console.log('  - Street:', selectedAddress.street);
+    console.log('  - Area:', selectedAddress.area);
+    console.log('  - City:', selectedAddress.city);
+    console.log('  - State:', selectedAddress.state);
+    console.log('  - Pincode:', selectedAddress.pincode);
+    console.log('  - Formatted:', selectedAddress.formatted_address);
 
     // Find matching state from our predefined list
     const indianStates = [
@@ -674,6 +814,14 @@ export default function BusinessAddressScreen() {
 
   const handleManualEntry = () => {
     console.log('✍️ Going to manual entry with existing addresses:', existingAddresses);
+    console.log('🏠 Selected address for manual entry:', selectedAddress);
+    
+    // Find matching state for the selected address
+    const matchingState = selectedAddress?.state ? 
+      indianStates.find((state: { name: string; code: string }) => 
+        state.name.toLowerCase() === selectedAddress.state.toLowerCase() ||
+        selectedAddress.state.toLowerCase().includes(state.name.toLowerCase())
+      ) : null;
     
     router.push({
       pathname: '/auth/business-address-manual',
@@ -687,6 +835,15 @@ export default function BusinessAddressScreen() {
         customBusinessType,
         addressType,
         existingAddresses,
+        // Pre-fill with selected address data
+        prefilledAddressName: selectedAddress?.street || '',
+        prefilledDoorNumber: '',
+        prefilledStreet: selectedAddress?.street || '',
+        prefilledArea: selectedAddress?.area || '',
+        prefilledCity: selectedAddress?.city || '',
+        prefilledState: matchingState ? matchingState.name : selectedAddress?.state || '',
+        prefilledPincode: selectedAddress?.pincode || '',
+        prefilledFormatted: selectedAddress?.formatted_address || '',
       }
     });
   };
@@ -720,6 +877,7 @@ export default function BusinessAddressScreen() {
               value={searchQuery}
               onChangeText={setSearchQuery}
               onAddressSelect={handleAddressSelect}
+              isSettingQueryProgrammatically={isSettingQueryProgrammatically}
             />
           </View>
         </View>

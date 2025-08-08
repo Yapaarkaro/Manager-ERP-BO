@@ -103,6 +103,15 @@ export default function BusinessAddressManualScreen() {
   }, []);
 
   useEffect(() => {
+    console.log('🏠 Business Address Manual Screen - Prefilled Data:');
+    console.log('  - Address Name:', prefilledAddressName);
+    console.log('  - Street:', prefilledStreet);
+    console.log('  - Area:', prefilledArea);
+    console.log('  - City:', prefilledCity);
+    console.log('  - State:', prefilledState);
+    console.log('  - Pincode:', prefilledPincode);
+    console.log('  - Formatted:', prefilledFormatted);
+    
     // Auto-fill address name with business name
     if (businessName && !addressName && addressType === 'primary') {
       setAddressName(businessName as string);
@@ -137,6 +146,29 @@ export default function BusinessAddressManualScreen() {
       useNativeDriver: true,
     }).start();
   }, [businessName, prefilledState, addressType]);
+
+  // Handle prefilled address data
+  useEffect(() => {
+    if (prefilledStreet) {
+      console.log('🏠 Setting prefilled street:', prefilledStreet);
+      setAddressLine1(prefilledStreet as string);
+    }
+    
+    if (prefilledArea) {
+      console.log('🏠 Setting prefilled area:', prefilledArea);
+      setAddressLine2(prefilledArea as string);
+    }
+    
+    if (prefilledCity) {
+      console.log('🏠 Setting prefilled city:', prefilledCity);
+      setCity(prefilledCity as string);
+    }
+    
+    if (prefilledPincode) {
+      console.log('🏠 Setting prefilled pincode:', prefilledPincode);
+      setPincode(prefilledPincode as string);
+    }
+  }, [prefilledStreet, prefilledArea, prefilledCity, prefilledPincode]);
 
   const filteredStates = indianStates.filter(state =>
     state.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
