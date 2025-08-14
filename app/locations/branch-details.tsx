@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
+import { dataStore, BusinessAddress, getStateCode } from '@/utils/dataStore';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -73,10 +74,10 @@ export default function BranchDetailsScreen() {
   const [city, setCity] = useState(prefilledCity as string);
   const [pincode, setPincode] = useState(prefilledPincode as string);
   const [selectedState, setSelectedState] = useState<{ name: string; code: string } | null>(null);
+  const [showStateModal, setShowStateModal] = useState(false);
+  const [stateSearchQuery, setStateSearchQuery] = useState('');
   const [managerName, setManagerName] = useState('');
   const [managerPhone, setManagerPhone] = useState('');
-  const [showStates, setShowStates] = useState(false);
-  const [stateSearch, setStateSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
@@ -108,18 +109,17 @@ export default function BranchDetailsScreen() {
   }, [prefilledState]);
 
   const filteredStates = indianStates.filter(state =>
-    state.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
-    state.code.includes(stateSearch)
+    state.name.toLowerCase().includes(stateSearchQuery.toLowerCase())
   );
 
   const handleStateSelect = (state: { name: string; code: string }) => {
     setSelectedState(state);
-    setStateSearch('');
-    setShowStates(false);
+    setStateSearchQuery('');
+    setShowStateModal(false);
   };
 
   const handleStateModalOpen = () => {
-    setShowStates(true);
+    setShowStateModal(true);
     setTimeout(() => {
       searchInputRef.current?.focus();
     }, 300);
@@ -169,27 +169,50 @@ export default function BranchDetailsScreen() {
       return;
     }
 
+    // Check for duplicate addresses
+    const allAddresses = dataStore.getAddresses();
+    const isDuplicate = allAddresses.some(addr => {
+      // Check if address components match (excluding name and ID)
+      return addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
+             addr.city.toLowerCase() === city.trim().toLowerCase() &&
+             addr.pincode === pincode &&
+             addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
+    });
+
+    if (isDuplicate) {
+      Alert.alert(
+        'Duplicate Address', 
+        'An address with these details already exists. Please use a different location or edit the existing one.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setIsLoading(true);
     
-    const newBranch = {
+    const newBranch: BusinessAddress = {
       id: `branch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: branchName.trim(),
       type: 'branch',
-      doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
-      addressLine1: addressLine1.trim(),
-      addressLine2: addressLine2.trim(),
+      addressLine1: addressLine1.trim(), // Door number
+      addressLine2: addressLine2.trim(), // Street address
+      additionalLines: additionalLines.filter(line => line.trim().length > 0),
       city: city.trim(),
       pincode: pincode,
       stateName: selectedState?.name || '',
-      stateCode: selectedState?.code || '',
+      stateCode: getStateCode(selectedState?.name || ''),
       isPrimary: false,
       manager: managerName.trim() || undefined,
       phone: managerPhone || undefined,
       status: 'active',
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     console.log('Creating new branch:', newBranch);
+    
+    // Save to data store
+    dataStore.addAddress(newBranch);
     
     setTimeout(() => {
       Alert.alert('Success', 'Branch office added successfully', [
@@ -271,28 +294,33 @@ export default function BranchDetailsScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Address Line 1 *</Text>
+                  <Text style={styles.label}>Door Number / Building Name *</Text>
                   <TextInput
                     style={styles.input}
                     value={addressLine1}
                     onChangeText={setAddressLine1}
-                    placeholder="Building, Street, Area"
+                    placeholder="e.g., Flat 101, Shop No. 5, Building A"
+                    placeholderTextColor="#999999"
+                    autoCapitalize="words"
+                  />
+                  <Text style={styles.fieldHint}>
+                    Enter the specific door number, flat number, or building name
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Street Address *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={addressLine2}
+                    onChangeText={setAddressLine2}
+                    placeholder="Street name, area, landmark"
                     placeholderTextColor="#999999"
                     autoCapitalize="words"
                   />
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Address Line 2</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={addressLine2}
-                    onChangeText={setAddressLine2}
-                    placeholder="Landmark, Near (optional)"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
-                </View>
+
 
                 {additionalLines.map((line, index) => (
                   <View key={index} style={styles.inputGroup}>
@@ -427,10 +455,10 @@ export default function BranchDetailsScreen() {
 
           {/* State Selection Modal */}
           <Modal
-            visible={showStates}
+            visible={showStateModal}
             transparent={true}
             animationType="fade"
-            onRequestClose={() => setShowStates(false)}
+            onRequestClose={() => setShowStateModal(false)}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -438,7 +466,7 @@ export default function BranchDetailsScreen() {
                   <Text style={styles.modalTitle}>Select State</Text>
                   <TouchableOpacity
                     style={styles.modalCloseButton}
-                    onPress={() => setShowStates(false)}
+                    onPress={() => setShowStateModal(false)}
                     activeOpacity={0.7}
                   >
                     <X size={24} color="#666666" />
@@ -450,8 +478,8 @@ export default function BranchDetailsScreen() {
                   <TextInput
                     ref={searchInputRef}
                     style={styles.searchInput}
-                    value={stateSearch}
-                    onChangeText={setStateSearch}
+                    value={stateSearchQuery}
+                    onChangeText={setStateSearchQuery}
                     placeholder="Search states..."
                     placeholderTextColor="#94a3b8"
                     autoFocus={false}

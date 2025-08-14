@@ -34,16 +34,25 @@ const OLA_MAPS_API_KEY = '7lWg0vFb2XZqdPXSOzseDmd4QaSSyNKf74TMC93i';
 
 export default function AddressAutocomplete({
   placeholder = 'Search for address...',
-  value,
+  value = '',
   onChangeText,
   onAddressSelect,
   onManualEntry,
   isSettingQueryProgrammatically = false,
 }: AddressAutocompleteProps) {
+  // Ensure value is always a string
+  const safeValue = typeof value === 'string' ? value : '';
+  // Internal state for the input value
+  const [inputValue, setInputValue] = useState(safeValue);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync inputValue with external value prop
+  useEffect(() => {
+    setInputValue(safeValue);
+  }, [safeValue]);
 
   useEffect(() => {
     // Don't trigger search if query is being set programmatically
@@ -51,14 +60,15 @@ export default function AddressAutocomplete({
       return;
     }
     
-    if (value.length > 2) {
+    // Use the internal inputValue for search
+    if (inputValue && inputValue.length > 2) {
       // Debounce the search
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
       
       debounceRef.current = setTimeout(() => {
-        searchAddresses(value);
+        searchAddresses(inputValue);
       }, 300) as unknown as NodeJS.Timeout;
     } else {
       setSuggestions([]);
@@ -70,7 +80,7 @@ export default function AddressAutocomplete({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [value, isSettingQueryProgrammatically]);
+  }, [inputValue, isSettingQueryProgrammatically]);
 
   const searchAddresses = async (query: string) => {
     if (!query.trim()) return;
@@ -209,18 +219,23 @@ export default function AddressAutocomplete({
     setShowSuggestions(false);
     setSuggestions([]);
     
-    // For Android, we need to ensure the touch event is fully processed
-    // before calling the parent callback
-    if (Platform.OS === 'android') {
-      // Use a longer delay for Android to ensure proper touch handling
-      setTimeout(() => {
+    // Ensure onAddressSelect is defined before calling it
+    if (typeof onAddressSelect === 'function') {
+      // For Android, we need to ensure the touch event is fully processed
+      // before calling the parent callback
+      if (Platform.OS === 'android') {
+        // Use a longer delay for Android to ensure proper touch handling
+        setTimeout(() => {
+          console.log('📞 Calling onAddressSelect with:', suggestion);
+          onAddressSelect(suggestion);
+        }, 200);
+      } else {
+        // For iOS, call immediately
         console.log('📞 Calling onAddressSelect with:', suggestion);
         onAddressSelect(suggestion);
-      }, 200);
+      }
     } else {
-      // For iOS, call immediately
-      console.log('📞 Calling onAddressSelect with:', suggestion);
-      onAddressSelect(suggestion);
+      console.warn('onAddressSelect callback is not defined');
     }
   };
 
@@ -233,13 +248,13 @@ export default function AddressAutocomplete({
     // inputRef.current?.blur(); // This line is removed as per the edit hint
     
     // Call the manual entry callback if provided
-    if (onManualEntry) {
+    if (typeof onManualEntry === 'function') {
       onManualEntry();
     }
   };
 
   const handleInputFocus = () => {
-    if (suggestions.length > 0) {
+    if (suggestions && suggestions.length > 0) {
       setShowSuggestions(true);
     }
   };
@@ -247,6 +262,16 @@ export default function AddressAutocomplete({
   const handleInputBlur = () => {
     // Hide suggestions immediately
     setShowSuggestions(false);
+  };
+
+  const handleInputChange = (text: string) => {
+    // Update internal state
+    setInputValue(text);
+    
+    // Call external onChangeText if provided
+    if (typeof onChangeText === 'function') {
+      onChangeText(text);
+    }
   };
 
   return (
@@ -257,8 +282,8 @@ export default function AddressAutocomplete({
           style={styles.input}
           placeholder={placeholder}
           placeholderTextColor="#94a3b8"
-          value={value}
-          onChangeText={onChangeText}
+          value={inputValue}
+          onChangeText={handleInputChange}
           onFocus={handleInputFocus}
           onBlur={handleInputBlur}
           autoCapitalize="words"
@@ -281,7 +306,7 @@ export default function AddressAutocomplete({
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled={true}
           >
-            {suggestions.length > 0 && suggestions.map((suggestion, index) => (
+            {suggestions && suggestions.length > 0 && suggestions.map((suggestion, index) => (
               <TouchableOpacity
                 key={`${suggestion.place_id}-${index}`}
                 style={styles.suggestionItem}

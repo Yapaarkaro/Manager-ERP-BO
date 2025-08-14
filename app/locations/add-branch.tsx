@@ -143,31 +143,57 @@ export default function AddBranchScreen() {
             style: {
               version: 8,
               sources: {
-                'osm-tiles': {
+                'carto-tiles': {
                   type: 'raster',
                   tiles: [
-                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                    'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                    'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
                   ],
                   tileSize: 256,
-                  attribution: '© OpenStreetMap contributors'
+                  attribution: '© CARTO © OpenStreetMap contributors'
                 }
               },
               layers: [
                 {
-                  id: 'osm-tiles',
+                  id: 'carto-tiles',
                   type: 'raster',
-                  source: 'osm-tiles'
+                  source: 'carto-tiles'
                 }
               ]
             },
             center: [location.lng, location.lat],
             zoom: 16,
+            attributionControl: true,
           });
 
           setMapInstance(map);
 
           map.on('load', () => {
             setIsMapLoading(false);
+            console.log('Map loaded successfully with CARTO tiles');
+          });
+
+          map.on('error', (e: any) => {
+            console.error('Map error:', e);
+            // Try fallback tile provider
+            try {
+              map.getStyle().sources['carto-tiles'] = {
+                type: 'raster',
+                tiles: [
+                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                ],
+                tileSize: 256,
+                attribution: '© OpenStreetMap contributors'
+              };
+              map.getStyle().layers[0].source = 'carto-tiles';
+              map.setStyle(map.getStyle());
+              console.log('Switched to fallback OpenStreetMap tiles');
+            } catch (fallbackError) {
+              console.error('Fallback tile provider also failed:', fallbackError);
+              setIsMapLoading(false);
+            }
           });
 
           map.on('click', (e: any) => {
@@ -654,12 +680,10 @@ export default function AddBranchScreen() {
             <View style={styles.mapPlaceholder}>
               <MapPin size={48} color="#64748b" />
               <Text style={styles.mapPlaceholderText}>
-                {Platform.OS === 'web' ? 'Loading map...' : 'Use search to find branch address'}
+                Use search to find branch address
               </Text>
               <Text style={styles.mapPlaceholderSubtext}>
-                {Platform.OS === 'web' 
-                  ? 'Interactive map will load shortly' 
-                  : 'Search above or use current location button'}
+                Search above or use current location button
               </Text>
             </View>
           )}
@@ -675,9 +699,14 @@ export default function AddBranchScreen() {
           
           {(isGettingLocation || isMapLoading) && (
             <View style={styles.mapOverlay}>
-              <Text style={styles.mapOverlayText}>
-                {isGettingLocation ? 'Getting your location...' : 'Loading map...'}
-              </Text>
+              <View style={styles.loadingContainer}>
+                <Text style={styles.mapOverlayText}>
+                  {isGettingLocation ? 'Getting your location...' : 'Loading map tiles...'}
+                </Text>
+                <Text style={styles.mapOverlaySubtext}>
+                  {isMapLoading ? 'This may take a few seconds' : ''}
+                </Text>
+              </View>
             </View>
           )}
           
@@ -832,6 +861,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#64748b',
+  },
+  mapOverlaySubtext: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginTop: 4,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    padding: 20,
   },
   selectedAddressIndicator: {
     position: 'absolute',

@@ -1,6 +1,72 @@
 // Comprehensive data store for the ERP app
 // Manages customers, suppliers, sales, invoices, and inventory
 
+// State code mapping function
+export function getStateCode(stateName: string): string {
+  const stateCodeMap: { [key: string]: string } = {
+    'Andhra Pradesh': 'AP',
+    'Arunachal Pradesh': 'AR',
+    'Assam': 'AS',
+    'Bihar': 'BR',
+    'Chhattisgarh': 'CG',
+    'Goa': 'GA',
+    'Gujarat': 'GJ',
+    'Haryana': 'HR',
+    'Himachal Pradesh': 'HP',
+    'Jharkhand': 'JH',
+    'Karnataka': 'KA',
+    'Kerala': 'KL',
+    'Madhya Pradesh': 'MP',
+    'Maharashtra': 'MH',
+    'Manipur': 'MN',
+    'Meghalaya': 'ML',
+    'Mizoram': 'MZ',
+    'Nagaland': 'NL',
+    'Odisha': 'OD',
+    'Punjab': 'PB',
+    'Rajasthan': 'RJ',
+    'Sikkim': 'SK',
+    'Tamil Nadu': 'TN',
+    'Telangana': 'TS',
+    'Tripura': 'TR',
+    'Uttar Pradesh': 'UP',
+    'Uttarakhand': 'UK',
+    'West Bengal': 'WB',
+    'Delhi': 'DL',
+    'Jammu and Kashmir': 'JK',
+    'Ladakh': 'LA',
+    'Chandigarh': 'CH',
+    'Dadra and Nagar Haveli': 'DN',
+    'Daman and Diu': 'DD',
+    'Lakshadweep': 'LD',
+    'Puducherry': 'PY',
+    'Andaman and Nicobar Islands': 'AN'
+  };
+  
+  return stateCodeMap[stateName] || stateName.substring(0, 2).toUpperCase();
+}
+
+// Business Address interface
+export interface BusinessAddress {
+  id: string;
+  name: string;
+  type: 'primary' | 'branch' | 'warehouse';
+  doorNumber: string;
+  addressLine1: string;
+  addressLine2: string;
+  additionalLines?: string[];
+  city: string;
+  pincode: string;
+  stateName: string;
+  stateCode: string;
+  manager?: string;
+  phone?: string;
+  isPrimary: boolean;
+  status: 'active' | 'inactive';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -190,6 +256,7 @@ class DataStore {
   private invoices: Invoice[] = [];
   private receivables: Receivable[] = [];
   private payables: Payable[] = [];
+  private addresses: BusinessAddress[] = [];
   private listeners: (() => void)[] = [];
 
   // Customer methods
@@ -421,6 +488,62 @@ class DataStore {
     return [...this.payables];
   }
 
+  // Address methods
+  addAddress(address: BusinessAddress) {
+    this.addresses.push(address);
+    this.notifyListeners();
+  }
+
+  getAddresses(): BusinessAddress[] {
+    return [...this.addresses];
+  }
+
+  getAddressById(id: string): BusinessAddress | undefined {
+    return this.addresses.find(address => address.id === id);
+  }
+
+  getAddressesByType(type: 'primary' | 'branch' | 'warehouse'): BusinessAddress[] {
+    return this.addresses.filter(address => address.type === type);
+  }
+
+  updateAddress(id: string, updates: Partial<BusinessAddress>) {
+    const index = this.addresses.findIndex(address => address.id === id);
+    if (index !== -1) {
+      this.addresses[index] = { ...this.addresses[index], ...updates };
+      this.notifyListeners();
+    }
+  }
+
+  deleteAddress(id: string) {
+    const index = this.addresses.findIndex(address => address.id === id);
+    if (index !== -1) {
+      this.addresses.splice(index, 1);
+      this.notifyListeners();
+    }
+  }
+
+  setPrimaryAddress(id: string) {
+    // Remove primary status from all addresses
+    this.addresses.forEach(address => {
+      address.isPrimary = false;
+    });
+    
+    // Set the specified address as primary
+    const address = this.addresses.find(addr => addr.id === id);
+    if (address) {
+      address.isPrimary = true;
+      this.notifyListeners();
+    }
+  }
+
+  getPrimaryAddress(): BusinessAddress | undefined {
+    return this.addresses.find(address => address.isPrimary);
+  }
+
+  getAddressCountByType(type: 'primary' | 'branch' | 'warehouse'): number {
+    return this.addresses.filter(address => address.type === type).length;
+  }
+
   // Utility methods
   getCustomerCount(): number {
     return this.customers.length;
@@ -461,6 +584,7 @@ class DataStore {
     this.invoices = [];
     this.receivables = [];
     this.payables = [];
+    this.addresses = [];
     console.log('=== ALL DATA CLEARED ===');
     console.log('Cleared at:', new Date().toISOString());
     console.log('========================');

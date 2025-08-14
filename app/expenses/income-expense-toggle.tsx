@@ -581,6 +581,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    overflow: 'hidden',
   },
   toggleButton: {
     flexDirection: 'row',
@@ -591,6 +592,7 @@ const styles = StyleSheet.create({
     gap: 6,
     flex: 1,
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   toggleButtonIncome: {
     backgroundColor: Colors.success,
