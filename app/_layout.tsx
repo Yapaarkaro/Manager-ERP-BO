@@ -51,7 +51,6 @@ export default function RootLayout() {
         <Stack.Screen name="inventory/stock-discrepancies" />
         <Stack.Screen name="inventory/discrepancy-details" />
         <Stack.Screen name="inventory/index" />
-        <Stack.Screen name="inventory/add-product" />
         <Stack.Screen name="inventory/scan-product" />
         <Stack.Screen name="inventory/manual-product" />
         <Stack.Screen name="inventory/stock-management" />

@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { productStore, Product } from '@/utils/productStore';
+import { dataStore } from '@/utils/dataStore';
 import { 
   ArrowLeft, 
   Search, 
@@ -83,10 +84,10 @@ export default function InventoryScreen() {
   };
 
   const handleAddProduct = () => {
-    console.log('=== NAVIGATING TO ADD PRODUCT SCREEN ===');
+    console.log('=== NAVIGATING DIRECTLY TO MANUAL PRODUCT FORM ===');
     console.log('Timestamp:', new Date().toISOString());
-    console.log('========================================');
-    router.push('/inventory/add-product');
+    console.log('==================================================');
+    router.push('/inventory/manual-product');
   };
 
   // Function to refresh products (called when returning from add product)
@@ -144,7 +145,19 @@ export default function InventoryScreen() {
     return { trend: 'down', color: Colors.error };
   };
 
-  const totalStockValue = filteredProducts.reduce((sum, product) => sum + product.stockValue, 0);
+  const getSupplierName = (supplierId: string | undefined) => {
+    if (!supplierId) return 'No supplier';
+    
+    // Get supplier name from dataStore
+    const supplier = dataStore.getSupplierById(supplierId);
+    if (supplier) {
+      // Show business name if available, otherwise show contact person name
+      return supplier.businessName || supplier.name;
+    }
+    return supplierId; // Fallback to displaying the ID if supplier not found
+  };
+
+  const totalStockValue = filteredProducts.reduce((sum, product) => sum + (product.stockValue || 0), 0);
   const lowStockItems = productStore.getProducts().filter(product => 
     product.currentStock <= product.minStockLevel
   ).length;
@@ -153,7 +166,7 @@ export default function InventoryScreen() {
   ).length;
 
   const renderProductCard = (product: Product) => {
-    const stockTrend = getStockTrend(product.currentStock, product.minStockLevel, product.maxStockLevel);
+    const stockTrend = getStockTrend(product.currentStock, product.minStockLevel, product.maxStockLevel || 1);
     const urgencyColor = getUrgencyColor(product.urgencyLevel);
 
     return (
@@ -178,7 +191,7 @@ export default function InventoryScreen() {
               {product.category}
             </Text>
             <Text style={styles.productSupplier}>
-              {product.supplier}
+              {getSupplierName(product.supplier)}
             </Text>
           </View>
 
@@ -214,7 +227,7 @@ export default function InventoryScreen() {
             <View style={styles.stockInfo}>
               <Text style={styles.stockLabel}>Stock Value</Text>
               <Text style={[styles.stockValue, { color: Colors.success }]}>
-                {formatPrice(product.stockValue)}
+                {formatPrice(product.stockValue || 0)}
               </Text>
             </View>
           </View>
@@ -225,13 +238,13 @@ export default function InventoryScreen() {
               <View style={[
                 styles.stockProgressFill,
                 { 
-                  width: `${Math.min((product.currentStock / product.maxStockLevel) * 100, 100)}%`,
+                  width: `${Math.min((product.currentStock / (product.maxStockLevel || 1)) * 100, 100)}%`,
                   backgroundColor: urgencyColor
                 }
               ]} />
             </View>
             <Text style={styles.stockPercentage}>
-              {Math.round((product.currentStock / product.maxStockLevel) * 100)}%
+              {Math.round((product.currentStock / (product.maxStockLevel || 1)) * 100)}%
             </Text>
           </View>
 
@@ -243,7 +256,9 @@ export default function InventoryScreen() {
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Last Restocked:</Text>
-              <Text style={styles.infoValue}>{formatDate(product.lastRestocked)}</Text>
+              <Text style={styles.infoValue}>
+                {product.lastRestocked ? formatDate(product.lastRestocked) : 'Not specified'}
+              </Text>
             </View>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>HSN Code:</Text>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -8,6 +9,7 @@ import {
   TextInput,
   Image,
   Modal,
+  Alert,
 } from 'react-native';
 import { showError } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -102,26 +104,54 @@ interface CartProduct {
   batchNumber?: string;
   // Unit fields
   primaryUnit?: string;
+  secondaryUnit?: string;
+  tertiaryUnit?: string;
+  conversionRatio?: string;
+  tertiaryConversionRatio?: string;
+  // MRP field
+  mrp?: string;
   // CESS fields
-  cessType?: 'none' | 'value' | 'quantity' | 'value_and_quantity';
+  cessType?: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp';
   cessRate?: number;
   cessAmount?: number;
   cessUnit?: string;
+  // UoM selection
+  selectedUoM?: 'primary' | 'secondary' | 'tertiary';
+  // Stock information
+  openingStock?: number;
 }
 
 export default function CartScreen() {
-  const { selectedProducts, preSelectedCustomer } = useLocalSearchParams();
+  const { selectedProducts, preSelectedCustomer, newProduct } = useLocalSearchParams();
   const [cartItems, setCartItems] = useState<CartProduct[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProduct, setEditingProduct] = useState<CartProduct | null>(null);
+  const [processedProducts, setProcessedProducts] = useState<Set<string>>(new Set());
+  const [processedSelectedProducts, setProcessedSelectedProducts] = useState<string>('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [invoiceDiscountType, setInvoiceDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [invoiceDiscountValue, setInvoiceDiscountValue] = useState('');
-  const [showAddProductModal, setShowAddProductModal] = useState(false);
+
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState('');
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [expandedTaxSections, setExpandedTaxSections] = useState<Set<string>>(new Set());
+  const [customAlert, setCustomAlert] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'error' | 'warning' | 'info';
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+  
+  // Roundoff feature state
+  const [applyRoundoff, setApplyRoundoff] = useState(false);
 
   // Logging function to track product additions to cart
   const logProductToCart = (product: CartProduct) => {
@@ -163,25 +193,204 @@ export default function CartScreen() {
     console.log('==========================');
   };
 
+
+
+  // Handle new products being created and added to cart
   useEffect(() => {
-    if (selectedProducts) {
+    console.log('newProduct useEffect triggered:', newProduct);
+    if (newProduct && typeof newProduct === 'string' && !processedProducts.has(newProduct)) {
       try {
-        const products = JSON.parse(selectedProducts as string);
-        setCartItems(products);
-        // Log products added from selection
-        products.forEach((product: CartProduct) => {
-          logProductToCart(product);
+        const product = JSON.parse(newProduct);
+        console.log('🔍 Adding new product to cart:', product.name);
+        
+        // Mark this product as processed
+        setProcessedProducts(prev => new Set([...prev, newProduct]));
+        
+        // Check if product already exists in cart (by name and barcode, not just ID)
+        setCartItems(prev => {
+          console.log('Current cart items before adding:', prev.length);
+          const existingProductIndex = prev.findIndex(item => 
+            item.name === product.name && 
+            (item.barcode === product.barcode || item.id === product.id)
+          );
+          
+          if (existingProductIndex >= 0) {
+            // Update existing product quantity
+            console.log('Updating existing product quantity');
+            return prev.map((item, index) => 
+              index === existingProductIndex 
+                ? { ...item, quantity: item.quantity + 1 }
+                : item
+            );
+          } else {
+            // Add new product to cart with unique ID
+            console.log('Adding new product to cart');
+            const cartProduct: CartProduct = {
+              ...product,
+              id: `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Ensure unique ID
+              quantity: 1,
+              price: product.salesPrice || product.unitPrice || 0,
+              // Ensure CESS fields are passed
+              cessType: product.cessType || 'none',
+              cessRate: product.cessRate || 0,
+              cessAmount: product.cessAmount || 0,
+              cessUnit: product.cessUnit || '',
+              // Add UoM fields for compound units
+              primaryUnit: product.primaryUnit || 'Piece',
+              secondaryUnit: product.secondaryUnit || undefined,
+              tertiaryUnit: product.tertiaryUnit || undefined,
+              conversionRatio: product.conversionRatio || undefined,
+              tertiaryConversionRatio: product.tertiaryConversionRatio || undefined,
+              // Initialize UoM selection
+              selectedUoM: 'primary'
+            };
+            
+            logProductToCart(cartProduct);
+            
+            // Auto-expand only the new product card
+            expandOnlyCard(cartProduct.id);
+            
+            const newCart = [...prev, cartProduct];
+            console.log('Cart now has', newCart.length, 'items:', newCart.map(item => item.name));
+            return newCart;
+          }
         });
       } catch (error) {
-        console.error('Error parsing selected products:', error);
+        console.error('Error parsing new product:', error);
+      }
+    } else if (newProduct) {
+      console.log('newProduct exists but not processed:', {
+        isString: typeof newProduct === 'string',
+        alreadyProcessed: typeof newProduct === 'string' ? processedProducts.has(newProduct) : false,
+        newProduct
+      });
+    }
+  }, [newProduct, processedProducts]);
+
+  // Load cart items from AsyncStorage on component mount FIRST
+  useEffect(() => {
+    const loadCartItems = async () => {
+      try {
+        // Clear all existing cart data for testing
+        await AsyncStorage.removeItem('cartItems');
+        console.log('🧹 Cleared all existing cart data for testing');
+        setCartItems([]);
+        setProcessedProducts(new Set());
+        setProcessedSelectedProducts('');
+      } catch (error) {
+        console.error('Error clearing cart items:', error);
+      }
+    };
+    
+    loadCartItems();
+  }, []);
+
+  // Initialize expanded cards when cart items change
+  useEffect(() => {
+    if (cartItems.length === 1) {
+      // If only one item, expand it
+      setExpandedCards(new Set([cartItems[0].id]));
+    } else if (cartItems.length > 1 && expandedCards.size === 0) {
+      // If multiple items and none expanded, expand the last one
+      const lastItem = cartItems[cartItems.length - 1];
+      setExpandedCards(new Set([lastItem.id]));
+    }
+  }, [cartItems.length]);
+
+  // Initialize cart items from selectedProducts AFTER loading from storage
+  useEffect(() => {
+    if (selectedProducts && typeof selectedProducts === 'string' && selectedProducts !== processedSelectedProducts) {
+      try {
+        const products = JSON.parse(selectedProducts);
+        if (Array.isArray(products) && products.length > 0) {
+          console.log('✅ Processing selectedProducts:', products.length, 'products');
+          
+          // Mark this selectedProducts as processed
+          setProcessedSelectedProducts(selectedProducts);
+          
+          // Add selected products to existing cart items
+          setCartItems(prev => {
+            const newProducts = products.map(product => {
+              return {
+                ...product,
+                id: `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                quantity: 1,
+                price: product.salesPrice || product.unitPrice || 0,
+                cessType: product.cessType || 'none',
+                cessRate: product.cessRate || 0,
+                cessAmount: product.cessAmount || 0,
+                cessUnit: product.cessUnit || '',
+                selectedUoM: 'primary'
+              };
+            });
+            
+            // Check if product already exists in cart (by name and barcode)
+            const updatedCart = [...prev];
+            
+            newProducts.forEach(newProduct => {
+              const existingProductIndex = updatedCart.findIndex(item => 
+                item.name === newProduct.name && 
+                (item.barcode === newProduct.barcode || item.id === newProduct.id)
+              );
+              
+              if (existingProductIndex >= 0) {
+                // Update existing product quantity
+                console.log('🔄 Updating existing product quantity:', newProduct.name);
+                updatedCart[existingProductIndex] = {
+                  ...updatedCart[existingProductIndex],
+                  quantity: updatedCart[existingProductIndex].quantity + 1
+                };
+              } else {
+                // Add new product to cart
+                console.log('➕ Adding new product to cart:', newProduct.name);
+                updatedCart.push(newProduct);
+                
+                // Auto-expand only the new product card
+                expandOnlyCard(newProduct.id);
+              }
+            });
+            
+            console.log('✅ Cart updated. Total items:', updatedCart.length);
+            return updatedCart;
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error parsing selected products:', error);
       }
     }
-  }, [selectedProducts]);
+  }, [selectedProducts, processedSelectedProducts]);
+
+  // Persist cart items to AsyncStorage whenever they change
+  useEffect(() => {
+    if (cartItems.length > 0) {
+      AsyncStorage.setItem('cartItems', JSON.stringify(cartItems));
+    } else {
+      // Clear persistence when cart is empty
+      AsyncStorage.removeItem('cartItems');
+    }
+  }, [cartItems]);
+
+
 
   const updateQuantity = (productId: string, newQuantity: number) => {
     if (newQuantity <= 0) {
       removeItem(productId);
       return;
+    }
+    
+    // Find the item to check stock
+    const item = cartItems.find(item => item.id === productId);
+    if (item) {
+      const stockLimits = calculateStockLimits(item);
+      
+      if (newQuantity > stockLimits.maxQuantityForSelectedUoM) {
+        showCustomAlert(
+          'Insufficient Stock',
+          `Cannot add more than available stock (${stockLimits.maxQuantityForSelectedUoM} ${stockLimits.selectedUoMUnit}s).\n\nTotal available: ${stockLimits.totalInLowestUoM} ${stockLimits.lowestUoM}s`,
+          'error'
+        );
+        return;
+      }
     }
     
     setCartItems(prev => 
@@ -193,8 +402,77 @@ export default function CartScreen() {
     );
   };
 
+  const updateItemUoM = (productId: string, selectedUoM: 'primary' | 'secondary' | 'tertiary') => {
+    setCartItems(prev => 
+      prev.map(item => {
+        if (item.id === productId) {
+          const unitPrices = calculateUnitPrices(item);
+          let newPrice = item.price;
+          
+          // Update price based on selected UoM
+          if (selectedUoM === 'primary') {
+            newPrice = unitPrices.primary.price;
+          } else if (selectedUoM === 'secondary' && unitPrices.secondary) {
+            newPrice = unitPrices.secondary.price;
+          } else if (selectedUoM === 'tertiary' && unitPrices.tertiary) {
+            newPrice = unitPrices.tertiary.price;
+          }
+          
+          // Check if new quantity exceeds stock limit for new UoM
+          const stockLimits = calculateStockLimits({ ...item, selectedUoM });
+          if (item.quantity > stockLimits.maxQuantityForSelectedUoM) {
+            // Reset quantity to maximum available for new UoM
+            return { ...item, selectedUoM, price: newPrice, quantity: stockLimits.maxQuantityForSelectedUoM };
+          }
+          
+          return { ...item, selectedUoM, price: newPrice };
+        }
+        return item;
+      })
+    );
+  };
+
   const removeItem = (productId: string) => {
-    setCartItems(prev => prev.filter(item => item.id !== productId));
+    setCartItems(prev => {
+      const newCart = prev.filter(item => item.id !== productId);
+      // If no items left, collapse all tax sections
+      if (newCart.length === 0) {
+        setExpandedTaxSections(new Set());
+      }
+      return newCart;
+    });
+  };
+
+  const clearCart = async () => {
+    setCartItems([]);
+    // Also collapse all tax sections when cart is cleared
+    setExpandedTaxSections(new Set());
+    try {
+      await AsyncStorage.removeItem('cartItems');
+    } catch (error) {
+      console.error('Error clearing cart persistence:', error);
+    }
+  };
+
+
+
+  // Clean up duplicate cart items and ensure unique IDs
+  const cleanupCartItems = () => {
+    setCartItems(prev => {
+      const uniqueItems = new Map<string, CartProduct>();
+      
+      prev.forEach(item => {
+        if (uniqueItems.has(item.id)) {
+          // If duplicate ID exists, merge quantities
+          const existing = uniqueItems.get(item.id)!;
+          existing.quantity += item.quantity;
+        } else {
+          uniqueItems.set(item.id, { ...item });
+        }
+      });
+      
+      return Array.from(uniqueItems.values());
+    });
   };
 
   const handleScanBarcode = () => {
@@ -232,11 +510,16 @@ export default function CartScreen() {
       cessType: product.cessType || 'none',
       cessRate: product.cessRate || 0,
       cessAmount: product.cessAmount || 0,
-      cessUnit: product.cessUnit || ''
+      cessUnit: product.cessUnit || '',
+      selectedUoM: 'primary'
     };
     
     setCartItems(prev => [...prev, cartProduct]);
     logProductToCart(cartProduct);
+    
+    // Auto-expand only the new product card
+    expandOnlyCard(cartProduct.id);
+    
     handleSearchModalClose();
   };
 
@@ -260,34 +543,41 @@ export default function CartScreen() {
     setEditingProduct(null);
   };
 
-  const handleAddNewProduct = () => {
-    setShowAddProductModal(true);
-  };
 
-  const handleSaveNewProduct = (newProduct: CartProduct) => {
-    setCartItems(prev => [...prev, newProduct]);
-    logNewProductCreation(newProduct);
-    setShowAddProductModal(false);
-  };
 
-  const handleCancelAddProduct = () => {
-    setShowAddProductModal(false);
-  };
+
 
   const handlePriceEditStart = (item: CartProduct) => {
     setEditingPriceId(item.id);
-    setEditingPriceValue(item.price.toString());
+    // Show the current UoM price for editing
+    const currentUoMPrice = getCurrentUoMPrice(item);
+    setEditingPriceValue(currentUoMPrice.toString());
   };
 
   const handlePriceEditSave = (itemId: string) => {
     const newPrice = parseFloat(editingPriceValue) || 0;
     if (newPrice > 0) {
       setCartItems(prev => 
-        prev.map(item => 
-          item.id === itemId 
-            ? { ...item, price: newPrice }
-            : item
-        )
+        prev.map(item => {
+          if (item.id === itemId) {
+            // Calculate the new primary unit price based on the edited UoM price
+            const selectedUoM = item.selectedUoM || 'primary';
+            let newPrimaryPrice = newPrice;
+            
+            if (selectedUoM === 'secondary' && item.conversionRatio) {
+              // Convert secondary UoM price back to primary
+              newPrimaryPrice = newPrice * parseFloat(item.conversionRatio);
+            } else if (selectedUoM === 'tertiary' && item.conversionRatio && item.tertiaryConversionRatio) {
+              // Convert tertiary UoM price back to primary
+              const secondaryRatio = parseFloat(item.conversionRatio);
+              const tertiaryRatio = parseFloat(item.tertiaryConversionRatio);
+              newPrimaryPrice = newPrice * secondaryRatio * tertiaryRatio;
+            }
+            
+            return { ...item, price: newPrimaryPrice };
+          }
+          return item;
+        })
       );
     }
     setEditingPriceId(null);
@@ -299,54 +589,114 @@ export default function CartScreen() {
     setEditingPriceValue('');
   };
 
-  const calculateItemTotal = (item: CartProduct) => {
-    let basePrice = item.price * item.quantity;
-    
-    // Apply discount
-    if (item.discountValue && item.discountValue > 0) {
-      if (item.discountType === 'percentage') {
-        basePrice = basePrice * (1 - item.discountValue / 100);
+  // Handle card expand/collapse functionality
+  const toggleCardExpansion = (itemId: string) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        // If card is expanded, collapse it
+        newSet.delete(itemId);
+        // If no cards are expanded, collapse all tax sections
+        if (newSet.size === 0) {
+          setExpandedTaxSections(new Set());
+        }
+        return newSet;
       } else {
-        basePrice = basePrice - item.discountValue;
+        // If card is collapsed, expand it and collapse all others
+        // Also expand tax sections when a card is expanded
+        setExpandedTaxSections(new Set(['gst', 'cess']));
+        return new Set([itemId]);
       }
-    }
-    
-    // Apply tax
-    const taxRate = item.taxRate || 0;
-    const taxAmount = basePrice * (taxRate / 100);
-    
-    // Calculate CESS
-    let cessAmount = 0;
-    if (item.cessType && item.cessType !== 'none') {
-      if (item.cessType === 'value') {
-        // Value-based CESS (percentage of base price)
-        cessAmount = basePrice * ((item.cessRate || 0) / 100);
-      } else if (item.cessType === 'quantity') {
-        // Quantity-based CESS (fixed amount per unit)
-        cessAmount = (item.cessAmount || 0) * item.quantity;
-      } else if (item.cessType === 'value_and_quantity') {
-        // Both value and quantity CESS
-        const valueCess = basePrice * ((item.cessRate || 0) / 100);
-        const quantityCess = (item.cessAmount || 0) * item.quantity;
-        cessAmount = valueCess + quantityCess;
+    });
+  };
+
+  const expandCard = (itemId: string) => {
+    setExpandedCards(prev => new Set([...prev, itemId]));
+  };
+
+  const collapseCard = (itemId: string) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(itemId);
+      return newSet;
+    });
+  };
+
+  const collapseAllCards = () => {
+    setExpandedCards(new Set());
+    // Also collapse all tax sections when all cards are collapsed
+    setExpandedTaxSections(new Set());
+  };
+
+  const expandOnlyCard = (itemId: string) => {
+    setExpandedCards(new Set([itemId]));
+    // Auto-expand tax sections when card is expanded
+    setExpandedTaxSections(new Set(['gst', 'cess']));
+  };
+
+  const toggleTaxSection = (itemId: string) => {
+    setExpandedTaxSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
       }
-    }
+      return newSet;
+    });
+  };
+
+  const formatProductNameForTaxSection = (productName: string) => {
+    if (productName.length <= 20) return productName;
+    return productName.substring(0, 20) + '...';
+  };
+
+  // Show custom alert
+  const showCustomAlert = (title: string, message: string, type: 'error' | 'warning' | 'info' = 'info') => {
+    setCustomAlert({
+      visible: true,
+      title,
+      message,
+      type
+    });
+  };
+
+  // Hide custom alert
+  const hideCustomAlert = () => {
+    setCustomAlert({
+      visible: false,
+      title: '',
+      message: '',
+      type: 'info'
+    });
+  };
+
+  const calculateItemTotal = (item: CartProduct) => {
+    const currentUoMPrice = getCurrentUoMPrice(item);
+    const itemSubtotal = currentUoMPrice * item.quantity;
     
-    return {
-      subtotal: item.price * item.quantity,
-      discountAmount: item.discountValue && item.discountValue > 0 
+    // Calculate item discount amount (but don't apply it yet)
+    const itemDiscount = item.discountValue && item.discountValue > 0 
         ? (item.discountType === 'percentage' 
-          ? (item.price * item.quantity * item.discountValue / 100)
+        ? (itemSubtotal * item.discountValue / 100)
           : item.discountValue)
-        : 0,
-      taxAmount: taxAmount,
-      cessAmount: cessAmount,
-      total: basePrice + taxAmount + cessAmount
+      : 0;
+    
+    // Return base values without applying discounts or taxes
+    return {
+      subtotal: itemSubtotal,
+      discountAmount: itemDiscount,
+      taxAmount: 0, // Will be calculated later after all discounts
+      cessAmount: 0, // Will be calculated later after all discounts
+      total: itemSubtotal // Base total without discounts or taxes
     };
   };
 
   const calculateInvoiceDiscount = () => {
-    const subtotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const subtotal = cartItems.reduce((total, item) => {
+      const currentUoMPrice = getCurrentUoMPrice(item);
+      return total + (currentUoMPrice * item.quantity);
+    }, 0);
     const discountValue = parseFloat(invoiceDiscountValue) || 0;
     
     if (invoiceDiscountType === 'percentage') {
@@ -356,28 +706,360 @@ export default function CartScreen() {
     }
   };
 
-  const calculateTotal = () => {
-    const subtotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-    const invoiceDiscount = calculateInvoiceDiscount();
-    const tax = cartItems.reduce((total, item) => total + calculateItemTotal(item).taxAmount, 0);
-    const cess = cartItems.reduce((total, item) => total + calculateItemTotal(item).cessAmount, 0);
+  // Get short form for UoM units
+  const getUoMShortForm = (unit: string): string => {
+    const shortForms: { [key: string]: string } = {
+      'Piece': 'Pcs',
+      'Pieces': 'Pcs',
+      'Kilogram': 'Kg',
+      'Kilograms': 'Kg',
+      'Gram': 'g',
+      'Grams': 'g',
+      'Liter': 'L',
+      'Liters': 'L',
+      'Milliliter': 'ml',
+      'Milliliters': 'ml',
+      'Meter': 'm',
+      'Meters': 'm',
+      'Centimeter': 'cm',
+      'Centimeters': 'cm',
+      'Box': 'Bx',
+      'Boxes': 'Bx',
+      'Case': 'Cs',
+      'Cases': 'Cs',
+      'Pack': 'Pk',
+      'Packs': 'Pk',
+      'Set': 'St',
+      'Sets': 'St',
+      'Pair': 'Pr',
+      'Pairs': 'Pr',
+      'Dozen': 'Doz',
+      'Dozens': 'Doz',
+      'Ton': 'Ton',
+      'Tons': 'Ton',
+      'Quintal': 'Qtl',
+      'Quintals': 'Qtl',
+      'Foot': 'ft',
+      'Feet': 'ft',
+      'Inch': 'in',
+      'Inches': 'in',
+      'Yard': 'yd',
+      'Yards': 'yd',
+      'Square Meter': 'm²',
+      'Square Meters': 'm²',
+      'Square Foot': 'ft²',
+      'Square Feet': 'ft²',
+      'Cubic Meter': 'm³',
+      'Cubic Meters': 'm³',
+      'Cubic Foot': 'ft³',
+      'Cubic Feet': 'ft³',
+      'Bundle': 'Bdl',
+      'Bundles': 'Bdl',
+      'Roll': 'Roll',
+      'Rolls': 'Roll',
+      'Sheet': 'Sheet',
+      'Sheets': 'Sheet',
+      'Bottle': 'Btl',
+      'Bottles': 'Btl',
+      'Can': 'Can',
+      'Cans': 'Can',
+      'Jar': 'Jar',
+      'Jars': 'Jar',
+      'Tube': 'Tube',
+      'Tubes': 'Tube',
+      'Bag': 'Bag',
+      'Bags': 'Bag',
+      'Carton': 'Ctn',
+      'Cartons': 'Ctn',
+      'Crate': 'Crate',
+      'Crates': 'Crate',
+      'Gallon': 'Gal',
+      'Gallons': 'Gal',
+      'Ounce': 'oz',
+      'Ounces': 'oz',
+      'Pound': 'lb',
+      'Pounds': 'lb'
+    };
     
-    const total = subtotal - invoiceDiscount + tax + cess;
+    return shortForms[unit] || unit;
+  };
+
+  // Calculate unit prices for compound UoM
+  const calculateUnitPrices = (item: CartProduct) => {
+    const basePrice = item.price;
+    const primaryUnit = item.primaryUnit || 'Piece';
     
-    // Apply round-off logic
-    const decimalPart = total % 1;
-    if (decimalPart < 0.50) {
-      return Math.floor(total); // Round down to nearest whole number
-    } else {
-      return Math.ceil(total); // Round up to nearest whole number
+    if (!item.secondaryUnit || item.secondaryUnit === 'None' || !item.conversionRatio) {
+      return {
+        primary: { unit: primaryUnit, price: basePrice },
+        secondary: null,
+        tertiary: null
+      };
     }
+
+    const secondaryUnit = item.secondaryUnit;
+    const secondaryPrice = basePrice / parseFloat(item.conversionRatio);
+    
+    if (!item.tertiaryUnit || item.tertiaryUnit === 'None' || !item.tertiaryConversionRatio) {
+      return {
+        primary: { unit: primaryUnit, price: basePrice },
+        secondary: { unit: secondaryUnit, price: secondaryPrice },
+        tertiary: null
+      };
+    }
+
+    const tertiaryUnit = item.tertiaryUnit;
+    const tertiaryPrice = secondaryPrice / parseFloat(item.tertiaryConversionRatio);
+
+    return {
+      primary: { unit: primaryUnit, price: basePrice },
+      secondary: { unit: secondaryUnit, price: secondaryPrice },
+      tertiary: { unit: tertiaryUnit, price: tertiaryPrice }
+    };
+  };
+
+  // Get the current price for the selected UoM
+  const getCurrentUoMPrice = (item: CartProduct) => {
+    const unitPrices = calculateUnitPrices(item);
+    const selectedUoM = item.selectedUoM || 'primary';
+    
+    if (selectedUoM === 'primary') {
+      return unitPrices.primary.price;
+    } else if (selectedUoM === 'secondary' && unitPrices.secondary) {
+      return unitPrices.secondary.price;
+    } else if (selectedUoM === 'tertiary' && unitPrices.tertiary) {
+      return unitPrices.tertiary.price;
+    }
+    
+    return unitPrices.primary.price; // Fallback to primary
+  };
+
+  // Calculate UoM-adjusted tax and CESS amounts
+  const calculateUoMAdjustedAmounts = (item: CartProduct, baseAmount: number) => {
+    const selectedUoM = item.selectedUoM || 'primary';
+    
+    if (selectedUoM === 'primary' || !item.secondaryUnit || item.secondaryUnit === 'None') {
+      return {
+        adjustedAmount: baseAmount,
+        cessPer: item.cessAmount || 0
+      };
+    }
+
+    // Calculate conversion factor to adjust amounts
+    let conversionFactor = 1;
+    
+    if (selectedUoM === 'secondary') {
+      conversionFactor = 1 / parseFloat(item.conversionRatio || '1');
+    } else if (selectedUoM === 'tertiary') {
+      const secondaryRatio = parseFloat(item.conversionRatio || '1');
+      const tertiaryRatio = parseFloat(item.tertiaryConversionRatio || '1');
+      conversionFactor = 1 / (secondaryRatio * tertiaryRatio);
+    }
+
+    return {
+      adjustedAmount: baseAmount * conversionFactor,
+      cessPer: (item.cessAmount || 0) * conversionFactor
+    };
+  };
+
+  // Calculate total available stock in lowest UoM and set limits for selected UoM
+  const calculateStockLimits = (item: CartProduct) => {
+    const primaryStock = item.openingStock || 0;
+    
+    if (!item.secondaryUnit || item.secondaryUnit === 'None' || !item.conversionRatio) {
+      // Single UoM product
+      return {
+        totalInLowestUoM: primaryStock,
+        maxQuantityForSelectedUoM: primaryStock,
+        lowestUoM: item.primaryUnit || 'Piece',
+        selectedUoMUnit: item.primaryUnit || 'Piece'
+      };
+    }
+
+    const secondaryRatio = parseFloat(item.conversionRatio || '1');
+    
+    if (!item.tertiaryUnit || item.tertiaryUnit === 'None' || !item.tertiaryConversionRatio) {
+      // Two UoM product
+      const totalInLowestUoM = primaryStock * secondaryRatio;
+      const selectedUoM = item.selectedUoM || 'primary';
+      
+      if (selectedUoM === 'primary') {
+        return {
+          totalInLowestUoM,
+          maxQuantityForSelectedUoM: primaryStock,
+          lowestUoM: item.secondaryUnit || 'Box',
+          selectedUoMUnit: item.primaryUnit || 'Piece'
+        };
+      } else {
+        return {
+          totalInLowestUoM,
+          maxQuantityForSelectedUoM: Math.floor(totalInLowestUoM / secondaryRatio),
+          lowestUoM: item.secondaryUnit || 'Box',
+          selectedUoMUnit: item.secondaryUnit || 'Box'
+        };
+      }
+    }
+
+    // Three UoM product
+    const tertiaryRatio = parseFloat(item.tertiaryConversionRatio || '1');
+    const totalInLowestUoM = primaryStock * secondaryRatio * tertiaryRatio;
+    const selectedUoM = item.selectedUoM || 'primary';
+    
+    if (selectedUoM === 'primary') {
+      return {
+        totalInLowestUoM,
+        maxQuantityForSelectedUoM: primaryStock,
+        lowestUoM: item.tertiaryUnit || 'Piece',
+        selectedUoMUnit: item.primaryUnit || 'Piece'
+      };
+    } else if (selectedUoM === 'secondary') {
+      return {
+        totalInLowestUoM,
+        maxQuantityForSelectedUoM: Math.floor(totalInLowestUoM / tertiaryRatio),
+        lowestUoM: item.tertiaryUnit || 'Piece',
+        selectedUoMUnit: item.secondaryUnit || 'Box'
+      };
+    } else {
+      return {
+        totalInLowestUoM,
+        maxQuantityForSelectedUoM: totalInLowestUoM,
+        lowestUoM: item.tertiaryUnit || 'Piece',
+        selectedUoMUnit: item.tertiaryUnit || 'Piece'
+      };
+    }
+  };
+
+  // Helper function to calculate final discounted amount for an item (after both item and invoice discounts)
+  const getFinalDiscountedAmount = (item: CartProduct) => {
+    const currentUoMPrice = getCurrentUoMPrice(item);
+    const itemSubtotal = currentUoMPrice * item.quantity;
+    const itemDiscount = item.discountValue && item.discountValue > 0 
+      ? (item.discountType === 'percentage' 
+        ? (itemSubtotal * item.discountValue / 100)
+        : item.discountValue)
+      : 0;
+    
+    const itemDiscountedSubtotal = itemSubtotal - itemDiscount;
+    
+    // Calculate this item's proportion of the invoice discount
+    const originalSubtotal = cartItems.reduce((total, cartItem) => {
+      const cartItemUoMPrice = getCurrentUoMPrice(cartItem);
+      return total + (cartItemUoMPrice * cartItem.quantity);
+    }, 0);
+    const invoiceDiscount = calculateInvoiceDiscount();
+    const itemProportion = itemSubtotal / originalSubtotal;
+    const itemInvoiceDiscount = invoiceDiscount * itemProportion;
+    
+    // Final discounted amount for this item
+    const finalItemDiscountedAmount = itemDiscountedSubtotal - itemInvoiceDiscount;
+    
+    return {
+      originalSubtotal: itemSubtotal,
+      itemDiscount: itemDiscount,
+      itemDiscountedSubtotal: itemDiscountedSubtotal,
+      itemInvoiceDiscount: itemInvoiceDiscount,
+      finalDiscountedAmount: finalItemDiscountedAmount
+    };
+  };
+
+  const calculateTotal = () => {
+    // Step 1: Calculate original subtotal
+    const originalSubtotal = cartItems.reduce((total, item) => {
+      const currentUoMPrice = getCurrentUoMPrice(item);
+      return total + (currentUoMPrice * item.quantity);
+    }, 0);
+    
+    // Step 2: Calculate total item-level discounts
+    const totalItemDiscounts = cartItems.reduce((total, item) => {
+      const currentUoMPrice = getCurrentUoMPrice(item);
+      const itemSubtotal = currentUoMPrice * item.quantity;
+      const itemDiscount = item.discountValue && item.discountValue > 0 
+        ? (item.discountType === 'percentage' 
+          ? (itemSubtotal * item.discountValue / 100)
+          : item.discountValue)
+        : 0;
+      return total + itemDiscount;
+    }, 0);
+    
+    // Step 3: Calculate invoice-level discount
+    const invoiceDiscount = calculateInvoiceDiscount();
+    
+    // Step 4: Apply ALL discounts to get final discounted amount
+    const totalDiscounts = totalItemDiscounts + invoiceDiscount;
+    const discountedSubtotal = originalSubtotal - totalDiscounts;
+    
+    // Step 5: Calculate tax on the FINAL discounted amount (UoM-adjusted)
+    const tax = cartItems.reduce((total, item) => {
+      const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+      const { adjustedAmount } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+      
+      // Calculate tax on the UoM-adjusted discounted amount
+      const taxRate = item.taxRate || 0;
+      const taxAmount = adjustedAmount * (taxRate / 100);
+      
+      return total + taxAmount;
+    }, 0);
+    
+    // Step 6: Calculate CESS on the FINAL discounted amount (UoM-adjusted)
+    const cess = cartItems.reduce((total, item) => {
+      const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+      const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+      
+      let cessAmount = 0;
+      
+      if (item.cessType && item.cessType !== 'none') {
+        if (item.cessType === 'value') {
+          cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
+        } else if (item.cessType === 'quantity') {
+          cessAmount = cessPer * item.quantity;
+        } else if (item.cessType === 'value_and_quantity') {
+          const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
+          const quantityCess = cessPer * item.quantity;
+          cessAmount = valueCess + quantityCess;
+        } else if (item.cessType === 'mrp') {
+          // MRP-based CESS (percentage of MRP) - adjust MRP proportionally
+          const mrpPrice = parseFloat(item.mrp || '0') || 0;
+          const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
+          cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+        }
+      }
+      
+      return total + cessAmount;
+    }, 0);
+    
+    // Step 7: Calculate final total
+    const total = discountedSubtotal + tax + cess;
+    
+    return total;
+  };
+
+  // Calculate exact total without rounding
+  const calculateExactTotal = () => {
+    return calculateTotal();
+  };
+
+  // Calculate roundoff amount
+  const calculateRoundoffAmount = () => {
+    const exactTotal = calculateExactTotal();
+    const roundedTotal = Math.round(exactTotal);
+    return roundedTotal - exactTotal;
+  };
+
+  // Calculate final total with optional roundoff
+  const calculateFinalTotal = () => {
+    const exactTotal = calculateExactTotal();
+    if (applyRoundoff) {
+      return Math.round(exactTotal);
+    }
+    return exactTotal;
   };
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      minimumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(price);
   };
 
@@ -420,6 +1102,21 @@ export default function CartScreen() {
         <Text style={styles.headerTitle}>Shopping Cart</Text>
         
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.addNewProductButton}
+            onPress={() => router.push({
+              pathname: '/inventory/manual-product',
+              params: {
+                returnTo: 'cart',
+                preSelectedCustomer: preSelectedCustomer
+              }
+            })}
+            activeOpacity={0.7}
+          >
+            <Plus size={20} color={Colors.primary} />
+            <Text style={styles.addNewProductButtonText}>Add New</Text>
+          </TouchableOpacity>
+          
           <Text style={styles.itemCount}>
             {cartItems.length} {cartItems.length === 1 ? 'item' : 'items'}
           </Text>
@@ -442,33 +1139,154 @@ export default function CartScreen() {
           </View>
         ) : (
           <>
-            {cartItems.map((item) => (
-              <View key={item.id} style={styles.cartItem}>
-                {/* Main Content Row */}
-                <View style={styles.cartItemMain}>
+            {cartItems.map((item, index) => {
+              const isExpanded = expandedCards.has(item.id);
+              return (
+              <TouchableOpacity 
+                key={`${item.id}_${index}`} 
+                style={[styles.cartItem, !isExpanded && styles.collapsedCartItem]}
+                onPress={() => {
+                  if (!isExpanded) {
+                    toggleCardExpansion(item.id);
+                  }
+                }}
+                activeOpacity={!isExpanded ? 0.7 : 1}
+              >
+                {/* Product Header Row */}
+                <View style={styles.productHeader}>
                   {/* Left: Product Image */}
                   <Image 
                     source={{ uri: item.image }}
                     style={styles.productImage}
                   />
                   
-                  {/* Center: Product Details */}
-                  <View style={styles.productInfo}>
+                  {/* Right: Product Title (Full Space) */}
+                  <View style={styles.productTitleContainer}>
                     <Text style={styles.productName} numberOfLines={2}>
                       {item.name}
                     </Text>
-                    <Text style={styles.productCategory}>
-                      HSN: {item.category}
+                  </View>
+                </View>
+
+                {/* Collapsed View - Only show when not expanded */}
+                {!isExpanded && (
+                  <View style={styles.collapsedInfo} pointerEvents="box-none">
+                    <View style={styles.collapsedRow}>
+                      {/* Left: Price */}
+                      <Text style={styles.collapsedPrice}>
+                        {formatPrice(getCurrentUoMPrice(item) * item.quantity)}
+                      </Text>
+                      
+                      {/* Center: UoM */}
+                      <Text style={styles.collapsedUoM}>
+                        {item.selectedUoM === 'primary' ? item.primaryUnit : 
+                         item.selectedUoM === 'secondary' ? item.secondaryUnit : 
+                         item.tertiaryUnit || 'Piece'}
+                      </Text>
+                      
+                      {/* Right: Quantity Controls */}
+                      <View 
+                        style={styles.collapsedQuantityControls}
+                        pointerEvents="auto"
+                      >
+                        <TouchableOpacity
+                          style={styles.collapsedQuantityButton}
+                          onPress={() => updateQuantity(item.id, item.quantity - 1)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.collapsedQuantityButtonText}>-</Text>
+                        </TouchableOpacity>
+                        
+                        <TextInput
+                          style={styles.collapsedQuantityInput}
+                          value={item.quantity.toString()}
+                          onChangeText={(text) => {
+                            const newQuantity = parseInt(text) || 0;
+                            if (newQuantity >= 0) {
+                              updateQuantity(item.id, newQuantity);
+                            }
+                          }}
+                          keyboardType="numeric"
+                          textAlign="center"
+                          placeholder="0"
+                          placeholderTextColor={Colors.textLight}
+                        />
+                        
+                        <TouchableOpacity
+                          style={styles.collapsedQuantityButton}
+                          onPress={() => updateQuantity(item.id, item.quantity + 1)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.collapsedQuantityButtonText}>+</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Text style={styles.expandHint}>Tap to expand</Text>
+                  </View>
+                )}
+
+                {/* Expanded View - Show when expanded */}
+                {isExpanded && (
+                  <>
+                    {/* Product Details Section */}
+                    <View style={styles.productDetailsSection}>
+                  {/* HSN and Barcode Row */}
+                  <View style={styles.productMetaRow}>
+                    <Text style={styles.productMeta}>
+                      HSN: {item.hsnCode || 'Not specified'}
                     </Text>
                     {item.barcode && (
-                      <Text style={styles.barcode}>
-                        {item.barcode}
+                      <Text style={styles.productMeta}>
+                        Barcode: {item.barcode}
                       </Text>
                     )}
                   </View>
 
-                  {/* Right: Price */}
-                  <View style={styles.rightSection}>
+                  {/* Price Breakdown Per UoM - Single Line, Centered */}
+                  {(() => {
+                    const unitPrices = calculateUnitPrices(item);
+                    return (
+                      <View style={styles.priceBreakdownContainer}>
+                        <Text style={styles.priceBreakdownTitle}>Price per Unit:</Text>
+                        <View style={styles.priceBreakdownRow}>
+                          <Text style={styles.priceBreakdownItem}>
+                            {formatPrice(unitPrices.primary.price)}/{unitPrices.primary.unit}
+                          </Text>
+                          {unitPrices.secondary && (
+                            <Text style={styles.priceBreakdownItem}>
+                              {formatPrice(unitPrices.secondary.price)}/{unitPrices.secondary.unit}
+                            </Text>
+                          )}
+                          {unitPrices.tertiary && (
+                            <Text style={styles.priceBreakdownItem}>
+                              {formatPrice(unitPrices.tertiary.price)}/{unitPrices.tertiary.unit}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })()}
+
+                  {/* Dynamic Stock Count */}
+                  {(() => {
+                    const stockLimits = calculateStockLimits(item);
+                    const currentStock = stockLimits.maxQuantityForSelectedUoM - item.quantity;
+                    return (
+                      <View style={styles.dynamicStockContainer}>
+                        <Text style={[styles.dynamicStock, currentStock <= 0 && styles.outOfStock]}>
+                          Available: {currentStock} {stockLimits.selectedUoMUnit}s
+                          {currentStock <= 0 && ' (Out of Stock)'}
+                        </Text>
+                        <Text style={styles.totalStockInfo}>
+                          Total: {stockLimits.totalInLowestUoM} {stockLimits.lowestUoM}s
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+
+                {/* Bottom Price Section */}
+                <View style={styles.bottomPriceSection}>
                     {editingPriceId === item.id ? (
                       <View style={styles.priceEditContainer}>
                         <TextInput
@@ -499,20 +1317,70 @@ export default function CartScreen() {
                       </View>
                     ) : (
                       <TouchableOpacity
-                        style={styles.priceDisplay}
+                      style={styles.bottomPriceDisplay}
                         onPress={() => handlePriceEditStart(item)}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.productPrice}>
-                          {formatPrice(item.price)}
+                      <Text style={styles.bottomPriceLabel}>Total Price:</Text>
+                                      <Text style={styles.bottomPriceValue}>
+                  {formatPrice(getCurrentUoMPrice(item) * item.quantity)}
                         </Text>
-                        <Text style={styles.priceEditHint}>Tap to edit</Text>
+                      <Text style={styles.priceEditHint}>Tap to edit unit price</Text>
                       </TouchableOpacity>
                     )}
                   </View>
-                </View>
 
-                {/* Bottom: Action Buttons and Quantity */}
+                {/* UoM Selector Section - Above Action Controls */}
+                {item.secondaryUnit && item.secondaryUnit !== 'None' && (
+                  <View style={styles.uomSection}>
+                    <Text style={styles.uomSectionLabel}>Select Unit of Measurement:</Text>
+                    <View style={styles.uomSelectorWrapper}>
+                      <TouchableOpacity
+                        style={[styles.uomSelectorButton, item.selectedUoM === 'primary' && styles.activeUomSelectorButton]}
+                        onPress={() => updateItemUoM(item.id, 'primary')}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.uomSelectorButtonText, item.selectedUoM === 'primary' && styles.activeUomSelectorButtonText]}>
+                          {item.primaryUnit || 'Piece'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.uomSelectorButton, item.selectedUoM === 'secondary' && styles.activeUomSelectorButton]}
+                        onPress={() => updateItemUoM(item.id, 'secondary')}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.uomSelectorButtonText, item.selectedUoM === 'secondary' && styles.activeUomSelectorButtonText]}>
+                          {item.secondaryUnit || 'Box'}
+                        </Text>
+                      </TouchableOpacity>
+                      {item.tertiaryUnit && item.tertiaryUnit !== 'None' && (
+                        <TouchableOpacity
+                          style={[styles.uomSelectorButton, item.selectedUoM === 'tertiary' && styles.activeUomSelectorButton]}
+                          onPress={() => updateItemUoM(item.id, 'tertiary')}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.uomSelectorButtonText, item.selectedUoM === 'tertiary' && styles.activeUomSelectorButtonText]}>
+                            {item.tertiaryUnit || 'Piece'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                </View>
+                  </View>
+                )}
+
+                {/* UoM Display Section for Primary UoM Products */}
+                {(!item.secondaryUnit || item.secondaryUnit === 'None') && (
+                  <View style={styles.uomSection}>
+                    <Text style={styles.uomSectionLabel}>Unit of Measurement:</Text>
+                    <View style={styles.uomDisplayWrapper}>
+                      <Text style={styles.uomDisplayText}>
+                        {item.primaryUnit || 'Piece'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Bottom: Action Buttons and Quantity Controls */}
                 <View style={styles.cartItemBottom}>
                   {/* Left: Edit and Delete Buttons */}
                   <View style={styles.actionButtons}>
@@ -531,6 +1399,7 @@ export default function CartScreen() {
                       <Trash2 size={16} color={Colors.error} />
                     </TouchableOpacity>
                   </View>
+                  
 
                   {/* Right: Quantity Controls */}
                   <View style={styles.quantityControls}>
@@ -566,18 +1435,22 @@ export default function CartScreen() {
                     </TouchableOpacity>
                   </View>
                 </View>
-              </View>
-            ))}
 
-            {/* Add New Product Button */}
+                {/* Collapse Button */}
             <TouchableOpacity
-              style={styles.addNewProductButton}
-              onPress={handleAddNewProduct}
+                  style={styles.collapseButton}
+                  onPress={() => toggleCardExpansion(item.id)}
               activeOpacity={0.7}
             >
-              <Plus size={20} color={Colors.primary} />
-              <Text style={styles.addNewProductText}>Add New Product</Text>
+                  <Text style={styles.collapseButtonText}>Collapse</Text>
             </TouchableOpacity>
+                </>
+                )}
+              </TouchableOpacity>
+            );
+            })}
+
+
 
 
 
@@ -633,7 +1506,10 @@ export default function CartScreen() {
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Subtotal:</Text>
                 <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => total + (item.price * item.quantity), 0))}
+                  {formatPrice(cartItems.reduce((total, item) => {
+                    const currentUoMPrice = getCurrentUoMPrice(item);
+                    return total + (currentUoMPrice * item.quantity);
+                  }, 0))}
                 </Text>
               </View>
               <View style={styles.totalRow}>
@@ -645,81 +1521,221 @@ export default function CartScreen() {
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>GST:</Text>
                 <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => total + calculateItemTotal(item).taxAmount, 0))}
+                  {formatPrice(cartItems.reduce((total, item) => {
+                    const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                    const { adjustedAmount } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+                    
+                    // Calculate tax on the UoM-adjusted final discounted amount
+                    const taxRate = item.taxRate || 0;
+                    const taxAmount = adjustedAmount * (taxRate / 100);
+                    
+                    return total + taxAmount;
+                  }, 0))}
                 </Text>
               </View>
               
               {/* GST Breakdown */}
               {cartItems.some(item => item.taxRate && item.taxRate > 0) && (
                 <View style={styles.taxBreakdownContainer}>
-                  <Text style={styles.taxBreakdownLabel}>GST Breakdown:</Text>
-                  {cartItems.map((item, index) => {
-                    if (item.taxRate && item.taxRate > 0) {
-                      const itemTotal = item.price * item.quantity;
-                      const cgstAmount = (itemTotal * (item.taxRate / 100)) / 2;
-                      const sgstAmount = (itemTotal * (item.taxRate / 100)) / 2;
-                      
-                      return (
-                        <View key={index} style={styles.taxBreakdownRow}>
-                          <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
-                          <Text style={styles.taxBreakdownText}>
-                            CGST ({item.taxRate / 2}%): {formatPrice(cgstAmount)} | 
-                            SGST ({item.taxRate / 2}%): {formatPrice(sgstAmount)}
-                          </Text>
-                        </View>
-                      );
-                    }
-                    return null;
-                  })}
+                  <TouchableOpacity
+                    style={styles.taxSectionHeader}
+                    onPress={() => toggleTaxSection('gst')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.taxBreakdownLabel}>
+                      Tax calc for {cartItems.filter(item => item.taxRate && item.taxRate > 0).length > 1 
+                        ? `${formatProductNameForTaxSection(cartItems.find(item => item.taxRate && item.taxRate > 0)?.name || '')} & ${cartItems.filter(item => item.taxRate && item.taxRate > 0).length - 1} more`
+                        : formatProductNameForTaxSection(cartItems.find(item => item.taxRate && item.taxRate > 0)?.name || '')
+                      }
+                    </Text>
+                    <Text style={styles.taxSectionTotal}>
+                      {formatPrice(cartItems.reduce((total, item) => {
+                        if (item.taxRate && item.taxRate > 0) {
+                          const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                          const taxAmount = finalDiscountedAmount * (item.taxRate / 100);
+                          return total + taxAmount;
+                        }
+                        return total;
+                      }, 0))}
+                    </Text>
+                    <Text style={styles.taxSectionToggle}>
+                      {expandedTaxSections.has('gst') ? '▼' : '▶'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  {expandedTaxSections.has('gst') && (
+                    <View style={styles.taxBreakdownDetails}>
+                      {cartItems.map((item, index) => {
+                        if (item.taxRate && item.taxRate > 0) {
+                          const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                          
+                          // Calculate tax on the final discounted amount
+                          const cgstAmount = (finalDiscountedAmount * (item.taxRate / 100)) / 2;
+                          const sgstAmount = (finalDiscountedAmount * (item.taxRate / 100)) / 2;
+                          
+                          return (
+                            <View key={index} style={styles.taxBreakdownRow}>
+                              <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                              <Text style={styles.taxBreakdownText}>
+                                CGST ({item.taxRate / 2}%): {formatPrice(cgstAmount)} | 
+                                SGST ({item.taxRate / 2}%): {formatPrice(sgstAmount)}
+                              </Text>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })}
+                    </View>
+                  )}
                 </View>
               )}
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>CESS:</Text>
                 <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => total + calculateItemTotal(item).cessAmount, 0))}
+                  {formatPrice(cartItems.reduce((total, item) => {
+                    const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                    const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+                    
+                    let cessAmount = 0;
+                    
+                    if (item.cessType && item.cessType !== 'none') {
+                      if (item.cessType === 'value') {
+                        cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
+                      } else if (item.cessType === 'quantity') {
+                        cessAmount = cessPer * item.quantity;
+                      } else if (item.cessType === 'value_and_quantity') {
+                        const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
+                        const quantityCess = cessPer * item.quantity;
+                        cessAmount = valueCess + quantityCess;
+                      } else if (item.cessType === 'mrp') {
+                        // MRP-based CESS (percentage of MRP) - adjust MRP proportionally
+                        const mrpPrice = parseFloat(item.mrp || '0') || 0;
+                        const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
+                        cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+                      }
+                    }
+                    
+                    return total + cessAmount;
+                  }, 0))}
                 </Text>
               </View>
               
               {/* CESS Breakdown */}
               {cartItems.some(item => item.cessType && item.cessType !== 'none') && (
                 <View style={styles.taxBreakdownContainer}>
-                  <Text style={styles.taxBreakdownLabel}>CESS Breakdown:</Text>
-                  {cartItems.map((item, index) => {
-                    if (item.cessType && item.cessType !== 'none') {
-                      const itemTotal = item.price * item.quantity;
-                      let cessAmount = 0;
-                      let cessDescription = '';
-                      
-                      if (item.cessType === 'value') {
-                        cessAmount = itemTotal * ((item.cessRate || 0) / 100);
-                        cessDescription = `Value-based (${item.cessRate}% of ₹${itemTotal.toFixed(2)})`;
-                      } else if (item.cessType === 'quantity') {
-                        cessAmount = (item.cessAmount || 0) * item.quantity;
-                        cessDescription = `Quantity-based (₹${item.cessAmount} × ${item.quantity} units)`;
-                      } else if (item.cessType === 'value_and_quantity') {
-                        const valueCess = itemTotal * ((item.cessRate || 0) / 100);
-                        const quantityCess = (item.cessAmount || 0) * item.quantity;
-                        cessAmount = valueCess + quantityCess;
-                        cessDescription = `Value + Quantity (${item.cessRate}% + ₹${item.cessAmount} × ${item.quantity})`;
+                  <TouchableOpacity
+                    style={styles.taxSectionHeader}
+                    onPress={() => toggleTaxSection('cess')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.taxBreakdownLabel}>
+                      Tax calc for {cartItems.filter(item => item.cessType && item.cessType !== 'none').length > 1 
+                        ? `${formatProductNameForTaxSection(cartItems.find(item => item.cessType && item.cessType !== 'none')?.name || '')} & ${cartItems.filter(item => item.cessType && item.cessType !== 'none').length - 1} more`
+                        : formatProductNameForTaxSection(cartItems.find(item => item.cessType && item.cessType !== 'none')?.name || '')
                       }
-                      
-                      return (
-                        <View key={index} style={styles.taxBreakdownRow}>
-                          <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
-                          <Text style={styles.taxBreakdownText}>
-                            {formatPrice(cessAmount)} - {cessDescription}
-                          </Text>
-                        </View>
-                      );
-                    }
-                    return null;
-                  })}
+                    </Text>
+                    <Text style={styles.taxSectionTotal}>
+                      {formatPrice(cartItems.reduce((total, item) => {
+                        if (item.cessType && item.cessType !== 'none') {
+                          const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                          const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+                          
+                          let cessAmount = 0;
+                          
+                          if (item.cessType === 'value') {
+                            cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
+                          } else if (item.cessType === 'quantity') {
+                            cessAmount = cessPer * item.quantity;
+                          } else if (item.cessType === 'value_and_quantity') {
+                            const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
+                            const quantityCess = cessPer * item.quantity;
+                            cessAmount = valueCess + quantityCess;
+                          } else if (item.cessType === 'mrp') {
+                            const mrpPrice = parseFloat(item.mrp || '0') || 0;
+                            const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
+                            cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+                          }
+                          
+                          return total + cessAmount;
+                        }
+                        return total;
+                      }, 0))}
+                    </Text>
+                    <Text style={styles.taxSectionToggle}>
+                      {expandedTaxSections.has('cess') ? '▼' : '▶'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  {expandedTaxSections.has('cess') && (
+                    <View style={styles.taxBreakdownDetails}>
+                      {cartItems.map((item, index) => {
+                        if (item.cessType && item.cessType !== 'none') {
+                          const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                          const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+                          
+                          let cessAmount = 0;
+                          let cessDescription = '';
+                          
+                          if (item.cessType === 'value') {
+                            cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
+                            cessDescription = `Value-based (${item.cessRate}% of ₹${adjustedAmount.toFixed(2)})`;
+                          } else if (item.cessType === 'quantity') {
+                            cessAmount = cessPer * item.quantity;
+                            cessDescription = `Quantity-based (₹${cessPer.toFixed(2)} × ${item.quantity} ${item.selectedUoM === 'tertiary' ? item.tertiaryUnit : item.selectedUoM === 'secondary' ? item.secondaryUnit : item.primaryUnit}s)`;
+                          } else if (item.cessType === 'value_and_quantity') {
+                            const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
+                            const quantityCess = cessPer * item.quantity;
+                            cessAmount = valueCess + quantityCess;
+                            cessDescription = `Value + Quantity (${item.cessRate}% + ₹${cessPer.toFixed(2)} × ${item.quantity} ${item.selectedUoM === 'tertiary' ? item.tertiaryUnit : item.selectedUoM === 'secondary' ? item.secondaryUnit : item.primaryUnit}s)`;
+                          } else if (item.cessType === 'mrp') {
+                            // MRP-based CESS (percentage of MRP) - adjust MRP proportionally
+                            const mrpPrice = parseFloat(item.mrp || '0') || 0;
+                            const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
+                            cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+                            cessDescription = `MRP-based (${item.cessRate}% of MRP ₹${mrpPrice.toFixed(2)} × ${item.cessRate}% × ${item.quantity} units)`;
+                          }
+                          
+                          return (
+                            <View key={index} style={styles.taxBreakdownRow}>
+                              <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                              <Text style={styles.taxBreakdownText}>
+                                {formatPrice(cessAmount)} - {cessDescription}
+                              </Text>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })}
+                    </View>
+                  )}
                 </View>
               )}
+              
+              {/* Roundoff Section */}
+              <View style={styles.roundoffSection}>
+                <View style={styles.roundoffRow}>
+                  <TouchableOpacity 
+                    style={styles.roundoffCheckbox}
+                    onPress={() => setApplyRoundoff(!applyRoundoff)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.checkbox, applyRoundoff && styles.checkboxActive]}>
+                      {applyRoundoff && <Text style={styles.checkboxText}>✓</Text>}
+                    </View>
+                    <Text style={styles.roundoffLabel}>Apply Round Off</Text>
+                  </TouchableOpacity>
+                  {applyRoundoff && (
+                    <Text style={[styles.roundoffAmount, calculateRoundoffAmount() >= 0 ? styles.roundoffPositive : styles.roundoffNegative]}>
+                      {calculateRoundoffAmount() >= 0 ? '+' : ''}{formatPrice(Math.abs(calculateRoundoffAmount()))}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              
               <View style={[styles.totalRow, styles.grandTotalRow]}>
                 <Text style={styles.grandTotalLabel}>Total:</Text>
                 <Text style={styles.grandTotalAmount}>
-                  {formatPrice(calculateTotal())}
+                  {formatPrice(calculateFinalTotal())}
                 </Text>
               </View>
             </View>
@@ -779,14 +1795,7 @@ export default function CartScreen() {
         />
       )}
 
-      {/* Add New Product Modal */}
-      {showAddProductModal && (
-        <AddNewProductModal
-          onSave={handleSaveNewProduct}
-          onCancel={handleCancelAddProduct}
-          formatPrice={formatPrice}
-        />
-      )}
+
 
       {/* Search Products Modal */}
       {showSearchModal && (
@@ -867,6 +1876,28 @@ export default function CartScreen() {
           </SafeAreaView>
         </Modal>
       )}
+
+      {/* Custom Alert Modal */}
+      {customAlert.visible && (
+        <View style={styles.customAlertOverlay}>
+          <View style={[
+            styles.customAlertContainer,
+            customAlert.type === 'error' && styles.customAlertError,
+            customAlert.type === 'warning' && styles.customAlertWarning,
+            customAlert.type === 'info' && styles.customAlertInfo
+          ]}>
+            <Text style={styles.customAlertTitle}>{customAlert.title}</Text>
+            <Text style={styles.customAlertMessage}>{customAlert.message}</Text>
+            <TouchableOpacity
+              style={styles.customAlertButton}
+              onPress={hideCustomAlert}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.customAlertButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -890,7 +1921,7 @@ interface ProductEditData {
   conversionRatio?: number;
   hsnCode: string;
   batchNumber: string;
-  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
+          cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp';
   cessRate?: number;
   cessAmount?: number;
   cessUnit?: string;
@@ -920,7 +1951,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
   const [batchNumber, setBatchNumber] = useState(product.batchNumber || '');
   
   // CESS
-  const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity'>(product.cessType || 'none');
+  const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp'>(product.cessType || 'none');
   const [cessRate, setCessRate] = useState((product.cessRate || 0).toString());
   const [cessAmount, setCessAmount] = useState((product.cessAmount || 0).toString());
   const [cessUnit, setCessUnit] = useState(product.cessUnit || '');
@@ -966,7 +1997,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
 
 
   const handleCessTypeSelect = (type: string) => {
-    setCessType(type as 'none' | 'value' | 'quantity' | 'value_and_quantity');
+    setCessType(type as 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp');
     setShowCessTypeModal(false);
   };
 
@@ -1060,6 +2091,10 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
         const valueCess = finalPrice * ((parseFloat(cessRate) || 0) / 100);
         const quantityCess = (parseFloat(cessAmount) || 0) * editedProduct.quantity;
         calculatedCessAmount = valueCess + quantityCess;
+      } else if (cessType === 'mrp') {
+        // MRP-based CESS (percentage of MRP)
+        const mrpPrice = parseFloat(editedProduct.mrp || '0') || 0;
+        calculatedCessAmount = mrpPrice * editedProduct.quantity * ((parseFloat(cessRate) || 0) / 100);
       }
     }
     
@@ -1948,7 +2983,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
    const [conversionRatio, setConversionRatio] = useState('');
    
    // CESS
-   const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity'>('none');
+   const [cessType, setCessType] = useState<'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp'>('none');
    const [cessRate, setCessRate] = useState('');
    const [cessAmount, setCessAmount] = useState('');
    const [cessUnit, setCessUnit] = useState('');
@@ -1994,7 +3029,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
    };
 
    const handleCessTypeSelect = (type: string) => {
-     setCessType(type as 'none' | 'value' | 'quantity' | 'value_and_quantity');
+     setCessType(type as 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp');
      setShowCessTypeModal(false);
    };
 
@@ -3136,11 +4171,33 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerRight: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 16,
+  },
+  addNewProductButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+    minHeight: 32,
+  },
+  addNewProductButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
   },
   itemCount: {
     fontSize: 14,
     color: Colors.textLight,
+    textAlignVertical: 'center',
+    lineHeight: 32,
   },
   scrollView: {
     flex: 1,
@@ -3172,21 +4229,201 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
+    marginHorizontal: 4, // Add horizontal margin to prevent screen edge overflow
     borderWidth: 1,
     borderColor: Colors.grey[200],
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 1,
     },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
+    shadowOpacity: 0.03, // Reduced from 0.05
+    shadowRadius: 1, // Reduced from 3.84
+    elevation: 1, // Reduced from 2
+    overflow: 'hidden', // Ensure all content stays within card bounds
   },
-  cartItemMain: {
+  collapsedCartItem: {
+    paddingBottom: 8, // Reduce bottom padding for collapsed state
+  },
+  collapsedInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  collapsedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  collapsedQuantity: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  collapsedUoM: {
+    fontSize: 12,
+    color: Colors.textLight,
+    backgroundColor: Colors.grey[100],
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  collapsedPrice: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  expandHint: {
+    fontSize: 11,
+    color: Colors.textLight,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  collapseButton: {
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.grey[100],
+    borderRadius: 6,
+    alignSelf: 'center',
+  },
+  collapseButtonText: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  collapsedQuantityControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  collapsedQuantityButton: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 4,
+  },
+  collapsedQuantityButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  collapsedQuantityInput: {
+    width: 40,
+    height: 24,
+    textAlign: 'center',
+    fontSize: 12,
+    color: Colors.text,
+    backgroundColor: Colors.background,
+    borderRadius: 4,
+    marginHorizontal: 4,
+  },
+  productHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 12,
+    gap: 12,
+  },
+  productTitleContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  productDetailsSection: {
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  productMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  productMeta: {
+    fontSize: 11,
+    color: Colors.textLight,
+    fontFamily: 'monospace',
+  },
+  priceBreakdownContainer: {
+    marginBottom: 8,
+    backgroundColor: Colors.grey[50],
+    padding: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  priceBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    flexWrap: 'nowrap',
+  },
+  priceBreakdownTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  priceBreakdownItem: {
+    fontSize: 11,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    fontWeight: '400',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  dynamicStockContainer: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  dynamicStock: {
+    fontSize: 12,
+    color: Colors.success,
+    fontWeight: '500',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  outOfStock: {
+    color: Colors.error,
+  },
+  totalStockInfo: {
+    fontSize: 10,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  bottomPriceSection: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    paddingTop: 12,
+    marginTop: 8,
+  },
+  bottomPriceDisplay: {
+    backgroundColor: Colors.grey[50],
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  bottomPriceLabel: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginBottom: 4,
+  },
+  bottomPriceValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: 4,
   },
   cartItemBottom: {
     flexDirection: 'row',
@@ -3194,7 +4431,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
-    paddingTop: 12,
+    paddingTop: 16,
+    paddingBottom: 8,
+    paddingHorizontal: 4, // Add horizontal padding to prevent edge overflow
+    gap: 8, // Reduced gap since we have more space now
+    overflow: 'hidden', // Strictly contain all elements
   },
   discountSection: {
     backgroundColor: Colors.grey[50],
@@ -3370,15 +4611,126 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   productName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '700',
     color: Colors.text,
-    marginBottom: 4,
+    lineHeight: 22,
+    flex: 1,
   },
   productCategory: {
     fontSize: 12,
     color: Colors.textLight,
     marginBottom: 4,
+  },
+  stockCount: {
+    fontSize: 11,
+    color: Colors.textLight,
+    marginBottom: 4,
+    fontStyle: 'italic',
+  },
+  unitPriceContainer: {
+    marginBottom: 4,
+  },
+  unitPriceText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 2,
+  },
+  unitPriceSubtext: {
+    fontSize: 10,
+    color: Colors.textLight,
+    marginBottom: 1,
+  },
+  uomSection: {
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  uomSectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textLight,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  uomDisplayWrapper: {
+    backgroundColor: Colors.background,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uomDisplayText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    textAlign: 'center',
+  },
+  uomSelectorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '40%', // Fixed width instead of flex
+    paddingHorizontal: 4, // Add some padding for better spacing
+    zIndex: 1, // Ensure proper layering
+    overflow: 'hidden', // Strictly contain elements
+  },
+  uomSelectorWrapper: {
+    flexDirection: 'row',
+    backgroundColor: Colors.background,
+    borderRadius: 6,
+    padding: 2,
+    alignSelf: 'center', // Changed from 'flex-start' to 'center'
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    overflow: 'hidden', // Strictly contain elements
+    zIndex: 2, // Higher z-index than container
+    elevation: 0, // No elevation to prevent shadow issues
+    width: '100%', // Use full width of the section
+    justifyContent: 'space-around', // Evenly distribute buttons with space around
+  },
+  uomSelectorButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    marginHorizontal: 3,
+    flex: 1, // Use flex to distribute equally
+    minWidth: 80, // Larger minimum for full unit names
+    maxWidth: 120, // Larger maximum for full unit names
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    zIndex: 3, // Highest z-index to ensure visibility
+  },
+  activeUomSelectorButton: {
+    backgroundColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    zIndex: 3, // Highest z-index to ensure visibility
+    // Removed all shadow properties to fix layering issues
+  },
+  uomSelectorButtonText: {
+    fontSize: 13,
+    color: Colors.textLight,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  activeUomSelectorButtonText: {
+    color: Colors.background,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   productPrice: {
     fontSize: 14,
@@ -3395,17 +4747,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.grey[100],
-    borderRadius: 6,
-    paddingHorizontal: 3,
-    paddingVertical: 1,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    alignSelf: 'flex-end', // Align to right side
+    overflow: 'hidden', // Hide any overflow
   },
   quantityButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
   },
   quantity: {
     fontSize: 12,
@@ -3416,17 +4772,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   quantityInput: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
     marginHorizontal: 6,
-    minWidth: 30,
+    minWidth: 40,
+    height: 32,
     textAlign: 'center',
     borderWidth: 1,
     borderColor: Colors.grey[300],
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    borderRadius: 6,
+    paddingHorizontal: 8,
     backgroundColor: Colors.background,
   },
 
@@ -3462,6 +4818,32 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     lineHeight: 12,
   },
+  taxSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.grey[100],
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  taxSectionTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  taxSectionToggle: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: 'bold',
+  },
+  taxBreakdownDetails: {
+    marginLeft: 16,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.grey[300],
+  },
   itemActions: {
     flex: 1,
     alignItems: 'flex-end',
@@ -3475,12 +4857,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   removeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#fef2f2',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.error,
   },
   totalSection: {
     backgroundColor: Colors.grey[50],
@@ -3504,6 +4888,56 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: Colors.text,
+  },
+  roundoffSection: {
+    marginVertical: 8,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  roundoffRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  roundoffCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: Colors.grey[300],
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  checkboxActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  checkboxText: {
+    color: Colors.background,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  roundoffLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  roundoffAmount: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  roundoffPositive: {
+    color: Colors.success,
+  },
+  roundoffNegative: {
+    color: Colors.error,
   },
   grandTotalRow: {
     borderTopWidth: 1,
@@ -3606,10 +5040,11 @@ const styles = StyleSheet.create({
   scanButton: {
     width: 48,
     height: 48,
-    borderRadius: 8,
+    borderRadius: 25,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 4,
   },
   // Modal Styles
   modalOverlay: {
@@ -3846,16 +5281,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    alignSelf: 'flex-start', // Align to left side
+    overflow: 'hidden', // Hide any overflow
   },
   editButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
     backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 60,
+    minHeight: 32,
   },
   editButtonText: {
-    fontSize: 11,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
     color: Colors.background,
   },
   conversionContainer: {
@@ -3910,26 +5351,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.grey[300],
     minWidth: 80,
     marginBottom: 4,
-  },
-  addNewProductButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    marginHorizontal: 20,
-    marginVertical: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderStyle: 'dashed',
-  },
-  addNewProductText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: Colors.primary,
-    marginLeft: 8,
   },
   barcodeInputContainer: {
     flexDirection: 'row',
@@ -4151,5 +5572,70 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  customAlertOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  customAlertContainer: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 20,
+    marginHorizontal: 20,
+    maxWidth: 300,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  customAlertError: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.error,
+  },
+  customAlertWarning: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.warning,
+  },
+  customAlertInfo: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.primary,
+  },
+  customAlertTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  customAlertMessage: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginBottom: 16,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  customAlertButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignSelf: 'center',
+  },
+  customAlertButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.background,
+    textAlign: 'center',
   },
 });

@@ -17,7 +17,6 @@ import {
   Scan,
   Plus,
   ShoppingCart,
-  Package
 } from 'lucide-react-native';
 
 const Colors = {
@@ -36,8 +35,6 @@ const Colors = {
     300: '#D1D5DB',
   }
 };
-
-
 
 export default function NewSaleScreen() {
   const { preSelectedCustomer } = useLocalSearchParams();
@@ -145,6 +142,31 @@ export default function NewSaleScreen() {
           </Text>
         </View>
 
+        {/* Add New Product Card */}
+        <TouchableOpacity
+          style={styles.addNewProductCard}
+          onPress={() => router.push({
+            pathname: '/inventory/manual-product',
+            params: {
+              returnTo: 'new-sale',
+              preSelectedCustomer: preSelectedCustomer
+            }
+          })}
+          activeOpacity={0.7}
+        >
+          <View style={styles.addNewProductContent}>
+            <View style={styles.addNewProductIcon}>
+              <Plus size={32} color={Colors.primary} />
+            </View>
+            <View style={styles.addNewProductText}>
+              <Text style={styles.addNewProductTitle}>Add New Product</Text>
+              <Text style={styles.addNewProductSubtitle}>
+                Create a new product on the go
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
         <View style={styles.productsGrid}>
           {filteredProducts.map((product) => (
             <TouchableOpacity
@@ -164,12 +186,12 @@ export default function NewSaleScreen() {
                 <Text style={styles.productCategory}>
                   {product.category}
                 </Text>
-                            <Text style={styles.productPrice}>
-              {formatPrice(product.salesPrice)}
-            </Text>
-                                  <Text style={styles.lastBilled}>
-                    Stock: {product.currentStock} {product.primaryUnit}
-                  </Text>
+                <Text style={styles.productPrice}>
+                  {formatPrice(product.salesPrice)}
+                </Text>
+                <Text style={styles.lastBilled}>
+                  Stock: {product.currentStock} {product.primaryUnit}
+                </Text>
               </View>
               <View style={styles.addButton}>
                 <Plus size={16} color="#ffffff" />
@@ -262,6 +284,51 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 14,
     color: Colors.textLight,
+  },
+  // Add New Product Card Styles
+  addNewProductCard: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    borderStyle: 'dashed',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  addNewProductContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addNewProductIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.grey[50],
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  addNewProductText: {
+    flex: 1,
+  },
+  addNewProductTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: 4,
+  },
+  addNewProductSubtitle: {
+    fontSize: 14,
+    color: Colors.textLight,
+    lineHeight: 20,
   },
   productsGrid: {
     flexDirection: 'row',

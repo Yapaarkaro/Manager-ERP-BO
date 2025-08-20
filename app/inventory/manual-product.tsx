@@ -11,9 +11,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { productStore, Product } from '@/utils/productStore';
 import { dataStore, Supplier as StoreSupplier } from '@/utils/dataStore';
 import { 
@@ -50,7 +51,7 @@ const Colors = {
 
 let categories = [
   'Smartphones', 'Laptops', 'Tablets', 'Audio', 'Cameras', 'Gaming', 
-  'Accessories', 'Wearables', 'Home Appliances', 'Others'
+  'Accessories', 'Wearables', 'Home Appliances'
 ];
 
 const primaryUnits = [
@@ -78,6 +79,7 @@ const cessTypes = [
   { value: 'value', label: 'Based on Value' },
   { value: 'quantity', label: 'Based on Quantity' },
   { value: 'value_and_quantity', label: 'Based on Value & Quantity' },
+  { value: 'mrp', label: 'Based on MRP' },
 ];
 
 const unitConversions: { [key: string]: { [key: string]: number } } = {
@@ -133,15 +135,20 @@ interface ProductFormData {
   hsnCode: string;
   barcode: string;
   taxRate: number;
+  taxInclusive: boolean; // New field for tax inclusion toggle
   primaryUnit: string;
   secondaryUnit: string;
   useCompoundUnit: boolean;
   conversionRatio: string;
+  tertiaryUnit: string;
+  tertiaryConversionRatio: string;
   priceUnit: 'primary' | 'secondary';
-  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
+  stockUoM: 'primary' | 'secondary' | 'tertiary';
+  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp';
   cessRate: number;
   cessAmount: string;
   cessUnit: string;
+  perUnitPrice: string; // New field for per unit price
   purchasePrice: string;
   salesPrice: string;
   mrp: string;
@@ -157,8 +164,37 @@ interface ProductFormData {
   showAdvancedOptions: boolean;
 }
 
+import { getScannedData, clearScannedData } from '@/utils/scannedDataStore';
+
 export default function ManualProductScreen() {
-  const { scannedData, isScanned, returnToStockIn, supplierId, newSupplier } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const { scannedData, isScanned, returnToStockIn, supplierId, newSupplier, returnTo, preSelectedCustomer, editMode, productId, productData } = params;
+  
+  // Check if this is a duplicate form attempt
+  useEffect(() => {
+    // If we're coming from scanner but don't have scanned data, this might be a duplicate
+    if (returnTo === 'manual-product' && !scannedData && !getScannedData()) {
+      console.log('🚫 Potential duplicate form detected - checking navigation');
+      // Check if we should go back to the original screen
+      if (returnTo === 'manual-product') {
+        // This is likely a duplicate, go back to original screen
+        console.log('🚫 Duplicate form detected - redirecting to original screen');
+        router.back();
+        return;
+      }
+    }
+  }, [returnTo, scannedData]);
+  
+  // Debug logging for parameters - only log when there's actual data
+  if (scannedData || getScannedData()) {
+    console.log('🔍 ManualProductScreen - Received scanned data');
+  }
+  
+  // Force re-render when scanned data changes
+  const [forceUpdate, setForceUpdate] = useState(0);
+  
+  // Track which fields were auto-filled for visual feedback
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set());
   
   const [formData, setFormData] = useState<ProductFormData>({
     name: '',
@@ -167,6 +203,7 @@ export default function ManualProductScreen() {
     hsnCode: '',
     barcode: '',
     taxRate: 18,
+    taxInclusive: false, // Default to tax exclusive
     cessRate: 0,
     cessAmount: '',
     cessUnit: '',
@@ -174,8 +211,12 @@ export default function ManualProductScreen() {
     secondaryUnit: 'None',
     useCompoundUnit: false,
     conversionRatio: '',
+    tertiaryUnit: 'None',
+    tertiaryConversionRatio: '',
     priceUnit: 'primary',
+    stockUoM: 'primary',
     cessType: 'none',
+    perUnitPrice: '',
     purchasePrice: '',
     salesPrice: '',
     mrp: '',
@@ -214,26 +255,129 @@ export default function ManualProductScreen() {
   const [customSecondaryUnit, setCustomSecondaryUnit] = useState('');
   const [showCustomPrimaryUnitModal, setShowCustomPrimaryUnitModal] = useState(false);
   const [showCustomSecondaryUnitModal, setShowCustomSecondaryUnitModal] = useState(false);
+  const [showTertiaryUnitModal, setShowTertiaryUnitModal] = useState(false);
+  const [showCustomTertiaryUnitModal, setShowCustomTertiaryUnitModal] = useState(false);
+  const [showTertiaryConversionModal, setShowTertiaryConversionModal] = useState(false);
+  const [tertiaryUnitSearch, setTertiaryUnitSearch] = useState('');
+  const [customTertiaryUnit, setCustomTertiaryUnit] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const categorySearchRef = useRef<TextInput>(null);
   const supplierSearchRef = useRef<TextInput>(null);
 
+    // Use useFocusEffect to detect when form comes back into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔍 useFocusEffect triggered - checking for scanned data');
+      console.log('🔍 scannedData from params:', scannedData);
+      console.log('🔍 scannedData from store:', getScannedData());
+      
+      // Check if we have scanned data to process (either from params or shared store)
+      const dataToProcess = scannedData || getScannedData();
+      
+      if (dataToProcess) {
+        console.log('🔍 Found data to process:', dataToProcess);
+        try {
+          const scanned = JSON.parse(dataToProcess as string);
+          console.log('🔍 Processing scanned data:', { barcode: scanned.barcode, name: scanned.name, brand: scanned.brand });
+          
+          // Check if this is actually scanned data (has barcode and name)
+          if (scanned.barcode && scanned.name) {
+            const newAutoFilledFields = new Set<string>();
+            
+            // Update name field - combine brand and name
+            if (scanned.name) {
+              let fullProductName = scanned.name;
+              
+              // If brand exists and is not empty, prepend it to the product name
+              if (scanned.brand && scanned.brand.trim() !== '' && scanned.brand !== 'Unknown') {
+                fullProductName = `${scanned.brand} ${scanned.name}`;
+              }
+              
+              console.log('🔍 Setting product name to:', fullProductName);
+              setFormData(prev => ({ ...prev, name: fullProductName }));
+              newAutoFilledFields.add('name');
+              console.log('✅ Auto-filled product name:', fullProductName);
+            }
+            
+            // Update barcode field
+            if (scanned.barcode) {
+              console.log('🔍 Setting barcode to:', scanned.barcode);
+              setFormData(prev => ({ ...prev, barcode: scanned.barcode }));
+              newAutoFilledFields.add('barcode');
+              console.log('✅ Auto-filled barcode:', scanned.barcode);
+            }
+            
+            // Update auto-filled fields tracking
+            setAutoFilledFields(newAutoFilledFields);
+            
+            // Force a re-render to ensure form updates
+            setForceUpdate(prev => prev + 1);
+            
+            console.log('✅ Form auto-filled successfully');
+            
+            // Clear scanned data after processing
+            if (getScannedData()) {
+              clearScannedData();
+            }
+          } else {
+            console.log('⚠️ Scanned data missing required fields (barcode or name)');
+          }
+        } catch (error) {
+          console.error('❌ Error parsing scanned data:', error);
+        }
+      } else {
+        console.log('⚠️ No scanned data found to process');
+      }
+    }, [scannedData])
+  );
+
+  // Handle edit mode - populate form with existing product data
   useEffect(() => {
-    // Auto-fill data if scanned
-    if (isScanned === 'true' && scannedData) {
+    if (editMode === 'true' && productData) {
       try {
-        const scanned = JSON.parse(scannedData as string);
-        setFormData(prev => ({
-          ...prev,
-          barcode: scanned.barcode || '',
-          name: scanned.name || '',
-        }));
+        const product = JSON.parse(productData as string);
+        console.log('🔄 Edit mode: Populating form with existing product data:', product.name);
+        
+        setFormData({
+          name: product.name || '',
+          category: product.category || '',
+          customCategory: '',
+          hsnCode: product.hsnCode || '',
+          barcode: product.barcode || '',
+          taxRate: product.taxRate || 18,
+          taxInclusive: product.taxInclusive || false, // Include tax inclusive setting
+          cessRate: product.cessRate || 0,
+          cessAmount: product.cessAmount?.toString() || '',
+          cessUnit: product.cessUnit || '',
+          primaryUnit: product.primaryUnit || 'Piece',
+          secondaryUnit: product.secondaryUnit || 'None',
+          useCompoundUnit: Boolean(product.secondaryUnit && product.secondaryUnit !== 'None'),
+          conversionRatio: product.conversionRatio || '',
+          tertiaryUnit: product.tertiaryUnit || 'None',
+          tertiaryConversionRatio: product.tertiaryConversionRatio || '',
+          priceUnit: 'primary',
+          stockUoM: 'primary',
+          cessType: product.cessType || 'none',
+          perUnitPrice: product.unitPrice?.toString() || '',
+          purchasePrice: product.unitPrice?.toString() || '',
+          salesPrice: product.salesPrice?.toString() || '',
+          mrp: product.mrp || '',
+          minStockLevel: product.minStockLevel?.toString() || '',
+          maxStockLevel: product.maxStockLevel?.toString() || '',
+          openingStock: product.currentStock?.toString() || '',
+          preferredSupplier: product.supplier || '',
+          location: product.location || 'Primary Address',
+          productImage: product.image || null,
+          batchNumber: product.batchNumber || '',
+          expiryDate: '',
+          showAdvancedOptions: false,
+        });
       } catch (error) {
-        console.error('Error parsing scanned data:', error);
+        console.error('❌ Error parsing product data for edit:', error);
       }
     }
-  }, [scannedData, isScanned]);
+  }, [editMode, productData]);
 
   useEffect(() => {
     // Auto-fill supplier if passed from stock in
@@ -291,6 +435,7 @@ export default function ManualProductScreen() {
   }, [newSupplier]);
 
   const updateFormData = (field: keyof ProductFormData, value: string | number | boolean | null) => {
+    // Silent update - no logging at all
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -332,6 +477,12 @@ export default function ManualProductScreen() {
     setFormData(prev => ({ ...prev, secondaryUnit: unit }));
     setShowSecondaryUnitModal(false);
     setSecondaryUnitSearch('');
+  };
+
+  const handleTertiaryUnitSelect = (unit: string) => {
+    setFormData(prev => ({ ...prev, tertiaryUnit: unit }));
+    setShowTertiaryUnitModal(false);
+    setTertiaryUnitSearch('');
   };
 
   const handleTaxRateSelect = (rate: number) => {
@@ -384,11 +535,48 @@ export default function ManualProductScreen() {
     setShowImageModal(false);
   };
 
-  const handlePriceChange = (field: 'purchasePrice' | 'salesPrice' | 'mrp', text: string) => {
+  const handlePriceChange = (field: 'purchasePrice' | 'salesPrice' | 'mrp' | 'perUnitPrice', text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
     const parts = cleaned.split('.');
     if (parts.length <= 2 && parts[0].length <= 8) {
       updateFormData(field, cleaned);
+    }
+  };
+
+  // Helper function to calculate tax-exclusive price from tax-inclusive price
+  const calculateTaxExclusivePrice = (inclusivePrice: number, taxRate: number): number => {
+    return inclusivePrice / (1 + (taxRate / 100));
+  };
+
+  // Helper function to calculate tax-inclusive price from tax-exclusive price
+  const calculateTaxInclusivePrice = (exclusivePrice: number, taxRate: number): number => {
+    return exclusivePrice * (1 + (taxRate / 100));
+  };
+
+  // Helper function to get display prices based on tax inclusion toggle
+  const getDisplayPrices = () => {
+    const perUnitPrice = parseFloat(formData.perUnitPrice) || 0;
+    const salesPrice = parseFloat(formData.salesPrice) || 0;
+    const taxRate = formData.taxRate;
+
+    if (formData.taxInclusive) {
+      // Prices entered are inclusive, calculate exclusive for display
+      return {
+        perUnitBasePrice: calculateTaxExclusivePrice(perUnitPrice, taxRate),
+        salesBasePrice: calculateTaxExclusivePrice(salesPrice, taxRate),
+        perUnitFinalPrice: perUnitPrice,
+        salesFinalPrice: salesPrice,
+        showCalculation: true
+      };
+    } else {
+      // Prices entered are exclusive, calculate inclusive for display
+      return {
+        perUnitBasePrice: perUnitPrice,
+        salesBasePrice: salesPrice,
+        perUnitFinalPrice: calculateTaxInclusivePrice(perUnitPrice, taxRate),
+        salesFinalPrice: calculateTaxInclusivePrice(salesPrice, taxRate),
+        showCalculation: true
+      };
     }
   };
 
@@ -398,18 +586,37 @@ export default function ManualProductScreen() {
   };
 
   const isFormValid = () => {
-    return (
+    // Basic validation
+    const basicValidation = (
       formData.name.trim().length > 0 &&
       formData.category.trim().length > 0 &&
-      (formData.category !== 'Others' || formData.customCategory.trim().length > 0) &&
       formData.hsnCode.trim().length > 0 &&
       formData.barcode.trim().length > 0 &&
-      formData.purchasePrice.trim().length > 0 &&
+      formData.perUnitPrice.trim().length > 0 &&
       formData.salesPrice.trim().length > 0 &&
       formData.openingStock.trim().length > 0 &&
       formData.minStockLevel.trim().length > 0 &&
       formData.maxStockLevel.trim().length > 0
     );
+
+    // Compound UoM validation
+    if (formData.useCompoundUnit) {
+      if (!formData.secondaryUnit || formData.secondaryUnit === 'None') {
+        return false;
+      }
+      if (!formData.conversionRatio || formData.conversionRatio.trim().length === 0) {
+        return false;
+      }
+      
+      // Tertiary unit validation if enabled
+      if (formData.showAdvancedOptions && formData.tertiaryUnit && formData.tertiaryUnit !== 'None') {
+        if (!formData.tertiaryConversionRatio || formData.tertiaryConversionRatio.trim().length === 0) {
+          return false;
+        }
+      }
+    }
+
+    return basicValidation;
   };
 
   const handleSubmit = async () => {
@@ -418,19 +625,36 @@ export default function ManualProductScreen() {
       return;
     }
 
+    // Validate per unit price is lower than sale price
+    const perUnitPrice = parseFloat(formData.perUnitPrice);
+    const salePrice = parseFloat(formData.salesPrice);
+    
+    if (perUnitPrice >= salePrice) {
+      Alert.alert(
+        'Invalid Pricing', 
+        'Per unit price must be lower than sale price to ensure profitability.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     const productData: Product = {
-      id: `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: editMode === 'true' && productId ? (productId as string) : `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
       image: formData.productImage || 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-      category: formData.category !== 'Others' ? formData.category : formData.customCategory.trim(),
+      category: formData.category || formData.customCategory.trim(),
       hsnCode: formData.hsnCode.trim(),
       barcode: formData.barcode.trim(),
       taxRate: formData.taxRate,
+      taxInclusive: formData.taxInclusive, // Include tax inclusion setting
       primaryUnit: formData.primaryUnit,
       secondaryUnit: formData.secondaryUnit !== 'None' ? formData.secondaryUnit : undefined,
-      unitPrice: parseFloat(formData.purchasePrice),
+      tertiaryUnit: formData.tertiaryUnit !== 'None' ? formData.tertiaryUnit : undefined,
+      conversionRatio: formData.conversionRatio || undefined,
+      tertiaryConversionRatio: formData.tertiaryConversionRatio || undefined,
+      unitPrice: parseFloat(formData.perUnitPrice),
       salesPrice: parseFloat(formData.salesPrice),
       minStockLevel: parseInt(formData.minStockLevel),
       maxStockLevel: parseInt(formData.maxStockLevel),
@@ -438,9 +662,16 @@ export default function ManualProductScreen() {
       supplier: formData.preferredSupplier,
       location: formData.location,
       lastRestocked: new Date().toISOString(),
-      stockValue: parseFloat(formData.purchasePrice) * parseInt(formData.openingStock),
+      stockValue: parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock),
       urgencyLevel: 'normal',
       batchNumber: formData.batchNumber || '',
+      openingStock: parseInt(formData.openingStock),
+      // Additional fields
+      mrp: formData.mrp || '',
+      brand: '',
+      description: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       // CESS fields
       cessType: formData.cessType,
       cessRate: formData.cessRate,
@@ -448,11 +679,17 @@ export default function ManualProductScreen() {
       cessUnit: formData.cessUnit,
     };
 
-    console.log('Creating new product:', productData);
-    
-    // Add product to store
-    productStore.addProduct(productData);
-    console.log('Product added to store. Total products:', productStore.getProductCount());
+    if (editMode === 'true' && productId) {
+      // Update existing product
+      console.log('Updating existing product:', productData);
+      productStore.updateProduct(productId as string, productData);
+      console.log('Product updated in store');
+    } else {
+      // Create new product
+      console.log('Creating new product:', productData);
+      productStore.addProduct(productData);
+      console.log('Product added to store. Total products:', productStore.getProductCount());
+    }
     
     setTimeout(() => {
       if (returnToStockIn === 'true') {
@@ -467,7 +704,7 @@ export default function ManualProductScreen() {
           cessAmount: parseFloat(formData.cessAmount) || 0,
         };
         
-        Alert.alert('Success', 'Product added successfully. Returning to stock in...', [
+        Alert.alert('Success', editMode === 'true' ? 'Product updated successfully. Returning to stock in...' : 'Product added successfully. Returning to stock in...', [
           {
             text: 'OK',
             onPress: () => {
@@ -481,19 +718,210 @@ export default function ManualProductScreen() {
             }
           }
         ]);
-      } else {
-        Alert.alert('Success', 'Product added to inventory successfully', [
+      } else if (returnTo === 'new-sale') {
+        // Return to new sale with the new product added to cart
+        Alert.alert('Success', editMode === 'true' ? 'Product updated successfully' : 'Product added to inventory and cart successfully', [
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back and trigger refresh
-              router.back();
-              // Add a small delay to ensure navigation completes
-                              setTimeout(() => {
+              if (editMode === 'true') {
+                // Go back to product details page after edit
+                router.back();
+              } else {
+                // Clear the form data to prevent showing completed form
+                setFormData({
+                  name: '',
+                  category: '',
+                  customCategory: '',
+                  hsnCode: '',
+                  barcode: '',
+                  taxRate: 18,
+                  taxInclusive: false,
+                  cessRate: 0,
+                  cessAmount: '',
+                  cessUnit: '',
+                  primaryUnit: 'Piece',
+                  secondaryUnit: 'None',
+                  useCompoundUnit: false,
+                  conversionRatio: '',
+                  tertiaryUnit: 'None',
+                  tertiaryConversionRatio: '',
+                  priceUnit: 'primary',
+                  stockUoM: 'primary',
+                  cessType: 'none',
+                  perUnitPrice: '',
+                  purchasePrice: '',
+                  salesPrice: '',
+                  mrp: '',
+                  minStockLevel: '',
+                  maxStockLevel: '',
+                  openingStock: '',
+                  preferredSupplier: '',
+                  location: 'Primary Address',
+                  productImage: null,
+                  batchNumber: '',
+                  expiryDate: '',
+                  showAdvancedOptions: false,
+                });
+                
+                // Clear auto-filled fields
+                setAutoFilledFields(new Set());
+                
+                // Clear scanned data from store
+                clearScannedData();
+                
+                // Navigate to cart and replace the current screen
+                router.replace({
+                  pathname: '/new-sale/cart',
+                  params: {
+                    selectedProducts: JSON.stringify([{
+                      ...productData,
+                      quantity: 1,
+                      price: productData.salesPrice,
+                      // Ensure CESS fields are passed
+                      cessType: productData.cessType || 'none',
+                      cessRate: productData.cessRate || 0,
+                      cessAmount: productData.cessAmount || 0,
+                      cessUnit: productData.cessUnit || ''
+                    }]),
+                    preSelectedCustomer: preSelectedCustomer
+                  }
+                });
+              }
+            }
+          }
+        ]);
+      } else if (returnTo === 'cart') {
+        // Return to cart with the new product added
+        Alert.alert('Success', editMode === 'true' ? 'Product updated successfully' : 'Product added to inventory and cart successfully', [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (editMode === 'true') {
+                // Go back to product details page after edit
+                router.back();
+              } else {
+                // Clear the form data to prevent showing completed form
+                setFormData({
+                  name: '',
+                  category: '',
+                  customCategory: '',
+                  hsnCode: '',
+                  barcode: '',
+                  taxRate: 18,
+                  taxInclusive: false,
+                  cessRate: 0,
+                  cessAmount: '',
+                  cessUnit: '',
+                  primaryUnit: 'Piece',
+                  secondaryUnit: 'None',
+                  useCompoundUnit: false,
+                  conversionRatio: '',
+                  tertiaryUnit: 'None',
+                  tertiaryConversionRatio: '',
+                  priceUnit: 'primary',
+                  stockUoM: 'primary',
+                  cessType: 'none',
+                  perUnitPrice: '',
+                  purchasePrice: '',
+                  salesPrice: '',
+                  mrp: '',
+                  minStockLevel: '',
+                  maxStockLevel: '',
+                  openingStock: '',
+                  preferredSupplier: '',
+                  location: 'Primary Address',
+                  productImage: null,
+                  batchNumber: '',
+                  expiryDate: '',
+                  showAdvancedOptions: false,
+                });
+                
+                // Clear auto-filled fields
+                setAutoFilledFields(new Set());
+                
+                // Clear scanned data from store
+                clearScannedData();
+                
+                // Navigate to cart and replace the current screen
+                router.replace({
+                  pathname: '/new-sale/cart',
+                  params: {
+                    newProduct: JSON.stringify({
+                      ...productData,
+                      // Ensure CESS fields are passed
+                      cessType: productData.cessType || 'none',
+                      cessRate: productData.cessRate || 0,
+                      cessAmount: productData.cessAmount || 0,
+                      cessUnit: productData.cessUnit || ''
+                    }),
+                    preSelectedCustomer: preSelectedCustomer
+                  }
+                });
+              }
+            }
+          }
+        ]);
+      } else {
+        Alert.alert('Success', editMode === 'true' ? 'Product updated successfully' : 'Product added to inventory successfully', [
+          {
+            text: 'OK',
+            onPress: () => {
+              if (editMode === 'true') {
+                // Go back to product details page after edit
+                router.back();
+              } else {
+                // Clear the form data to prevent showing completed form
+                setFormData({
+                  name: '',
+                  category: '',
+                  customCategory: '',
+                  hsnCode: '',
+                  barcode: '',
+                  taxRate: 18,
+                  taxInclusive: false,
+                  cessRate: 0,
+                  cessAmount: '',
+                  cessUnit: '',
+                  primaryUnit: 'Piece',
+                  secondaryUnit: 'None',
+                  useCompoundUnit: false,
+                  conversionRatio: '',
+                  tertiaryUnit: 'None',
+                  tertiaryConversionRatio: '',
+                  priceUnit: 'primary',
+                  stockUoM: 'primary',
+                  cessType: 'none',
+                  perUnitPrice: '',
+                  purchasePrice: '',
+                  salesPrice: '',
+                  mrp: '',
+                  minStockLevel: '',
+                  maxStockLevel: '',
+                  openingStock: '',
+                  preferredSupplier: '',
+                  location: 'Primary Address',
+                  productImage: null,
+                  batchNumber: '',
+                  expiryDate: '',
+                  showAdvancedOptions: false,
+                });
+                
+                // Clear auto-filled fields
+                setAutoFilledFields(new Set());
+                
+                // Clear scanned data from store
+                clearScannedData();
+                
+                // Navigate back and trigger refresh
+                router.back();
+                // Add a small delay to ensure navigation completes
+                setTimeout(() => {
                   console.log('=== PRODUCT ADDED - NAVIGATING BACK ===');
                   console.log('Total products in store:', productStore.getProductCount());
                   console.log('==========================================');
                 }, 100);
+              }
             }
           }
         ]);
@@ -535,7 +963,7 @@ export default function ManualProductScreen() {
           </TouchableOpacity>
           
           <Text style={styles.headerTitle}>
-            {isScanned === 'true' ? 'Complete Product Details' : 'Add New Product'}
+            {editMode === 'true' ? 'Edit Product' : (isScanned === 'true' ? 'Complete Product Details' : 'Add New Product')}
           </Text>
         </View>
 
@@ -545,6 +973,32 @@ export default function ManualProductScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Quick Barcode Entry */}
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.barcodeScanButton}
+              onPress={() => {
+                // Navigate to scanner with current form context
+                router.push({
+                  pathname: '/new-sale/scanner',
+                  params: {
+                    returnTo: 'manual-product',
+                    preSelectedCustomer: preSelectedCustomer,
+                    currentFormData: JSON.stringify(formData), // Pass current form state
+                    formId: Date.now().toString() // Unique form identifier
+                  }
+                });
+              }}
+              activeOpacity={0.7}
+            >
+              <Barcode size={24} color={Colors.primary} />
+              <Text style={styles.barcodeScanButtonText}>Scan Barcode to Add Product</Text>
+              <Camera size={24} color={Colors.primary} />
+            </TouchableOpacity>
+            
+
+          </View>
+
           {/* Preferred Supplier & Location - Moved to top for better flow */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Preferred Supplier & Location</Text>
@@ -604,15 +1058,21 @@ export default function ManualProductScreen() {
             )}
           </View>
 
+
+
           {/* Basic Information */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Basic Information</Text>
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Product Name *</Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                styles.inputContainer,
+                autoFilledFields.has('name') && styles.autoFilledInput
+              ]}>
                 <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
+                  key={`name-${forceUpdate}`}
                   style={styles.input}
                   value={formData.name}
                   onChangeText={(text) => updateFormData('name', text)}
@@ -620,6 +1080,9 @@ export default function ManualProductScreen() {
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
                 />
+                {autoFilledFields.has('name') && (
+                  <Text style={styles.autoFilledBadge}>✓ Auto-filled</Text>
+                )}
               </View>
             </View>
 
@@ -629,6 +1092,7 @@ export default function ManualProductScreen() {
                 <View style={styles.customInputContainer}>
                   <View style={styles.inputContainer}>
                     <TextInput
+                      key={`customCategory-${forceUpdate}`}
                       style={styles.input}
                       value={formData.customCategory}
                       onChangeText={(text) => updateFormData('customCategory', text)}
@@ -647,6 +1111,7 @@ export default function ManualProductScreen() {
                 </View>
               ) : (
                 <TouchableOpacity
+                  key={`category-${forceUpdate}`}
                   style={styles.dropdown}
                   onPress={() => setShowCategoryModal(true)}
                   activeOpacity={0.7}
@@ -679,29 +1144,27 @@ export default function ManualProductScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Barcode *</Text>
-              <View style={styles.inputContainer}>
+              <Text style={styles.label}>Barcode</Text>
+              <View style={[
+                styles.inputContainer,
+                autoFilledFields.has('barcode') && styles.autoFilledInput
+              ]}>
                 <Barcode size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
+                  key={`barcode-${forceUpdate}`}
                   style={styles.input}
                   value={formData.barcode}
                   onChangeText={(text) => updateFormData('barcode', text)}
-                  placeholder="Enter or scan barcode"
+                  placeholder="Enter barcode number"
                   placeholderTextColor={Colors.textLight}
-                  editable={isScanned !== 'true'}
                 />
-                <TouchableOpacity
-                  style={styles.scanIconButton}
-                  onPress={() => {
-                    // Navigate to scanner
-                    router.push('/inventory/scan-product');
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Camera size={20} color={Colors.primary} />
-                </TouchableOpacity>
+                {autoFilledFields.has('barcode') && (
+                  <Text style={styles.autoFilledBadge}>✓ Auto-filled</Text>
+                )}
               </View>
             </View>
+
+
 
 
 
@@ -815,6 +1278,56 @@ export default function ManualProductScreen() {
                 </TouchableOpacity>
               </View>
             )}
+
+            {/* Advanced Unit Options */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Advanced Unit Options</Text>
+              <TouchableOpacity
+                style={[styles.advancedToggle, formData.showAdvancedOptions && styles.advancedToggleActive]}
+                onPress={() => updateFormData('showAdvancedOptions', !formData.showAdvancedOptions)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.advancedToggleText, formData.showAdvancedOptions && styles.advancedToggleTextActive]}>
+                  {formData.showAdvancedOptions ? 'Hide Advanced Unit Options' : 'Show Advanced Unit Options'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Advanced Unit Fields */}
+            {formData.showAdvancedOptions && (
+              <View style={styles.advancedOptionsContainer}>
+                {/* Tertiary Unit Option */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Tertiary Unit</Text>
+                  <TouchableOpacity
+                    style={styles.dropdown}
+                    onPress={() => setShowTertiaryUnitModal(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.dropdownText}>
+                      {formData.tertiaryUnit}
+                    </Text>
+                    <ChevronDown size={20} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+                
+                {formData.tertiaryUnit !== 'None' && (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Tertiary Conversion Ratio</Text>
+                    <TouchableOpacity
+                      style={styles.dropdown}
+                      onPress={() => setShowTertiaryConversionModal(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.dropdownText}>
+                        {formData.tertiaryConversionRatio || 'Set tertiary conversion ratio'}
+                      </Text>
+                      <ChevronDown size={20} color={Colors.textLight} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Tax Information */}
@@ -835,6 +1348,8 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
 
+
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>CESS Calculation</Text>
               <TouchableOpacity
@@ -847,6 +1362,7 @@ export default function ManualProductScreen() {
                    formData.cessType === 'value' ? `Value Based (${formData.cessRate}%)` :
                    formData.cessType === 'quantity' ? `Quantity Based (₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
                    formData.cessType === 'value_and_quantity' ? `Value & Quantity (${formData.cessRate}% + ₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
+                   formData.cessType === 'mrp' ? `MRP Based (${formData.cessRate}%)` :
                    'Select CESS calculation method'
                   }
                 </Text>
@@ -859,41 +1375,115 @@ export default function ManualProductScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Stock Management</Text>
             
+            {/* Stock UoM Selector - Only show for compound units, placed above opening stock */}
+            {formData.useCompoundUnit && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Stock Unit *</Text>
+                <Text style={styles.inputHint}>
+                  Select the unit you're providing stock in
+                </Text>
+                <View style={styles.stockUoMContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.stockUoMButton,
+                      formData.stockUoM === 'primary' && styles.activeStockUoMButton
+                    ]}
+                    onPress={() => updateFormData('stockUoM', 'primary')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.stockUoMButtonText,
+                      formData.stockUoM === 'primary' && styles.activeStockUoMButtonText
+                    ]}>
+                      {formData.primaryUnit}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.stockUoMButton,
+                      formData.stockUoM === 'secondary' && styles.activeStockUoMButton
+                    ]}
+                    onPress={() => updateFormData('stockUoM', 'secondary')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.stockUoMButtonText,
+                      formData.stockUoM === 'secondary' && styles.activeStockUoMButtonText
+                    ]}>
+                      {formData.secondaryUnit}
+                    </Text>
+                  </TouchableOpacity>
+                  {formData.tertiaryUnit !== 'None' && (
+                    <TouchableOpacity
+                      style={[
+                        styles.stockUoMButton,
+                        formData.stockUoM === 'tertiary' && styles.activeStockUoMButton
+                      ]}
+                      onPress={() => updateFormData('stockUoM', 'tertiary')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.stockUoMButtonText,
+                        formData.stockUoM === 'tertiary' && styles.activeStockUoMButtonText
+                      ]}>
+                        {formData.tertiaryUnit}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            )}
+            
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Opening Stock *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.openingStock}
-                onChangeText={(text) => handleStockChange('openingStock', text)}
-                placeholder="Enter opening stock quantity"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="numeric"
-              />
+              <Text style={styles.label}>
+                Opening Stock *
+                {formData.useCompoundUnit && (
+                  <Text style={styles.unitIndicator}> (in {
+                    formData.stockUoM === 'primary' ? formData.primaryUnit :
+                    formData.stockUoM === 'secondary' ? formData.secondaryUnit :
+                    formData.tertiaryUnit
+                  })</Text>
+                )}
+              </Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={formData.openingStock}
+                  onChangeText={(text) => handleStockChange('openingStock', text)}
+                  placeholder="Enter opening stock quantity"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="numeric"
+                />
+              </View>
             </View>
 
             <View style={styles.rowContainer}>
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Min Stock Level *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.minStockLevel}
-                  onChangeText={(text) => handleStockChange('minStockLevel', text)}
-                  placeholder="Min level"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="numeric"
-                />
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.minStockLevel}
+                    onChangeText={(text) => handleStockChange('minStockLevel', text)}
+                    placeholder="Min level"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="numeric"
+                  />
+                </View>
               </View>
 
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Max Stock Level *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.maxStockLevel}
-                  onChangeText={(text) => handleStockChange('maxStockLevel', text)}
-                  placeholder="Max level"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="numeric"
-                />
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    value={formData.maxStockLevel}
+                    onChangeText={(text) => handleStockChange('maxStockLevel', text)}
+                    placeholder="Max level"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="numeric"
+                  />
+                </View>
               </View>
             </View>
           </View>
@@ -901,6 +1491,67 @@ export default function ManualProductScreen() {
           {/* Pricing */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Pricing</Text>
+            
+            {/* Tax Inclusion Toggle */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Price Includes Tax</Text>
+              <View style={styles.taxToggleContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.taxToggleButton,
+                    !formData.taxInclusive && styles.taxToggleButtonActive
+                  ]}
+                  onPress={() => setFormData(prev => ({ ...prev, taxInclusive: false }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.taxToggleText,
+                    !formData.taxInclusive && styles.taxToggleTextActive
+                  ]}>
+                    Tax Exclusive
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.taxToggleButton,
+                    formData.taxInclusive && styles.taxToggleButtonActive
+                  ]}
+                  onPress={() => setFormData(prev => ({ ...prev, taxInclusive: true }))}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.taxToggleText,
+                    formData.taxInclusive && styles.taxToggleTextActive
+                  ]}>
+                    Tax Inclusive
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Per Unit Price Input - Always Show */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                Per Unit Price * 
+                <Text style={styles.unitIndicator}>
+                  {formData.useCompoundUnit 
+                    ? ` (in ${formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit})`
+                    : ` (in ${formData.primaryUnit})`
+                  }
+                </Text>
+              </Text>
+              <View style={styles.inputContainer}>
+                <Text style={styles.currencySymbol}>₹</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.perUnitPrice}
+                  onChangeText={(text) => handlePriceChange('perUnitPrice', text)}
+                  placeholder="0.00"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
             
             {formData.useCompoundUnit && (
               <View style={styles.inputGroup}>
@@ -940,34 +1591,18 @@ export default function ManualProductScreen() {
               </View>
             )}
             
-            <View style={styles.rowContainer}>
-              <View style={[styles.inputGroup, styles.halfWidth]}>
-                <Text style={styles.label}>Purchase Price *</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.currencySymbol}>₹</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.purchasePrice}
-                    onChangeText={(text) => handlePriceChange('purchasePrice', text)}
-                    placeholder="0.00"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-              <View style={[styles.inputGroup, styles.halfWidth]}>
-                <Text style={styles.label}>Sales Price *</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.currencySymbol}>₹</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.salesPrice}
-                    onChangeText={(text) => handlePriceChange('salesPrice', text)}
-                    placeholder="0.00"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Sales Price *</Text>
+              <View style={styles.inputContainer}>
+                <Text style={styles.currencySymbol}>₹</Text>
+                <TextInput
+                  style={styles.input}
+                  value={formData.salesPrice}
+                  onChangeText={(text) => handlePriceChange('salesPrice', text)}
+                  placeholder="0.00"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                />
               </View>
             </View>
             <View style={styles.inputGroup}>
@@ -984,29 +1619,50 @@ export default function ManualProductScreen() {
                 />
               </View>
             </View>
-            {formData.purchasePrice && formData.salesPrice && (
-              <View style={styles.marginContainer}>
-                <Text style={styles.marginLabel}>Profit Margin:</Text>
-                <Text style={styles.marginValue}>
-                  {((parseFloat(formData.salesPrice) - parseFloat(formData.purchasePrice)) / parseFloat(formData.purchasePrice) * 100).toFixed(1)}%
+            {formData.perUnitPrice && formData.salesPrice && (
+              <>
+                {parseFloat(formData.perUnitPrice) >= parseFloat(formData.salesPrice) ? (
+                  <View style={[styles.marginContainer, styles.warningContainer]}>
+                    <Text style={styles.warningText}>⚠️ Per unit price should be lower than sale price</Text>
+                  </View>
+                ) : (
+                  <View style={styles.marginContainer}>
+                    <Text style={styles.marginLabel}>Profit Margin:</Text>
+                    <Text style={styles.marginValue}>
+                      {((parseFloat(formData.salesPrice) - parseFloat(formData.perUnitPrice)) / parseFloat(formData.perUnitPrice) * 100).toFixed(1)}%
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* Simplified Tax Calculation Display */}
+            {formData.perUnitPrice && formData.taxRate > 0 && (
+              <View style={styles.simpleTaxContainer}>
+                <Text style={styles.simpleTaxText}>
+                  {formData.taxInclusive 
+                    ? `Base Price: ₹${getDisplayPrices().perUnitBasePrice.toFixed(2)} | GST: ${formData.taxRate}%`
+                    : `Final Price: ₹${getDisplayPrices().perUnitFinalPrice.toFixed(2)} | GST: ${formData.taxRate}%`
+                  }
+                  {formData.cessType && formData.cessType !== 'none' && ` | CESS: ${formData.cessRate}%`}
                 </Text>
               </View>
             )}
             
             {/* Opening Stock Summary */}
-            {formData.purchasePrice && formData.openingStock && (
+            {formData.perUnitPrice && formData.openingStock && (
               <View style={styles.summaryContainer}>
                 <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>Base Price:</Text>
                   <Text style={styles.summaryValue}>
-                    ₹{(parseFloat(formData.purchasePrice) * parseInt(formData.openingStock)).toFixed(2)}
+                    ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>GST ({formData.taxRate}%):</Text>
                   <Text style={styles.summaryValue}>
-                    ₹{((parseFloat(formData.purchasePrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
+                    ₹{((parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
                   </Text>
                 </View>
                 {formData.cessType !== 'none' && (
@@ -1015,7 +1671,7 @@ export default function ManualProductScreen() {
                       <Text style={styles.summaryLabel}>CESS:</Text>
                       <Text style={styles.summaryValue}>
                         ₹{(() => {
-                          const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                          const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
                           switch (formData.cessType) {
                             case 'value':
                               return (basePrice * formData.cessRate / 100).toFixed(2);
@@ -1035,7 +1691,9 @@ export default function ManualProductScreen() {
                       <Text style={styles.cessCalculationLabel}>CESS Calculation:</Text>
                       <Text style={styles.cessCalculationText}>
                         {(() => {
-                          const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                          const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
+                          const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                          
                           switch (formData.cessType) {
                             case 'value':
                               return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) = ₹${(basePrice * formData.cessRate / 100).toFixed(2)}`;
@@ -1045,6 +1703,8 @@ export default function ManualProductScreen() {
                               const valueCess = basePrice * formData.cessRate / 100;
                               const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
                               return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) + ${formData.cessAmount} × ${parseInt(formData.openingStock)} ${formData.cessUnit} = ₹${(valueCess + quantityCess).toFixed(2)}`;
+                            case 'mrp':
+                              return `${formData.cessRate}% of MRP (₹${mrpPrice.toFixed(2)}) = ₹${(mrpPrice * formData.cessRate / 100).toFixed(2)}`;
                             default:
                               return 'No CESS applied';
                           }
@@ -1057,7 +1717,7 @@ export default function ManualProductScreen() {
                   <Text style={styles.totalLabel}>Total Value:</Text>
                   <Text style={styles.totalValue}>
                     ₹{(() => {
-                      const basePrice = parseFloat(formData.purchasePrice) * parseInt(formData.openingStock);
+                      const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
                       const gstAmount = (basePrice * formData.taxRate) / 100;
                       let cessAmount = 0;
                       
@@ -1072,6 +1732,10 @@ export default function ManualProductScreen() {
                           const valueCess = basePrice * formData.cessRate / 100;
                           const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
                           cessAmount = valueCess + quantityCess;
+                          break;
+                        case 'mrp':
+                          const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                          cessAmount = mrpPrice * formData.cessRate / 100;
                           break;
                       }
                       
@@ -1103,7 +1767,7 @@ export default function ManualProductScreen() {
               styles.submitButtonText,
               isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
             ]}>
-              {isSubmitting ? 'Adding Product...' : 'Add Product'}
+              {isSubmitting ? (editMode === 'true' ? 'Updating Product...' : 'Adding Product...') : (editMode === 'true' ? 'Update Product' : 'Add Product')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1254,8 +1918,13 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
 
-            {(formData.cessType === 'value' || formData.cessType === 'value_and_quantity') && (
+            {(formData.cessType === 'value' || formData.cessType === 'value_and_quantity' || formData.cessType === 'mrp') && (
               <View style={styles.modalInputGroup}>
+                {formData.cessType === 'mrp' && (
+                  <Text style={styles.modalDescription}>
+                    CESS will be calculated on the MRP (Maximum Retail Price) of the product.
+                  </Text>
+                )}
                 <Text style={styles.modalLabel}>CESS Rate (%)</Text>
                 <View style={styles.modalInputContainer}>
                   <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
@@ -1290,6 +1959,11 @@ export default function ManualProductScreen() {
                 </View>
                 <View style={styles.modalInputGroup}>
                   <Text style={styles.modalLabel}>CESS Unit</Text>
+                  {formData.showAdvancedOptions && formData.tertiaryUnit && formData.tertiaryUnit !== 'None' && (
+                    <Text style={styles.modalDescription}>
+                      Note: Selecting different units affects CESS calculation. Tertiary units will use the conversion ratios you've set.
+                    </Text>
+                  )}
                   <TouchableOpacity
                     style={styles.modalInputContainer}
                     onPress={() => {
@@ -1299,6 +1973,10 @@ export default function ManualProductScreen() {
                       }
                       if (formData.useCompoundUnit && formData.secondaryUnit && formData.secondaryUnit !== 'None') {
                         availableUnits.push(formData.secondaryUnit);
+                      }
+                      // Add tertiary unit if available and advanced options are enabled
+                      if (formData.showAdvancedOptions && formData.tertiaryUnit && formData.tertiaryUnit !== 'None') {
+                        availableUnits.push(formData.tertiaryUnit);
                       }
                       
                       if (availableUnits.length === 0) {
@@ -1311,11 +1989,24 @@ export default function ManualProductScreen() {
                         return;
                       }
                       
+                      // Create unit descriptions for better understanding
+                      const unitDescriptions = availableUnits.map(unit => {
+                        let description = unit;
+                        if (unit === formData.primaryUnit) {
+                          description = `${unit} (Primary Unit)`;
+                        } else if (unit === formData.secondaryUnit) {
+                          description = `${unit} (Secondary Unit - 1 ${formData.primaryUnit} = ${formData.conversionRatio} ${unit})`;
+                        } else if (unit === formData.tertiaryUnit) {
+                          description = `${unit} (Tertiary Unit - 1 ${formData.secondaryUnit} = ${formData.tertiaryConversionRatio} ${unit})`;
+                        }
+                        return description;
+                      });
+
                       Alert.alert(
                         'Select CESS Unit',
                         'Choose the unit for CESS calculation:',
-                        availableUnits.map(unit => ({
-                          text: unit,
+                        availableUnits.map((unit, index) => ({
+                          text: unitDescriptions[index],
                           onPress: () => {
                             console.log('Selecting CESS unit:', unit);
                             updateFormData('cessUnit', unit);
@@ -1345,12 +2036,12 @@ export default function ManualProductScreen() {
               <TouchableOpacity
                 style={[
                   styles.confirmButton,
-                  ((!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity')) ||
+                  ((!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity' || formData.cessType === 'mrp')) ||
                    (!formData.cessAmount && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity')) ||
                    (!formData.cessUnit && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity'))) && styles.disabledButton
                 ]}
                 onPress={() => setShowCessAmountModal(false)}
-                disabled={(!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity')) ||
+                disabled={(!formData.cessRate && (formData.cessType === 'value' || formData.cessType === 'value_and_quantity' || formData.cessType === 'mrp')) ||
                          (!formData.cessAmount && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity')) ||
                          (!formData.cessUnit && (formData.cessType === 'quantity' || formData.cessType === 'value_and_quantity'))}
                 activeOpacity={0.7}
@@ -2062,6 +2753,236 @@ export default function ManualProductScreen() {
         </View>
       </Modal>
 
+      {/* Tertiary Unit Modal */}
+      <Modal
+        visible={showTertiaryUnitModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowTertiaryUnitModal(false);
+          setTertiaryUnitSearch('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Tertiary Unit</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setShowTertiaryUnitModal(false);
+                  setTertiaryUnitSearch('');
+                }}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.searchContainer}>
+              <Search size={18} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={tertiaryUnitSearch}
+                onChangeText={setTertiaryUnitSearch}
+                placeholder="Search units..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+            
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={[
+                  styles.modalOption,
+                  formData.tertiaryUnit === 'None' && styles.selectedOption
+                ]}
+                onPress={() => handleTertiaryUnitSelect('None')}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.modalOptionText,
+                  formData.tertiaryUnit === 'None' && styles.selectedOptionText
+                ]}>
+                  None
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowTertiaryUnitModal(false);
+                  setTertiaryUnitSearch('');
+                  setTimeout(() => setShowCustomTertiaryUnitModal(true), 300);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalOptionText}>+ Add Custom Unit</Text>
+              </TouchableOpacity>
+              
+              {secondaryUnits
+                .filter(unit => 
+                  unit.toLowerCase().includes(tertiaryUnitSearch.toLowerCase())
+                )
+                .map((unit, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.modalOption,
+                      formData.tertiaryUnit === unit && styles.selectedOption
+                    ]}
+                    onPress={() => handleTertiaryUnitSelect(unit)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.modalOptionText,
+                      formData.tertiaryUnit === unit && styles.selectedOptionText
+                    ]}>
+                      {unit}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Tertiary Unit Modal */}
+      <Modal
+        visible={showCustomTertiaryUnitModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setShowCustomTertiaryUnitModal(false);
+          setCustomTertiaryUnit('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Custom Tertiary Unit</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setShowCustomTertiaryUnitModal(false);
+                  setCustomTertiaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalInputGroup}>
+              <Text style={styles.modalLabel}>Custom Unit Name *</Text>
+              <View style={styles.modalInputContainer}>
+                <TextInput
+                  style={styles.modalInput}
+                  value={customTertiaryUnit}
+                  onChangeText={setCustomTertiaryUnit}
+                  placeholder="e.g., Bundle, Pack, Set"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  autoFocus
+                />
+              </View>
+            </View>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowCustomTertiaryUnitModal(false);
+                  setCustomTertiaryUnit('');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  !customTertiaryUnit.trim() && styles.disabledButton
+                ]}
+                onPress={() => {
+                  if (customTertiaryUnit.trim()) {
+                    setFormData(prev => ({ ...prev, tertiaryUnit: customTertiaryUnit.trim() }));
+                    setCustomTertiaryUnit('');
+                    setShowCustomTertiaryUnitModal(false);
+                  }
+                }}
+                disabled={!customTertiaryUnit.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.confirmButtonText}>Add Custom Unit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Tertiary Conversion Ratio Modal */}
+      <Modal
+        visible={showTertiaryConversionModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowTertiaryConversionModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Tertiary Unit Conversion</Text>
+                              <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowTertiaryConversionModal(false)}
+                  activeOpacity={0.7}
+                >
+                  <X size={24} color={Colors.textLight} />
+                </TouchableOpacity>
+            </View>
+            
+            <View style={styles.conversionModalContent}>
+              <Text style={styles.conversionQuestion}>
+                How many {formData.tertiaryUnit} are in 1 {formData.secondaryUnit}?
+              </Text>
+              
+              <View style={styles.conversionInputContainer}>
+                <Text style={styles.conversionLabel}>1 {formData.secondaryUnit} = </Text>
+                <TextInput
+                  style={styles.conversionModalInput}
+                  value={formData.tertiaryConversionRatio}
+                  onChangeText={(text) => updateFormData('tertiaryConversionRatio', text.replace(/[^0-9.]/g, ''))}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+                <Text style={styles.conversionLabel}> {formData.tertiaryUnit}</Text>
+              </View>
+              
+            </View>
+            
+            <View style={styles.conversionButtonContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.conversionSubmitButton,
+                  !formData.tertiaryConversionRatio && styles.disabledButton
+                ]}
+                onPress={() => setShowTertiaryConversionModal(false)}
+                disabled={!formData.tertiaryConversionRatio}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.conversionSubmitButtonText,
+                  !formData.tertiaryConversionRatio && styles.disabledButtonText
+                ]}>
+                  Set Conversion
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
 
     </View>
   );
@@ -2128,6 +3049,12 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 16,
   },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginBottom: 16,
+  },
+
   inputGroup: {
     marginBottom: 16,
   },
@@ -2136,6 +3063,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
     marginBottom: 8,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 6,
+    marginLeft: 2,
+    fontStyle: 'italic',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -2147,9 +3081,89 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  barcodeScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.background,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  barcodeScanButtonText: {
+    fontSize: 18,
+    color: Colors.primary,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 16,
+  },
+
+  autoFilledInput: {
+    borderColor: Colors.success,
+    backgroundColor: Colors.success + '10',
+  },
+  autoFilledBadge: {
+    fontSize: 12,
+    color: Colors.success,
+    fontWeight: '600',
+    marginLeft: 8,
+    fontStyle: 'italic',
+  },
+  stockUoMContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 12,
+    padding: 4,
+  },
+  stockUoMButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeStockUoMButton: {
+    backgroundColor: Colors.background,
+    shadowColor: Colors.text,
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  stockUoMButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  activeStockUoMButtonText: {
+    color: Colors.text,
+    fontWeight: '600',
+  },
+  unitIndicator: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
   inputIcon: {
     marginRight: 12,
   },
+
   input: {
     flex: 1,
     fontSize: 16,
@@ -2222,6 +3236,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: Colors.success,
+  },
+  warningContainer: {
+    backgroundColor: Colors.warning + '20',
+    borderWidth: 1,
+    borderColor: Colors.warning,
+  },
+  warningText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.warning,
+    textAlign: 'center',
+    flex: 1,
   },
   imagePreview: {
     alignItems: 'center',
@@ -2572,8 +3598,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   scanIconButton: {
-    padding: 8,
-    marginLeft: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
   },
   toggleContainer: {
     flexDirection: 'row',
@@ -2778,5 +3817,140 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.primary,
+  },
+  // Tax Toggle Styles
+  taxToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 8,
+    padding: 2,
+  },
+  taxToggleButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  taxToggleButtonActive: {
+    backgroundColor: Colors.primary,
+  },
+  taxToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  taxToggleTextActive: {
+    color: Colors.background,
+  },
+  // Tax Calculation Display Styles
+  taxCalculationContainer: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  taxCalculationTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  taxCalculationContent: {
+    gap: 12,
+  },
+  taxCalculationRow: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 12,
+  },
+  taxCalculationColumn: {
+    gap: 4,
+  },
+  taxCalculationLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  taxCalculationPrimary: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  taxCalculationSecondary: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  taxCalculationInfo: {
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  taxCalculationInfoText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: Colors.textLight,
+    fontStyle: 'italic',
+  },
+  // Additional Tax Calculation Styles
+  taxCalculationUnit: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  taxBreakdownContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  taxBreakdownTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  taxBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  taxBreakdownLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: Colors.text,
+    flex: 1,
+  },
+  taxBreakdownValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  // Simplified Tax Display Styles
+  simpleTaxContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  simpleTaxText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
+    textAlign: 'center',
   },
 });

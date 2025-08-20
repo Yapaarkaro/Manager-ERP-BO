@@ -95,7 +95,7 @@ export interface Customer {
   status: 'active' | 'inactive' | 'suspended';
   paymentTerms?: string;
   creditLimit?: number;
-  categories: string[];
+  categories?: string[];
   createdAt: string;
 }
 
@@ -542,6 +542,94 @@ class DataStore {
 
   getAddressCountByType(type: 'primary' | 'branch' | 'warehouse'): number {
     return this.addresses.filter(address => address.type === type).length;
+  }
+
+  // Product deletion methods - remove all records related to a product
+  deleteProductRecords(productId: string) {
+    let deletedRecords = {
+      sales: 0,
+      invoices: 0,
+      receivablesUpdated: 0
+    };
+
+    // Filter out sales that contain this product
+    const originalSalesCount = this.sales.length;
+    this.sales = this.sales.filter(sale => {
+      const hasProduct = sale.items.some(item => item.productId === productId);
+      return !hasProduct;
+    });
+    deletedRecords.sales = originalSalesCount - this.sales.length;
+
+    // Filter out invoices that contain this product
+    const originalInvoicesCount = this.invoices.length;
+    this.invoices = this.invoices.filter(invoice => {
+      const hasProduct = invoice.items.some(item => item.productId === productId);
+      return !hasProduct;
+    });
+    deletedRecords.invoices = originalInvoicesCount - this.invoices.length;
+
+    // Update receivables - recalculate totals without the deleted sales
+    this.receivables.forEach(receivable => {
+      const customerInvoices = this.invoices.filter(invoice => invoice.customerId === receivable.customerId);
+      const newTotalReceivable = customerInvoices.reduce((sum, invoice) => sum + invoice.balanceAmount, 0);
+      const newOverdueAmount = customerInvoices.reduce((sum, invoice) => {
+        if (invoice.status === 'overdue') {
+          return sum + invoice.balanceAmount;
+        }
+        return sum;
+      }, 0);
+
+      if (receivable.totalReceivable !== newTotalReceivable || receivable.overdueAmount !== newOverdueAmount) {
+        receivable.totalReceivable = newTotalReceivable;
+        receivable.overdueAmount = newOverdueAmount;
+        receivable.invoiceCount = customerInvoices.length;
+        receivable.status = newOverdueAmount > 0 ? 'overdue' : 'current';
+        deletedRecords.receivablesUpdated++;
+      }
+    });
+
+    // Remove receivables with zero amounts
+    this.receivables = this.receivables.filter(receivable => receivable.totalReceivable > 0);
+
+    console.log('=== PRODUCT RECORDS DELETED ===');
+    console.log('Product ID:', productId);
+    console.log('Sales deleted:', deletedRecords.sales);
+    console.log('Invoices deleted:', deletedRecords.invoices);
+    console.log('Receivables updated:', deletedRecords.receivablesUpdated);
+    console.log('Deleted at:', new Date().toISOString());
+    console.log('================================');
+
+    this.notifyListeners();
+    return deletedRecords;
+  }
+
+  // Get all records related to a product (for preview before deletion)
+  getProductRecords(productId: string) {
+    const relatedSales = this.sales.filter(sale => 
+      sale.items.some(item => item.productId === productId)
+    );
+    
+    const relatedInvoices = this.invoices.filter(invoice => 
+      invoice.items.some(item => item.productId === productId)
+    );
+
+    const affectedCustomers = new Set();
+    relatedSales.forEach(sale => affectedCustomers.add(sale.customerId));
+    relatedInvoices.forEach(invoice => affectedCustomers.add(invoice.customerId));
+
+    const relatedReceivables = this.receivables.filter(receivable => 
+      affectedCustomers.has(receivable.customerId)
+    );
+
+    return {
+      sales: relatedSales,
+      invoices: relatedInvoices,
+      receivables: relatedReceivables,
+      totalSales: relatedSales.length,
+      totalInvoices: relatedInvoices.length,
+      totalReceivables: relatedReceivables.length,
+      totalAmount: relatedSales.reduce((sum, sale) => sum + sale.totalAmount, 0)
+    };
   }
 
   // Utility methods

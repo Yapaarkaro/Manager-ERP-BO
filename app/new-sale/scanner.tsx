@@ -80,9 +80,12 @@ const fetchProductDetails = async (barcode: string) => {
   }
 };
 
+import { setScannedData } from '@/utils/scannedDataStore';
+
 export default function BarcodeScannerScreen() {
   const params = useLocalSearchParams();
   const preSelectedCustomer = params?.preSelectedCustomer || '';
+  const returnTo = params?.returnTo || '';
   const [permission, requestPermission] = useCameraPermissions();
   
   const [scanned, setScanned] = useState(false);
@@ -152,79 +155,178 @@ export default function BarcodeScannerScreen() {
           quantity: result.product.quantity || '',
         };
 
-        Alert.alert(
-          'Product Found',
-          `Barcode: ${barcode}\nProduct: ${result.product.name}\nBrand: ${result.product.brand || 'Unknown'}\nQuantity: ${result.product.quantity || 'N/A'}`,
-          [
-            {
-              text: 'Scan Again',
-              onPress: () => setScanned(false),
-              style: 'cancel',
-            },
-            {
-              text: 'Add to Cart',
-              onPress: () => {
-                try {
-                  router.push({
-                    pathname: '/new-sale/cart',
-                    params: {
-                      selectedProducts: JSON.stringify([{
-                        ...productData,
-                        quantity: 1
-                      }]),
-                      preSelectedCustomer: preSelectedCustomer || ''
-                    }
-                  });
-                } catch (error) {
-                  console.error('Error navigating to cart:', error);
-                  Alert.alert('Error', 'Failed to add product to cart. Please try again.');
-                }
+        if (returnTo === 'manual-product') {
+          // Show custom alert with product details and continue button
+          Alert.alert(
+            '🎉 Product Found!',
+            `Here's what we found:\n\n📦 Product: ${result.product.name}\n🏷️ Brand: ${result.product.brand || 'Unknown'}\n📊 Quantity: ${result.product.quantity || 'N/A'}\n\nClick Continue to auto-fill the product form with these details.`,
+            [
+              {
+                text: 'Continue',
+                onPress: () => {
+                  try {
+                    const navigationParams = {
+                      returnTo: returnTo,
+                      preSelectedCustomer: preSelectedCustomer,
+                      scannedData: JSON.stringify({
+                        barcode: barcode,
+                        name: result.product.name || 'Unknown Product',
+                        brand: result.product.brand || '',
+                        category: result.product.category || 'Others',
+                        isScanned: 'true'
+                      })
+                    };
+                    
+                    console.log('🚀 Returning to existing manual product form');
+                    
+                    // Set scanned data before going back
+                    const dataToSet = JSON.stringify({
+                      barcode: barcode,
+                      name: result.product.name || 'Unknown Product',
+                      brand: result.product.brand || '',
+                      category: result.product.category || 'Others',
+                      isScanned: 'true'
+                    });
+                    console.log('🔍 Setting scanned data in store:', dataToSet);
+                    setScannedData(dataToSet);
+                    
+                    console.log('🚀 Returning to existing manual product form');
+                    
+                    // Go back to the existing form with scanned data
+                    router.back();
+                  } catch (error) {
+                    console.error('Error navigating to manual product form:', error);
+                    Alert.alert('Error', 'Failed to open product form. Please try again.');
+                  }
+                },
               },
-            },
-          ]
-        );
+            ]
+          );
+        } else {
+          // Default behavior - add to cart
+          Alert.alert(
+            'Product Found',
+            `Barcode: ${barcode}\nProduct: ${result.product.name}\nBrand: ${result.product.brand || 'Unknown'}\nQuantity: ${result.product.quantity || 'N/A'}`,
+            [
+              {
+                text: 'Scan Again',
+                onPress: () => setScanned(false),
+                style: 'cancel',
+              },
+              {
+                text: 'Add to Cart',
+                onPress: () => {
+                  try {
+                    router.push({
+                      pathname: '/new-sale/cart',
+                      params: {
+                        selectedProducts: JSON.stringify([{
+                          ...productData,
+                          quantity: 1
+                        }]),
+                        preSelectedCustomer: preSelectedCustomer || ''
+                      }
+                    });
+                  } catch (error) {
+                    console.error('Error navigating to cart:', error);
+                    Alert.alert('Error', 'Failed to add product to cart. Please try again.');
+                  }
+                },
+              },
+            ]
+          );
+        }
       } else {
-        // Product not found
-        Alert.alert(
-          'Product Not Found',
-          `Barcode: ${barcode}\n\nThis product was not found in our database. You can still add it manually to your cart.`,
-          [
-            {
-              text: 'Scan Again',
-              onPress: () => setScanned(false),
-              style: 'cancel',
-            },
-            {
-              text: 'Add Manually',
-              onPress: () => {
-                const manualProduct = {
-                  id: barcode,
-                  name: 'Manual Product',
-                  price: 999,
-                  barcode: barcode,
-                  image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-                  category: 'Others',
-                };
-                
-                try {
-                  router.push({
-                    pathname: '/new-sale/cart',
-                    params: {
-                      selectedProducts: JSON.stringify([{
-                        ...manualProduct,
-                        quantity: 1
-                      }]),
-                      preSelectedCustomer: preSelectedCustomer || ''
-                    }
-                  });
-                } catch (error) {
-                  console.error('Error navigating to cart:', error);
-                  Alert.alert('Error', 'Failed to add product to cart. Please try again.');
-                }
+        if (returnTo === 'manual-product') {
+          // Show custom alert for product not found
+          Alert.alert(
+            '🔍 Product Not Found',
+            `Barcode: ${barcode}\n\nThis product wasn't found in our database. We'll open the product form so you can add it manually.`,
+            [
+              {
+                text: 'Continue',
+                onPress: () => {
+                  try {
+                    const navigationParams = {
+                      returnTo: returnTo,
+                      preSelectedCustomer: preSelectedCustomer,
+                      scannedData: JSON.stringify({
+                        barcode: barcode,
+                        name: '',
+                        brand: '',
+                        category: 'Others',
+                        isScanned: 'true'
+                      })
+                    };
+                    
+                    console.log('🚀 Returning to existing manual product form (not found)');
+                    
+                    // Set scanned data before going back
+                    const dataToSet = JSON.stringify({
+                      barcode: barcode,
+                      name: '',
+                      brand: '',
+                      category: 'Others',
+                      isScanned: 'true'
+                    });
+                    console.log('🔍 Setting scanned data in store (not found):', dataToSet);
+                    setScannedData(dataToSet);
+                    
+                    console.log('🚀 Returning to existing manual product form (not found)');
+                    
+                    // Go back to the existing form with scanned data
+                    router.back();
+                  } catch (error) {
+                    console.error('Error navigating to manual product form:', error);
+                    Alert.alert('Error', 'Failed to open product form. Please try again.');
+                  }
+                },
               },
-            },
-          ]
-        );
+            ]
+          );
+        } else {
+          // Default behavior - add manually to cart
+          Alert.alert(
+            'Product Not Found',
+            `Barcode: ${barcode}\n\nThis product was not found in our database. You can still add it manually to your cart.`,
+            [
+              {
+                text: 'Scan Again',
+                onPress: () => setScanned(false),
+                style: 'cancel',
+              },
+              {
+                text: 'Add Manually',
+                onPress: () => {
+                  const manualProduct = {
+                    id: barcode,
+                    name: 'Manual Product',
+                    price: 999,
+                    barcode: barcode,
+                    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+                    category: 'Others',
+                  };
+                  
+                  try {
+                    router.push({
+                      pathname: '/new-sale/cart',
+                      params: {
+                        selectedProducts: JSON.stringify([{
+                          ...manualProduct,
+                          quantity: 1
+                        }]),
+                        preSelectedCustomer: preSelectedCustomer || ''
+                      }
+                    });
+                  } catch (error) {
+                    console.error('Error navigating to cart:', error);
+                    Alert.alert('Error', 'Failed to add product to cart. Please try again.');
+                  }
+                },
+              },
+            ]
+          );
+        }
       }
     } catch (error) {
       console.error('Error processing barcode:', error);
@@ -285,32 +387,47 @@ export default function BarcodeScannerScreen() {
             flash={flashOn ? 'on' : 'off'}
           >
             <View style={styles.overlay}>
-                          <View style={styles.scanArea}>
-              <View style={styles.scanFrame} />
-              <Text style={styles.scanText}>
-                Position the barcode within the frame
-              </Text>
-              
-              {/* Floating Torch Button */}
-              <TouchableOpacity
-                style={styles.floatingTorchButton}
-                onPress={() => setFlashOn(!flashOn)}
-                activeOpacity={0.7}
-              >
-                {flashOn ? (
-                  <FlashlightOff size={20} color="#ffffff" />
-                ) : (
-                  <Flashlight size={20} color="#ffffff" />
-                )}
-              </TouchableOpacity>
-              
-              {isLoading && (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#ffffff" />
-                  <Text style={styles.loadingText}>Fetching product details...</Text>
+              {/* Top Controls */}
+              <View style={styles.topControls}>
+                <TouchableOpacity
+                  style={styles.flashlightButton}
+                  onPress={() => setFlashOn(!flashOn)}
+                  activeOpacity={0.7}
+                >
+                  {flashOn ? (
+                    <FlashlightOff size={24} color="#ffffff" />
+                  ) : (
+                    <Flashlight size={24} color="#ffffff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {/* Scan Area */}
+              <View style={styles.scanArea}>
+                {/* Corner Guides */}
+                <View style={[styles.cornerGuide, styles.topLeft]} />
+                <View style={[styles.cornerGuide, styles.topRight]} />
+                <View style={[styles.cornerGuide, styles.bottomLeft]} />
+                <View style={[styles.cornerGuide, styles.bottomRight]} />
+                
+                {/* Scan Frame */}
+                <View style={styles.scanFrame}>
+                  <View style={styles.scanFrameInner} />
                 </View>
-              )}
-            </View>
+                
+                {/* Scan Instructions */}
+                <Text style={styles.scanText}>
+                  Position the barcode within the frame
+                </Text>
+                
+                {/* Loading Indicator */}
+                {isLoading && (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#ffffff" />
+                    <Text style={styles.loadingText}>Fetching product details...</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </CameraView>
         ) : (
@@ -383,17 +500,6 @@ export default function BarcodeScannerScreen() {
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
-                    <TouchableOpacity
-                      style={styles.torchButton}
-                      onPress={() => setFlashOn(!flashOn)}
-                      activeOpacity={0.7}
-                    >
-                      {flashOn ? (
-                        <FlashlightOff size={20} color={Colors.primary} />
-                      ) : (
-                        <Flashlight size={20} color={Colors.primary} />
-                      )}
-                    </TouchableOpacity>
                   </View>
                   {manualBarcode.length > 0 && (
                     <Text style={styles.inputPreview}>Preview: {manualBarcode}</Text>
@@ -479,14 +585,7 @@ const styles = StyleSheet.create({
   scanArea: {
     alignItems: 'center',
   },
-  scanFrame: {
-    width: 250,
-    height: 150,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    borderRadius: 12,
-    backgroundColor: 'transparent',
-  },
+
   scanText: {
     color: '#ffffff',
     fontSize: 16,
@@ -650,14 +749,23 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: Colors.primary,
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    fontSize: 20,
     color: Colors.text,
     backgroundColor: Colors.background,
     fontFamily: 'monospace',
-    letterSpacing: 1,
+    letterSpacing: 2,
     textAlign: 'center',
+    fontWeight: '600',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   torchButton: {
     width: 48,
@@ -726,15 +834,71 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
-  floatingTorchButton: {
+  // Top Controls
+  topControls: {
     position: 'absolute',
     top: 20,
     right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    zIndex: 10,
+  },
+  flashlightButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  
+  // Corner Guides
+  cornerGuide: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderWidth: 3,
+    borderColor: Colors.primary,
+  },
+  topLeft: {
+    top: -15,
+    left: -15,
+    borderBottomWidth: 0,
+    borderRightWidth: 0,
+  },
+  topRight: {
+    top: -15,
+    right: -15,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+  },
+  bottomLeft: {
+    bottom: -15,
+    left: -15,
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+  },
+  bottomRight: {
+    bottom: -15,
+    right: -15,
+    borderTopWidth: 0,
+    borderLeftWidth: 0,
+  },
+  
+  // Enhanced Scan Frame
+  scanFrame: {
+    width: 280,
+    height: 180,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanFrameInner: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 16,
+    backgroundColor: 'transparent',
   },
 });

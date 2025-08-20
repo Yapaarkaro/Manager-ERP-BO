@@ -13,8 +13,17 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Navigation, CreditCard as Edit, MapPin } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import AddressAutocomplete from '@/components/AddressAutocomplete';
-import OlaMapView from '@/components/OlaMapView';
 import * as Location from 'expo-location';
+
+// Conditionally import OlaMapView only on native platforms
+let OlaMapView: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    OlaMapView = require('@/components/OlaMapView').default;
+  } catch (error) {
+    console.warn('OlaMapView not available:', error);
+  }
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -884,13 +893,22 @@ export default function BusinessAddressScreen() {
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
-          <OlaMapView
-            initialLocation={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined}
-            onMapClick={handleMapClick}
-            onMarkerDragEnd={handleMarkerDragEnd}
-            selectedLocation={selectedAddress ? { lat: selectedAddress.lat || 0, lng: selectedAddress.lng || 0 } : undefined}
-            onMapLoad={() => setIsMapLoading(false)}
-          />
+          {OlaMapView ? (
+            <OlaMapView
+              initialLocation={userLocation ? { lat: userLocation.lat, lng: userLocation.lng } : undefined}
+              onMapClick={handleMapClick}
+              onMarkerDragEnd={handleMarkerDragEnd}
+              selectedLocation={selectedAddress ? { lat: selectedAddress.lat || 0, lng: selectedAddress.lng || 0 } : undefined}
+              onMapLoad={() => setIsMapLoading(false)}
+            />
+          ) : (
+            <View style={styles.mapPlaceholder}>
+              <Text style={styles.mapPlaceholderText}>Map View Not Available</Text>
+              <Text style={styles.mapPlaceholderSubtext}>
+                This feature is only available on native platforms.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Selected Address Display - Only show when address is selected */}
@@ -987,19 +1005,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f8fafc',
-    paddingHorizontal: 32,
+    borderRadius: 12,
+    padding: 32,
+    margin: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   mapPlaceholderText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#64748b',
-    textAlign: 'center',
-    marginTop: 16,
+    color: '#374151',
     marginBottom: 8,
+    textAlign: 'center',
   },
   mapPlaceholderSubtext: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#6b7280',
     textAlign: 'center',
     lineHeight: 20,
   },
