@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -7,6 +8,8 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -60,29 +63,44 @@ interface Customer {
   categories: string[];
 }
 
-const mockCustomers: Customer[] = [];
+// Mock customer data removed - now using real data only
 
 export default function CustomersScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'business' | 'high_score'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'business' | 'individual' | 'high_score'>('all');
 
   // Subscribe to data store changes
   React.useEffect(() => {
     const unsubscribe = dataStore.subscribe(() => {
       const allCustomers = dataStore.getCustomers();
       setCustomers(allCustomers);
-      applyFilters(searchQuery, selectedFilter);
     });
 
-    // Initial load
+    // Initial load - get customers from data store
     const allCustomers = dataStore.getCustomers();
     setCustomers(allCustomers);
-    setFilteredCustomers(allCustomers);
 
     return unsubscribe;
   }, []);
+
+  // Refresh customer data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Customers screen focused, refreshing data...');
+      const allCustomers = dataStore.getCustomers();
+      console.log('Customers loaded:', allCustomers.length);
+      setCustomers(allCustomers);
+    }, []) // Remove dependencies to prevent infinite re-renders
+  );
+
+  // Apply filters whenever customers or filter changes
+  React.useEffect(() => {
+    console.log('Applying filters with customers:', customers.length, 'filter:', selectedFilter, 'searchQuery:', searchQuery);
+    applyFilters(searchQuery, selectedFilter);
+    console.log('Filtered customers result:', filteredCustomers.length);
+  }, [customers, selectedFilter, searchQuery]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -95,6 +113,7 @@ export default function CustomersScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
+    console.log('applyFilters called with:', { query, filter, customersCount: customers.length });
     let filtered = customers;
 
     // Apply search filter
@@ -107,6 +126,7 @@ export default function CustomersScreen() {
         customer.email?.toLowerCase().includes(query.toLowerCase()) ||
         customer.categories.some(cat => cat.toLowerCase().includes(query.toLowerCase()))
       );
+      console.log('After search filter:', filtered.length, 'customers');
     }
 
     // Apply status filter
@@ -115,14 +135,18 @@ export default function CustomersScreen() {
         switch (filter) {
           case 'business':
             return customer.customerType === 'business';
+          case 'individual':
+            return customer.customerType === 'individual';
           case 'high_score':
             return customer.customerScore >= 85;
           default:
             return true;
         }
       });
+      console.log('After status filter:', filtered.length, 'customers');
     }
 
+    console.log('Final filtered result:', filtered.length, 'customers');
     setFilteredCustomers(filtered);
   };
 
@@ -150,6 +174,18 @@ export default function CustomersScreen() {
           customerAvatar: customer.avatar
         }
       });
+    }
+  };
+
+  const handlePhoneCall = (phoneNumber: string) => {
+    if (phoneNumber) {
+      // Remove any non-digit characters and format for phone call
+      const cleanNumber = phoneNumber.replace(/\D/g, '');
+      if (cleanNumber.length >= 10) {
+        Linking.openURL(`tel:${cleanNumber}`);
+      } else {
+        Alert.alert('Invalid Phone Number', 'Please check the phone number format');
+      }
     }
   };
 
@@ -189,13 +225,18 @@ export default function CustomersScreen() {
   const renderCustomerCard = (customer: Customer) => {
     const scoreColor = getScoreColor(customer.customerScore);
     const statusColor = getStatusColor(customer.status);
+    
+    // Use different border colors for business vs individual customers
+    const customerTypeColor = customer.customerType === 'business' 
+      ? Colors.primary 
+      : Colors.success;
 
     return (
       <TouchableOpacity
         key={customer.id}
         style={[
           styles.customerCard,
-          { borderLeftColor: scoreColor }
+          { borderLeftColor: customerTypeColor }
         ]}
         onPress={() => handleCustomerPress(customer)}
         activeOpacity={0.7}
@@ -356,7 +397,13 @@ export default function CustomersScreen() {
         <View style={styles.contactSection}>
           <View style={styles.contactRow}>
             <Phone size={14} color={Colors.textLight} />
-            <Text style={styles.contactText}>{customer.mobile}</Text>
+            <TouchableOpacity
+              onPress={() => handlePhoneCall(customer.mobile)}
+              activeOpacity={0.7}
+              style={styles.phoneButton}
+            >
+              <Text style={[styles.contactText, styles.clickablePhone]}>{customer.mobile}</Text>
+            </TouchableOpacity>
           </View>
           {customer.email && (
             <View style={styles.contactRow}>
@@ -446,8 +493,9 @@ export default function CustomersScreen() {
           contentContainerStyle={styles.filterScrollContent}
         >
           {[
-                          { key: 'all', label: 'All Customers', count: customers.length },
+              { key: 'all', label: 'All Customers', count: customers.length },
               { key: 'business', label: 'Business Only', count: customers.filter(c => c.customerType === 'business').length },
+              { key: 'individual', label: 'Individual Only', count: customers.filter(c => c.customerType === 'individual').length },
               { key: 'high_score', label: 'High Score', count: customers.filter(c => c.customerScore >= 85).length },
           ].map((filter) => (
             <TouchableOpacity
@@ -864,6 +912,14 @@ const styles = StyleSheet.create({
   contactText: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  clickablePhone: {
+    textDecorationLine: 'underline',
+    color: Colors.primary,
+  },
+  phoneButton: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
   },
   floatingSearchContainer: {
     position: 'absolute',

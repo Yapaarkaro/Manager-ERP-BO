@@ -160,24 +160,29 @@ export default function AddCustomerScreen() {
     updateFormData('address', address.formatted_address);
   };
 
+  const updateFormAddress = (text: string) => {
+    updateFormData('address', text);
+  };
+
   const isFormValid = () => {
     const baseValidation = (
       formData.mobile.trim().length > 0 &&
       formData.address.trim().length > 0
     );
 
-    // Check if custom payment terms are required
-    const paymentTermsValid = formData.paymentTerms !== 'Others' || 
-      (formData.paymentTerms === 'Others' && formData.customPaymentTerms.trim().length > 0);
-
     if (formData.customerType === 'business') {
+      // Check if custom payment terms are required for business customers
+      const paymentTermsValid = formData.paymentTerms !== 'Others' || 
+        (formData.paymentTerms === 'Others' && formData.customPaymentTerms.trim().length > 0);
+      
       return baseValidation && 
         formData.businessName.trim().length > 0 &&
         formData.contactPerson.trim().length > 0 &&
         paymentTermsValid;
     }
 
-    return baseValidation && formData.name.trim().length > 0 && paymentTermsValid;
+    // For individual customers, only basic validation is required
+    return baseValidation && formData.name.trim().length > 0;
   };
 
   const handleSubmit = async () => {
@@ -229,7 +234,10 @@ export default function AddCustomerScreen() {
       Alert.alert('Success', 'Customer added successfully', [
         {
           text: 'OK',
-          onPress: () => router.push('/people/customers')
+          onPress: () => {
+            // Navigate back to customers list
+            router.back();
+          }
         }
       ]);
       setIsSubmitting(false);
@@ -243,7 +251,10 @@ export default function AddCustomerScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              // Navigate back to customers list
+              router.back();
+            }}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color={Colors.text} />
@@ -258,7 +269,7 @@ export default function AddCustomerScreen() {
         >
           <ScrollView 
             style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -431,12 +442,11 @@ export default function AddCustomerScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address *</Text>
                 <AddressAutocomplete
-                  key={`address-${formData.gstin ? 'gstin' : 'manual'}`}
                   placeholder="Search for address or enter manually"
                   value={formData.address}
-                  onChangeText={(text) => updateFormData('address', text)}
+                  onChangeText={(text) => updateFormAddress(text)}
                   onAddressSelect={handleAddressSelect}
-                  isSettingQueryProgrammatically={formData.address && formData.gstin ? true : false}
+                  isSettingQueryProgrammatically={false}
                 />
               </View>
             </View>
@@ -447,69 +457,73 @@ export default function AddCustomerScreen() {
                 {formData.customerType === 'business' ? 'Business Details' : 'Customer Details'}
               </Text>
               
-
-
-              <View style={styles.inputGroup}>
-                <Text style={[
-                  styles.label,
-                  formData.paymentTerms === 'Others' && styles.requiredLabel
-                ]}>
-                  Payment Terms{formData.paymentTerms === 'Others' ? ' *' : ''}
-                </Text>
-                <View style={[
-                  styles.inputContainer,
-                  formData.paymentTerms === 'Others' && styles.customInputContainer
-                ]}>
-                  {formData.paymentTerms === 'Others' ? (
-                    <TextInput
-                      style={styles.input}
-                      value={formData.customPaymentTerms}
-                      onChangeText={(text) => updateFormData('customPaymentTerms', text)}
-                      placeholder="Enter your custom payment terms"
-                      placeholderTextColor={Colors.textLight}
-                      autoCapitalize="words"
-                    />
-                  ) : (
+              {/* Payment Terms - Only for Business Customers */}
+              {formData.customerType === 'business' && (
+                <View style={styles.inputGroup}>
+                  <Text style={[
+                    styles.label,
+                    formData.paymentTerms === 'Others' && styles.requiredLabel
+                  ]}>
+                    Payment Terms{formData.paymentTerms === 'Others' ? ' *' : ''}
+                  </Text>
+                  <View style={[
+                    styles.inputContainer,
+                    formData.paymentTerms === 'Others' && styles.customInputContainer
+                  ]}>
+                    {formData.paymentTerms === 'Others' ? (
+                      <TextInput
+                        style={styles.input}
+                        value={formData.customPaymentTerms}
+                        onChangeText={(text) => updateFormData('customPaymentTerms', text)}
+                        placeholder="Enter your custom payment terms"
+                        placeholderTextColor={Colors.textLight}
+                        autoCapitalize="words"
+                      />
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.dropdownButton}
+                        onPress={() => setShowPaymentTermsModal(true)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[
+                          styles.dropdownButtonText,
+                          !formData.paymentTerms && styles.placeholderText
+                        ]}>
+                          {formData.paymentTerms || 'Select payment terms'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
-                      style={styles.dropdownButton}
+                      style={[
+                        styles.dropdownIconButton,
+                        formData.paymentTerms === 'Others' && styles.customDropdownIconButton
+                      ]}
                       onPress={() => setShowPaymentTermsModal(true)}
                       activeOpacity={0.7}
                     >
-                      <Text style={[
-                        styles.dropdownButtonText,
-                        !formData.paymentTerms && styles.placeholderText
-                      ]}>
-                        {formData.paymentTerms || 'Select payment terms'}
-                      </Text>
+                      <ChevronDown size={20} color={formData.paymentTerms === 'Others' ? Colors.text : Colors.textLight} />
                     </TouchableOpacity>
-                  )}
-                  <TouchableOpacity
-                    style={[
-                      styles.dropdownIconButton,
-                      formData.paymentTerms === 'Others' && styles.customDropdownIconButton
-                    ]}
-                    onPress={() => setShowPaymentTermsModal(true)}
-                    activeOpacity={0.7}
-                  >
-                    <ChevronDown size={20} color={formData.paymentTerms === 'Others' ? Colors.text : Colors.textLight} />
-                  </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              )}
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Credit Limit (₹)</Text>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.currencySymbol}>₹</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.creditLimit}
-                    onChangeText={(text) => updateFormData('creditLimit', text.replace(/[^0-9]/g, ''))}
-                    placeholder="0"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="numeric"
-                  />
+              {/* Credit Limit - Only for Business Customers */}
+              {formData.customerType === 'business' && (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Credit Limit (₹)</Text>
+                  <View style={styles.inputContainer}>
+                    <Text style={styles.currencySymbol}>₹</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={formData.creditLimit}
+                      onChangeText={(text) => updateFormData('creditLimit', text.replace(/[^0-9]/g, ''))}
+                      placeholder="0"
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType="numeric"
+                    />
+                  </View>
                 </View>
-              </View>
+              )}
 
 
 
@@ -897,10 +911,12 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   submitSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   submitButton: {
     backgroundColor: Colors.primary,

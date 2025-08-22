@@ -56,6 +56,7 @@ interface Customer {
   paymentTerms?: string;
   selectedBusinessAddress?: any;
   selectedShipToAddress?: any;
+  selectedIndividualAddress?: any;
   email?: string;
 }
 
@@ -87,6 +88,7 @@ export default function CustomerDetailsScreen() {
   // Separate search query states for address autocomplete
   const [businessAddressSearch, setBusinessAddressSearch] = useState('');
   const [shipToAddressSearch, setShipToAddressSearch] = useState('');
+  const [individualAddressSearch, setIndividualAddressSearch] = useState('');
   
   // Customer search functionality
   const [customerSearch, setCustomerSearch] = useState('');
@@ -100,14 +102,19 @@ export default function CustomerDetailsScreen() {
     isBusinessCustomer: storeCustomer.customerType === 'business',
     gstin: storeCustomer.gstin,
     businessName: storeCustomer.businessName,
-    businessAddress: storeCustomer.address,
+    businessAddress: storeCustomer.address, // Use address as business address
+    shipToAddress: '', // Default empty for existing customers
     paymentTerms: storeCustomer.paymentTerms,
     email: storeCustomer.email,
+    // Map address data to the expected format for auto-filling
+    selectedIndividualAddress: storeCustomer.customerType === 'individual' ? { formatted_address: storeCustomer.address } : undefined,
+    selectedBusinessAddress: storeCustomer.customerType === 'business' ? { formatted_address: storeCustomer.address } : undefined,
+    selectedShipToAddress: undefined, // No ship-to address for existing customers
   }));
   
   // Manual address entry modal states
   const [showManualAddressModal, setShowManualAddressModal] = useState(false);
-  const [manualAddressType, setManualAddressType] = useState<'business' | 'ship-to'>('business');
+  const [manualAddressType, setManualAddressType] = useState<'business' | 'ship-to' | 'individual'>('business');
   const [manualAddress, setManualAddress] = useState({
     addressLine1: '',
     addressLine2: '',
@@ -148,7 +155,17 @@ export default function CustomerDetailsScreen() {
   }, [customerSearch]);
 
   const handleExistingCustomerSelect = (selectedCustomer: Customer) => {
-    setCustomer(selectedCustomer);
+    // Set the customer data with proper address mapping
+    setCustomer({
+      ...selectedCustomer,
+      // Ensure address fields are properly set for auto-filling
+      address: selectedCustomer.address,
+      businessAddress: selectedCustomer.businessAddress,
+      shipToAddress: selectedCustomer.shipToAddress,
+      selectedIndividualAddress: selectedCustomer.selectedIndividualAddress,
+      selectedBusinessAddress: selectedCustomer.selectedBusinessAddress,
+      selectedShipToAddress: selectedCustomer.selectedShipToAddress,
+    });
     setCustomerSearch('');
     setFilteredCustomers([]);
   };
@@ -261,6 +278,28 @@ export default function CustomerDetailsScreen() {
     setShowManualAddressModal(true);
   };
 
+  const handleIndividualAddressSelect = (address: any) => {
+    setIndividualAddressSearch('');
+    setCustomer(prev => ({ 
+      ...prev, 
+      address: address.formatted_address,
+      selectedIndividualAddress: address 
+    }));
+  };
+
+  const handleIndividualAddressManualEntry = () => {
+    setManualAddressType('individual');
+    setManualAddress({
+      addressLine1: '',
+      addressLine2: '',
+      additionalLines: [],
+      city: '',
+      pincode: '',
+      state: '',
+    });
+    setShowManualAddressModal(true);
+  };
+
   const handleManualAddressSubmit = () => {
     const newAddress = {
       ...manualAddress,
@@ -310,11 +349,18 @@ export default function CustomerDetailsScreen() {
         selectedBusinessAddress: { formatted_address: completeAddress }
       }));
       setShowManualAddressModal(false);
-    } else {
+    } else if (manualAddressType === 'ship-to') {
       setCustomer(prev => ({ 
         ...prev, 
         shipToAddress: completeAddress,
         selectedShipToAddress: { formatted_address: completeAddress }
+      }));
+      setShowManualAddressModal(false);
+    } else if (manualAddressType === 'individual') {
+      setCustomer(prev => ({ 
+        ...prev, 
+        address: completeAddress,
+        selectedIndividualAddress: { formatted_address: completeAddress }
       }));
       setShowManualAddressModal(false);
     }
@@ -350,23 +396,21 @@ export default function CustomerDetailsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Customer Details</Text>
-          
-
-        </View>
-      </SafeAreaView>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>
+          {customerSearch.trim() ? 'Customer Details' : 'Add New Customer'}
+        </Text>
+      </View>
 
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
@@ -439,40 +483,6 @@ export default function CustomerDetailsScreen() {
 
         {/* Customer Details Form */}
         <View style={styles.formContainer}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Search Existing Customers</Text>
-            <View style={styles.inputContainer}>
-              <Search size={20} color={Colors.textLight} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                value={customerSearch}
-                onChangeText={setCustomerSearch}
-                placeholder="Search by name, mobile, or business name"
-                placeholderTextColor={Colors.textLight}
-                returnKeyType={Platform.OS === 'android' ? 'next' : 'default'}
-                blurOnSubmit={Platform.OS === 'android'}
-              />
-            </View>
-            {filteredCustomers.length > 0 && (
-              <View style={styles.customerSearchResults}>
-                {filteredCustomers.map((existingCustomer, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.customerSearchResult}
-                    onPress={() => handleExistingCustomerSelect(existingCustomer)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.customerSearchResultName}>
-                      {existingCustomer.isBusinessCustomer ? existingCustomer.businessName : existingCustomer.name}
-                    </Text>
-                    <Text style={styles.customerSearchResultDetails}>
-                      {existingCustomer.mobile} • {existingCustomer.isBusinessCustomer ? 'Business' : 'Individual'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
 
           {customer.isBusinessCustomer && (
             <View style={styles.inputGroup}>
@@ -634,19 +644,22 @@ export default function CustomerDetailsScreen() {
                 )}
               </>
             ) : (
-              <View style={styles.inputContainer}>
-                <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
-                  style={[styles.input, styles.addressInput]}
-                  value={customer.address}
-                  onChangeText={(text) => setCustomer(prev => ({ ...prev, address: text }))}
-                  placeholder="Enter address"
-                  placeholderTextColor={Colors.textLight}
-                  multiline
-                  numberOfLines={3}
-                  textAlignVertical="top"
+              <>
+                <AddressAutocomplete
+                  placeholder="Search for address..."
+                  value={individualAddressSearch}
+                  onChangeText={setIndividualAddressSearch}
+                  onAddressSelect={handleIndividualAddressSelect}
+                  onManualEntry={handleIndividualAddressManualEntry}
                 />
-              </View>
+                {customer.selectedIndividualAddress && (
+                  <View style={styles.selectedAddressContainer}>
+                    <Text style={styles.selectedAddressText}>
+                      📍 {customer.selectedIndividualAddress.formatted_address}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
 
@@ -673,16 +686,70 @@ export default function CustomerDetailsScreen() {
             </View>
           )}
         </View>
-
-        <TouchableOpacity
-          style={styles.continueButton}
-          onPress={handleContinueToPayment}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.continueButtonText}>Continue to Payment</Text>
-        </TouchableOpacity>
       </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Bottom Section with Continue Button and Search */}
+      <View style={styles.bottomContainer}>
+        {/* Continue Button */}
+        <View style={styles.continueSection}>
+          <TouchableOpacity
+            style={styles.continueButton}
+            onPress={handleContinueToPayment}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.continueButtonText}>Continue to Payment</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Search and Scan */}
+        <View style={styles.floatingSearchContainer}>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Search size={20} color={Colors.textLight} />
+              <TextInput
+                style={styles.searchInput}
+                value={customerSearch}
+                onChangeText={setCustomerSearch}
+                placeholder="Search existing customers..."
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+            
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={() => {
+                // Handle scan functionality if needed
+                console.log('Scan functionality');
+              }}
+              activeOpacity={0.7}
+            >
+              <Search size={24} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
+          
+          {/* Customer Search Results */}
+          {filteredCustomers.length > 0 && (
+            <View style={styles.customerSearchResults}>
+              {filteredCustomers.map((existingCustomer, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.customerSearchResult}
+                  onPress={() => handleExistingCustomerSelect(existingCustomer)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.customerSearchResultName}>
+                    {existingCustomer.isBusinessCustomer ? existingCustomer.businessName : existingCustomer.name}
+                  </Text>
+                  <Text style={styles.customerSearchResultDetails}>
+                    {existingCustomer.mobile} • {existingCustomer.isBusinessCustomer ? 'Business' : 'Individual'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      </View>
 
       {/* GSTIN Lookup Modal */}
       <Modal
@@ -902,7 +969,7 @@ export default function CustomerDetailsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -911,17 +978,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
+  header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: Colors.background,
   },
   backButton: {
     width: 40,
@@ -1282,5 +1346,62 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  // Bottom container styles
+  bottomContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    gap: 12, // Small gap between continue button and search bar
+  },
+  // Continue button and search container styles
+  continueSection: {
+    marginBottom: 0, // No margin since it's in the bottom container
+  },
+  floatingSearchContainer: {
+    backgroundColor: Colors.background,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+    marginLeft: 12,
+  },
+  scanButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 25,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
   },
 });

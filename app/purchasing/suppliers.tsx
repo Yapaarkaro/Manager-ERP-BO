@@ -9,6 +9,7 @@ import {
   Image,
   Modal,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -111,6 +112,18 @@ export default function SuppliersScreen() {
 
   const handleAddSupplier = () => {
     router.push('/purchasing/add-supplier');
+  };
+
+  const handlePhoneCall = (phoneNumber: string) => {
+    if (phoneNumber) {
+      // Remove any non-digit characters and format for phone call
+      const cleanNumber = phoneNumber.replace(/\D/g, '');
+      if (cleanNumber.length >= 10) {
+        Linking.openURL(`tel:${cleanNumber}`);
+      } else {
+        Alert.alert('Invalid Phone Number', 'Please check the phone number format');
+      }
+    }
   };
 
   const getScoreColor = (score: number) => {
@@ -297,7 +310,13 @@ export default function SuppliersScreen() {
         <View style={styles.contactSection}>
           <View style={styles.contactRow}>
             <Phone size={14} color={Colors.textLight} />
-            <Text style={styles.contactText}>{supplier.mobile}</Text>
+            <TouchableOpacity
+              onPress={() => handlePhoneCall(supplier.mobile)}
+              activeOpacity={0.7}
+              style={styles.phoneButton}
+            >
+              <Text style={[styles.contactText, styles.clickablePhone]}>{supplier.mobile}</Text>
+            </TouchableOpacity>
           </View>
           {supplier.email && (
             <View style={styles.contactRow}>
@@ -376,7 +395,7 @@ export default function SuppliersScreen() {
           contentContainerStyle={styles.filterScrollContent}
         >
           {[
-                          { key: 'all', label: 'All', count: suppliers.length },
+              { key: 'all', label: 'All', count: suppliers.length },
               { key: 'active', label: 'Active', count: suppliers.filter(s => s.status === 'active').length },
               { key: 'high_score', label: 'High Score', count: suppliers.filter(s => s.supplierScore >= 85).length },
           ].map((filter) => (
@@ -784,6 +803,14 @@ const styles = StyleSheet.create({
   contactText: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  clickablePhone: {
+    textDecorationLine: 'underline',
+    color: Colors.primary,
+  },
+  phoneButton: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
   },
   addSupplierFAB: {
     position: 'absolute',

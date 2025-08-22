@@ -249,14 +249,244 @@ export interface Payable {
   status: 'current' | 'overdue' | 'critical';
 }
 
+export interface BankAccount {
+  id: string;
+  bankId: string;
+  bankName: string;
+  bankShortName: string;
+  accountHolderName: string;
+  accountNumber: string;
+  ifscCode: string;
+  upiId: string;
+  accountType: 'Savings' | 'Current';
+  initialBalance: number;
+  balance: number;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+export interface BankTransaction {
+  id: string;
+  bankAccountId: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  description: string;
+  date: string;
+  reference: string;
+  category: string;
+  transactionNumber: string;
+  source: 'UPI' | 'Card' | 'Cheque' | 'Cash' | 'Bank Transfer' | 'NEFT' | 'RTGS' | 'IMPS' | 'Other';
+  relatedInvoiceId?: string;
+  relatedCustomerId?: string;
+  relatedSupplierId?: string;
+  createdAt: string;
+  // Cheque specific fields
+  chequeNumber?: string;
+  chequeDate?: string;
+  isCleared?: boolean;
+  clearanceDate?: string;
+}
+
 class DataStore {
-  private customers: Customer[] = [];
+  private customers: Customer[] = [
+    // Mock customers for demonstration
+    {
+      id: 'cust_001',
+      name: 'ABC Electronics',
+      businessName: 'ABC Electronics Pvt Ltd',
+      customerType: 'business',
+      contactPerson: 'John Doe',
+      mobile: '+91-9876543210',
+      email: 'contact@abcelectronics.com',
+      address: 'Plot 123, Industrial Area, New Delhi, 110001',
+      gstin: '07AABCU9603R1ZX',
+      avatar: '🏢',
+      customerScore: 85,
+      onTimePayment: 95,
+      satisfactionRating: 4.5,
+      responseTime: 2,
+      totalOrders: 25,
+      completedOrders: 24,
+      pendingOrders: 1,
+      cancelledOrders: 0,
+      returnedOrders: 0,
+      totalValue: 2500000,
+      averageOrderValue: 100000,
+      returnRate: 0,
+      lastOrderDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      joinedDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'active',
+      paymentTerms: 'Net 30',
+      creditLimit: 500000,
+      categories: ['Electronics', 'Hardware'],
+      createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'cust_002',
+      name: 'XYZ Solutions',
+      businessName: 'XYZ Solutions India Ltd',
+      customerType: 'business',
+      contactPerson: 'Jane Smith',
+      mobile: '+91-9876543211',
+      email: 'info@xyzsolutions.com',
+      address: 'Tower B, Tech Park, Bangalore, 560001',
+      gstin: '29AABCU9603R1ZY',
+      avatar: '💻',
+      customerScore: 92,
+      onTimePayment: 98,
+      satisfactionRating: 4.8,
+      responseTime: 1,
+      totalOrders: 15,
+      completedOrders: 15,
+      pendingOrders: 0,
+      cancelledOrders: 0,
+      returnedOrders: 0,
+      totalValue: 1200000,
+      averageOrderValue: 80000,
+      returnRate: 0,
+      lastOrderDate: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      joinedDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'active',
+      paymentTerms: 'Net 15',
+      creditLimit: 300000,
+      categories: ['Software', 'Services'],
+      createdAt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'cust_003',
+      name: 'Tech Innovators',
+      businessName: 'Tech Innovators Pvt Ltd',
+      customerType: 'business',
+      contactPerson: 'Mike Johnson',
+      mobile: '+91-9876543212',
+      email: 'contact@techinnovators.com',
+      address: 'Floor 5, Business Center, Mumbai, 400001',
+      gstin: '27AABCU9603R1ZZ',
+      avatar: '🚀',
+      customerScore: 78,
+      onTimePayment: 85,
+      satisfactionRating: 4.2,
+      responseTime: 3,
+      totalOrders: 8,
+      completedOrders: 7,
+      pendingOrders: 1,
+      cancelledOrders: 0,
+      returnedOrders: 0,
+      totalValue: 600000,
+      averageOrderValue: 75000,
+      returnRate: 0,
+      lastOrderDate: new Date(Date.now() - 168 * 60 * 60 * 1000).toISOString(),
+      joinedDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'active',
+      paymentTerms: 'Net 45',
+      creditLimit: 200000,
+      categories: ['Technology', 'Innovation'],
+      createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+    }
+  ];
   private suppliers: Supplier[] = [];
   private sales: Sale[] = [];
-  private invoices: Invoice[] = [];
+  private invoices: Invoice[] = [
+    // Mock invoices for demonstration
+    {
+      id: 'INV_001',
+      invoiceNumber: 'INV-2024-001',
+      customerId: 'cust_001',
+      customerName: 'ABC Electronics',
+      customerType: 'business',
+      items: [
+        {
+          productId: 'prod_001',
+          productName: 'Laptop',
+          quantity: 2,
+          unitPrice: 45000,
+          totalPrice: 90000,
+          taxRate: 18,
+          taxAmount: 16200,
+          hsnCode: '8471',
+          primaryUnit: 'pieces'
+        }
+      ],
+      subtotal: 90000,
+      taxAmount: 16200,
+      cessAmount: 0,
+      totalAmount: 106200,
+      paidAmount: 106200,
+      balanceAmount: 0,
+      paymentMethod: 'UPI',
+      invoiceDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'paid',
+      notes: 'Payment received via UPI',
+      createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'INV_002',
+      invoiceNumber: 'INV-2024-002',
+      customerId: 'cust_002',
+      customerName: 'XYZ Solutions',
+      customerType: 'business',
+      items: [
+        {
+          productId: 'prod_002',
+          productName: 'Software License',
+          quantity: 5,
+          unitPrice: 12000,
+          totalPrice: 60000,
+          taxRate: 18,
+          taxAmount: 10800,
+          hsnCode: '998314',
+          primaryUnit: 'licenses'
+        }
+      ],
+      subtotal: 60000,
+      taxAmount: 10800,
+      cessAmount: 0,
+      totalAmount: 70800,
+      paidAmount: 70800,
+      balanceAmount: 0,
+      paymentMethod: 'Bank Transfer',
+      invoiceDate: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'paid',
+      notes: 'Payment received via bank transfer',
+      createdAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString()
+    },
+    {
+      id: 'INV_003',
+      invoiceNumber: 'INV-2024-003',
+      customerId: 'cust_003',
+      customerName: 'Tech Innovators',
+      customerType: 'business',
+      items: [
+        {
+          productId: 'prod_003',
+          productName: 'Cloud Services',
+          quantity: 1,
+          unitPrice: 25000,
+          totalPrice: 25000,
+          taxRate: 18,
+          taxAmount: 4500,
+          hsnCode: '998314',
+          primaryUnit: 'subscription'
+        }
+      ],
+      subtotal: 25000,
+      taxAmount: 4500,
+      cessAmount: 0,
+      totalAmount: 29500,
+      paidAmount: 0,
+      balanceAmount: 29500,
+      paymentMethod: 'Cheque',
+      invoiceDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'unpaid',
+      notes: 'Payment pending via cheque',
+      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    }
+  ];
   private receivables: Receivable[] = [];
   private payables: Payable[] = [];
   private addresses: BusinessAddress[] = [];
+  private bankAccounts: BankAccount[] = [];
+  private bankTransactions: BankTransaction[] = [];
   private listeners: (() => void)[] = [];
 
   // Customer methods
@@ -416,6 +646,10 @@ class DataStore {
     return this.invoices.filter(invoice => invoice.customerId === customerId);
   }
 
+  getInvoiceById(invoiceId: string): Invoice | undefined {
+    return this.invoices.find(invoice => invoice.id === invoiceId);
+  }
+
   // Receivables methods
   getReceivables(): Receivable[] {
     return [...this.receivables];
@@ -542,6 +776,210 @@ class DataStore {
 
   getAddressCountByType(type: 'primary' | 'branch' | 'warehouse'): number {
     return this.addresses.filter(address => address.type === type).length;
+  }
+
+  // Bank Account methods
+  addBankAccount(bankAccount: BankAccount) {
+    this.bankAccounts.push(bankAccount);
+    console.log('=== BANK ACCOUNT ADDED TO STORE ===');
+    console.log('Bank Account ID:', bankAccount.id);
+    console.log('Bank Name:', bankAccount.bankName);
+    console.log('Account Holder:', bankAccount.accountHolderName);
+    console.log('Account Number:', bankAccount.accountNumber);
+    console.log('UPI ID:', bankAccount.upiId);
+    console.log('Is Primary:', bankAccount.isPrimary);
+    console.log('Total bank accounts in store:', this.bankAccounts.length);
+    console.log('Added at:', new Date().toISOString());
+    console.log('====================================');
+    this.notifyListeners();
+  }
+
+  getBankAccounts(): BankAccount[] {
+    return [...this.bankAccounts];
+  }
+
+  getBankAccountById(id: string): BankAccount | undefined {
+    return this.bankAccounts.find(account => account.id === id);
+  }
+
+  getPrimaryBankAccount(): BankAccount | undefined {
+    return this.bankAccounts.find(account => account.isPrimary);
+  }
+
+  updateBankAccount(id: string, updates: Partial<BankAccount>) {
+    const index = this.bankAccounts.findIndex(account => account.id === id);
+    if (index !== -1) {
+      this.bankAccounts[index] = { ...this.bankAccounts[index], ...updates };
+      console.log('=== BANK ACCOUNT UPDATED ===');
+      console.log('Bank Account ID:', id);
+      console.log('Updated at:', new Date().toISOString());
+      console.log('============================');
+      this.notifyListeners();
+    }
+  }
+
+  deleteBankAccount(id: string) {
+    const index = this.bankAccounts.findIndex(account => account.id === id);
+    if (index !== -1) {
+      const deletedAccount = this.bankAccounts[index];
+      this.bankAccounts.splice(index, 1);
+      console.log('=== BANK ACCOUNT DELETED ===');
+      console.log('Bank Account ID:', id);
+      console.log('Bank Name:', deletedAccount.bankName);
+      console.log('Total bank accounts remaining:', this.bankAccounts.length);
+      console.log('Deleted at:', new Date().toISOString());
+      console.log('============================');
+      this.notifyListeners();
+    }
+  }
+
+  setPrimaryBankAccount(id: string) {
+    // Remove primary status from all bank accounts
+    this.bankAccounts.forEach(account => {
+      account.isPrimary = false;
+    });
+    
+    // Set the specified account as primary
+    const account = this.bankAccounts.find(acc => acc.id === id);
+    if (account) {
+      account.isPrimary = true;
+      console.log('=== PRIMARY BANK ACCOUNT SET ===');
+      console.log('Bank Account ID:', id);
+      console.log('Bank Name:', account.bankName);
+      console.log('Set at:', new Date().toISOString());
+      console.log('=================================');
+      this.notifyListeners();
+    }
+  }
+
+  getBankAccountCount(): number {
+    return this.bankAccounts.length;
+  }
+
+  // Bank Transaction methods
+  addBankTransaction(transaction: BankTransaction) {
+    this.bankTransactions.push(transaction);
+    
+    // Update bank account balance
+    const bankAccount = this.getBankAccountById(transaction.bankAccountId);
+    if (bankAccount) {
+      if (transaction.type === 'credit') {
+        bankAccount.balance += transaction.amount;
+      } else {
+        bankAccount.balance -= transaction.amount;
+      }
+    }
+    
+    console.log('=== BANK TRANSACTION ADDED ===');
+    console.log('Transaction ID:', transaction.id);
+    console.log('Bank Account ID:', transaction.bankAccountId);
+    console.log('Type:', transaction.type);
+    console.log('Amount:', transaction.amount);
+    console.log('Description:', transaction.description);
+    console.log('Total transactions in store:', this.bankTransactions.length);
+    console.log('Added at:', new Date().toISOString());
+    console.log('================================');
+    this.notifyListeners();
+  }
+
+  getBankTransactions(bankAccountId?: string): BankTransaction[] {
+    if (bankAccountId) {
+      return this.bankTransactions.filter(t => t.bankAccountId === bankAccountId);
+    }
+    return [...this.bankTransactions];
+  }
+
+  getBankTransactionById(id: string): BankTransaction | undefined {
+    return this.bankTransactions.find(t => t.id === id);
+  }
+
+  getBankTransactionsByType(bankAccountId: string, type: 'credit' | 'debit'): BankTransaction[] {
+    return this.bankTransactions.filter(t => 
+      t.bankAccountId === bankAccountId && t.type === type
+    );
+  }
+
+  getBankAccountBalance(bankAccountId: string): number {
+    const bankAccount = this.getBankAccountById(bankAccountId);
+    return bankAccount?.balance || 0;
+  }
+
+  getTotalIncome(bankAccountId?: string): number {
+    const transactions = bankAccountId 
+      ? this.getBankTransactions(bankAccountId)
+      : this.bankTransactions;
+    
+    return transactions
+      .filter(t => t.type === 'credit')
+      .reduce((sum, t) => sum + t.amount, 0);
+  }
+
+  getTotalExpense(bankAccountId?: string): number {
+    const transactions = bankAccountId 
+      ? this.getBankTransactions(bankAccountId)
+      : this.bankTransactions;
+    
+    return transactions
+      .filter(t => t.type === 'debit')
+      .reduce((sum, t) => sum + t.amount, 0);
+  }
+
+  // Cheque management methods
+  clearCheque(transactionId: string, clearanceDate: string): boolean {
+    const transaction = this.bankTransactions.find(t => t.id === transactionId);
+    if (transaction && transaction.source === 'Cheque' && !transaction.isCleared) {
+      transaction.isCleared = true;
+      transaction.clearanceDate = clearanceDate;
+      
+      // Update bank account balance
+      const bankAccount = this.getBankAccountById(transaction.bankAccountId);
+      if (bankAccount) {
+        if (transaction.type === 'credit') {
+          bankAccount.balance += transaction.amount;
+        } else {
+          bankAccount.balance -= transaction.amount;
+        }
+      }
+      
+      this.notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bounceCheque(transactionId: string): boolean {
+    const transactionIndex = this.bankTransactions.findIndex(t => t.id === transactionId);
+    if (transactionIndex !== -1 && this.bankTransactions[transactionIndex].source === 'Cheque' && !this.bankTransactions[transactionIndex].isCleared) {
+      // Get transaction data before removing it
+      const transaction = this.bankTransactions[transactionIndex];
+      
+      // Remove the transaction
+      this.bankTransactions.splice(transactionIndex, 1);
+      
+      // Update bank account balance (reverse the transaction)
+      if (transaction) {
+        const bankAccount = this.getBankAccountById(transaction.bankAccountId);
+        if (bankAccount) {
+          if (transaction.type === 'credit') {
+            bankAccount.balance -= transaction.amount;
+          } else {
+            bankAccount.balance += transaction.amount;
+          }
+        }
+      }
+      
+      this.notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  getUnclearedCheques(bankAccountId: string): BankTransaction[] {
+    return this.bankTransactions.filter(t => 
+      t.bankAccountId === bankAccountId && 
+      t.source === 'Cheque' && 
+      !t.isCleared
+    );
   }
 
   // Product deletion methods - remove all records related to a product
@@ -673,11 +1111,15 @@ class DataStore {
     this.receivables = [];
     this.payables = [];
     this.addresses = [];
+    this.bankAccounts = [];
+    this.bankTransactions = [];
     console.log('=== ALL DATA CLEARED ===');
     console.log('Cleared at:', new Date().toISOString());
     console.log('========================');
     this.notifyListeners();
   }
+
+
 }
 
 // Export singleton instance

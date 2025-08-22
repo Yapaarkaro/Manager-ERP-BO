@@ -610,7 +610,7 @@ export default function AddSupplierScreen() {
         >
           <ScrollView 
             style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -1151,15 +1151,26 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
   },
   submitSection: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   completeButton: {
-    paddingVertical: 18,
+    backgroundColor: Colors.primary,
     borderRadius: 12,
+    paddingVertical: 16,
     alignItems: 'center',
-    marginBottom: 30,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   enabledButton: {
     backgroundColor: Colors.primary,

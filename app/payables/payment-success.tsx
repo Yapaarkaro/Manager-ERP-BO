@@ -58,7 +58,8 @@ export default function PaymentSuccessScreen() {
     return `PV-${year}${month}${day}-${random}`;
   };
 
-  const voucherNumber = generateVoucherNumber();
+  // Use useMemo to ensure voucher number is generated only once
+  const voucherNumber = React.useMemo(() => generateVoucherNumber(), []);
 
   const handleDownloadVoucher = () => {
     console.log('Download voucher:', voucherNumber);

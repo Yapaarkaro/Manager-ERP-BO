@@ -235,21 +235,19 @@ export default function SettingsScreen() {
   };
 
   const loadBankAccounts = () => {
-    // Mock data for now - replace with actual dataStore.getBankAccounts() when available
-    const mockBankAccounts: BankAccount[] = [
-      {
-        id: '1',
-        accountHolderName: 'ABC Electronics',
-        bankName: 'State Bank of India',
-        bankCode: 'SBI',
-        accountNumber: '1234567890',
-        ifscCode: 'SBIN0001234',
-        upiId: 'abc.electronics@sbi',
-        accountType: 'current',
-        isPrimary: true
-      }
-    ];
-    setBankAccounts(mockBankAccounts);
+    // Load real bank accounts from data store
+    const realBankAccounts = dataStore.getBankAccounts();
+    setBankAccounts(realBankAccounts.map(account => ({
+      id: account.id,
+      accountHolderName: account.accountHolderName,
+      bankName: account.bankName,
+      bankCode: account.bankShortName,
+      accountNumber: account.accountNumber,
+      ifscCode: account.ifscCode,
+      upiId: account.upiId,
+      accountType: account.accountType.toLowerCase() as 'savings' | 'current',
+      isPrimary: account.isPrimary
+    })));
   };
 
   const getAddressesByType = (type: 'branch' | 'warehouse') => {
@@ -343,8 +341,10 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteBankAccount = (accountId: string) => {
-    // Mock delete for now - replace with actual dataStore.deleteBankAccount() when available
-    setBankAccounts(prev => prev.filter(acc => acc.id !== accountId));
+    // Delete from data store
+    dataStore.deleteBankAccount(accountId);
+    // Reload bank accounts to refresh UI
+    loadBankAccounts();
   };
 
   const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
@@ -852,11 +852,10 @@ export default function SettingsScreen() {
             <TouchableOpacity 
               style={styles.actionIconButton}
               onPress={() => {
-                // Mock set primary for now - replace with actual dataStore.setPrimaryBankAccount() when available
-                setBankAccounts(prev => prev.map(acc => ({
-                  ...acc,
-                  isPrimary: acc.id === account.id
-                })));
+                // Set primary in data store
+                dataStore.setPrimaryBankAccount(account.id);
+                // Reload bank accounts to refresh UI
+                loadBankAccounts();
               }}
               activeOpacity={0.7}
             >

@@ -87,7 +87,7 @@ export default function AddBankAccount() {
       setConfirmAccountNumber(existingAccount.accountNumber || '');
       setIfscCode(existingAccount.ifscCode || '');
       setUpiId(existingAccount.upiId || '');
-      setAccountType(existingAccount.accountType === 'savings' ? 'Savings' : 'Current');
+      setAccountType(existingAccount.accountType === 'Savings' ? 'Savings' : 'Current');
       setIsPrimary(existingAccount.isPrimary || false);
       
       // Find and set the bank
@@ -249,13 +249,14 @@ export default function AddBankAccount() {
       dataStore.updateBankAccount(existingAccount.id, {
         accountHolderName: accountHolderName.trim(),
         bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
-        bankCode: selectedBank?.shortName || '',
+        bankId: selectedBank?.shortName || '',
+        bankShortName: selectedBank?.shortName || '',
         accountNumber: accountNumber.trim(),
         ifscCode: ifscCode.trim(),
         upiId: upiId.trim(),
-        accountType: accountType.toLowerCase() as 'savings' | 'current',
+        accountType: accountType,
         isPrimary,
-        updatedAt: new Date().toISOString(),
+        balance: existingAccount.balance || 0,
       });
       
       // If setting as primary, update the dataStore
@@ -272,15 +273,16 @@ export default function AddBankAccount() {
         id: `bank_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         accountHolderName: accountHolderName.trim(),
         bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
-        bankCode: selectedBank?.shortName || '',
+        bankId: selectedBank?.shortName || '',
+        bankShortName: selectedBank?.shortName || '',
         accountNumber: accountNumber.trim(),
         ifscCode: ifscCode.trim(),
         upiId: upiId.trim(),
-        accountType: accountType.toLowerCase() as 'savings' | 'current',
+        accountType: accountType,
         isPrimary,
-        status: 'active',
+        initialBalance: parseFloat(initialBalance) || 0,
+        balance: parseFloat(initialBalance) || 0,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       };
       
       dataStore.addBankAccount(newBankAccount);
@@ -289,6 +291,89 @@ export default function AddBankAccount() {
       if (isPrimary) {
         dataStore.setPrimaryBankAccount(newBankAccount.id);
       }
+      
+      // Add sample transactions for demonstration
+      const sampleTransactions = [
+        {
+          id: `trans_${Date.now()}_1`,
+          bankAccountId: newBankAccount.id,
+          type: 'credit' as const,
+          amount: 50000,
+          description: 'Initial deposit',
+          date: new Date().toISOString(),
+          reference: 'INIT-001',
+          category: 'Initial Balance',
+          transactionNumber: `TXN${Date.now()}001`,
+          source: 'Bank Transfer' as const,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: `trans_${Date.now()}_2`,
+          bankAccountId: newBankAccount.id,
+          type: 'credit' as const,
+          amount: 25000,
+          description: 'Payment received from ABC Electronics',
+          date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+          reference: 'INV-2024-001',
+          category: 'Sales',
+          transactionNumber: `TXN${Date.now()}002`,
+          source: 'UPI' as const,
+          relatedInvoiceId: 'INV_001',
+          relatedCustomerId: 'cust_001',
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: `trans_${Date.now()}_3`,
+          bankAccountId: newBankAccount.id,
+          type: 'debit' as const,
+          amount: 15000,
+          description: 'Sample expense',
+          date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days ago
+          reference: 'SAMPLE-002',
+          category: 'Expenses',
+          transactionNumber: `TXN${Date.now()}003`,
+          source: 'Cheque' as const,
+          createdAt: new Date().toISOString(),
+        },
+        // Add cash deposit transaction
+        {
+          id: `trans_${Date.now()}_4`,
+          bankAccountId: newBankAccount.id,
+          type: 'credit' as const,
+          amount: 75000,
+          description: 'Cash deposit',
+          date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+          reference: 'CASH-001',
+          category: 'Cash Deposit',
+          transactionNumber: `TXN${Date.now()}004`,
+          source: 'Cash' as const,
+          createdAt: new Date().toISOString(),
+        },
+        // Add uncleared cheque transaction
+        {
+          id: `trans_${Date.now()}_5`,
+          bankAccountId: newBankAccount.id,
+          type: 'credit' as const,
+          amount: 35000,
+          description: 'Cheque payment from Tech Innovators',
+          date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(), // 4 days ago
+          reference: 'INV-2024-003',
+          category: 'Sales',
+          transactionNumber: `TXN${Date.now()}005`,
+          source: 'Cheque' as const,
+          chequeNumber: 'CHQ123456',
+          chequeDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+          isCleared: false,
+          relatedInvoiceId: 'INV_003',
+          relatedCustomerId: 'cust_003',
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      
+      // Add sample transactions to data store
+      sampleTransactions.forEach(transaction => {
+        dataStore.addBankTransaction(transaction);
+      });
       
       Alert.alert('Success', 'Bank account added successfully!', [
         { text: 'OK', onPress: () => router.back() }
@@ -492,26 +577,28 @@ export default function AddBankAccount() {
             </View>
           </View>
 
-          {/* Set as Primary Option */}
-          <View style={styles.section}>
-            <View style={styles.inputGroup}>
-              <TouchableOpacity
-                style={styles.primaryToggle}
-                onPress={() => setIsPrimary(!isPrimary)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.checkbox, { backgroundColor: isPrimary ? Colors.primary : Colors.grey[200] }]}>
-                  {isPrimary && <Check size={16} color={Colors.card} />}
-                </View>
-                <View style={styles.primaryToggleText}>
-                  <Text style={styles.primaryToggleLabel}>Set as Primary Bank Account</Text>
-                  <Text style={styles.primaryToggleHint}>
-                    This will be your main bank account for transactions
-                  </Text>
-                </View>
-              </TouchableOpacity>
+          {/* Set as Primary Option - Only show when adding new account or editing non-primary account */}
+          {(!isEditMode || !existingAccount?.isPrimary) && (
+            <View style={styles.section}>
+              <View style={styles.inputGroup}>
+                <TouchableOpacity
+                  style={styles.primaryToggle}
+                  onPress={() => setIsPrimary(!isPrimary)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.checkbox, { backgroundColor: isPrimary ? Colors.primary : Colors.grey[200] }]}>
+                    {isPrimary && <Check size={16} color={Colors.card} />}
+                  </View>
+                  <View style={styles.primaryToggleText}>
+                    <Text style={styles.primaryToggleLabel}>Set as Primary Bank Account</Text>
+                    <Text style={styles.primaryToggleHint}>
+                      This will be your main bank account for transactions
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
 
           <TouchableOpacity
             style={styles.confirmButton}

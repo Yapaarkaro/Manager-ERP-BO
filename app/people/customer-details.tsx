@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MessageCircle, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw } from 'lucide-react-native';
+import { dataStore } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -72,9 +73,31 @@ const mockTransactionLogs: TransactionLog[] = [
 ];
 
 export default function CustomerDetailsScreen() {
-  const { customerId, customerData } = useLocalSearchParams();
-  const customer = JSON.parse(customerData as string);
+  const { customerId } = useLocalSearchParams();
+  const [customer, setCustomer] = useState<any>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'transactions'>('overview');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadCustomerData();
+  }, [customerId]);
+
+  const loadCustomerData = () => {
+    try {
+      setIsLoading(true);
+      
+      if (customerId) {
+        const customerData = dataStore.getCustomerById(customerId as string);
+        if (customerData) {
+          setCustomer(customerData);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading customer data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -141,6 +164,59 @@ export default function CustomerDetailsScreen() {
       });
     }
   };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Loading Customer...</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading customer details...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if customer not found
+  if (!customer) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Customer Not Found</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Customer details could not be loaded</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadCustomerData}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const handleCreateSale = () => {
     // Clean mobile number to remove +91 and spaces
@@ -869,6 +945,42 @@ const styles = StyleSheet.create({
   },
   createSaleButtonText: {
     color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Loading State
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: Colors.textLight,
+  },
+  
+  // Error State
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '600',
   },

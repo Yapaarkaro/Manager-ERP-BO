@@ -58,7 +58,8 @@ export default function PaymentSuccessScreen() {
     return `RCP-${year}${month}${day}-${random}`;
   };
 
-  const receiptNumber = generateReceiptNumber();
+  // Use useMemo to ensure receipt number is generated only once
+  const receiptNumber = React.useMemo(() => generateReceiptNumber(), []);
 
   const handleDownloadReceipt = () => {
     console.log('Download receipt:', receiptNumber);

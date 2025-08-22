@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { dataStore } from '@/utils/dataStore';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { 
@@ -56,40 +57,107 @@ interface InvoiceItem {
 }
 
 export default function InvoiceDetailsScreen() {
-  const { invoiceId, invoiceData } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
-  const customer = invoice.customerDetails;
-  const isBusinessCustomer = invoice.customerType === 'business';
+  const { invoiceId } = useLocalSearchParams();
+  const [invoice, setInvoice] = useState<any>(null);
+  const [customer, setCustomer] = useState<any>(null);
+  const [isBusinessCustomer, setIsBusinessCustomer] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Debug: Log invoice data to ensure it's correct
-  console.log('Invoice Details Screen - Invoice Data:', {
-    invoiceId,
-    invoiceNumber: invoice.invoiceNumber,
-    customerName: invoice.customerName,
-    date: invoice.date
-  });
+  useEffect(() => {
+    loadInvoiceData();
+  }, [invoiceId]);
 
-  // Mock invoice items
-  const invoiceItems: InvoiceItem[] = [
+  const loadInvoiceData = () => {
+    try {
+      setIsLoading(true);
+      
+      // Get invoice from dataStore
+      const allInvoices = dataStore.getInvoices();
+      const foundInvoice = allInvoices.find(inv => inv.id === invoiceId);
+      
+      if (foundInvoice) {
+        setInvoice(foundInvoice);
+        
+        // Get customer details
+        if (foundInvoice.customerId) {
+          const customerData = dataStore.getCustomerById(foundInvoice.customerId);
+          if (customerData) {
+            setCustomer(customerData);
+            setIsBusinessCustomer(customerData.customerType === 'business');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading invoice data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Loading Invoice...</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading invoice details...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if invoice not found
+  if (!invoice || !customer) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Invoice Not Found</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Invoice details could not be loaded</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadInvoiceData}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Get invoice items from the invoice data
+  const invoiceItems: InvoiceItem[] = invoice.items || [
     {
-      id: '1',
-      name: 'iPhone 14 Pro 128GB',
-      quantity: 2,
-      rate: 129900,
-      amount: 259800,
-      taxRate: 18,
-      taxAmount: 46764,
-      total: 306564
-    },
-    {
-      id: '2',
-      name: 'AirPods Pro 2nd Gen',
+      id: `fallback-item-${Date.now()}`,
+      name: 'Sample Item',
       quantity: 1,
-      rate: 24900,
-      amount: 24900,
+      rate: invoice.amount || 0,
+      amount: invoice.amount || 0,
       taxRate: 18,
-      taxAmount: 4482,
-      total: 29382
+      taxAmount: 0,
+      total: invoice.amount || 0
     }
   ];
 
@@ -528,8 +596,8 @@ export default function InvoiceDetailsScreen() {
             </View>
             
             {/* Table Rows */}
-            {invoiceItems.map((item) => (
-              <View key={item.id} style={styles.tableRow}>
+            {invoiceItems.map((item, index) => (
+              <View key={item.id || `item-${index}`} style={styles.tableRow}>
                 <View style={styles.itemNameCell}>
                   <Text style={styles.itemName}>{item.name}</Text>
                   <Text style={styles.itemTax}>GST @ {item.taxRate}%</Text>
@@ -1027,5 +1095,41 @@ const styles = StyleSheet.create({
   staffRole: {
     fontSize: 14,
     color: Colors.textLight,
+  },
+  
+  // Loading State
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: Colors.textLight,
+  },
+  
+  // Error State
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: Colors.background,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

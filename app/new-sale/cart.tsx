@@ -153,6 +153,18 @@ export default function CartScreen() {
   // Roundoff feature state
   const [applyRoundoff, setApplyRoundoff] = useState(false);
 
+  // Other Charges feature state
+  const [showOtherCharges, setShowOtherCharges] = useState(false);
+  const [otherCharges, setOtherCharges] = useState<Array<{
+    id: string;
+    name: string;
+    amount: string;
+    taxRate: string;
+    description?: string;
+  }>>([]);
+
+
+
   // Logging function to track product additions to cart
   const logProductToCart = (product: CartProduct) => {
     console.log('=== PRODUCT ADDED TO CART ===');
@@ -502,23 +514,57 @@ export default function CartScreen() {
   };
 
   const handleProductSelectFromSearch = (product: Product) => {
-    const cartProduct: CartProduct = {
-      ...product,
-      quantity: 1,
-      price: product.salesPrice,
-      // Ensure CESS fields are passed
-      cessType: product.cessType || 'none',
-      cessRate: product.cessRate || 0,
-      cessAmount: product.cessAmount || 0,
-      cessUnit: product.cessUnit || '',
-      selectedUoM: 'primary'
-    };
+    // Check if product already exists in cart (by name and barcode, not just ID)
+    const existingProductIndex = cartItems.findIndex(item => 
+      item.name === product.name && 
+      (item.barcode === product.barcode || item.id === product.id)
+    );
     
-    setCartItems(prev => [...prev, cartProduct]);
-    logProductToCart(cartProduct);
-    
-    // Auto-expand only the new product card
-    expandOnlyCard(cartProduct.id);
+    if (existingProductIndex !== -1) {
+      // Product already exists, increase quantity
+      setCartItems(prev => prev.map((item, index) => 
+        index === existingProductIndex 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+      
+      // Auto-expand the existing product card
+      expandOnlyCard(product.id);
+      
+      // Show feedback that quantity was increased
+      const updatedQuantity = cartItems[existingProductIndex].quantity + 1;
+      Alert.alert(
+        'Product Updated',
+        `Quantity of "${product.name}" increased to ${updatedQuantity}`,
+        [{ text: 'OK' }]
+      );
+    } else {
+      // New product, add to cart
+      const cartProduct: CartProduct = {
+        ...product,
+        quantity: 1,
+        price: product.salesPrice,
+        // Ensure CESS fields are passed
+        cessType: product.cessType || 'none',
+        cessRate: product.cessRate || 0,
+        cessAmount: product.cessAmount || 0,
+        cessUnit: product.cessUnit || '',
+        selectedUoM: 'primary'
+      };
+      
+      setCartItems(prev => [...prev, cartProduct]);
+      logProductToCart(cartProduct);
+      
+      // Auto-expand only the new product card
+      expandOnlyCard(cartProduct.id);
+      
+      // Show feedback that product was added
+      Alert.alert(
+        'Product Added',
+        `"${product.name}" added to cart`,
+        [{ text: 'OK' }]
+      );
+    }
     
     handleSearchModalClose();
   };
@@ -630,8 +676,7 @@ export default function CartScreen() {
 
   const expandOnlyCard = (itemId: string) => {
     setExpandedCards(new Set([itemId]));
-    // Auto-expand tax sections when card is expanded
-    setExpandedTaxSections(new Set(['gst', 'cess']));
+    // Keep tax sections collapsed until user manually expands them
   };
 
   const toggleTaxSection = (itemId: string) => {
@@ -809,6 +854,7 @@ export default function CartScreen() {
     }
 
     const tertiaryUnit = item.tertiaryUnit;
+    // For your example: 1 Box = 100 Pieces, so 1 Piece = 22.5/100 = 0.225
     const tertiaryPrice = secondaryPrice / parseFloat(item.tertiaryConversionRatio);
 
     return {
@@ -1027,8 +1073,16 @@ export default function CartScreen() {
       return total + cessAmount;
     }, 0);
     
-    // Step 7: Calculate final total
-    const total = discountedSubtotal + tax + cess;
+    // Step 7: Calculate other charges and their tax
+    const otherChargesTotal = otherCharges.reduce((total, charge) => {
+      const amount = parseFloat(charge.amount) || 0;
+      const taxRate = parseFloat(charge.taxRate) || 0;
+      const chargeTax = amount * (taxRate / 100);
+      return total + amount + chargeTax;
+    }, 0);
+    
+    // Step 8: Calculate final total
+    const total = discountedSubtotal + tax + cess + otherChargesTotal;
     
     return total;
   };
@@ -1168,62 +1222,187 @@ export default function CartScreen() {
                   </View>
                 </View>
 
-                {/* Collapsed View - Only show when not expanded */}
-                {!isExpanded && (
-                  <View style={styles.collapsedInfo} pointerEvents="box-none">
-                    <View style={styles.collapsedRow}>
-                      {/* Left: Price */}
-                      <Text style={styles.collapsedPrice}>
-                        {formatPrice(getCurrentUoMPrice(item) * item.quantity)}
-                      </Text>
-                      
-                      {/* Center: UoM */}
-                      <Text style={styles.collapsedUoM}>
-                        {item.selectedUoM === 'primary' ? item.primaryUnit : 
-                         item.selectedUoM === 'secondary' ? item.secondaryUnit : 
-                         item.tertiaryUnit || 'Piece'}
-                      </Text>
-                      
-                      {/* Right: Quantity Controls */}
-                      <View 
-                        style={styles.collapsedQuantityControls}
-                        pointerEvents="auto"
-                      >
-                        <TouchableOpacity
-                          style={styles.collapsedQuantityButton}
-                          onPress={() => updateQuantity(item.id, item.quantity - 1)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={styles.collapsedQuantityButtonText}>-</Text>
-                        </TouchableOpacity>
-                        
-                        <TextInput
-                          style={styles.collapsedQuantityInput}
-                          value={item.quantity.toString()}
-                          onChangeText={(text) => {
-                            const newQuantity = parseInt(text) || 0;
-                            if (newQuantity >= 0) {
-                              updateQuantity(item.id, newQuantity);
-                            }
-                          }}
-                          keyboardType="numeric"
-                          textAlign="center"
-                          placeholder="0"
-                          placeholderTextColor={Colors.textLight}
-                        />
-                        
-                        <TouchableOpacity
-                          style={styles.collapsedQuantityButton}
-                          onPress={() => updateQuantity(item.id, item.quantity + 1)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={styles.collapsedQuantityButtonText}>+</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    <Text style={styles.expandHint}>Tap to expand</Text>
-                  </View>
-                )}
+                                  {/* Collapsed View - Only show when not expanded */}
+                 {!isExpanded && (
+                   <View style={styles.collapsedInfo} pointerEvents="box-none">
+                     {/* Product Meta Info (HSN, Barcode, Category) - Below Title */}
+                     <View style={styles.collapsedMetaRow}>
+                       <View style={styles.collapsedMetaLeft}>
+                         <Text style={styles.collapsedMeta}>
+                           HSN: {item.hsnCode || 'N/A'}
+                         </Text>
+                         {item.barcode && (
+                           <Text style={styles.collapsedMeta}>
+                             Barcode: {item.barcode}
+                           </Text>
+                         )}
+                       </View>
+                       <View style={styles.collapsedMetaRight}>
+                         <Text style={styles.collapsedCategory}>
+                           {item.category || 'Uncategorized'}
+                         </Text>
+                       </View>
+                     </View>
+
+                     {/* Separator Line */}
+                     <View style={styles.collapsedSeparator} />
+
+                     {/* Base Price per Unit Section */}
+                     <View style={styles.collapsedBasePriceSection}>
+                       <Text style={styles.collapsedBasePriceTitle}>Base price per unit</Text>
+                       {(() => {
+                         const unitPrices = calculateUnitPrices(item);
+                         return (
+                           <View style={styles.collapsedPriceBreakdown}>
+                             <View style={styles.collapsedPriceBreakdownRow}>
+                               <Text style={styles.collapsedPriceBreakdownItem}>
+                                 {formatPrice(unitPrices.primary.price)}/{unitPrices.primary.unit}
+                               </Text>
+                               {unitPrices.secondary && (
+                                 <Text style={styles.collapsedPriceBreakdownItem}>
+                                   {formatPrice(unitPrices.secondary.price)}/{unitPrices.secondary.unit}
+                                 </Text>
+                               )}
+                               {unitPrices.tertiary && (
+                                 <Text style={styles.collapsedPriceBreakdownItem}>
+                                   {formatPrice(unitPrices.tertiary.price)}/{unitPrices.tertiary.unit}
+                                 </Text>
+                               )}
+                             </View>
+                           </View>
+                         );
+                       })()}
+                     </View>
+
+                     {/* Separator Line */}
+                     <View style={styles.collapsedSeparator} />
+
+                     {/* Controls Row: Price, UoM, Quantity */}
+                     <View style={styles.collapsedControlsRow}>
+                       {/* Left: Editable Price */}
+                       <View style={styles.collapsedPriceSection}>
+                         <TouchableOpacity
+                           style={styles.collapsedPriceContainer}
+                           onPress={() => handlePriceEditStart(item)}
+                           activeOpacity={0.7}
+                         >
+                           {editingPriceId === item.id ? (
+                             <View style={styles.collapsedPriceEditContainer}>
+                               <TextInput
+                                 style={styles.collapsedPriceEditInput}
+                                 value={editingPriceValue}
+                                 onChangeText={setEditingPriceValue}
+                                 keyboardType="decimal-pad"
+                                 placeholder="0"
+                                 placeholderTextColor={Colors.textLight}
+                                 autoFocus
+                                 onBlur={() => handlePriceEditSave(item.id)}
+                                 onSubmitEditing={() => handlePriceEditSave(item.id)}
+                               />
+                               <TouchableOpacity
+                                 style={styles.collapsedPriceEditSave}
+                                 onPress={() => handlePriceEditSave(item.id)}
+                                 activeOpacity={0.7}
+                               >
+                                 <Text style={styles.collapsedPriceEditSaveText}>✓</Text>
+                               </TouchableOpacity>
+                             </View>
+                           ) : (
+                             <View style={styles.collapsedPriceDisplay}>
+                               <Text style={styles.collapsedPrice}>
+                                 {formatPrice(getCurrentUoMPrice(item) * item.quantity)}
+                               </Text>
+                               <Text style={styles.collapsedPriceHint}>Tap to edit</Text>
+                             </View>
+                           )}
+                         </TouchableOpacity>
+                       </View>
+
+                       {/* Center: UoM Selector */}
+                       <View style={styles.collapsedUoMSection}>
+                         <TouchableOpacity
+                           style={styles.collapsedUoMButton}
+                           onPress={() => {
+                             // Cycle through available UoMs
+                             const currentUoM = item.selectedUoM || 'primary';
+                             let nextUoM = 'primary';
+                             
+                             if (currentUoM === 'primary' && item.secondaryUnit && item.secondaryUnit !== 'None') {
+                               nextUoM = 'secondary';
+                             } else if (currentUoM === 'secondary' && item.tertiaryUnit && item.tertiaryUnit !== 'None') {
+                               nextUoM = 'tertiary';
+                             } else {
+                               nextUoM = 'primary';
+                             }
+                             
+                             // Update the item's selected UoM
+                             setCartItems(prev => prev.map(cartItem => 
+                               cartItem.id === item.id 
+                                 ? { ...cartItem, selectedUoM: nextUoM as 'primary' | 'secondary' | 'tertiary' }
+                                 : cartItem
+                             ));
+                           }}
+                           activeOpacity={0.7}
+                         >
+                           <Text style={styles.collapsedUoM}>
+                             {item.selectedUoM === 'primary' ? item.primaryUnit : 
+                              item.selectedUoM === 'secondary' ? item.secondaryUnit : 
+                              item.tertiaryUnit || 'Piece'}
+                           </Text>
+                           <Text style={styles.collapsedUoMHint}>Tap to change</Text>
+                         </TouchableOpacity>
+                       </View>
+                       
+                       {/* Right: Quantity Controls */}
+                       <View style={styles.collapsedQuantitySection}>
+                         <View 
+                           style={styles.collapsedQuantityControls}
+                           pointerEvents="auto"
+                         >
+                           <TouchableOpacity
+                             style={styles.collapsedQuantityButton}
+                             onPress={() => updateQuantity(item.id, item.quantity - 1)}
+                             activeOpacity={0.7}
+                           >
+                             <Text style={styles.collapsedQuantityButtonText}>-</Text>
+                           </TouchableOpacity>
+                           
+                           <TextInput
+                             style={styles.collapsedQuantityInput}
+                             value={item.quantity.toString()}
+                             onChangeText={(text) => {
+                               const newQuantity = parseInt(text) || 0;
+                               if (newQuantity >= 0) {
+                                 updateQuantity(item.id, newQuantity);
+                               }
+                             }}
+                             keyboardType="numeric"
+                             textAlign="center"
+                             placeholder="0"
+                             placeholderTextColor={Colors.textLight}
+                           />
+                           
+                           <TouchableOpacity
+                             style={styles.collapsedQuantityButton}
+                             onPress={() => updateQuantity(item.id, item.quantity + 1)}
+                             activeOpacity={0.7}
+                           >
+                             <Text style={styles.collapsedQuantityButtonText}>+</Text>
+                           </TouchableOpacity>
+                         </View>
+                       </View>
+                     </View>
+                     
+                     {/* Separator Line */}
+                     <View style={styles.collapsedSeparator} />
+                     
+                     {/* Centered Expand Hint with Line */}
+                     <View style={styles.expandHintContainer}>
+                       <View style={styles.expandHintLine} />
+                       <Text style={styles.expandHint}>Tap to expand</Text>
+                     </View>
+                   </View>
+                 )}
 
                 {/* Expanded View - Show when expanded */}
                 {isExpanded && (
@@ -1247,7 +1426,7 @@ export default function CartScreen() {
                     const unitPrices = calculateUnitPrices(item);
                     return (
                       <View style={styles.priceBreakdownContainer}>
-                        <Text style={styles.priceBreakdownTitle}>Price per Unit:</Text>
+                        <Text style={styles.priceBreakdownTitle}>Base Price per Unit:</Text>
                         <View style={styles.priceBreakdownRow}>
                           <Text style={styles.priceBreakdownItem}>
                             {formatPrice(unitPrices.primary.price)}/{unitPrices.primary.unit}
@@ -1265,6 +1444,27 @@ export default function CartScreen() {
                         </View>
                       </View>
                     );
+                  })()}
+
+                  {/* Selected UoM Price Display */}
+                  {(() => {
+                    const selectedUoM = item.selectedUoM || 'primary';
+                    const currentPrice = getCurrentUoMPrice(item);
+                    const currentUnit = selectedUoM === 'primary' ? item.primaryUnit : 
+                                      selectedUoM === 'secondary' ? item.secondaryUnit : 
+                                      item.tertiaryUnit || 'Piece';
+                    
+                    if (selectedUoM !== 'primary') {
+                      return (
+                        <View style={styles.selectedUoMPriceContainer}>
+                          <Text style={styles.selectedUoMPriceLabel}>Price for Selected Unit:</Text>
+                          <Text style={styles.selectedUoMPriceValue}>
+                            {formatPrice(currentPrice)}/{currentUnit}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    return null;
                   })()}
 
                   {/* Dynamic Stock Count */}
@@ -1454,52 +1654,153 @@ export default function CartScreen() {
 
 
 
-            {/* Invoice Discount Section */}
-            <View style={styles.discountSection}>
-              <Text style={styles.discountTitle}>Invoice Discount</Text>
-              <View style={styles.discountRow}>
-                <Text style={styles.discountLabel}>Discount Type:</Text>
-                <View style={styles.discountTypeContainer}>
-                  <TouchableOpacity
-                    style={[
-                      styles.discountTypeButton, 
-                      invoiceDiscountType === 'percentage' && styles.activeDiscountTypeButton
-                    ]}
-                    onPress={() => setInvoiceDiscountType('percentage')}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.discountTypeText,
-                      invoiceDiscountType === 'percentage' && styles.activeDiscountTypeText
-                    ]}>%</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.discountTypeButton,
-                      invoiceDiscountType === 'amount' && styles.activeDiscountTypeButton
-                    ]}
-                    onPress={() => setInvoiceDiscountType('amount')}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.discountTypeText,
-                      invoiceDiscountType === 'amount' && styles.activeDiscountTypeText
-                    ]}>₹</Text>
-                  </TouchableOpacity>
+            {/* Invoice Summary Section */}
+            <View style={styles.invoiceSummarySection}>
+              <Text style={styles.invoiceSummaryTitle}>Invoice Summary</Text>
+              
+              {/* Discount Row */}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Invoice Discount:</Text>
+                <View style={styles.discountControls}>
+                  <View style={styles.discountTypeContainer}>
+                    <TouchableOpacity
+                      style={[
+                        styles.discountTypeButton, 
+                        invoiceDiscountType === 'percentage' && styles.activeDiscountTypeButton
+                      ]}
+                      onPress={() => setInvoiceDiscountType('percentage')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.discountTypeText,
+                        invoiceDiscountType === 'percentage' && styles.activeDiscountTypeText
+                      ]}>%</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.discountTypeButton,
+                        invoiceDiscountType === 'amount' && styles.activeDiscountTypeButton
+                      ]}
+                      onPress={() => setInvoiceDiscountType('amount')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.discountTypeText,
+                        invoiceDiscountType === 'amount' && styles.activeDiscountTypeText
+                      ]}>₹</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={styles.discountInput}
+                    value={invoiceDiscountValue}
+                    onChangeText={setInvoiceDiscountValue}
+                    placeholder="0"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="decimal-pad"
+                  />
                 </View>
               </View>
-              <View style={styles.discountRow}>
-                <Text style={styles.discountLabel}>Discount Value:</Text>
-                <TextInput
-                  style={styles.invoiceDiscountInput}
-                  value={invoiceDiscountValue}
-                  onChangeText={setInvoiceDiscountValue}
-                  placeholder="0"
-                  placeholderTextColor={Colors.textLight}
-                  keyboardType="decimal-pad"
-                />
+
+              {/* Other Charges Row */}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Other Charges:</Text>
+                <TouchableOpacity
+                  style={styles.otherChargesToggle}
+                  onPress={() => setShowOtherCharges(!showOtherCharges)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.otherChargesToggleText}>
+                    {showOtherCharges ? '▼' : '▶'}
+                  </Text>
+                </TouchableOpacity>
               </View>
+              
+              {/* Other Charges Content */}
+              {showOtherCharges && (
+                <View style={styles.otherChargesContent}>
+                  {otherCharges.map((charge, index) => (
+                    <View key={charge.id} style={styles.otherChargeItem}>
+                      <View style={styles.otherChargeRow}>
+                        <Text style={styles.otherChargeLabel}>Charge Name:</Text>
+                        <TextInput
+                          style={styles.otherChargeInput}
+                          value={charge.name}
+                          onChangeText={(text) => {
+                            const newCharges = [...otherCharges];
+                            newCharges[index].name = text;
+                            setOtherCharges(newCharges);
+                          }}
+                          placeholder="e.g., Delivery Fee"
+                          placeholderTextColor={Colors.textLight}
+                        />
+                      </View>
+                      
+                      <View style={styles.otherChargeRow}>
+                        <Text style={styles.otherChargeLabel}>Amount:</Text>
+                        <TextInput
+                          style={styles.otherChargeInput}
+                          value={charge.amount}
+                          onChangeText={(text) => {
+                            const newCharges = [...otherCharges];
+                            newCharges[index].amount = text;
+                            setOtherCharges(newCharges);
+                          }}
+                          placeholder="0"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                      
+                      <View style={styles.otherChargeRow}>
+                        <Text style={styles.otherChargeLabel}>Tax Rate (%):</Text>
+                        <TextInput
+                          style={styles.otherChargeInput}
+                          value={charge.taxRate}
+                          onChangeText={(text) => {
+                            const newCharges = [...otherCharges];
+                            newCharges[index].taxRate = text;
+                            setOtherCharges(newCharges);
+                          }}
+                          placeholder="0"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                      
+                      <TouchableOpacity
+                        style={styles.removeOtherChargeButton}
+                        onPress={() => {
+                          const newCharges = otherCharges.filter((_, i) => i !== index);
+                          setOtherCharges(newCharges);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.removeOtherChargeButtonText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  
+                  <TouchableOpacity
+                    style={styles.addOtherChargeButton}
+                    onPress={() => {
+                      const newCharge = {
+                        id: Date.now().toString(),
+                        name: '',
+                        amount: '',
+                        taxRate: '0',
+                        description: ''
+                      };
+                      setOtherCharges([...otherCharges, newCharge]);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.addOtherChargeButtonText}>+ Add Other Charge</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
+
+
 
             {/* Total Section */}
             <View style={styles.totalSection}>
@@ -1518,21 +1819,7 @@ export default function CartScreen() {
                   {formatPrice(calculateInvoiceDiscount())}
                 </Text>
               </View>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>GST:</Text>
-                <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => {
-                    const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
-                    const { adjustedAmount } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
-                    
-                    // Calculate tax on the UoM-adjusted final discounted amount
-                    const taxRate = item.taxRate || 0;
-                    const taxAmount = adjustedAmount * (taxRate / 100);
-                    
-                    return total + taxAmount;
-                  }, 0))}
-                </Text>
-              </View>
+
               
               {/* GST Breakdown */}
               {cartItems.some(item => item.taxRate && item.taxRate > 0) && (
@@ -1543,10 +1830,7 @@ export default function CartScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={styles.taxBreakdownLabel}>
-                      Tax calc for {cartItems.filter(item => item.taxRate && item.taxRate > 0).length > 1 
-                        ? `${formatProductNameForTaxSection(cartItems.find(item => item.taxRate && item.taxRate > 0)?.name || '')} & ${cartItems.filter(item => item.taxRate && item.taxRate > 0).length - 1} more`
-                        : formatProductNameForTaxSection(cartItems.find(item => item.taxRate && item.taxRate > 0)?.name || '')
-                      }
+                      GST Breakdown
                     </Text>
                     <Text style={styles.taxSectionTotal}>
                       {formatPrice(cartItems.reduce((total, item) => {
@@ -1572,14 +1856,25 @@ export default function CartScreen() {
                           // Calculate tax on the final discounted amount
                           const cgstAmount = (finalDiscountedAmount * (item.taxRate / 100)) / 2;
                           const sgstAmount = (finalDiscountedAmount * (item.taxRate / 100)) / 2;
+                          const totalGSTAmount = cgstAmount + sgstAmount;
                           
                           return (
                             <View key={index} style={styles.taxBreakdownRow}>
-                              <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
-                              <Text style={styles.taxBreakdownText}>
-                                CGST ({item.taxRate / 2}%): {formatPrice(cgstAmount)} | 
-                                SGST ({item.taxRate / 2}%): {formatPrice(sgstAmount)}
-                              </Text>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                                <Text style={styles.taxBreakdownAmount}>
+                                  {formatPrice(totalGSTAmount)}
+                                </Text>
+                              </View>
+                              
+                              {expandedCards.has(item.id) && (
+                                <View style={styles.taxBreakdownDetails}>
+                                  <Text style={styles.taxBreakdownText}>
+                                    CGST ({item.taxRate / 2}%): {formatPrice(cgstAmount)} | 
+                                    SGST ({item.taxRate / 2}%): {formatPrice(sgstAmount)}
+                                  </Text>
+                                </View>
+                              )}
                             </View>
                           );
                         }
@@ -1589,36 +1884,7 @@ export default function CartScreen() {
                   )}
                 </View>
               )}
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>CESS:</Text>
-                <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => {
-                    const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
-                    const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
-                    
-                    let cessAmount = 0;
-                    
-                    if (item.cessType && item.cessType !== 'none') {
-                      if (item.cessType === 'value') {
-                        cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
-                      } else if (item.cessType === 'quantity') {
-                        cessAmount = cessPer * item.quantity;
-                      } else if (item.cessType === 'value_and_quantity') {
-                        const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
-                        const quantityCess = cessPer * item.quantity;
-                        cessAmount = valueCess + quantityCess;
-                      } else if (item.cessType === 'mrp') {
-                        // MRP-based CESS (percentage of MRP) - adjust MRP proportionally
-                        const mrpPrice = parseFloat(item.mrp || '0') || 0;
-                        const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
-                        cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
-                      }
-                    }
-                    
-                    return total + cessAmount;
-                  }, 0))}
-                </Text>
-              </View>
+
               
               {/* CESS Breakdown */}
               {cartItems.some(item => item.cessType && item.cessType !== 'none') && (
@@ -1629,10 +1895,7 @@ export default function CartScreen() {
                     activeOpacity={0.7}
                   >
                     <Text style={styles.taxBreakdownLabel}>
-                      Tax calc for {cartItems.filter(item => item.cessType && item.cessType !== 'none').length > 1 
-                        ? `${formatProductNameForTaxSection(cartItems.find(item => item.cessType && item.cessType !== 'none')?.name || '')} & ${cartItems.filter(item => item.cessType && item.cessType !== 'none').length - 1} more`
-                        : formatProductNameForTaxSection(cartItems.find(item => item.cessType && item.cessType !== 'none')?.name || '')
-                      }
+                      CESS Breakdown
                     </Text>
                     <Text style={styles.taxSectionTotal}>
                       {formatPrice(cartItems.reduce((total, item) => {
@@ -1678,29 +1941,39 @@ export default function CartScreen() {
                           
                           if (item.cessType === 'value') {
                             cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
-                            cessDescription = `Value-based (${item.cessRate}% of ₹${adjustedAmount.toFixed(2)})`;
+                            cessDescription = `Value-based (${item.cessRate}%)`;
                           } else if (item.cessType === 'quantity') {
                             cessAmount = cessPer * item.quantity;
-                            cessDescription = `Quantity-based (₹${cessPer.toFixed(2)} × ${item.quantity} ${item.selectedUoM === 'tertiary' ? item.tertiaryUnit : item.selectedUoM === 'secondary' ? item.secondaryUnit : item.primaryUnit}s)`;
+                            cessDescription = `Quantity-based (₹${cessPer.toFixed(2)} per unit)`;
                           } else if (item.cessType === 'value_and_quantity') {
                             const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
                             const quantityCess = cessPer * item.quantity;
                             cessAmount = valueCess + quantityCess;
-                            cessDescription = `Value + Quantity (${item.cessRate}% + ₹${cessPer.toFixed(2)} × ${item.quantity} ${item.selectedUoM === 'tertiary' ? item.tertiaryUnit : item.selectedUoM === 'secondary' ? item.secondaryUnit : item.primaryUnit}s)`;
+                            cessDescription = `Value + Quantity (${item.cessRate}% + ₹${cessPer.toFixed(2)})`;
                           } else if (item.cessType === 'mrp') {
                             // MRP-based CESS (percentage of MRP) - adjust MRP proportionally
                             const mrpPrice = parseFloat(item.mrp || '0') || 0;
                             const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
                             cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
-                            cessDescription = `MRP-based (${item.cessRate}% of MRP ₹${mrpPrice.toFixed(2)} × ${item.cessRate}% × ${item.quantity} units)`;
+                            cessDescription = `MRP-based (${item.cessRate}%)`;
                           }
                           
                           return (
                             <View key={index} style={styles.taxBreakdownRow}>
-                              <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
-                              <Text style={styles.taxBreakdownText}>
-                                {formatPrice(cessAmount)} - {cessDescription}
-                              </Text>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                <Text style={styles.taxBreakdownItem}>{item.name}:</Text>
+                                <Text style={styles.taxBreakdownAmount}>
+                                  {formatPrice(cessAmount)}
+                                </Text>
+                              </View>
+                              
+                              {expandedCards.has(item.id) && (
+                                <View style={styles.taxBreakdownDetails}>
+                                  <Text style={styles.taxBreakdownText}>
+                                    {formatPrice(cessAmount)} - {cessDescription}
+                                  </Text>
+                                </View>
+                              )}
                             </View>
                           );
                         }
@@ -1731,6 +2004,83 @@ export default function CartScreen() {
                   )}
                 </View>
               </View>
+              
+              {/* Overall Tax Totals */}
+              {cartItems.some(item => item.taxRate && item.taxRate > 0) && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Overall GST:</Text>
+                  <Text style={styles.totalAmount}>
+                    {formatPrice(cartItems.reduce((total, item) => {
+                      if (item.taxRate && item.taxRate > 0) {
+                        const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                        const taxAmount = finalDiscountedAmount * (item.taxRate / 100);
+                        return total + taxAmount;
+                      }
+                      return total;
+                    }, 0))}
+                  </Text>
+                </View>
+              )}
+              
+              {cartItems.some(item => item.cessType && item.cessType !== 'none') && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Overall CESS:</Text>
+                  <Text style={styles.totalAmount}>
+                    {formatPrice(cartItems.reduce((total, item) => {
+                      const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
+                      const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
+                      
+                      let cessAmount = 0;
+                      
+                      if (item.cessType && item.cessType !== 'none') {
+                        if (item.cessType === 'value') {
+                          cessAmount = adjustedAmount * ((item.cessRate || 0) / 100);
+                        } else if (item.cessType === 'quantity') {
+                          cessAmount = cessPer * item.quantity;
+                        } else if (item.cessType === 'value_and_quantity') {
+                          const valueCess = adjustedAmount * ((item.cessRate || 0) / 100);
+                          const quantityCess = cessPer * item.quantity;
+                          cessAmount = valueCess + quantityCess;
+                        } else if (item.cessType === 'mrp') {
+                          const mrpPrice = parseFloat(item.mrp || '0') || 0;
+                          const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
+                          cessAmount = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+                        }
+                      }
+                      
+                      return total + cessAmount;
+                    }, 0))}
+                  </Text>
+                </View>
+              )}
+              
+              {/* Other Charges Total */}
+              {otherCharges.length > 0 && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Other Charges:</Text>
+                  <Text style={styles.totalAmount}>
+                    {formatPrice(otherCharges.reduce((total, charge) => {
+                      const amount = parseFloat(charge.amount) || 0;
+                      return total + amount;
+                    }, 0))}
+                  </Text>
+                </View>
+              )}
+              
+              {/* Other Charges Tax Total */}
+              {otherCharges.some(charge => parseFloat(charge.taxRate) > 0) && (
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Other Charges Tax:</Text>
+                  <Text style={styles.totalAmount}>
+                    {formatPrice(otherCharges.reduce((total, charge) => {
+                      const amount = parseFloat(charge.amount) || 0;
+                      const taxRate = parseFloat(charge.taxRate) || 0;
+                      const chargeTax = amount * (taxRate / 100);
+                      return total + chargeTax;
+                    }, 0))}
+                  </Text>
+                </View>
+              )}
               
               <View style={[styles.totalRow, styles.grandTotalRow]}>
                 <Text style={styles.grandTotalLabel}>Total:</Text>
@@ -4262,23 +4612,175 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: Colors.text,
   },
-  collapsedUoM: {
-    fontSize: 12,
+  collapsedMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  collapsedMetaLeft: {
+    flex: 1,
+  },
+  collapsedMetaRight: {
+    alignItems: 'flex-end',
+  },
+  collapsedMeta: {
+    fontSize: 10,
     color: Colors.textLight,
-    backgroundColor: Colors.grey[100],
-    paddingHorizontal: 8,
+    fontFamily: 'monospace',
+    marginBottom: 2,
+  },
+  collapsedCategory: {
+    fontSize: 10,
+    color: Colors.primary,
+    fontWeight: '600',
+    backgroundColor: Colors.primary + '10',
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  collapsedSeparator: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginVertical: 8,
+  },
+  collapsedBasePriceSection: {
+    marginBottom: 8,
+  },
+  collapsedBasePriceTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  collapsedPriceBreakdown: {
+    backgroundColor: Colors.grey[50],
+    padding: 8,
+    borderRadius: 6,
+  },
+  collapsedPriceBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  collapsedPriceBreakdownItem: {
+    fontSize: 10,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    fontWeight: '400',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  collapsedControlsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  collapsedPriceSection: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  collapsedPriceContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  collapsedPriceDisplay: {
+    alignItems: 'flex-start',
   },
   collapsedPrice: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.primary,
   },
+  collapsedPriceHint: {
+    fontSize: 9,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  collapsedPriceEditContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  collapsedPriceEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 14,
+    color: Colors.text,
+    backgroundColor: Colors.background,
+    minWidth: 80,
+  },
+  collapsedPriceEditSave: {
+    backgroundColor: Colors.primary,
+    borderRadius: 4,
+    padding: 4,
+    minWidth: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collapsedPriceEditSaveText: {
+    color: Colors.background,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  collapsedUoMSection: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collapsedUoMButton: {
+    alignItems: 'center',
+  },
+  collapsedQuantitySection: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  collapsedUoM: {
+    fontSize: 12,
+    color: Colors.textLight,
+    backgroundColor: Colors.grey[100],
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    textAlign: 'center',
+    minWidth: 60,
+    fontWeight: '600',
+  },
+  collapsedUoMHint: {
+    fontSize: 8,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  expandHintContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  expandHintLine: {
+    width: 40,
+    height: 3,
+    backgroundColor: Colors.grey[300],
+    borderRadius: 2,
+  },
   expandHint: {
     fontSize: 11,
     color: Colors.textLight,
-    textAlign: 'center',
     fontStyle: 'italic',
   },
   collapseButton: {
@@ -4381,6 +4883,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
+  selectedUoMPriceContainer: {
+    marginBottom: 8,
+    backgroundColor: Colors.primary + '10',
+    padding: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  selectedUoMPriceLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  selectedUoMPriceValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.primary,
+    textAlign: 'center',
+  },
   dynamicStockContainer: {
     alignItems: 'center',
     marginBottom: 8,
@@ -4444,6 +4968,242 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+  },
+  otherChargesSection: {
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  otherChargesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  otherChargesTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  otherChargesToggle: {
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: Colors.primary + '20',
+  },
+  otherChargesToggleText: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: 'bold',
+  },
+  otherChargesContent: {
+    gap: 16,
+  },
+  otherChargeItem: {
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  otherChargeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  otherChargeLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+    width: 100,
+  },
+  otherChargeInput: {
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: Colors.text,
+    width: 150,
+    textAlign: 'center',
+  },
+  removeOtherChargeButton: {
+    backgroundColor: Colors.error + '20',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignSelf: 'flex-end',
+  },
+  removeOtherChargeButtonText: {
+    fontSize: 12,
+    color: Colors.error,
+    fontWeight: '600',
+  },
+  addOtherChargeButton: {
+    backgroundColor: Colors.primary + '20',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.primary + '40',
+  },
+  addOtherChargeButtonText: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  invoiceSummarySection: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  invoiceSummaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  summaryLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+    flex: 1,
+  },
+  discountControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 2,
+    justifyContent: 'flex-end',
+  },
+  discountInput: {
+    borderWidth: 1,
+    borderColor: Colors.grey[300],
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: Colors.text,
+    width: 100,
+    textAlign: 'center',
+    backgroundColor: Colors.background,
+    height: 40,
+  },
+  taxSummarySection: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  taxSummaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  taxSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  taxSummaryLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  taxExpandButton: {
+    backgroundColor: Colors.primary + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  taxExpandText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  taxSummaryAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  taxDetailsContainer: {
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  taxDetailsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  taxDetailRow: {
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  taxDetailItem: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  taxDetailAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+    textAlign: 'right',
+  },
+  taxDetailBreakdown: {
+    fontSize: 11,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   discountTitle: {
     fontSize: 16,
@@ -4813,6 +5573,11 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 1,
   },
+  taxBreakdownAmount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.text,
+  },
   taxBreakdownText: {
     fontSize: 10,
     color: Colors.textLight,
@@ -5159,7 +5924,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.grey[50],
     borderRadius: 8,
     padding: 2,
-    marginBottom: 12,
+    gap: 2,
     width: 120,
     borderWidth: 1,
     borderColor: Colors.grey[200],
@@ -5167,10 +5932,11 @@ const styles = StyleSheet.create({
   discountTypeButton: {
     flex: 1,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 55,
   },
   activeDiscountTypeButton: {
     backgroundColor: Colors.primary,
@@ -5179,6 +5945,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.textLight,
+    textAlign: 'center',
   },
   activeDiscountTypeText: {
     color: Colors.background,

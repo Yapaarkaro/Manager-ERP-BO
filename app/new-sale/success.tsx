@@ -33,8 +33,54 @@ export default function SaleSuccessScreen() {
   const payment = JSON.parse(paymentData as string);
   const [showInvoice, setShowInvoice] = useState(false);
 
+  // Safety check for payment data
+  if (!payment || !payment.customer || !payment.cartItems || !Array.isArray(payment.cartItems)) {
+    console.error('=== ERROR: Invalid payment data ===');
+    console.error('Payment data:', payment);
+    console.error('Customer:', payment?.customer);
+    console.error('CartItems:', payment?.cartItems);
+    console.error('====================================');
+    
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.headerTitle}>← Back</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>⚠️ Invalid Payment Data</Text>
+          <Text style={styles.errorMessage}>
+            The payment data is missing or invalid. Please go back and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.errorButton}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.errorButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   // Debug: Log customer data
   React.useEffect(() => {
+    // Safety check for customer data
+    if (!payment.customer) {
+      console.error('=== ERROR: Customer data is missing ===');
+      console.error('Payment data:', payment);
+      console.error('====================================');
+      return;
+    }
+
     console.log('=== SUCCESS SCREEN CUSTOMER DATA ===');
     console.log('Customer:', payment.customer);
     console.log('Payment Terms:', payment.customer.paymentTerms);
@@ -45,11 +91,28 @@ export default function SaleSuccessScreen() {
 
   // Log successful sale completion and add to data store
   React.useEffect(() => {
+    // Safety check for customer data
+    if (!payment.customer) {
+      console.error('=== ERROR: Customer data is missing ===');
+      console.error('Payment data:', payment);
+      console.error('====================================');
+      return;
+    }
+
+    // Safety check for cartItems
+    if (!payment.cartItems || !Array.isArray(payment.cartItems)) {
+      console.error('=== ERROR: cartItems is missing or invalid ===');
+      console.error('Payment data:', payment);
+      console.error('CartItems:', payment.cartItems);
+      console.error('==============================================');
+      return;
+    }
+
     console.log('=== SALE COMPLETED SUCCESSFULLY ===');
     console.log('Invoice Number:', invoiceNumber);
     console.log('Customer:', payment.customer.name);
     console.log('Customer Type:', payment.customer.customerType);
-    console.log('Total Amount:', formatAmount(payment.total));
+    console.log('Total Amount:', formatAmount(payment.amount || payment.total || 0));
     console.log('Payment Method:', getPaymentMethodText());
     console.log('Items Count:', payment.cartItems.length);
     console.log('Completed at:', new Date().toISOString());
@@ -93,13 +156,13 @@ export default function SaleSuccessScreen() {
       invoiceNumber: invoiceNumber,
       customerId: payment.customer.id || `CUST_${Date.now()}`,
       customerName: payment.customer.name,
-      customerType: payment.customer.isBusinessCustomer ? 'business' : 'individual',
+      customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
       items: saleItems,
       subtotal: subtotal,
       taxAmount: taxAmount,
       cessAmount: cessAmount,
       totalAmount: totalAmount,
-      paidAmount: payment.amount,
+      paidAmount: payment.amount || payment.total || 0,
       balanceAmount: payment.balance || 0,
       paymentMethod: payment.method,
       othersMethod: payment.othersMethod,
@@ -153,7 +216,8 @@ export default function SaleSuccessScreen() {
     return `INV-${year}${month}${day}-${random}`;
   };
 
-  const invoiceNumber = generateInvoiceNumber();
+  // Use useMemo to ensure invoice number is generated only once
+  const invoiceNumber = React.useMemo(() => generateInvoiceNumber(), []);
 
   const handleDownloadInvoice = () => {
     console.log('Download invoice:', invoiceNumber);
@@ -228,15 +292,15 @@ export default function SaleSuccessScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Amount:</Text>
                 <Text style={[styles.detailValue, styles.amountValue]}>
-                  {formatAmount(payment.amount)}
+                  {formatAmount(payment.amount || payment.total || 0)}
                 </Text>
               </View>
 
-              {payment.method === 'cash' && payment.balance > 0 && (
+              {payment.method === 'cash' && (payment.balance || 0) > 0 && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Balance Returned:</Text>
                   <Text style={[styles.detailValue, styles.balanceValue]}>
-                    {formatAmount(payment.balance)}
+                    {formatAmount(payment.balance || 0)}
                   </Text>
                 </View>
               )}
@@ -619,9 +683,9 @@ export default function SaleSuccessScreen() {
               <View style={styles.paymentSection}>
                 <Text style={styles.sectionTitle}>Payment Method:</Text>
                 <Text style={styles.paymentMethod}>{getPaymentMethodText()}</Text>
-                {payment.method === 'cash' && payment.balance > 0 && (
-                  <Text style={styles.paymentBalance}>Balance Returned: {formatAmount(payment.balance)}</Text>
-                )}
+                              {payment.method === 'cash' && (payment.balance || 0) > 0 && (
+                <Text style={styles.paymentBalance}>Balance Returned: {formatAmount(payment.balance || 0)}</Text>
+              )}
               </View>
 
               {/* Thank You Note */}
@@ -1137,5 +1201,66 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.textLight,
     textAlign: 'center',
+  },
+  
+  // Header Styles for Error Display
+  headerSafeArea: {
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: Colors.background,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    flex: 1,
+  },
+  
+  // Error Display Styles
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  errorTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.error,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: Colors.textLight,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  errorButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+  },
+  errorButtonText: {
+    color: Colors.background,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

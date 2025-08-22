@@ -47,6 +47,7 @@ export default function AddressAutocomplete({
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [hasSelectedAddress, setHasSelectedAddress] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync inputValue with external value prop
@@ -218,6 +219,8 @@ export default function AddressAutocomplete({
     // IMMEDIATELY close suggestions and clear all states
     setShowSuggestions(false);
     setSuggestions([]);
+    setIsLoading(false); // Ensure loading state is also cleared
+    setHasSelectedAddress(true); // Mark that an address has been selected
     
     // Ensure onAddressSelect is defined before calling it
     if (typeof onAddressSelect === 'function') {
@@ -254,19 +257,27 @@ export default function AddressAutocomplete({
   };
 
   const handleInputFocus = () => {
-    if (suggestions && suggestions.length > 0) {
+    // Only show suggestions if there are actual suggestions, we're not loading, and no address has been selected
+    if (suggestions && suggestions.length > 0 && !isLoading && !hasSelectedAddress) {
       setShowSuggestions(true);
     }
   };
 
   const handleInputBlur = () => {
-    // Hide suggestions immediately
-    setShowSuggestions(false);
+    // Hide suggestions immediately with a small delay to ensure proper touch handling
+    setTimeout(() => {
+      setShowSuggestions(false);
+    }, 100);
   };
 
   const handleInputChange = (text: string) => {
     // Update internal state
     setInputValue(text);
+    
+    // Reset selection flag when user starts typing again
+    if (hasSelectedAddress) {
+      setHasSelectedAddress(false);
+    }
     
     // Call external onChangeText if provided
     if (typeof onChangeText === 'function') {

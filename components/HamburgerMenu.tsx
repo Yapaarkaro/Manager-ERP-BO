@@ -8,7 +8,7 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
-import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee } from 'lucide-react-native';
+import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building } from 'lucide-react-native';
 
 interface HamburgerMenuProps {
   visible: boolean;
@@ -68,6 +68,12 @@ const menuSections: MenuSection[] = [
       { id: 'customers', title: 'Customers', route: '/people/customers' },
       { id: 'staff', title: 'Staff', route: '/people/staff' },
     ],
+  },
+  {
+    id: 'banks',
+    title: 'Banks',
+    icon: Building,
+    route: '/banks',
   },
   {
     id: 'locations',

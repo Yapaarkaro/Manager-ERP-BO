@@ -490,7 +490,7 @@ export default function ManualProductScreen() {
     setShowTaxModal(false);
   };
 
-  const handleCessTypeSelect = (type: 'none' | 'value' | 'quantity' | 'value_and_quantity') => {
+  const handleCessTypeSelect = (type: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp') => {
     setFormData(prev => ({ ...prev, cessType: type }));
     setShowCessTypeModal(false);
     // Show cess amount/rate modal after type selection if not 'none'
@@ -543,7 +543,62 @@ export default function ManualProductScreen() {
     }
   };
 
-  // Helper function to calculate tax-exclusive price from tax-inclusive price
+  // Helper function to calculate base price from tax-inclusive price (with GST and CESS)
+  const calculateBasePriceFromTaxInclusive = (
+    inclusivePrice: number, 
+    taxRate: number, 
+    cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp', 
+    cessRate: number = 0, 
+    cessAmount: number = 0, 
+    mrp: number = 0
+  ): number => {
+    const gstRate = taxRate / 100;
+    const cessRateDecimal = cessRate / 100;
+    
+    // Use MRP if provided, otherwise use inclusive price as fallback
+    const effectiveMRP = mrp > 0 ? mrp : inclusivePrice;
+    
+    let basePrice = 0;
+    
+    switch (cessType) {
+      case 'value':
+        // P = B * (1 + g + c_val)
+        // B = P / (1 + g + c_val)
+        basePrice = inclusivePrice / (1 + gstRate + cessRateDecimal);
+        break;
+        
+      case 'quantity':
+        // P = B * (1 + g) + c_qty * n
+        // B = (P - c_qty * n) / (1 + g)
+        // For single unit calculation, n = 1
+        basePrice = (inclusivePrice - cessAmount) / (1 + gstRate);
+        break;
+        
+      case 'value_and_quantity':
+        // P = B * (1 + g + c_val) + c_qty * n
+        // B = (P - c_qty * n) / (1 + g + c_val)
+        // For single unit calculation, n = 1
+        basePrice = (inclusivePrice - cessAmount) / (1 + gstRate + cessRateDecimal);
+        break;
+        
+      case 'mrp':
+        // P = B * (1 + g) + c_mrp * M
+        // B = (P - c_mrp * M) / (1 + g)
+        basePrice = (inclusivePrice - cessRateDecimal * effectiveMRP) / (1 + gstRate);
+        break;
+        
+      default:
+        // No CESS, only GST
+        // P = B * (1 + g)
+        // B = P / (1 + g)
+        basePrice = inclusivePrice / (1 + gstRate);
+        break;
+    }
+    
+    return Math.max(0, basePrice); // Ensure base price is not negative
+  };
+
+  // Helper function to calculate tax-exclusive price from tax-inclusive price (simple GST only)
   const calculateTaxExclusivePrice = (inclusivePrice: number, taxRate: number): number => {
     return inclusivePrice / (1 + (taxRate / 100));
   };
@@ -553,19 +608,132 @@ export default function ManualProductScreen() {
     return exclusivePrice * (1 + (taxRate / 100));
   };
 
+  // Helper function to calculate tax and CESS breakdown from base price
+  const calculateTaxAndCessBreakdown = (
+    basePrice: number,
+    taxRate: number,
+    cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp',
+    cessRate: number = 0,
+    cessAmount: number = 0,
+    mrp: number = 0
+  ) => {
+    const gstRate = taxRate / 100;
+    const cessRateDecimal = cessRate / 100;
+    
+    // Calculate GST
+    const gstAmount = basePrice * gstRate;
+    const cgstAmount = gstAmount / 2;
+    const sgstAmount = gstAmount / 2;
+    
+    // Calculate CESS based on type
+    let cessTotal = 0;
+    let cessBreakdown = '';
+    
+    switch (cessType) {
+      case 'value':
+        cessTotal = basePrice * cessRateDecimal;
+        cessBreakdown = `Value-based (${cessRate}% of ₹${basePrice.toFixed(2)})`;
+        break;
+        
+      case 'quantity':
+        cessTotal = cessAmount; // For single unit
+        cessBreakdown = `Quantity-based (₹${cessAmount.toFixed(2)} per unit)`;
+        break;
+        
+      case 'value_and_quantity':
+        const valueCess = basePrice * cessRateDecimal;
+        const quantityCess = cessAmount; // For single unit
+        cessTotal = valueCess + quantityCess;
+        cessBreakdown = `Value + Quantity (${cessRate}% + ₹${cessAmount.toFixed(2)} per unit)`;
+        break;
+        
+      case 'mrp':
+        const effectiveMRP = mrp > 0 ? mrp : basePrice;
+        cessTotal = effectiveMRP * cessRateDecimal;
+        cessBreakdown = `MRP-based (${cessRate}% of MRP ₹${effectiveMRP.toFixed(2)})`;
+        break;
+        
+      default:
+        cessTotal = 0;
+        cessBreakdown = 'No CESS';
+        break;
+    }
+    
+    const total = basePrice + gstAmount + cessTotal;
+    
+    return {
+      basePrice,
+      gstAmount,
+      cgstAmount,
+      sgstAmount,
+      cessTotal,
+      cessBreakdown,
+      total,
+      breakdown: {
+        base: basePrice,
+        gst: gstAmount,
+        cess: cessTotal,
+        total: total
+      }
+    };
+  };
+
   // Helper function to get display prices based on tax inclusion toggle
   const getDisplayPrices = () => {
     const perUnitPrice = parseFloat(formData.perUnitPrice) || 0;
     const salesPrice = parseFloat(formData.salesPrice) || 0;
     const taxRate = formData.taxRate;
+    const cessType = formData.cessType || 'none';
+    const cessRate = formData.cessRate || 0;
+    const cessAmount = parseFloat(formData.cessAmount) || 0;
+    const mrp = parseFloat(formData.mrp) || 0;
 
     if (formData.taxInclusive) {
-      // Prices entered are inclusive, calculate exclusive for display
+      // Prices entered are inclusive, calculate base price and breakdown
+      const perUnitBasePrice = calculateBasePriceFromTaxInclusive(
+        perUnitPrice, 
+        taxRate, 
+        cessType, 
+        cessRate, 
+        cessAmount, 
+        mrp
+      );
+      
+      const salesBasePrice = calculateBasePriceFromTaxInclusive(
+        salesPrice, 
+        taxRate, 
+        cessType, 
+        cessRate, 
+        cessAmount, 
+        mrp
+      );
+      
+      // Calculate full breakdown for display
+      const perUnitBreakdown = calculateTaxAndCessBreakdown(
+        perUnitBasePrice,
+        taxRate,
+        cessType,
+        cessRate,
+        cessAmount,
+        mrp
+      );
+      
+      const salesBreakdown = calculateTaxAndCessBreakdown(
+        salesBasePrice,
+        taxRate,
+        cessType,
+        cessRate,
+        cessAmount,
+        mrp
+      );
+      
       return {
-        perUnitBasePrice: calculateTaxExclusivePrice(perUnitPrice, taxRate),
-        salesBasePrice: calculateTaxExclusivePrice(salesPrice, taxRate),
+        perUnitBasePrice,
+        salesBasePrice,
         perUnitFinalPrice: perUnitPrice,
         salesFinalPrice: salesPrice,
+        perUnitBreakdown,
+        salesBreakdown,
         showCalculation: true
       };
     } else {
@@ -1488,9 +1656,19 @@ export default function ManualProductScreen() {
             </View>
           </View>
 
-          {/* Pricing */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Pricing</Text>
+                     {/* Pricing */}
+           <View style={styles.section}>
+             <Text style={styles.sectionTitle}>Pricing</Text>
+             
+             {/* Tax Inclusion Explanation */}
+             <View style={styles.taxExplanationContainer}>
+               <Text style={styles.taxExplanationTitle}>Tax-Inclusive vs Tax-Exclusive Pricing</Text>
+               <Text style={styles.taxExplanationText}>
+                 <Text style={styles.taxExplanationBold}>Tax-Exclusive:</Text> Enter base price, taxes added on top{'\n'}
+                 <Text style={styles.taxExplanationBold}>Tax-Inclusive:</Text> Enter final price, system calculates base price{'\n\n'}
+                 <Text style={styles.taxExplanationBold}>Note:</Text> All tax calculations are done automatically behind the scenes.
+               </Text>
+             </View>
             
             {/* Tax Inclusion Toggle */}
             <View style={styles.inputGroup}>
@@ -1636,115 +1814,282 @@ export default function ManualProductScreen() {
               </>
             )}
 
-            {/* Simplified Tax Calculation Display */}
-            {formData.perUnitPrice && formData.taxRate > 0 && (
-              <View style={styles.simpleTaxContainer}>
-                <Text style={styles.simpleTaxText}>
-                  {formData.taxInclusive 
-                    ? `Base Price: ₹${getDisplayPrices().perUnitBasePrice.toFixed(2)} | GST: ${formData.taxRate}%`
-                    : `Final Price: ₹${getDisplayPrices().perUnitFinalPrice.toFixed(2)} | GST: ${formData.taxRate}%`
-                  }
-                  {formData.cessType && formData.cessType !== 'none' && ` | CESS: ${formData.cessRate}%`}
-                </Text>
-              </View>
-            )}
+                         {/* Tax Calculation Display */}
+             {formData.perUnitPrice && formData.taxRate > 0 && (
+               <View style={styles.taxCalculationContainer}>
+                 <Text style={styles.taxCalculationTitle}>
+                   Tax Calculation Summary
+                 </Text>
+                 
+                 {formData.taxInclusive ? (
+                   // Show breakdown for tax-inclusive pricing
+                   <View style={styles.taxCalculationContent}>
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>Price Entered (Tax-Inclusive):</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{parseFloat(formData.perUnitPrice).toFixed(2)}</Text>
+                       </View>
+                     </View>
+                     
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>Base Price (Before Tax):</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{getDisplayPrices().perUnitBasePrice.toFixed(2)}</Text>
+
+                       </View>
+                     </View>
+                     
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>GST ({formData.taxRate}%):</Text>
+                         <Text style={styles.taxCalculationPrimary}>
+                           ₹{((getDisplayPrices().perUnitBasePrice * formData.taxRate) / 100).toFixed(2)}
+                         </Text>
+
+                       </View>
+                     </View>
+                     
+                     {formData.cessType !== 'none' && (
+                       <View style={styles.taxCalculationRow}>
+                         <View style={styles.taxCalculationColumn}>
+                           <Text style={styles.taxCalculationLabel}>CESS:</Text>
+                           <Text style={styles.taxCalculationPrimary}>
+                             ₹{(() => {
+                               const basePrice = getDisplayPrices().perUnitBasePrice;
+                               switch (formData.cessType) {
+                                 case 'value':
+                                   return (basePrice * formData.cessRate / 100).toFixed(2);
+                                 case 'quantity':
+                                   return parseFloat(formData.cessAmount || '0').toFixed(2);
+                                 case 'value_and_quantity':
+                                   const valueCess = basePrice * formData.cessRate / 100;
+                                   const quantityCess = parseFloat(formData.cessAmount || '0');
+                                   return (valueCess + quantityCess).toFixed(2);
+                                 case 'mrp':
+                                   const mrpPrice = parseFloat(formData.mrp) || parseFloat(formData.perUnitPrice);
+                                   return (mrpPrice * formData.cessRate / 100).toFixed(2);
+                                 default:
+                                   return '0.00';
+                               }
+                             })()}
+                           </Text>
+
+                         </View>
+                       </View>
+                     )}
+                     
+                     <View style={styles.taxCalculationInfo}>
+                       <Text style={styles.taxCalculationInfoText}>
+                         All calculations are done automatically behind the scenes
+                       </Text>
+                     </View>
+                   </View>
+                 ) : (
+                   // Show breakdown for tax-exclusive pricing
+                   <View style={styles.taxCalculationContent}>
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>Base Price (Tax-Exclusive):</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{parseFloat(formData.perUnitPrice).toFixed(2)}</Text>
+                       </View>
+                     </View>
+                     
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>GST ({formData.taxRate}%):</Text>
+                         <Text style={styles.taxCalculationPrimary}>
+                           ₹{((parseFloat(formData.perUnitPrice) * formData.taxRate) / 100).toFixed(2)}
+                         </Text>
+
+                       </View>
+                     </View>
+                     
+                     {formData.cessType !== 'none' && (
+                       <View style={styles.taxCalculationRow}>
+                         <View style={styles.taxCalculationColumn}>
+                           <Text style={styles.taxCalculationLabel}>CESS:</Text>
+                           <Text style={styles.taxCalculationPrimary}>
+                             ₹{(() => {
+                               const basePrice = parseFloat(formData.perUnitPrice);
+                               switch (formData.cessType) {
+                                 case 'value':
+                                   return (basePrice * formData.cessRate / 100).toFixed(2);
+                                 case 'quantity':
+                                   return parseFloat(formData.cessAmount || '0').toFixed(2);
+                                 case 'value_and_quantity':
+                                   const valueCess = basePrice * formData.cessRate / 100;
+                                   const quantityCess = parseFloat(formData.cessAmount || '0');
+                                   return (valueCess + quantityCess).toFixed(2);
+                                 case 'mrp':
+                                   const mrpPrice = parseFloat(formData.mrp) || parseFloat(formData.perUnitPrice);
+                                   return (mrpPrice * formData.cessRate / 100).toFixed(2);
+                                 default:
+                                   return '0.00';
+                               }
+                             })()}
+                           </Text>
+
+                         </View>
+                       </View>
+                     )}
+                     
+                     <View style={styles.taxCalculationRow}>
+                       <View style={styles.taxCalculationColumn}>
+                         <Text style={styles.taxCalculationLabel}>Final Price (Tax-Inclusive):</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{getDisplayPrices().perUnitFinalPrice.toFixed(2)}</Text>
+                       </View>
+                     </View>
+                   </View>
+                 )}
+               </View>
+             )}
             
-            {/* Opening Stock Summary */}
-            {formData.perUnitPrice && formData.openingStock && (
-              <View style={styles.summaryContainer}>
-                <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Base Price:</Text>
-                  <Text style={styles.summaryValue}>
-                    ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
-                  </Text>
-                </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>GST ({formData.taxRate}%):</Text>
-                  <Text style={styles.summaryValue}>
-                    ₹{((parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
-                  </Text>
-                </View>
-                {formData.cessType !== 'none' && (
-                  <>
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.summaryLabel}>CESS:</Text>
-                      <Text style={styles.summaryValue}>
-                        ₹{(() => {
-                          const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
-                          switch (formData.cessType) {
-                            case 'value':
-                              return (basePrice * formData.cessRate / 100).toFixed(2);
-                            case 'quantity':
-                              return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2);
-                            case 'value_and_quantity':
-                              const valueCess = basePrice * formData.cessRate / 100;
-                              const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                              return (valueCess + quantityCess).toFixed(2);
-                            default:
-                              return '0.00';
-                          }
-                        })()}
-                      </Text>
-                    </View>
-                    <View style={styles.cessCalculationRow}>
-                      <Text style={styles.cessCalculationLabel}>CESS Calculation:</Text>
-                      <Text style={styles.cessCalculationText}>
-                        {(() => {
-                          const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
-                          const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
-                          
-                          switch (formData.cessType) {
-                            case 'value':
-                              return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) = ₹${(basePrice * formData.cessRate / 100).toFixed(2)}`;
-                            case 'quantity':
-                              return `${formData.cessAmount} × ${parseInt(formData.openingStock)} ${formData.cessUnit} = ₹${(parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2)}`;
-                            case 'value_and_quantity':
-                              const valueCess = basePrice * formData.cessRate / 100;
-                              const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                              return `${formData.cessRate}% of Base Price (₹${basePrice.toFixed(2)}) + ${formData.cessAmount} × ${parseInt(formData.openingStock)} ${formData.cessUnit} = ₹${(valueCess + quantityCess).toFixed(2)}`;
-                            case 'mrp':
-                              return `${formData.cessRate}% of MRP (₹${mrpPrice.toFixed(2)}) = ₹${(mrpPrice * formData.cessRate / 100).toFixed(2)}`;
-                            default:
-                              return 'No CESS applied';
-                          }
-                        })()}
-                      </Text>
-                    </View>
-                  </>
-                )}
-                <View style={[styles.summaryRow, styles.totalRow]}>
-                  <Text style={styles.totalLabel}>Total Value:</Text>
-                  <Text style={styles.totalValue}>
-                    ₹{(() => {
-                      const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
-                      const gstAmount = (basePrice * formData.taxRate) / 100;
-                      let cessAmount = 0;
-                      
-                      switch (formData.cessType) {
-                        case 'value':
-                          cessAmount = basePrice * formData.cessRate / 100;
-                          break;
-                        case 'quantity':
-                          cessAmount = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                          break;
-                        case 'value_and_quantity':
-                          const valueCess = basePrice * formData.cessRate / 100;
-                          const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                          cessAmount = valueCess + quantityCess;
-                          break;
-                        case 'mrp':
-                          const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
-                          cessAmount = mrpPrice * formData.cessRate / 100;
-                          break;
-                      }
-                      
-                      return (basePrice + gstAmount + cessAmount).toFixed(2);
-                    })()}
-                  </Text>
-                </View>
-              </View>
-            )}
+                         {/* Opening Stock Summary */}
+             {formData.perUnitPrice && formData.openingStock && (
+               <View style={styles.summaryContainer}>
+                 <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
+                 
+                 {formData.taxInclusive ? (
+                   // For tax-inclusive pricing, show breakdown from base price
+                   <>
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>Price Entered (Tax-Inclusive):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
+                       </Text>
+                     </View>
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>Base Price (Before Tax):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{(getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock)).toFixed(2)}
+                       </Text>
+                     </View>
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>GST ({formData.taxRate}% of Base Price):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{((getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
+                       </Text>
+                     </View>
+                     {formData.cessType !== 'none' && (
+                       <>
+                         <View style={styles.summaryRow}>
+                           <Text style={styles.summaryLabel}>CESS:</Text>
+                           <Text style={styles.summaryValue}>
+                             ₹{(() => {
+                               const basePrice = getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock);
+                               switch (formData.cessType) {
+                                 case 'value':
+                                   return (basePrice * formData.cessRate / 100).toFixed(2);
+                                 case 'quantity':
+                                   return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2);
+                                 case 'value_and_quantity':
+                                   const valueCess = basePrice * formData.cessRate / 100;
+                                   const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                                   return (valueCess + quantityCess).toFixed(2);
+                                 case 'mrp':
+                                   const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                                   return (mrpPrice * formData.cessRate / 100).toFixed(2);
+                                 default:
+                                   return '0.00';
+                               }
+                             })()}
+                           </Text>
+                         </View>
+
+                       </>
+                     )}
+
+                   </>
+                 ) : (
+                   // For tax-exclusive pricing, show normal breakdown
+                   <>
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>Base Price (Tax-Exclusive):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
+                       </Text>
+                     </View>
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>GST ({formData.taxRate}% of Base Price):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{((parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
+                       </Text>
+                     </View>
+                     {formData.cessType !== 'none' && (
+                       <>
+                         <View style={styles.summaryRow}>
+                           <Text style={styles.summaryLabel}>CESS:</Text>
+                           <Text style={styles.summaryValue}>
+                             ₹{(() => {
+                               const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
+                               switch (formData.cessType) {
+                                 case 'value':
+                                   return (basePrice * formData.cessRate / 100).toFixed(2);
+                                 case 'quantity':
+                                   return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(2);
+                                 case 'value_and_quantity':
+                                   const valueCess = basePrice * formData.cessRate / 100;
+                                   const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                                   return (valueCess + quantityCess).toFixed(2);
+                                 case 'mrp':
+                                   const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                                   return (mrpPrice * formData.cessRate / 100).toFixed(2);
+                                 default:
+                                   return '0.00';
+                               }
+                             })()}
+                           </Text>
+                         </View>
+
+                       </>
+                     )}
+                     <View style={styles.summaryRow}>
+                       <Text style={styles.summaryLabel}>Final Price (Tax-Inclusive):</Text>
+                       <Text style={styles.summaryValue}>
+                         ₹{getDisplayPrices().perUnitFinalPrice.toFixed(2)}
+                       </Text>
+                     </View>
+                   </>
+                 )}
+                 
+                 <View style={[styles.summaryRow, styles.totalRow]}>
+                   <Text style={styles.totalLabel}>Total Value:</Text>
+                   <Text style={styles.totalValue}>
+                     ₹{(() => {
+                       if (formData.taxInclusive) {
+                         // For tax-inclusive, total is the price entered × quantity
+                         return (parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2);
+                       } else {
+                         // For tax-exclusive, calculate total including taxes
+                         const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
+                         const gstAmount = (basePrice * formData.taxRate) / 100;
+                         let cessAmount = 0;
+                         
+                         switch (formData.cessType) {
+                           case 'value':
+                             cessAmount = basePrice * formData.cessRate / 100;
+                             break;
+                           case 'quantity':
+                             cessAmount = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                             break;
+                           case 'value_and_quantity':
+                             const valueCess = basePrice * formData.cessRate / 100;
+                             const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                             cessAmount = valueCess + quantityCess;
+                             break;
+                           case 'mrp':
+                             const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                             cessAmount = mrpPrice * formData.cessRate / 100;
+                             break;
+                         }
+                         
+                         return (basePrice + gstAmount + cessAmount).toFixed(2);
+                       }
+                     })()}
+                   </Text>
+                 </View>
+               </View>
+             )}
           </View>
 
 
@@ -2127,7 +2472,7 @@ export default function ManualProductScreen() {
                     styles.modalOption,
                     formData.cessType === type.value && styles.selectedOption
                   ]}
-                  onPress={() => handleCessTypeSelect(type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity')}
+                  onPress={() => handleCessTypeSelect(type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp')}
                   activeOpacity={0.7}
                 >
                   <Text style={[
@@ -3899,22 +4244,47 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     fontStyle: 'italic',
   },
-  // Additional Tax Calculation Styles
-  taxCalculationUnit: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: Colors.textLight,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  taxBreakdownContainer: {
-    marginTop: 16,
-    padding: 12,
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
+     // Additional Tax Calculation Styles
+   taxCalculationUnit: {
+     fontSize: 12,
+     fontWeight: '500',
+     color: Colors.textLight,
+     fontStyle: 'italic',
+     marginTop: 2,
+   },
+   taxBreakdownContainer: {
+     marginTop: 16,
+     padding: 12,
+     backgroundColor: Colors.background,
+     borderRadius: 8,
+     borderWidth: 1,
+     borderColor: Colors.grey[200],
+   },
+   
+   // Tax Explanation Styles
+   taxExplanationContainer: {
+     backgroundColor: Colors.grey[50],
+     borderRadius: 12,
+     padding: 16,
+     marginBottom: 16,
+     borderWidth: 1,
+     borderColor: Colors.grey[200],
+   },
+   taxExplanationTitle: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: Colors.primary,
+     marginBottom: 8,
+   },
+   taxExplanationText: {
+     fontSize: 14,
+     color: Colors.textLight,
+     lineHeight: 20,
+   },
+   taxExplanationBold: {
+     fontWeight: '600',
+     color: Colors.text,
+   },
   taxBreakdownTitle: {
     fontSize: 14,
     fontWeight: '600',

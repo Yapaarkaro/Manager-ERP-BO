@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MessageCircle, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share } from 'lucide-react-native';
+import { dataStore } from '@/utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -114,9 +115,31 @@ const mockTransactionLogs: TransactionLog[] = [
 ];
 
 export default function SupplierDetailsScreen() {
-  const { supplierId, supplierData } = useLocalSearchParams();
-  const supplier = JSON.parse(supplierData as string);
+  const { supplierId } = useLocalSearchParams();
+  const [supplier, setSupplier] = useState<any>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'products' | 'transactions'>('overview');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadSupplierData();
+  }, [supplierId]);
+
+  const loadSupplierData = () => {
+    try {
+      setIsLoading(true);
+      
+      if (supplierId) {
+        const supplierData = dataStore.getSupplierById(supplierId as string);
+        if (supplierData) {
+          setSupplier(supplierData);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading supplier data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -182,6 +205,59 @@ export default function SupplierDetailsScreen() {
       }
     });
   };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Loading Supplier...</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading supplier details...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show error state if supplier not found
+  if (!supplier) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Supplier Not Found</Text>
+          </View>
+        </SafeAreaView>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Supplier details could not be loaded</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadSupplierData}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const handleCreatePO = () => {
     router.push({
@@ -984,14 +1060,11 @@ const styles = StyleSheet.create({
   },
   createPOSection: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: Colors.background,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    bottom: 20,
+    left: 16,
+    right: 16,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   createPOButton: {
     flexDirection: 'row',
@@ -999,11 +1072,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.primary,
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     gap: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
   createPOButtonText: {
     color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Loading State
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: Colors.textLight,
+  },
+  
+  // Error State
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: Colors.background,
     fontSize: 16,
     fontWeight: '600',
   },
