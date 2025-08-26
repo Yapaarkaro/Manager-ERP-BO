@@ -8,6 +8,7 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -307,44 +308,77 @@ export default function InventoryScreen() {
           >
             <AlertTriangle size={20} color={Colors.error} />
           </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Summary Cards */}
+      <View style={styles.summaryContainer}>
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.success} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Stock Value</Text>
+            <Text style={[styles.summaryValue, { color: Colors.success }]}>
+              {formatPrice(totalStockValue)}
+            </Text>
+            <Text style={styles.summaryCount}>
+              value
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Products</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
+              {filteredProducts.length}
+            </Text>
+            <Text style={styles.summaryCount}>
+              products
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.warning} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Categories</Text>
+            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
+              {new Set(filteredProducts.map(p => p.category)).size}
+            </Text>
+            <Text style={styles.summaryCount}>
+              categories
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
           <TouchableOpacity
-            style={styles.addButton}
-            onPress={handleAddProduct}
+            style={styles.filterButton}
+            onPress={() => console.log('Filter products')}
             activeOpacity={0.7}
           >
-            <Plus size={24} color={Colors.primary} />
+            <Filter size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Total Stock Value */}
-      <View style={styles.stockValueContainer}>
-        {/* Total Stock Value - Center Top */}
-        <View style={styles.totalStockContainer}>
-          <Package size={24} color={Colors.success} />
-          <View style={styles.totalStockInfo}>
-            <Text style={styles.totalStockLabel}>Total Stock Value</Text>
-            <Text style={styles.totalStockValue}>
-              {formatPrice(totalStockValue)}
-            </Text>
-          </View>
-        </View>
-
-        {/* Items and Categories - Bottom Row */}
-        <View style={styles.bottomStatsRow}>
-          <View style={styles.bottomStatCard}>
-            <Text style={styles.bottomStatLabel}>Total Products</Text>
-            <Text style={styles.bottomStatValue}>{filteredProducts.length}</Text>
-          </View>
-
-          <View style={styles.bottomStatCard}>
-            <Text style={styles.bottomStatLabel}>Categories</Text>
-            <Text style={styles.bottomStatValue}>
-              {new Set(filteredProducts.map(p => p.category)).size}
-            </Text>
-          </View>
-        </View>
-      </View>
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Products List */}
       <ScrollView 
@@ -393,28 +427,16 @@ export default function InventoryScreen() {
         </View>
       )}
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search products..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Filter products')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      {/* Add Product FAB */}
+      <TouchableOpacity
+        style={styles.addProductFAB}
+        onPress={handleAddProduct}
+        activeOpacity={0.8}
+      >
+        <Plus size={20} color="#FFFFFF" />
+        <Text style={styles.fabText}>Add Product</Text>
+      </TouchableOpacity>
+
     </SafeAreaView>
   );
 }
@@ -537,6 +559,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   summaryCard: {
+    flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  summaryInfo: {
     alignItems: 'center',
     marginTop: 8,
   },
@@ -548,9 +586,58 @@ const styles = StyleSheet.create({
   },
   summaryValue: {
     fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
+    fontWeight: '700',
     textAlign: 'center',
+    marginBottom: 2,
+  },
+  summaryCount: {
+    fontSize: 10,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  summaryContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+    backgroundColor: Colors.grey[50],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
+  },
+  addProductFAB: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
+    right: 20,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 25,
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  fabText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   scrollView: {
     flex: 1,

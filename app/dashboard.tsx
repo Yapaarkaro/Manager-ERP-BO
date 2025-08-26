@@ -32,6 +32,7 @@ import {
 } from 'lucide-react-native';
 import HamburgerMenu from '@/components/HamburgerMenu';
 import FAB from '@/components/FAB';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const Colors = {
   background: '#FFFFFF',
@@ -57,58 +58,94 @@ function getGreeting() {
   return 'Good Evening';
 }
 
+
+
 export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const userName = 'John Doe'; // This would come from user data
   const businessName = 'ABC Electronics'; // This would come from business data
+  
+  // Use debounced navigation for all KPI cards
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const handleMenuPress = () => {
     setShowHamburgerMenu(true);
   };
 
   const handleSalesPress = () => {
-    router.push('/sales');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/sales');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleReceivablesPress = () => {
-    router.push('/receivables');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/receivables');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handlePayablesPress = () => {
-    router.push('/payables');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/payables');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleLowStockPress = () => {
-    router.push('/inventory/low-stock');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/inventory/low-stock');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleReturnsPress = () => {
-    router.push('/returns');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/returns');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleNotificationsPress = () => {
-    router.push('/notifications');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/notifications');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleSalesOverviewPress = () => {
-    router.push('/reports');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/reports');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleStaffPress = (staffId: string) => {
-    router.push('/people/staff');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/people/staff');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleStockDiscrepancyPress = () => {
-    router.push('/inventory/stock-discrepancies');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/inventory/stock-discrepancies');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const toggleLastWeekExpansion = () => {
     setIsLastWeekExpanded(!isLastWeekExpanded);
   };
 
-  const handleMenuNavigation = (route: string) => {
-    router.push(route);
+  const handleMenuNavigation = (route: any) => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate(route);
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const handleFABAction = (action: string) => {
@@ -117,7 +154,7 @@ export default function DashboardScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -131,7 +168,13 @@ export default function DashboardScreen() {
         <Text style={styles.headerTitle}>Dashboard</Text>
       </View>
 
-      <ScrollView style={styles.container}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={true}
+        alwaysBounceVertical={false}
+      >
         {/* Greeting */}
         <View style={styles.greetingSection}>
           <Text style={styles.greeting}>
@@ -145,9 +188,14 @@ export default function DashboardScreen() {
         {/* KPI Cards */}
         <View style={styles.kpiContainer}>
           <TouchableOpacity 
-            style={[styles.kpiCard, styles.salesCard]}
+            style={[
+              styles.kpiCard, 
+              styles.salesCard,
+              isNavigating && styles.kpiCardDisabled
+            ]}
             onPress={handleSalesPress}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Total Sales</Text>
@@ -162,9 +210,14 @@ export default function DashboardScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.kpiCard, styles.returnsCard]}
+            style={[
+              styles.kpiCard, 
+              styles.returnsCard,
+              isNavigating && styles.kpiCardDisabled
+            ]}
             onPress={handleReturnsPress}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Returns</Text>
@@ -179,9 +232,14 @@ export default function DashboardScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.kpiCard, styles.stockCard]}
+            style={[
+              styles.kpiCard, 
+              styles.stockCard,
+              isNavigating && styles.kpiCardDisabled
+            ]}
             onPress={handleLowStockPress}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Low Stock Items</Text>
@@ -196,9 +254,14 @@ export default function DashboardScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.kpiCard, styles.receivablesCard]}
+            style={[
+              styles.kpiCard, 
+              styles.receivablesCard,
+              isNavigating && styles.kpiCardDisabled
+            ]}
             onPress={handleReceivablesPress}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Receivables</Text>
@@ -213,9 +276,14 @@ export default function DashboardScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity 
-            style={[styles.kpiCard, styles.payablesCard]}
+            style={[
+              styles.kpiCard, 
+              styles.payablesCard,
+              isNavigating && styles.kpiCardDisabled
+            ]}
             onPress={handlePayablesPress}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Payables</Text>
@@ -235,6 +303,7 @@ export default function DashboardScreen() {
           <TouchableOpacity 
             style={styles.sectionHeader}
             onPress={handleStockDiscrepancyPress}
+            disabled={isNavigating}
           >
             <Text style={styles.sectionTitle}>Stock Discrepancies</Text>
             <AlertTriangle size={20} color={Colors.text} />
@@ -277,6 +346,7 @@ export default function DashboardScreen() {
                   item.type === 'shortage' ? styles.shortageItem : styles.excessItem
                 ]}
                 onPress={handleStockDiscrepancyPress}
+                disabled={isNavigating}
               >
                 <View style={styles.discrepancyHeader}>
                   <Text style={styles.discrepancyProduct}>{item.product}</Text>
@@ -317,6 +387,7 @@ export default function DashboardScreen() {
           <TouchableOpacity 
             style={styles.sectionHeader}
             onPress={handleNotificationsPress}
+            disabled={isNavigating}
           >
             <Text style={styles.sectionTitle}>Notification Center</Text>
             <Bell size={20} color={Colors.text} />
@@ -355,6 +426,7 @@ export default function DashboardScreen() {
                 key={index} 
                 style={styles.notificationItem}
                 onPress={handleNotificationsPress}
+                disabled={isNavigating}
               >
                 <View style={[
                   styles.notificationIcon,
@@ -428,6 +500,7 @@ export default function DashboardScreen() {
                 key={staff.id}
                 style={styles.staffCard}
                 onPress={() => handleStaffPress(staff.id)}
+                disabled={isNavigating}
               >
                 <View style={styles.staffHeader}>
                   <Image source={{ uri: staff.image }} style={styles.staffImage} />
@@ -464,6 +537,7 @@ export default function DashboardScreen() {
           <TouchableOpacity 
             style={styles.salesOverview}
             onPress={handleSalesOverviewPress}
+            disabled={isNavigating}
           >
             <View style={styles.periodSection}>
               <View style={styles.periodHeader}>
@@ -572,9 +646,17 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  scrollView: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 100, // Add bottom padding for FAB
   },
   header: {
     backgroundColor: Colors.background,
@@ -634,6 +716,29 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3.84,
     elevation: 2,
+  },
+  kpiCardDisabled: {
+    opacity: 0.6,
+  },
+  salesCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.success,
+  },
+  returnsCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.error,
+  },
+  stockCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.warning,
+  },
+  receivablesCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.success,
+  },
+  payablesCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.error,
   },
   kpiHeader: {
     flexDirection: 'row',

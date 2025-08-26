@@ -228,6 +228,20 @@ export default function POSearchScreen() {
         <Text style={styles.headerTitle}>Search Purchase Orders</Text>
       </View>
 
+      {/* Search Bar - Top of screen */}
+      <View style={styles.topSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by PO number or supplier name..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+      </View>
+
         <View style={styles.content}>
           {/* PO List */}
           <ScrollView style={styles.poList} showsVerticalScrollIndicator={false}>
@@ -330,21 +344,7 @@ export default function POSearchScreen() {
           </ScrollView>
         </View>
 
-        {/* Floating Search Bar */}
-        <View style={styles.floatingSearchContainer}>
-          <View style={styles.searchContainer}>
-            <View style={styles.searchBar}>
-              <Search size={20} color={Colors.textLight} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search by PO number or supplier name..."
-                placeholderTextColor={Colors.textLight}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </View>
-          </View>
-        </View>
+
       </SafeAreaView>
   );
 }
@@ -547,34 +547,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.background,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
+  // Top search bar styles
+  topSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.grey[50],
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
   },
 }); 

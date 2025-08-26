@@ -20,6 +20,7 @@ import {
   Eye,
   Plus
 } from 'lucide-react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const Colors = {
   background: '#FFFFFF',
@@ -36,6 +37,8 @@ const Colors = {
     300: '#D1D5DB',
   }
 };
+
+
 
 interface LowStockItem {
   id: string;
@@ -152,6 +155,10 @@ const mockLowStockItems: LowStockItem[] = [
 export default function LowStockScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredItems, setFilteredItems] = useState(mockLowStockItems);
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for low stock item cards
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -175,13 +182,18 @@ export default function LowStockScreen() {
   };
 
   const handleItemPress = (item: LowStockItem) => {
-    router.push({
+    if (isNavigating) return;
+    setIsNavigating(true);
+    
+    debouncedNavigate({
       pathname: '/inventory/product-details',
       params: {
         productId: item.id,
         productData: JSON.stringify(item)
       }
     });
+    
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const getUrgencyColor = (urgency: string) => {
@@ -233,6 +245,7 @@ export default function LowStockScreen() {
         style={[styles.itemCard, { borderLeftColor: urgencyColor }]}
         onPress={() => handleItemPress(item)}
         activeOpacity={0.7}
+        disabled={isNavigating}
       >
         {/* Item Header */}
         <View style={styles.itemHeader}>
@@ -269,6 +282,7 @@ export default function LowStockScreen() {
               style={styles.viewButton}
               onPress={() => handleItemPress(item)}
               activeOpacity={0.7}
+              disabled={isNavigating}
             >
               <Eye size={16} color={Colors.primary} />
             </TouchableOpacity>
@@ -367,19 +381,65 @@ export default function LowStockScreen() {
             <Text style={[styles.summaryValue, { color: Colors.error }]}>
               {criticalItems}
             </Text>
+            <Text style={styles.summaryCount}>
+              items
+            </Text>
           </View>
         </View>
 
         <View style={styles.summaryCard}>
-          <Package size={20} color={Colors.warning} />
+          <Package size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Items</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
+              {filteredItems.length}
+            </Text>
+            <Text style={styles.summaryCount}>
+              items
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <TrendingDown size={20} color={Colors.warning} />
           <View style={styles.summaryInfo}>
             <Text style={styles.summaryLabel}>Total Value</Text>
             <Text style={[styles.summaryValue, { color: Colors.warning }]}>
               {formatPrice(totalStockValue)}
             </Text>
+            <Text style={styles.summaryCount}>
+              amount
+            </Text>
           </View>
         </View>
       </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search low stock items..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={handleFilter}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Low Stock Items */}
       <ScrollView 
@@ -400,28 +460,7 @@ export default function LowStockScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom Section with Search */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search products..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={handleFilter}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+
     </SafeAreaView>
   );
 }
@@ -471,12 +510,11 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -487,16 +525,34 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   summaryInfo: {
-    flex: 1,
+    alignItems: 'center',
+    marginTop: 8,
   },
   summaryLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.textLight,
-    marginBottom: 4,
+    marginBottom: 2,
+    textAlign: 'center',
   },
   summaryValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  summaryCount: {
+    fontSize: 10,
+    color: Colors.textLight,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
   },
   scrollView: {
     flex: 1,
@@ -683,12 +739,14 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -699,13 +757,19 @@ const styles = StyleSheet.create({
     
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

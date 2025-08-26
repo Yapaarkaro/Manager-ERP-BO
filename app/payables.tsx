@@ -7,11 +7,13 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowUpRight, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
-import { dataStore, Payable } from '@/utils/dataStore';
+import { Payable } from '@/utils/dataStore';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const Colors = {
   background: '#FFFFFF',
@@ -32,27 +34,127 @@ const Colors = {
 
 // Using Payable interface from dataStore
 
-const mockPayables: Payable[] = [];
+const mockPayables: Payable[] = [
+  {
+    id: 'PAY-001',
+    supplierId: 'SUP-001',
+    supplierName: 'Apple India Pvt Ltd',
+    supplierType: 'business',
+    businessName: 'Apple India Pvt Ltd',
+    mobile: '+91 98765 43210',
+    gstin: '27AABCA1234Z1Z5',
+    address: '123, Apple Store, Bangalore - 560001',
+    totalPayable: 250000,
+    overdueAmount: 0,
+    billCount: 2,
+    oldestBillDate: '2024-01-20',
+    daysPastDue: 0,
+    creditLimit: 500000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-25',
+    lastPaymentAmount: 100000,
+    supplierAvatar: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'current'
+  },
+  {
+    id: 'PAY-002',
+    supplierId: 'SUP-002',
+    supplierName: 'Samsung Electronics',
+    supplierType: 'business',
+    businessName: 'Samsung Electronics India',
+    mobile: '+91 87654 32109',
+    gstin: '29AABCS9876Z2Z6',
+    address: '456, Samsung Plaza, Mumbai - 400001',
+    totalPayable: 180000,
+    overdueAmount: 100000,
+    billCount: 1,
+    oldestBillDate: '2024-01-15',
+    daysPastDue: 3,
+    creditLimit: 300000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-20',
+    lastPaymentAmount: 80000,
+    supplierAvatar: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'overdue'
+  },
+  {
+    id: 'PAY-003',
+    supplierId: 'SUP-003',
+    supplierName: 'Dell Technologies',
+    supplierType: 'business',
+    businessName: 'Dell Technologies India',
+    mobile: '+91 76543 21098',
+    gstin: '33AABCD5678Z3Z7',
+    address: '789, Dell Tower, Delhi - 110001',
+    totalPayable: 95000,
+    overdueAmount: 95000,
+    billCount: 1,
+    oldestBillDate: '2024-01-10',
+    daysPastDue: 10,
+    creditLimit: 200000,
+    paymentTerms: 'Net 15',
+    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'critical'
+  },
+  {
+    id: 'PAY-004',
+    supplierId: 'SUP-004',
+    supplierName: 'HP India',
+    supplierType: 'business',
+    businessName: 'HP India Pvt Ltd',
+    mobile: '+91 65432 10987',
+    gstin: '24AABCH2345Z4Z8',
+    address: '321, HP Complex, Chennai - 600001',
+    totalPayable: 120000,
+    overdueAmount: 80000,
+    billCount: 1,
+    oldestBillDate: '2024-01-08',
+    daysPastDue: 7,
+    creditLimit: 250000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-15',
+    lastPaymentAmount: 40000,
+    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'overdue'
+  },
+  {
+    id: 'PAY-005',
+    supplierId: 'SUP-005',
+    supplierName: 'Lenovo India',
+    supplierType: 'business',
+    businessName: 'Lenovo India Pvt Ltd',
+    mobile: '+91 54321 09876',
+    gstin: '27AABCL3456Z5Z9',
+    address: '654, Lenovo Park, Ahmedabad - 380001',
+    totalPayable: 75000,
+    overdueAmount: 0,
+    billCount: 2,
+    oldestBillDate: '2024-01-12',
+    daysPastDue: 0,
+    creditLimit: 150000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-25',
+    lastPaymentAmount: 25000,
+    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'current'
+  }
+];
 
 export default function PayablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [payables, setPayables] = useState<Payable[]>([]);
-  const [filteredPayables, setFilteredPayables] = useState<Payable[]>([]);
+  const [payables, setPayables] = useState<Payable[]>(mockPayables);
+  const [filteredPayables, setFilteredPayables] = useState<Payable[]>(mockPayables);
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for supplier cards
+  const debouncedNavigate = useDebounceNavigation(500);
 
-  // Subscribe to data store changes
+  // Use mock data instead of dataStore
   React.useEffect(() => {
-    const unsubscribe = dataStore.subscribe(() => {
-      const allPayables = dataStore.getPayables();
-      setPayables(allPayables);
-      setFilteredPayables(allPayables);
-    });
-
-    // Initial load
-    const allPayables = dataStore.getPayables();
-    setPayables(allPayables);
-    setFilteredPayables(allPayables);
-
-    return unsubscribe;
+    // Set initial data from mock
+    console.log('Loading mock payables:', mockPayables.length);
+    setPayables(mockPayables);
+    setFilteredPayables(mockPayables);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -129,13 +231,18 @@ export default function PayablesScreen() {
   };
 
   const handleSupplierDetails = (payable: Payable) => {
-    router.push({
+    if (isNavigating) return;
+    setIsNavigating(true);
+    
+    debouncedNavigate({
       pathname: '/payables/supplier-details',
       params: {
         supplierId: payable.id,
         supplierData: JSON.stringify(payable)
       }
     });
+    
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const renderPayableCard = (payable: Payable) => {
@@ -148,6 +255,7 @@ export default function PayablesScreen() {
         ]}
         onPress={() => handleSupplierDetails(payable)}
         activeOpacity={0.7}
+        disabled={isNavigating}
       >
         {/* Top Section */}
         <View style={styles.payableHeader}>
@@ -271,6 +379,7 @@ export default function PayablesScreen() {
               style={styles.actionButton}
               onPress={() => handleSupplierDetails(payable)}
               activeOpacity={0.7}
+              disabled={isNavigating}
             >
               <Eye size={18} color={Colors.textLight} />
             </TouchableOpacity>
@@ -314,22 +423,65 @@ export default function PayablesScreen() {
             <Text style={[styles.summaryValue, { color: Colors.error }]}>
               {formatAmount(totalPayables)}
             </Text>
+            <Text style={styles.summaryCount}>
+              amount
+            </Text>
           </View>
         </View>
 
         <View style={styles.summaryCard}>
-          <AlertTriangle size={20} color={Colors.error} />
+          <AlertTriangle size={20} color={Colors.warning} />
           <View style={styles.summaryInfo}>
             <Text style={styles.summaryLabel}>Overdue Amount</Text>
-            <Text style={[styles.summaryValue, { color: Colors.error }]}>
+            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
               {formatAmount(totalOverdue)}
             </Text>
-            <Text style={styles.summarySubtext}>
+            <Text style={styles.summaryCount}>
               {overdueSuppliers} suppliers
             </Text>
           </View>
         </View>
+
+        <View style={styles.summaryCard}>
+          <Building2 size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Suppliers</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
+              {filteredPayables.length}
+            </Text>
+            <Text style={styles.summaryCount}>
+              suppliers
+            </Text>
+          </View>
+        </View>
       </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search suppliers..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={handleFilter}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Payables List */}
       <ScrollView 
@@ -360,28 +512,7 @@ export default function PayablesScreen() {
         <Text style={styles.makePaymentText}>Make Payment</Text>
       </TouchableOpacity>
 
-      {/* Bottom Section with Search */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search suppliers..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={handleFilter}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+
     </SafeAreaView>
   );
 }
@@ -431,12 +562,11 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -447,21 +577,35 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   summaryInfo: {
-    flex: 1,
+    alignItems: 'center',
+    marginTop: 8,
   },
   summaryLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  summarySubtext: {
     fontSize: 11,
     color: Colors.textLight,
-    marginTop: 2,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  summaryCount: {
+    fontSize: 10,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
   },
   scrollView: {
     flex: 1,
@@ -638,7 +782,7 @@ const styles = StyleSheet.create({
   },
   makePaymentFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     backgroundColor: Colors.error,
     flexDirection: 'row',
@@ -685,12 +829,14 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -701,13 +847,19 @@ const styles = StyleSheet.create({
     
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

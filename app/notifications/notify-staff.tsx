@@ -96,6 +96,7 @@ export default function NotifyStaffScreen() {
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [staffSearchQuery, setStaffSearchQuery] = useState('');
 
   const updateFormData = (field: keyof NotificationData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -122,6 +123,12 @@ export default function NotifyStaffScreen() {
   const handleDeselectAllStaff = () => {
     updateFormData('selectedStaff', []);
   };
+
+  // Filter staff based on search query
+  const filteredStaff = mockStaff.filter(staff =>
+    staff.name.toLowerCase().includes(staffSearchQuery.toLowerCase()) ||
+    staff.role.toLowerCase().includes(staffSearchQuery.toLowerCase())
+  );
 
   const handleNotificationTypeSelect = (type: string) => {
     updateFormData('notificationType', type);
@@ -347,11 +354,37 @@ export default function NotifyStaffScreen() {
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Staff Members</Text>
                 <TouchableOpacity
-                  onPress={() => setShowStaffModal(false)}
+                  onPress={() => {
+                    setShowStaffModal(false);
+                    setStaffSearchQuery(''); // Clear search when modal closes
+                  }}
                   activeOpacity={0.7}
                 >
                   <X size={24} color={Colors.textLight} />
                 </TouchableOpacity>
+              </View>
+              
+              {/* Staff Search Bar */}
+              <View style={styles.staffSearchContainer}>
+                <View style={styles.staffSearchBar}>
+                  <Users size={20} color={Colors.textLight} />
+                  <TextInput
+                    style={styles.staffSearchInput}
+                    placeholder="Search staff by name or role..."
+                    placeholderTextColor={Colors.textLight}
+                    value={staffSearchQuery}
+                    onChangeText={setStaffSearchQuery}
+                  />
+                  {staffSearchQuery.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => setStaffSearchQuery('')}
+                      activeOpacity={0.7}
+                      style={styles.clearSearchButton}
+                    >
+                      <X size={16} color={Colors.textLight} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
               
               <View style={styles.modalActions}>
@@ -377,31 +410,41 @@ export default function NotifyStaffScreen() {
               </View>
               
               <ScrollView style={styles.staffList}>
-                {mockStaff.map((staff) => (
-                  <TouchableOpacity
-                    key={staff.id}
-                    style={[
-                      styles.staffItem,
-                      formData.selectedStaff.includes(staff.id) && styles.selectedStaffItem
-                    ]}
-                    onPress={() => handleStaffSelect(staff.id)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.staffInfo}>
-                      <View style={styles.staffAvatar}>
-                        <User size={20} color={Colors.primary} />
+                {filteredStaff.length === 0 ? (
+                  <View style={styles.noStaffFound}>
+                    <Users size={48} color={Colors.textLight} />
+                    <Text style={styles.noStaffFoundText}>No staff found</Text>
+                    <Text style={styles.noStaffFoundSubtext}>
+                      {staffSearchQuery ? 'Try a different search term' : 'No staff members available'}
+                    </Text>
+                  </View>
+                ) : (
+                  filteredStaff.map((staff) => (
+                    <TouchableOpacity
+                      key={staff.id}
+                      style={[
+                        styles.staffItem,
+                        formData.selectedStaff.includes(staff.id) && styles.selectedStaffItem
+                      ]}
+                      onPress={() => handleStaffSelect(staff.id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.staffInfo}>
+                        <View style={styles.staffAvatar}>
+                          <User size={20} color={Colors.primary} />
+                        </View>
+                        <View style={styles.staffDetails}>
+                          <Text style={styles.staffName}>{staff.name}</Text>
+                          <Text style={styles.staffRole}>{staff.role}</Text>
+                        </View>
                       </View>
-                      <View style={styles.staffDetails}>
-                        <Text style={styles.staffName}>{staff.name}</Text>
-                        <Text style={styles.staffRole}>{staff.role}</Text>
-                      </View>
-                    </View>
-                    
-                    {formData.selectedStaff.includes(staff.id) && (
-                      <Check size={20} color={Colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
+                      
+                      {formData.selectedStaff.includes(staff.id) && (
+                        <Check size={20} color={Colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))
+                )}
               </ScrollView>
             </View>
           </View>
@@ -712,6 +755,50 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
+  },
+  // Staff search styles
+  staffSearchContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  staffSearchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  staffSearchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+    marginLeft: 12,
+  },
+  clearSearchButton: {
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[200],
+  },
+  noStaffFound: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noStaffFoundText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 12,
+  },
+  noStaffFoundSubtext: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginTop: 4,
+    textAlign: 'center',
   },
   modalActions: {
     flexDirection: 'row',

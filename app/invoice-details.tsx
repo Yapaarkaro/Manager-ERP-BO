@@ -57,11 +57,15 @@ interface InvoiceItem {
 }
 
 export default function InvoiceDetailsScreen() {
-  const { invoiceId } = useLocalSearchParams();
+  const { invoiceId, invoiceData } = useLocalSearchParams();
   const [invoice, setInvoice] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
   const [isBusinessCustomer, setIsBusinessCustomer] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  console.log('InvoiceDetailsScreen rendered with invoiceId:', invoiceId);
+  console.log('Type of invoiceId:', typeof invoiceId);
+  console.log('Invoice data from params:', invoiceData);
 
   useEffect(() => {
     loadInvoiceData();
@@ -71,26 +75,153 @@ export default function InvoiceDetailsScreen() {
     try {
       setIsLoading(true);
       
-      // Get invoice from dataStore
-      const allInvoices = dataStore.getInvoices();
-      const foundInvoice = allInvoices.find(inv => inv.id === invoiceId);
+      console.log('Loading invoice data for ID:', invoiceId);
+      console.log('Invoice data from params:', invoiceData);
       
-      if (foundInvoice) {
-        setInvoice(foundInvoice);
-        
-        // Get customer details
-        if (foundInvoice.customerId) {
-          const customerData = dataStore.getCustomerById(foundInvoice.customerId);
-          if (customerData) {
-            setCustomer(customerData);
-            setIsBusinessCustomer(customerData.customerType === 'business');
-          }
+      // First try to use the passed invoiceData parameter
+      if (invoiceData) {
+        try {
+          const parsedInvoiceData = JSON.parse(invoiceData as string);
+          console.log('Parsed invoice data:', parsedInvoiceData);
+          
+          // Set the invoice from the passed data
+          setInvoice(parsedInvoiceData);
+          
+          // Create customer object from the invoice data
+          const customerFromInvoice = {
+            id: parsedInvoiceData.id || 'unknown',
+            name: parsedInvoiceData.customerName || 'Unknown Customer',
+            customerType: parsedInvoiceData.customerType || 'business',
+            contactPerson: parsedInvoiceData.customerDetails?.name || 'N/A',
+            mobile: parsedInvoiceData.customerDetails?.mobile || 'N/A',
+            email: 'N/A',
+            address: parsedInvoiceData.customerDetails?.address || 'N/A',
+            avatar: '👤',
+            customerScore: 0,
+            onTimePayment: 0,
+            satisfactionRating: 0,
+            responseTime: 0,
+            totalOrders: 0,
+            completedOrders: 0,
+            pendingOrders: 0,
+            cancelledOrders: 0,
+            returnedOrders: 0,
+            totalValue: 0,
+            averageOrderValue: 0,
+            returnRate: 0,
+            lastOrderDate: null,
+            joinedDate: new Date().toISOString(),
+            status: 'active',
+            createdAt: new Date().toISOString()
+          };
+          
+          setCustomer(customerFromInvoice);
+          setIsBusinessCustomer(customerFromInvoice.customerType === 'business');
+          console.log('Invoice and customer set from passed data');
+          
+        } catch (parseError) {
+          console.error('Error parsing invoice data:', parseError);
+          // Fall back to dataStore loading
+          loadFromDataStore();
         }
+      } else {
+        // Fall back to dataStore loading
+        loadFromDataStore();
       }
     } catch (error) {
       console.error('Error loading invoice data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  const loadFromDataStore = () => {
+    console.log('Loading from dataStore...');
+    
+    // Get invoice from dataStore
+    const allInvoices = dataStore.getInvoices();
+    console.log('All invoices from dataStore:', allInvoices.length);
+    console.log('Invoice IDs:', allInvoices.map(inv => inv.id));
+    
+    const foundInvoice = allInvoices.find(inv => inv.id === invoiceId);
+    console.log('Found invoice in dataStore:', foundInvoice);
+    
+    if (foundInvoice) {
+      setInvoice(foundInvoice);
+      console.log('Invoice set from dataStore:', foundInvoice);
+      
+      // Get customer details
+      if (foundInvoice.customerId) {
+        console.log('Looking for customer with ID:', foundInvoice.customerId);
+        const customerData = dataStore.getCustomerById(foundInvoice.customerId);
+        console.log('Found customer:', customerData);
+        
+        if (customerData) {
+          setCustomer(customerData);
+          setIsBusinessCustomer(customerData.customerType === 'business');
+          console.log('Customer set successfully');
+        } else {
+          console.log('Customer not found for ID:', foundInvoice.customerId);
+          // Set a fallback customer object
+          setCustomer({
+            id: foundInvoice.customerId,
+            name: foundInvoice.customerName || 'Unknown Customer',
+            customerType: foundInvoice.customerType || 'business',
+            contactPerson: 'N/A',
+            mobile: 'N/A',
+            email: 'N/A',
+            address: 'N/A',
+            avatar: '👤',
+            customerScore: 0,
+            onTimePayment: 0,
+            satisfactionRating: 0,
+            responseTime: 0,
+            totalOrders: 0,
+            completedOrders: 0,
+            pendingOrders: 0,
+            cancelledOrders: 0,
+            returnedOrders: 0,
+            totalValue: 0,
+            averageOrderValue: 0,
+            returnRate: 0,
+            lastOrderDate: null,
+            joinedDate: new Date().toISOString(),
+            status: 'active',
+            createdAt: new Date().toISOString()
+          });
+        }
+      } else {
+        console.log('No customerId in invoice');
+        // Set a fallback customer object
+        setCustomer({
+          id: 'unknown',
+          name: foundInvoice.customerName || 'Unknown Customer',
+          customerType: foundInvoice.customerType || 'business',
+          contactPerson: 'N/A',
+          mobile: 'N/A',
+          email: 'N/A',
+          address: 'N/A',
+          avatar: '👤',
+          customerScore: 0,
+          onTimePayment: 0,
+          satisfactionRating: 0,
+          responseTime: 0,
+          totalOrders: 0,
+          completedOrders: 0,
+          pendingOrders: 0,
+          cancelledOrders: 0,
+          returnedOrders: 0,
+          totalValue: 0,
+          averageOrderValue: 0,
+          returnRate: 0,
+          lastOrderDate: null,
+          joinedDate: new Date().toISOString(),
+          status: 'active',
+          createdAt: new Date().toISOString()
+        });
+      }
+    } else {
+      console.log('Invoice not found in dataStore for ID:', invoiceId);
     }
   };
 
@@ -118,7 +249,7 @@ export default function InvoiceDetailsScreen() {
   }
 
   // Show error state if invoice not found
-  if (!invoice || !customer) {
+  if (!invoice) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.headerSafeArea}>
@@ -134,7 +265,7 @@ export default function InvoiceDetailsScreen() {
           </View>
         </SafeAreaView>
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Invoice details could not be loaded</Text>
+          <Text style={styles.errorText}>Invoice not found</Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={loadInvoiceData}
@@ -153,11 +284,11 @@ export default function InvoiceDetailsScreen() {
       id: `fallback-item-${Date.now()}`,
       name: 'Sample Item',
       quantity: 1,
-      rate: invoice.amount || 0,
-      amount: invoice.amount || 0,
+      rate: invoice.totalAmount || 0,
+      amount: invoice.totalAmount || 0,
       taxRate: 18,
       taxAmount: 0,
-      total: invoice.amount || 0
+      total: invoice.totalAmount || 0
     }
   ];
 
@@ -342,11 +473,11 @@ export default function InvoiceDetailsScreen() {
           
           <div class="invoice-info">
             <div class="info-section">
-              <p><strong>Date:</strong> ${formatDate(invoice.date)}</p>
-              <p><strong>Payment Status:</strong> ${invoice.paymentStatus || 'Paid'}</p>
+              <p><strong>Date:</strong> ${formatDate(invoice.invoiceDate)}</p>
+              <p><strong>Payment Status:</strong> ${invoice.status || 'Paid'}</p>
             </div>
             <div class="info-section">
-              <p><strong>Staff:</strong> ${invoice.staffName || 'N/A'}</p>
+              <p><strong>Staff:</strong> N/A</p>
               <p><strong>Items:</strong> ${invoiceItems.length}</p>
             </div>
           </div>
@@ -479,7 +610,7 @@ export default function InvoiceDetailsScreen() {
             <View style={styles.metaRow}>
               <Calendar size={16} color={Colors.textLight} />
               <Text style={styles.metaLabel}>Date:</Text>
-              <Text style={styles.metaValue}>{formatDate(invoice.date)}</Text>
+              <Text style={styles.metaValue}>{formatDate(invoice.invoiceDate)}</Text>
             </View>
           </View>
         </View>
@@ -503,7 +634,7 @@ export default function InvoiceDetailsScreen() {
             
             <View style={styles.irnRow}>
               <Text style={styles.irnLabel}>Acknowledgment Date:</Text>
-              <Text style={styles.irnValue}>{formatDate(invoice.date)} 14:30:25</Text>
+              <Text style={styles.irnValue}>{formatDate(invoice.invoiceDate)} 14:30:25</Text>
             </View>
           </View>
         </View>
@@ -657,7 +788,7 @@ export default function InvoiceDetailsScreen() {
             
             <View style={styles.paymentDetails}>
               <Text style={styles.paymentDetailText}>
-                Payment received on {formatDate(invoice.date)} at 14:30
+                Payment received on {formatDate(invoice.invoiceDate)} at 14:30
               </Text>
             </View>
           </View>
@@ -668,7 +799,7 @@ export default function InvoiceDetailsScreen() {
           <Text style={styles.sectionTitle}>Processed By</Text>
           
           <View style={styles.staffCard}>
-            <Text style={styles.staffName}>{invoice.staffName}</Text>
+            <Text style={styles.staffName}>N/A</Text>
             <Text style={styles.staffRole}>Sales Executive</Text>
           </View>
         </View>

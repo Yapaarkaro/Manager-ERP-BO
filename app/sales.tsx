@@ -5,15 +5,15 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  TextInput,
   Image,
+  Keyboard,
+  Platform,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { 
   ArrowLeft, 
-  Search, 
-  Filter,
   Download,
   Share,
   Eye,
@@ -26,8 +26,12 @@ import {
   Banknote,
   Smartphone,
   CreditCard,
-  IndianRupee
+  IndianRupee,
+  Search,
+  Filter
 } from 'lucide-react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import AnimatedSearchBar from '@/components/AnimatedSearchBar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -44,6 +48,8 @@ const Colors = {
     300: '#D1D5DB',
   }
 };
+
+
 
 interface SalesInvoice {
   id: string;
@@ -179,6 +185,10 @@ const mockSalesInvoices: SalesInvoice[] = [
 export default function SalesInvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(mockSalesInvoices);
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for invoice cards
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -195,6 +205,9 @@ export default function SalesInvoicesScreen() {
   };
 
   const handleInvoicePress = (invoice: SalesInvoice) => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    
     // Navigate to invoice details
     const invoiceData = {
       id: invoice.id,
@@ -215,13 +228,15 @@ export default function SalesInvoicesScreen() {
       }
     };
 
-    router.push({
+    debouncedNavigate({
       pathname: '/invoice-details',
       params: {
         invoiceId: invoiceData.id,
         invoiceData: JSON.stringify(invoiceData)
       }
     });
+    
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const getPaymentMethodIcon = (method: string) => {
@@ -295,7 +310,10 @@ export default function SalesInvoicesScreen() {
   };
 
   const handleNewSale = () => {
-    router.push('/new-sale');
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/new-sale');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const renderInvoiceCard = (invoice: SalesInvoice) => {
@@ -309,6 +327,7 @@ export default function SalesInvoicesScreen() {
         style={[styles.invoiceCard, { borderLeftColor: Colors.success }]}
         onPress={() => handleInvoicePress(invoice)}
         activeOpacity={0.7}
+        disabled={isNavigating}
       >
         {/* Top Section */}
         <View style={styles.invoiceHeader}>
@@ -466,6 +485,33 @@ export default function SalesInvoicesScreen() {
         </View>
       </View>
 
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search sales invoices..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => console.log('Filter sales invoices')}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
       {/* Sales Invoices List */}
       <ScrollView 
         style={styles.scrollView}
@@ -490,33 +536,13 @@ export default function SalesInvoicesScreen() {
         style={styles.newSaleFAB}
         onPress={handleNewSale}
         activeOpacity={0.8}
+        disabled={isNavigating}
       >
         <Plus size={20} color="#ffffff" />
         <Text style={styles.newSaleText}>New Sale</Text>
       </TouchableOpacity>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search sales invoices..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Filter sales invoices')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+
     </SafeAreaView>
   );
 }
@@ -558,7 +584,7 @@ const styles = StyleSheet.create({
   summaryContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     gap: 12,
     backgroundColor: Colors.grey[50],
     borderBottomWidth: 1,
@@ -601,11 +627,17 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     textAlign: 'center',
   },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
+    paddingTop: 8,
     paddingBottom: 120,
   },
   emptyState: {
@@ -760,7 +792,7 @@ const styles = StyleSheet.create({
   },
   newSaleFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     backgroundColor: Colors.success,
     flexDirection: 'row',
@@ -784,35 +816,93 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
+
+  filterButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(63, 102, 172, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.primary,
     shadowOffset: {
       width: 0,
       height: 4,
     },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 6,
+    // Glassmorphism effect
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+  // Search Results Styles
+  searchResultsContainer: {
+    paddingVertical: 8,
+  },
+  searchResultItem: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  searchResultContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  searchResultTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    flex: 1,
+    marginRight: 12,
+  },
+  searchResultSubtitle: {
+    fontSize: 14,
+    color: Colors.textLight,
+    flex: 1,
+    marginRight: 12,
+  },
+  searchResultAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.success,
+  },
+  noSearchResults: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  noSearchResultsText: {
+    fontSize: 16,
+    color: Colors.textLight,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -820,16 +910,11 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    
-  },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    padding: 0,
+    fontWeight: '500',
+    // Better contrast for glassmorphism
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

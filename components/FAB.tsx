@@ -6,7 +6,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  Platform,
 } from 'react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import {
   Plus,
   X,
@@ -21,6 +23,7 @@ import {
 
 interface FABProps {
   onAction?: (action: string) => void;
+  onExpandedChange?: (isExpanded: boolean) => void;
 }
 
 interface FABAction {
@@ -76,10 +79,14 @@ const fabActions: FABAction[] = [
   },
 ];
 
-export default function FAB({ onAction }: FABProps) {
+export default function FAB({ onAction, onExpandedChange }: FABProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const animationValue = useRef(new Animated.Value(0)).current;
   const rotationValue = useRef(new Animated.Value(0)).current;
+  
+  // Use debounced navigation for all FAB actions
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const toggleFAB = () => {
     const toValue = isExpanded ? 0 : 1;
@@ -98,41 +105,49 @@ export default function FAB({ onAction }: FABProps) {
       }),
     ]).start();
     
-    setIsExpanded(!isExpanded);
+    const newExpandedState = !isExpanded;
+    setIsExpanded(newExpandedState);
+    onExpandedChange?.(newExpandedState);
   };
 
   const handleActionPress = (actionId: string) => {
+    if (isNavigating) return;
+    
     onAction?.(actionId);
+    setIsNavigating(true);
     
     // Navigate to new sale if new-sale action is pressed
     if (actionId === 'new-sale') {
-      router.push('/new-sale');
+      debouncedNavigate('/new-sale');
     }
     
     // Navigate to new return if return action is pressed
     if (actionId === 'return') {
-      router.push('/new-return');
+      debouncedNavigate('/new-return');
     }
     
     // Navigate to payment selection if payments action is pressed
     if (actionId === 'payments') {
-      router.push('/payment-selection');
+      debouncedNavigate('/payment-selection');
     }
     
     // Navigate to income/expense toggle if expense action is pressed
     if (actionId === 'expense') {
-      router.push('/expenses/income-expense-toggle');
+      debouncedNavigate('/expenses/income-expense-toggle');
     }
     
     // Navigate to notify staff if notify-staff action is pressed
     if (actionId === 'notify-staff') {
-      router.push('/notifications/notify-staff');
+      debouncedNavigate('/notifications/notify-staff');
     }
     
     // Navigate to stock management if stock action is pressed
     if (actionId === 'stock') {
-      router.replace('/inventory/stock-management');
+      debouncedNavigate('/inventory/stock-management');
     }
+    
+    // Reset navigation state after 1 second
+    setTimeout(() => setIsNavigating(false), 1000);
     
     toggleFAB();
   };
@@ -144,6 +159,15 @@ export default function FAB({ onAction }: FABProps) {
 
   return (
     <View style={styles.container}>
+      {/* Backdrop Overlay - Blocks all touch events when FAB is expanded */}
+      {isExpanded && (
+        <TouchableOpacity
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={toggleFAB}
+        />
+      )}
+      
       {/* Action Buttons */}
       {fabActions.map((action, index) => {
         const IconComponent = action.icon;
@@ -176,18 +200,20 @@ export default function FAB({ onAction }: FABProps) {
             <View style={styles.actionRow}>
               {/* Text Button (Left) */}
               <TouchableOpacity
-                style={styles.textButton}
+                style={[styles.textButton, isNavigating && styles.actionButtonDisabled]}
                 onPress={() => handleActionPress(action.id)}
                 activeOpacity={0.8}
+                disabled={isNavigating}
               >
                 <Text style={styles.textButtonLabel}>{action.title}</Text>
               </TouchableOpacity>
               
               {/* Icon Button (Right) */}
               <TouchableOpacity
-                style={styles.iconButton}
+                style={[styles.iconButton, isNavigating && styles.actionButtonDisabled]}
                 onPress={() => handleActionPress(action.id)}
                 activeOpacity={0.8}
+                disabled={isNavigating}
               >
                 <IconComponent size={20} color="#ffffff" />
               </TouchableOpacity>
@@ -211,18 +237,7 @@ export default function FAB({ onAction }: FABProps) {
         </Animated.View>
       </TouchableOpacity>
 
-      {/* Backdrop */}
-      {isExpanded && (
-        <TouchableOpacity
-          style={styles.backdrop}
-          onPress={toggleFAB}
-          activeOpacity={1}
-        >
-          <View style={styles.glassLayer1} />
-          <View style={styles.glassLayer2} />
-          <View style={styles.glassLayer3} />
-        </TouchableOpacity>
-      )}
+
     </View>
   );
 }
@@ -230,18 +245,19 @@ export default function FAB({ onAction }: FABProps) {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 20,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     alignItems: 'flex-end',
+    zIndex: 1000, // Higher than backdrop to ensure FAB is clickable
   },
   backdrop: {
     position: 'absolute',
     top: -1000,
     left: -1000,
-    right: -20,
-    bottom: -20,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    zIndex: -1,
+    right: -1000,
+    bottom: -1000,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    zIndex: 999, // High z-index to block all interactions
   },
   glassLayer1: {
     position: 'absolute',
@@ -275,7 +291,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     marginBottom: 8,
-    zIndex: 1,
+    zIndex: 1001, // Higher than container to ensure buttons are clickable
   },
   actionRow: {
     flexDirection: 'row',
@@ -336,6 +352,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
-    zIndex: 2,
+    zIndex: 1002, // Highest z-index to ensure main button is always clickable
+  },
+  actionButtonDisabled: {
+    opacity: 0.6,
   },
 });

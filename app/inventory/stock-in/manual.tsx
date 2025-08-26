@@ -884,7 +884,17 @@ export default function ManualStockInScreen() {
 
           {/* Discount Section */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Supplier Discount</Text>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Supplier Discount</Text>
+              <Text style={styles.sectionSubtitle}>
+                {formData.discountValue > 0 ? 
+                  `Saving: ₹${formData.discountType === 'percentage' 
+                    ? (formData.totalAmount * formData.discountValue / 100).toFixed(2)
+                    : formData.discountValue.toFixed(2)
+                  }` : 'No discount applied'
+                }
+              </Text>
+            </View>
             <View style={styles.discountContainer}>
               <View style={styles.discountTypeContainer}>
                 <TouchableOpacity
@@ -919,11 +929,11 @@ export default function ManualStockInScreen() {
                 </TouchableOpacity>
               </View>
               
-              <View style={styles.inputContainer}>
+              <View style={styles.discountInputContainer}>
                 {formData.discountType === 'amount' ? (
-                  <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <IndianRupee size={20} color={Colors.primary} style={styles.inputIcon} />
                 ) : (
-                  <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <Percent size={20} color={Colors.primary} style={styles.inputIcon} />
                 )}
                 <TextInput
                   style={styles.input}
@@ -934,6 +944,14 @@ export default function ManualStockInScreen() {
                   keyboardType="decimal-pad"
                 />
               </View>
+              {formData.discountValue > 0 && (
+                <Text style={styles.discountHelperText}>
+                  {formData.discountType === 'percentage' 
+                    ? `${formData.discountValue}% off total amount`
+                    : `₹${formData.discountValue.toFixed(2)} off total amount`
+                  }
+                </Text>
+              )}
             </View>
           </View>
 
@@ -2336,7 +2354,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
-    marginBottom: 12,
+    marginBottom: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontStyle: 'italic',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -2689,28 +2712,42 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 4,
     marginBottom: 12,
-    width: 120,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+    width: '100%',
+    gap: 4,
   },
   discountTypeButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   activeDiscountType: {
     backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
     shadowColor: Colors.primary,
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 3,
     },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+    transform: [{ scale: 1.02 }],
   },
   discountTypeText: {
     fontSize: 14,
@@ -2720,6 +2757,23 @@ const styles = StyleSheet.create({
   activeDiscountTypeText: {
     color: Colors.background,
     fontWeight: '600',
+  },
+  discountInputContainer: {
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 48,
+  },
+  discountHelperText: {
+    fontSize: 12,
+    color: Colors.success,
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   inputGroup: {
     marginBottom: 16,

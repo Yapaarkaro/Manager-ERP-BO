@@ -9,10 +9,12 @@ import {
   Image,
   Modal,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Bell, BellRing, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle, Info, Users, Package, ShoppingCart, IndianRupee, Eye, Check, X, MessageSquare } from 'lucide-react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const Colors = {
   background: '#FFFFFF',
@@ -227,6 +229,10 @@ export default function NotificationsScreen() {
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unread' | 'urgent' | 'action_required'>('all');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for related entity buttons
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const statusOptions = [
     { value: 'unread', label: 'Unread', color: Colors.error },
@@ -342,6 +348,7 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (notification: Notification) => {
+    if (isNavigating) return;
     setSelectedNotification(notification);
     setShowStatusModal(true);
   };
@@ -368,12 +375,15 @@ export default function NotificationsScreen() {
 
   const handleRelatedEntityPress = (notification: Notification) => {
     if (!notification.relatedEntity) return;
+    if (isNavigating) return;
+    
+    setIsNavigating(true);
 
     const entity = notification.relatedEntity;
     
     switch (entity.type) {
       case 'customer':
-        router.push({
+        debouncedNavigate({
           pathname: '/receivables/customer-details',
           params: {
             customerId: entity.id,
@@ -387,7 +397,7 @@ export default function NotificationsScreen() {
         });
         break;
       case 'product':
-        router.push({
+        debouncedNavigate({
           pathname: '/inventory/product-details',
           params: {
             productId: entity.id,
@@ -408,6 +418,8 @@ export default function NotificationsScreen() {
       default:
         console.log('View entity:', entity.type, entity.id);
     }
+    
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const renderNotificationCard = (notification: Notification) => {
@@ -427,6 +439,7 @@ export default function NotificationsScreen() {
         ]}
         onPress={() => handleNotificationPress(notification)}
         activeOpacity={0.7}
+        disabled={isNavigating}
       >
         {/* Header */}
         <View style={styles.notificationHeader}>
@@ -485,8 +498,12 @@ export default function NotificationsScreen() {
         {notification.relatedEntity && (
           <TouchableOpacity
             style={styles.relatedEntitySection}
-            onPress={() => handleRelatedEntityPress(notification)}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleRelatedEntityPress(notification);
+            }}
             activeOpacity={0.7}
+            disabled={isNavigating}
           >
             <Eye size={14} color={Colors.primary} />
             <Text style={styles.relatedEntityText}>
@@ -585,6 +602,9 @@ export default function NotificationsScreen() {
             <Text style={[styles.summaryValue, { color: Colors.error }]}>
               {filterCounts.unread}
             </Text>
+            <Text style={styles.summaryCount}>
+              notifications
+            </Text>
           </View>
         </View>
 
@@ -594,6 +614,9 @@ export default function NotificationsScreen() {
             <Text style={styles.summaryLabel}>Urgent</Text>
             <Text style={[styles.summaryValue, { color: Colors.warning }]}>
               {filterCounts.urgent}
+            </Text>
+            <Text style={styles.summaryCount}>
+              notifications
             </Text>
           </View>
         </View>
@@ -605,9 +628,39 @@ export default function NotificationsScreen() {
             <Text style={[styles.summaryValue, { color: Colors.info }]}>
               {filterCounts.action_required}
             </Text>
+            <Text style={styles.summaryCount}>
+              notifications
+            </Text>
           </View>
         </View>
       </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search notifications..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => console.log('Advanced filter')}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
@@ -682,28 +735,7 @@ export default function NotificationsScreen() {
         <Text style={styles.notifyStaffText}>Notify Staff</Text>
       </TouchableOpacity>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search notifications..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Advanced filter')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+
 
       {/* Status Update Modal */}
       <Modal
@@ -807,7 +839,7 @@ const styles = StyleSheet.create({
   summaryContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     gap: 12,
     backgroundColor: Colors.grey[50],
     borderBottomWidth: 1,
@@ -843,6 +875,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
+    marginBottom: 2,
+  },
+  summaryCount: {
+    fontSize: 10,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
   },
   filterContainer: {
     backgroundColor: Colors.background,
@@ -1092,7 +1140,7 @@ const styles = StyleSheet.create({
   },
   notifyStaffFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     backgroundColor: Colors.success,
     flexDirection: 'row',
@@ -1139,12 +1187,14 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -1155,14 +1205,20 @@ const styles = StyleSheet.create({
     
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   modalOverlay: {
     flex: 1,

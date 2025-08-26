@@ -8,13 +8,14 @@ import {
   TextInput,
   Image,
   Modal,
+  Platform,
 } from 'react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+
 import { 
   ArrowLeft, 
-  Search, 
-  Filter,
   Download,
   Share,
   Eye,
@@ -29,7 +30,9 @@ import {
   CreditCard,
   IndianRupee,
   ChevronDown,
-  X
+  X,
+  Search,
+  Filter
 } from 'lucide-react-native';
 
 const Colors = {
@@ -235,6 +238,10 @@ export default function AllInvoicesScreen() {
   const [showTimeRangeModal, setShowTimeRangeModal] = useState(false);
   const [customFromDate, setCustomFromDate] = useState('');
   const [customToDate, setCustomToDate] = useState('');
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for FAB buttons
+  const debouncedNavigate = useDebounceNavigation(500);
 
   const timeRangeOptions = [
     { value: 'today', label: 'Today' },
@@ -267,6 +274,20 @@ export default function AllInvoicesScreen() {
     }
     setShowTimeRangeModal(false);
     applyFilters(searchQuery, selectedFilter, 'custom');
+  };
+
+  const handleNewSalePress = () => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/new-sale');
+    setTimeout(() => setIsNavigating(false), 1000);
+  };
+
+  const handleNewReturnPress = () => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/new-return');
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter, timeRange: TimeRange) => {
@@ -644,6 +665,33 @@ export default function AllInvoicesScreen() {
         </View>
       </View>
 
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search invoices..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => console.log('Advanced filter')}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
         <TouchableOpacity
@@ -714,27 +762,29 @@ export default function AllInvoicesScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search invoices..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Advanced filter')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
+
+
+      {/* FABs */}
+      <View style={styles.fabContainer}>
+        {/* New Sale FAB */}
+        <TouchableOpacity
+          style={[styles.saleFAB, isNavigating && styles.fabDisabled]}
+          onPress={handleNewSalePress}
+          activeOpacity={0.8}
+          disabled={isNavigating}
+        >
+          <Text style={styles.fabText}>New Sale</Text>
+        </TouchableOpacity>
+
+        {/* New Return FAB */}
+        <TouchableOpacity
+          style={[styles.returnFAB, isNavigating && styles.fabDisabled]}
+          onPress={handleNewReturnPress}
+          activeOpacity={0.8}
+          disabled={isNavigating}
+        >
+          <Text style={styles.fabText}>New Return</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Time Range Selection Modal */}
@@ -942,6 +992,51 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     textAlign: 'center',
   },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+    marginLeft: 12,
+    marginRight: 12,
+  },
+  filterButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   filterContainer: {
     flexDirection: 'row',
     backgroundColor: Colors.background,
@@ -1130,54 +1225,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: Colors.text,
-    marginLeft: 12,
-    marginRight: 12,
-    
-  },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
+  // Search bar styles removed - now using AnimatedSearchBar component
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1296,5 +1344,54 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: Colors.textLight,
+  },
+  fabContainer: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
+    left: 16,
+    right: 16,
+    flexDirection: 'row', // Side by side layout
+    gap: 12,
+  },
+  returnFAB: {
+    flex: 1, // Equal width - takes half the available space
+    backgroundColor: Colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 25,
+    shadowColor: Colors.error,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  saleFAB: {
+    flex: 1, // Equal width - takes half the available space
+    backgroundColor: Colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 25,
+    shadowColor: Colors.success,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  fabText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  fabDisabled: {
+    opacity: 0.6,
   },
 });

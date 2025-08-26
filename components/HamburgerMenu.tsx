@@ -8,6 +8,7 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building } from 'lucide-react-native';
 
 interface HamburgerMenuProps {
@@ -74,6 +75,12 @@ const menuSections: MenuSection[] = [
     title: 'Banks',
     icon: Building,
     route: '/banks',
+  },
+  {
+    id: 'cash',
+    title: 'Cash',
+    icon: CreditCard,
+    route: '/cash',
   },
   {
     id: 'locations',
@@ -185,16 +192,18 @@ export default function HamburgerMenu({ visible, onClose, onNavigate }: Hamburge
       <View style={styles.overlay}>
         
         <View style={styles.menuContainer}>
-          <View style={styles.menuHeader}>
-            <Text style={styles.menuTitle}>Menu</Text>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={onClose}
-              activeOpacity={0.7}
-            >
-              <X size={24} color="#64748b" />
-            </TouchableOpacity>
-          </View>
+          <SafeAreaView style={styles.menuHeaderSafeArea}>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle}>Menu</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <X size={24} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
 
           <ScrollView
             style={styles.menuContent}
@@ -234,6 +243,9 @@ const styles = StyleSheet.create({
   },
   overlayTouchable: {
     flex: 1,
+  },
+  menuHeaderSafeArea: {
+    backgroundColor: '#ffffff',
   },
   menuHeader: {
     flexDirection: 'row',

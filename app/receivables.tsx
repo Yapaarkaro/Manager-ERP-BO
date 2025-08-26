@@ -7,11 +7,13 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowDownLeft, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
-import { dataStore, Receivable } from '@/utils/dataStore';
+import { Receivable } from '@/utils/dataStore';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const Colors = {
   background: '#FFFFFF',
@@ -32,27 +34,125 @@ const Colors = {
 
 // Using Receivable interface from dataStore
 
-const mockReceivables: Receivable[] = [];
+const mockReceivables: Receivable[] = [
+  {
+    id: 'REC-001',
+    customerId: 'CUST-001',
+    customerName: 'Rajesh Kumar',
+    customerType: 'business',
+    businessName: 'TechCorp Solutions',
+    mobile: '+91 98765 43210',
+    gstin: '27AABCT1234Z1Z5',
+    address: '123, Tech Park, Bangalore - 560001',
+    totalReceivable: 45000,
+    overdueAmount: 0,
+    invoiceCount: 3,
+    oldestInvoiceDate: '2024-01-15',
+    daysPastDue: 0,
+    creditLimit: 100000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-25',
+    lastPaymentAmount: 20000,
+    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'current'
+  },
+  {
+    id: 'REC-002',
+    customerId: 'CUST-002',
+    customerName: 'Metro Retail Chain',
+    customerType: 'business',
+    businessName: 'Metro Retail Chain',
+    mobile: '+91 87654 32109',
+    gstin: '29AABCM9876Z2Z6',
+    address: '456, Retail Plaza, Mumbai - 400001',
+    totalReceivable: 125000,
+    overdueAmount: 75000,
+    invoiceCount: 2,
+    oldestInvoiceDate: '2024-01-10',
+    daysPastDue: 5,
+    creditLimit: 200000,
+    paymentTerms: 'Net 45',
+    lastPaymentDate: '2024-01-15',
+    lastPaymentAmount: 50000,
+    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'overdue'
+  },
+  {
+    id: 'REC-003',
+    customerId: 'CUST-003',
+    customerName: 'Sunita Devi',
+    customerType: 'individual',
+    mobile: '+91 76543 21098',
+    address: '789, Residential Area, Delhi - 110001',
+    totalReceivable: 28000,
+    overdueAmount: 28000,
+    invoiceCount: 1,
+    oldestInvoiceDate: '2024-01-08',
+    daysPastDue: 12,
+    creditLimit: 50000,
+    paymentTerms: 'Net 15',
+    customerAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'critical'
+  },
+  {
+    id: 'REC-004',
+    customerId: 'CUST-004',
+    customerName: 'Global Enterprises',
+    customerType: 'business',
+    businessName: 'Global Enterprises Ltd',
+    mobile: '+91 65432 10987',
+    gstin: '33AABCG5678Z3Z7',
+    address: '321, Corporate Tower, Chennai - 600001',
+    totalReceivable: 89000,
+    overdueAmount: 59000,
+    invoiceCount: 2,
+    oldestInvoiceDate: '2024-01-05',
+    daysPastDue: 8,
+    creditLimit: 150000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-12',
+    lastPaymentAmount: 30000,
+    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'overdue'
+  },
+  {
+    id: 'REC-005',
+    customerId: 'CUST-005',
+    customerName: 'Vikram Patel',
+    customerType: 'business',
+    businessName: 'Patel Electronics',
+    mobile: '+91 54321 09876',
+    gstin: '24AABCP2345Z4Z8',
+    address: '654, Electronics Market, Ahmedabad - 380001',
+    totalReceivable: 67000,
+    overdueAmount: 0,
+    invoiceCount: 3,
+    oldestInvoiceDate: '2024-01-12',
+    daysPastDue: 0,
+    creditLimit: 100000,
+    paymentTerms: 'Net 30',
+    lastPaymentDate: '2024-01-25',
+    lastPaymentAmount: 20000,
+    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    status: 'current'
+  }
+];
 
 export default function ReceivablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [receivables, setReceivables] = useState<Receivable[]>([]);
-  const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>([]);
+  const [receivables, setReceivables] = useState<Receivable[]>(mockReceivables);
+  const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>(mockReceivables);
+  const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Use debounced navigation for customer cards
+  const debouncedNavigate = useDebounceNavigation(500);
 
-  // Subscribe to data store changes
+  // Use mock data instead of dataStore
   React.useEffect(() => {
-    const unsubscribe = dataStore.subscribe(() => {
-      const allReceivables = dataStore.getReceivables();
-      setReceivables(allReceivables);
-      setFilteredReceivables(allReceivables);
-    });
-
-    // Initial load
-    const allReceivables = dataStore.getReceivables();
-    setReceivables(allReceivables);
-    setFilteredReceivables(allReceivables);
-
-    return unsubscribe;
+    // Set initial data from mock
+    console.log('Loading mock receivables:', mockReceivables.length);
+    setReceivables(mockReceivables);
+    setFilteredReceivables(mockReceivables);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -129,13 +229,18 @@ export default function ReceivablesScreen() {
   };
 
   const handleCustomerDetails = (receivable: Receivable) => {
-    router.push({
+    if (isNavigating) return;
+    setIsNavigating(true);
+    
+    debouncedNavigate({
       pathname: '/receivables/customer-details',
       params: {
         customerId: receivable.id,
         customerData: JSON.stringify(receivable)
       }
     });
+    
+    setTimeout(() => setIsNavigating(false), 1000);
   };
 
   const renderReceivableCard = (receivable: Receivable) => {
@@ -148,6 +253,7 @@ export default function ReceivablesScreen() {
         ]}
         onPress={() => handleCustomerDetails(receivable)}
         activeOpacity={0.7}
+        disabled={isNavigating}
       >
         {/* Top Section */}
         <View style={styles.receivableHeader}>
@@ -271,6 +377,7 @@ export default function ReceivablesScreen() {
               style={styles.actionButton}
               onPress={() => handleCustomerDetails(receivable)}
               activeOpacity={0.7}
+              disabled={isNavigating}
             >
               <Eye size={18} color={Colors.textLight} />
             </TouchableOpacity>
@@ -314,6 +421,9 @@ export default function ReceivablesScreen() {
             <Text style={[styles.summaryValue, { color: Colors.success }]}>
               {formatAmount(totalReceivables)}
             </Text>
+            <Text style={styles.summaryCount}>
+              amount
+            </Text>
           </View>
         </View>
 
@@ -324,12 +434,52 @@ export default function ReceivablesScreen() {
             <Text style={[styles.summaryValue, { color: Colors.error }]}>
               {formatAmount(totalOverdue)}
             </Text>
-            <Text style={styles.summarySubtext}>
+            <Text style={styles.summaryCount}>
               {overdueCustomers} customers
             </Text>
           </View>
         </View>
+
+        <View style={styles.summaryCard}>
+          <Building2 size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Customers</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
+              {filteredReceivables.length}
+            </Text>
+            <Text style={styles.summaryCount}>
+              customers
+            </Text>
+          </View>
+        </View>
       </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search customers..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={handleFilter}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Receivables List */}
       <ScrollView 
@@ -360,28 +510,7 @@ export default function ReceivablesScreen() {
         <Text style={styles.receivePaymentText}>Receive Payment</Text>
       </TouchableOpacity>
 
-      {/* Bottom Section with Search */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search customers..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={handleFilter}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+
     </SafeAreaView>
   );
 }
@@ -431,12 +560,11 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -447,21 +575,35 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   summaryInfo: {
-    flex: 1,
+    alignItems: 'center',
+    marginTop: 8,
   },
   summaryLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  summarySubtext: {
     fontSize: 11,
     color: Colors.textLight,
-    marginTop: 2,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  summaryCount: {
+    fontSize: 10,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    // No background - completely transparent
   },
   scrollView: {
     flex: 1,
@@ -638,7 +780,7 @@ const styles = StyleSheet.create({
   },
   receivePaymentFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     backgroundColor: Colors.success,
     flexDirection: 'row',
@@ -685,12 +827,14 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -701,13 +845,19 @@ const styles = StyleSheet.create({
     
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

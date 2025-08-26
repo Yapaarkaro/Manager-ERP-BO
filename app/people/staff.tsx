@@ -7,12 +7,11 @@ import {
   ScrollView,
   TextInput,
   Image,
-  Modal,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX, X } from 'lucide-react-native';
+import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX } from 'lucide-react-native';
 
 const Colors = {
   background: '#FFFFFF',
@@ -302,8 +301,7 @@ const mockStaffData: Staff[] = [
 export default function StaffScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStaff, setFilteredStaff] = useState(mockStaffData);
-  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
+
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -323,8 +321,10 @@ export default function StaffScreen() {
   };
 
   const handleStaffPress = (staff: Staff) => {
-    setSelectedStaff(staff);
-    setShowDetailsModal(true);
+    router.push({
+      pathname: '/people/staff-details',
+      params: { staffId: staff.id }
+    });
   };
 
   const handleAddStaff = () => {
@@ -478,21 +478,30 @@ export default function StaffScreen() {
               </Text>
             </View>
 
-            {staff.performance.salesAmount > 0 && (
-              <View style={styles.performanceStat}>
-                <Text style={styles.performanceLabel}>Sales</Text>
-                <Text style={[styles.performanceValue, { color: Colors.success }]}>
-                  {formatAmount(staff.performance.salesAmount)}
-                </Text>
-              </View>
-            )}
+            <View style={styles.performanceStat}>
+              <Text style={styles.performanceLabel}>
+                {staff.performance.salesAmount > 0 ? 'Sales' : 'Tasks'}
+              </Text>
+              <Text style={[
+                styles.performanceValue, 
+                { color: staff.performance.salesAmount > 0 ? Colors.success : Colors.primary }
+              ]}>
+                {staff.performance.salesAmount > 0 
+                  ? formatAmount(staff.performance.salesAmount)
+                  : `${staff.performance.returnsHandled || staff.performance.invoicesProcessed || 0}`
+                }
+              </Text>
+            </View>
 
             <View style={styles.performanceStat}>
               <Text style={styles.performanceLabel}>
-                {staff.performance.salesAmount > 0 ? 'Invoices' : 'Tasks'}
+                {staff.performance.salesAmount > 0 ? 'Invoices' : 'Customers'}
               </Text>
               <Text style={styles.performanceValue}>
-                {staff.performance.invoicesProcessed || staff.performance.returnsHandled}
+                {staff.performance.salesAmount > 0 
+                  ? staff.performance.invoicesProcessed 
+                  : staff.performance.customersServed
+                }
               </Text>
             </View>
 
@@ -571,7 +580,7 @@ export default function StaffScreen() {
           <ArrowLeft size={24} color={Colors.text} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Staff Performance</Text>
+        <Text style={styles.headerTitle}>Staff</Text>
         
         <View style={styles.headerRight}>
           <Text style={styles.totalCount}>
@@ -665,183 +674,8 @@ export default function StaffScreen() {
         </View>
       </View>
 
-      {/* Staff Details Modal */}
-      <Modal
-        visible={showDetailsModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowDetailsModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            {selectedStaff && (
-              <>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Staff Details</Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={() => setShowDetailsModal(false)}
-                    activeOpacity={0.7}
-                  >
-                    <X size={24} color={Colors.textLight} />
-                  </TouchableOpacity>
-                </View>
 
-                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                  {/* Staff Profile */}
-                  <View style={styles.modalProfileSection}>
-                    <Image 
-                      source={{ uri: selectedStaff.avatar }}
-                      style={styles.modalStaffAvatar}
-                    />
-                    <Text style={styles.modalStaffName}>{selectedStaff.name}</Text>
-                    <Text style={styles.modalStaffRole}>{selectedStaff.role}</Text>
-                    <View style={[
-                      styles.modalStatusBadge,
-                      { backgroundColor: `${getStatusColor(selectedStaff.status)}20` }
-                    ]}>
-                      <Text style={[
-                        styles.modalStatusText,
-                        { color: getStatusColor(selectedStaff.status) }
-                      ]}>
-                        {getStatusText(selectedStaff.status)}
-                      </Text>
-                    </View>
-                  </View>
 
-                  {/* Contact Information */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Contact Information</Text>
-                    <View style={styles.modalDetailRow}>
-                      <Phone size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Mobile:</Text>
-                      <Text style={styles.modalDetailValue}>{selectedStaff.mobile}</Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <Mail size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Email:</Text>
-                      <Text style={styles.modalDetailValue}>{selectedStaff.email}</Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <MapPin size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Address:</Text>
-                      <Text style={[styles.modalDetailValue, styles.addressText]}>
-                        {selectedStaff.address}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Employment Details */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Employment Details</Text>
-                    <View style={styles.modalDetailRow}>
-                      <Calendar size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Join Date:</Text>
-                      <Text style={styles.modalDetailValue}>
-                        {formatDate(selectedStaff.joinDate)}
-                      </Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <Users size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Department:</Text>
-                      <Text style={styles.modalDetailValue}>{selectedStaff.department}</Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <IndianRupee size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Salary:</Text>
-                      <Text style={styles.modalDetailValue}>
-                        {formatAmount(selectedStaff.salary.total)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Performance Metrics */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Performance Metrics</Text>
-                    <View style={styles.modalPerformanceGrid}>
-                      <View style={styles.modalPerformanceCard}>
-                        <Text style={styles.modalPerformanceLabel}>Overall Score</Text>
-                        <Text style={[
-                          styles.modalPerformanceValue,
-                          { color: getPerformanceColor(selectedStaff.performance.score) }
-                        ]}>
-                          {selectedStaff.performance.score}/100
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.modalPerformanceCard}>
-                        <Text style={styles.modalPerformanceLabel}>Attendance</Text>
-                        <Text style={[
-                          styles.modalPerformanceValue,
-                          { color: selectedStaff.attendance.percentage >= 90 ? Colors.success : Colors.warning }
-                        ]}>
-                          {selectedStaff.attendance.percentage}%
-                        </Text>
-                      </View>
-
-                      {selectedStaff.performance.salesAmount > 0 && (
-                        <View style={styles.modalPerformanceCard}>
-                          <Text style={styles.modalPerformanceLabel}>Sales</Text>
-                          <Text style={[styles.modalPerformanceValue, { color: Colors.success }]}>
-                            {formatAmount(selectedStaff.performance.salesAmount)}
-                          </Text>
-                        </View>
-                      )}
-
-                      <View style={styles.modalPerformanceCard}>
-                        <Text style={styles.modalPerformanceLabel}>Rating</Text>
-                        <Text style={[styles.modalPerformanceValue, { color: Colors.warning }]}>
-                          ⭐ {selectedStaff.performance.rating}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Emergency Contact */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Emergency Contact</Text>
-                    <View style={styles.modalDetailRow}>
-                      <Users size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Name:</Text>
-                      <Text style={styles.modalDetailValue}>
-                        {selectedStaff.emergencyContact.name}
-                      </Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <Text style={styles.modalDetailLabel}>Relation:</Text>
-                      <Text style={styles.modalDetailValue}>
-                        {selectedStaff.emergencyContact.relation}
-                      </Text>
-                    </View>
-                    <View style={styles.modalDetailRow}>
-                      <Phone size={16} color={Colors.textLight} />
-                      <Text style={styles.modalDetailLabel}>Phone:</Text>
-                      <Text style={styles.modalDetailValue}>
-                        {selectedStaff.emergencyContact.phone}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Action Buttons */}
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity
-                      style={styles.editButton}
-                      onPress={() => {
-                        setShowDetailsModal(false);
-                        handleEditStaff(selectedStaff.id);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Edit size={16} color={Colors.primary} />
-                      <Text style={styles.editButtonText}>Edit Staff</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScrollView>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1201,148 +1035,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalContainer: {
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '90%',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 20,
-  },
-  modalProfileSection: {
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalStaffAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginBottom: 12,
-  },
-  modalStaffName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  modalStaffRole: {
-    fontSize: 16,
-    color: Colors.primary,
-    fontWeight: '500',
-    marginBottom: 12,
-  },
-  modalStatusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  modalStatusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalSection: {
-    marginBottom: 20,
-  },
-  modalSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  modalDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-    gap: 8,
-  },
-  modalDetailLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    minWidth: 80,
-  },
-  modalDetailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.text,
-    flex: 1,
-  },
-  addressText: {
-    lineHeight: 20,
-  },
-  modalPerformanceGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  modalPerformanceCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  modalPerformanceLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 6,
-    textAlign: 'center',
-  },
-  modalPerformanceValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  modalActions: {
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-  },
+
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',

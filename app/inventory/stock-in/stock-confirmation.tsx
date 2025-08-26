@@ -4,13 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  SafeAreaView,
   ScrollView,
   Alert,
-  Dimensions,
-  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
   Check,
@@ -21,16 +20,6 @@ import {
   Truck,
   AlertTriangle,
 } from 'lucide-react-native';
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-// Calculate responsive values with platform-specific adjustments
-const headerPaddingHorizontal = Math.max(16, screenWidth * 0.04);
-const headerPaddingVertical = Math.max(12, screenHeight * 0.015) + (Platform.OS === 'android' ? 8 : 0);
-const backButtonWidth = Math.max(40, screenWidth * 0.1);
-const backButtonHeight = Math.max(40, screenHeight * 0.05);
-const backButtonMarginRight = Math.max(16, screenWidth * 0.04);
-const headerTitleFontSize = Math.max(18, screenWidth * 0.045);
 
 const Colors = {
   background: '#FFFFFF',
@@ -80,6 +69,7 @@ export default function StockConfirmationScreen() {
     vehicleType 
   } = useLocalSearchParams();
 
+  const insets = useSafeAreaInsets();
   const po: PurchaseOrder = poData ? JSON.parse(poData as string) : null;
 
   const handleConfirm = () => {
@@ -112,52 +102,41 @@ export default function StockConfirmationScreen() {
 
   if (!po) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => {
-              // Try to go back, if no previous screen, go to stock in options
-              try {
-                router.back();
-              } catch (error) {
-                router.replace('/inventory/stock-in');
-              }
-            }}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Confirm Stock In</Text>
-        </View>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading data...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Confirm Stock In</Text>
+          </View>
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading data...</Text>
+          </View>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            // Try to go back, if no previous screen, go to verify stock
-            try {
-              handleCancel();
-            } catch (error) {
-              router.replace('/inventory/stock-in/verify-stock');
-            }
-          }}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Confirm Stock In</Text>
-      </View>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleCancel}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color={Colors.text} />
+          </TouchableOpacity>
+          
+          <Text style={styles.headerTitle}>Confirm Stock In</Text>
+        </View>
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Confirmation Message */}
@@ -262,7 +241,7 @@ export default function StockConfirmationScreen() {
         </ScrollView>
 
         {/* Action Buttons */}
-        <View style={styles.floatingButtonsContainer}>
+        <View style={[styles.floatingButtonsContainer, { bottom: Math.max(16, insets.bottom + 5) }]}>
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={handleCancel}
@@ -282,6 +261,7 @@ export default function StockConfirmationScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+    </View>
   );
 }
 
@@ -290,27 +270,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  safeArea: {
+    flex: 1,
+  },
   header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: headerPaddingHorizontal,
-    paddingVertical: headerPaddingVertical,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   backButton: {
-    width: backButtonWidth,
-    height: backButtonHeight,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: backButtonMarginRight,
+    marginRight: 12,
   },
   headerTitle: {
-    fontSize: headerTitleFontSize,
+    fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
-    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -467,11 +451,11 @@ const styles = StyleSheet.create({
   },
   floatingButtonsContainer: {
     position: 'absolute',
-    bottom: 20,
     left: 16,
     right: 16,
     flexDirection: 'row',
     gap: 12,
+    zIndex: 1000,
   },
   cancelButton: {
     flex: 1,
