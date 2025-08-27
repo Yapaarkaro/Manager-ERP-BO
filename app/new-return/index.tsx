@@ -296,25 +296,23 @@ export default function NewReturnScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>New Return</Text>
-          
-          <View style={styles.headerRight}>
-            <RotateCcw size={24} color={Colors.error} />
-          </View>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>New Return</Text>
+        
+        <View style={styles.headerRight}>
+          <RotateCcw size={24} color={Colors.error} />
         </View>
-      </SafeAreaView>
+      </View>
 
       {/* Instructions */}
       <View style={styles.instructionsContainer}>
@@ -322,6 +320,30 @@ export default function NewReturnScreen() {
         <Text style={styles.instructionsText}>
           Choose the original invoice for which you want to process a return
         </Text>
+      </View>
+
+      {/* Search Bar and Scanner - Top of screen */}
+      <View style={styles.topSearchContainer}>
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <Search size={20} color={Colors.primary} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search invoices..."
+              placeholderTextColor={Colors.textLight}
+              value={searchQuery}
+              onChangeText={handleSearch}
+            />
+          </View>
+          
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={handleScanInvoice}
+            activeOpacity={0.7}
+          >
+            <Scan size={24} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Recent Invoices */}
@@ -411,31 +433,7 @@ export default function NewReturnScreen() {
           </View>
         )}
       </ScrollView>
-
-      {/* Bottom Section with Search and Scan */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search invoices..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-          </View>
-          
-          <TouchableOpacity
-            style={styles.scanButton}
-            onPress={handleScanInvoice}
-            activeOpacity={0.7}
-          >
-            <Scan size={24} color="#ffffff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -444,17 +442,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
+
+  header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: Colors.background,
   },
   backButton: {
     width: 40,
@@ -467,10 +463,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
-    flex: 1,
   },
   headerRight: {
     alignItems: 'flex-end',
+    marginLeft: 'auto',
   },
   instructionsContainer: {
     backgroundColor: '#fef2f2',
@@ -495,7 +491,15 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 20,
+  },
+  // Top search container styles
+  topSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   sectionHeader: {
     marginBottom: 20,
@@ -635,39 +639,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 32,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 4,
     gap: 12,
   },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 25,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
   },
   searchInput: {
     flex: 1,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Keyboard,
   Platform,
   TextInput,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -186,23 +187,152 @@ export default function SalesInvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(mockSalesInvoices);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    paymentStatus: [] as string[],
+    paymentMethod: [] as string[],
+    customerType: [] as string[],
+    dateRange: 'all' as string,
+    amountRange: 'none' as string,
+    staffMember: [] as string[],
+  });
   
   // Use debounced navigation for invoice cards
   const debouncedNavigate = useDebounceNavigation(500);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredInvoices(mockSalesInvoices);
-    } else {
-      const filtered = mockSalesInvoices.filter(invoice =>
-        invoice.invoiceNumber.toLowerCase().includes(query.toLowerCase()) ||
-        invoice.customerName.toLowerCase().includes(query.toLowerCase()) ||
-        invoice.staffName.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredInvoices(filtered);
-    }
+    applyFilters(query);
   };
+
+  const applyFilters = (searchQuery: string = '') => {
+    let filtered = mockSalesInvoices;
+
+    // Apply search filter
+    if (searchQuery.trim() !== '') {
+      filtered = filtered.filter(invoice =>
+        invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        invoice.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        invoice.staffName.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Apply payment status filter
+    if (activeFilters.paymentStatus.length > 0) {
+      filtered = filtered.filter(invoice => 
+        activeFilters.paymentStatus.includes(invoice.paymentStatus)
+      );
+    }
+
+    // Apply payment method filter
+    if (activeFilters.paymentMethod.length > 0) {
+      filtered = filtered.filter(invoice => 
+        activeFilters.paymentMethod.includes(invoice.paymentMethod)
+      );
+    }
+
+    // Apply customer type filter
+    if (activeFilters.customerType.length > 0) {
+      filtered = filtered.filter(invoice => 
+        activeFilters.customerType.includes(invoice.customerType)
+      );
+    }
+
+    // Apply staff member filter
+    if (activeFilters.staffMember.length > 0) {
+      filtered = filtered.filter(invoice => 
+        activeFilters.staffMember.includes(invoice.staffName)
+      );
+    }
+
+    // Apply date range filter
+    if (activeFilters.dateRange !== 'all') {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (activeFilters.dateRange) {
+        case 'today':
+          filtered = filtered.filter(invoice => {
+            const invoiceDate = new Date(invoice.date);
+            return invoiceDate >= todayStart;
+          });
+          break;
+        case 'week':
+          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
+          filtered = filtered.filter(invoice => {
+            const invoiceDate = new Date(invoice.date);
+            return invoiceDate >= weekStart;
+          });
+          break;
+        case 'month':
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          filtered = filtered.filter(invoice => {
+            const invoiceDate = new Date(invoice.date);
+            return invoiceDate >= monthStart;
+          });
+          break;
+      }
+    }
+
+    // Apply amount range filter
+    if (activeFilters.amountRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.amountRange === 'lowToHigh') {
+          return a.amount - b.amount;
+        } else {
+          return b.amount - a.amount;
+        }
+      });
+    }
+
+    setFilteredInvoices(filtered);
+  };
+
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'dateRange' || filterType === 'amountRange') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      paymentStatus: [],
+      paymentMethod: [],
+      customerType: [],
+      dateRange: 'all',
+      amountRange: 'none',
+      staffMember: [],
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.paymentStatus.length > 0) count++;
+    if (activeFilters.paymentMethod.length > 0) count++;
+    if (activeFilters.customerType.length > 0) count++;
+    if (activeFilters.dateRange !== 'all') count++;
+    if (activeFilters.amountRange !== 'none') count++;
+    if (activeFilters.staffMember.length > 0) count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery);
+  }, [activeFilters]);
 
   const handleInvoicePress = (invoice: SalesInvoice) => {
     if (isNavigating) return;
@@ -501,10 +631,15 @@ export default function SalesInvoicesScreen() {
           />
           <TouchableOpacity
             style={styles.filterButton}
-            onPress={() => console.log('Filter sales invoices')}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.7}
           >
             <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -542,6 +677,197 @@ export default function SalesInvoicesScreen() {
         <Text style={styles.newSaleText}>New Sale</Text>
       </TouchableOpacity>
 
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Sales Invoices</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Payment Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Payment Status</Text>
+                <View style={styles.filterOptions}>
+                  {['paid', 'partially_paid', 'pending'].map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.paymentStatus.includes(status) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('paymentStatus', status)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.paymentStatus.includes(status) && styles.filterOptionTextActive
+                      ]}>
+                        {status === 'partially_paid' ? 'Partially Paid' : status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Payment Method Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Payment Method</Text>
+                <View style={styles.filterOptions}>
+                  {['cash', 'upi', 'card', 'others'].map(method => (
+                    <TouchableOpacity
+                      key={method}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.paymentMethod.includes(method) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('paymentMethod', method)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.paymentMethod.includes(method) && styles.filterOptionTextActive
+                      ]}>
+                        {getPaymentMethodName(method)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Customer Type Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Customer Type</Text>
+                <View style={styles.filterOptions}>
+                  {['individual', 'business'].map(type => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.customerType.includes(type) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('customerType', type)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.customerType.includes(type) && styles.filterOptionTextActive
+                      ]}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Date Range</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'all', label: 'All Time' },
+                    { value: 'today', label: 'Today' },
+                    { value: 'week', label: 'This Week' },
+                    { value: 'month', label: 'This Month' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.dateRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('dateRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.dateRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Amount Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Amount Range</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.amountRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('amountRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.amountRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Staff Member Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Staff Member</Text>
+                <View style={styles.filterOptions}>
+                  {['Priya Sharma', 'Rajesh Kumar', 'Amit Singh'].map(staff => (
+                    <TouchableOpacity
+                      key={staff}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.staffMember.includes(staff) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('staffMember', staff)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.staffMember.includes(staff) && styles.filterOptionTextActive
+                      ]}>
+                        {staff}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -916,5 +1242,140 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -156,30 +157,168 @@ export default function LowStockScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredItems, setFilteredItems] = useState(mockLowStockItems);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    urgencyLevel: [] as string[],
+    category: [] as string[],
+    supplier: [] as string[],
+    location: [] as string[],
+    dateRange: 'all' as string,
+    priceRange: 'none' as string,
+    stockRange: 'none' as string,
+  });
   
   // Use debounced navigation for low stock item cards
   const debouncedNavigate = useDebounceNavigation(500);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredItems(mockLowStockItems);
-    } else {
-      const filtered = mockLowStockItems.filter(item =>
-        item.name.toLowerCase().includes(query.toLowerCase()) ||
-        item.category.toLowerCase().includes(query.toLowerCase()) ||
-        item.supplier.toLowerCase().includes(query.toLowerCase()) ||
-        item.hsnCode.includes(query) ||
-        item.barcode.includes(query)
-      );
-      setFilteredItems(filtered);
-    }
+    applyFilters(query);
   };
 
-  const handleFilter = () => {
-    console.log('Filter pressed');
-    // Implement filter functionality
+  const applyFilters = (searchQuery: string = '') => {
+    let filtered = mockLowStockItems;
+
+    // Apply search filter
+    if (searchQuery.trim() !== '') {
+      filtered = filtered.filter(item =>
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.supplier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.hsnCode.includes(searchQuery) ||
+        item.barcode.includes(searchQuery)
+      );
+    }
+
+    // Apply urgency level filter
+    if (activeFilters.urgencyLevel.length > 0) {
+      filtered = filtered.filter(item => 
+        activeFilters.urgencyLevel.includes(item.urgencyLevel)
+      );
+    }
+
+    // Apply category filter
+    if (activeFilters.category.length > 0) {
+      filtered = filtered.filter(item => 
+        activeFilters.category.includes(item.category)
+      );
+    }
+
+    // Apply supplier filter
+    if (activeFilters.supplier.length > 0) {
+      filtered = filtered.filter(item => 
+        activeFilters.supplier.includes(item.supplier)
+      );
+    }
+
+    // Apply location filter
+    if (activeFilters.location.length > 0) {
+      filtered = filtered.filter(item => 
+        activeFilters.location.includes(item.location)
+      );
+    }
+
+    // Apply date range filter (last restocked)
+    if (activeFilters.dateRange !== 'all') {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (activeFilters.dateRange) {
+        case 'today':
+          filtered = filtered.filter(item => {
+            const restockDate = new Date(item.lastRestocked);
+            return restockDate >= todayStart;
+          });
+          break;
+        case 'week':
+          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
+          filtered = filtered.filter(item => {
+            const restockDate = new Date(item.lastRestocked);
+            return restockDate >= weekStart;
+          });
+          break;
+        case 'month':
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          filtered = filtered.filter(item => {
+            const restockDate = new Date(item.lastRestocked);
+            return restockDate >= monthStart;
+          });
+          break;
+      }
+    }
+
+    // Apply price range filter
+    if (activeFilters.priceRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.priceRange === 'lowToHigh') {
+          return a.price - b.price;
+        } else {
+          return b.price - a.price;
+        }
+      });
+    }
+
+    // Apply stock range filter
+    if (activeFilters.stockRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.stockRange === 'lowToHigh') {
+          return a.currentStock - b.currentStock;
+        } else {
+          return b.currentStock - a.currentStock;
+        }
+      });
+    }
+
+    setFilteredItems(filtered);
   };
+
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'dateRange' || filterType === 'priceRange' || filterType === 'stockRange') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      urgencyLevel: [],
+      category: [],
+      supplier: [],
+      location: [],
+      dateRange: 'all',
+      priceRange: 'none',
+      stockRange: 'none',
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.urgencyLevel.length > 0) count++;
+    if (activeFilters.category.length > 0) count++;
+    if (activeFilters.supplier.length > 0) count++;
+    if (activeFilters.location.length > 0) count++;
+    if (activeFilters.dateRange !== 'all') count++;
+    if (activeFilters.priceRange !== 'none') count++;
+    if (activeFilters.stockRange !== 'none') count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery);
+  }, [activeFilters]);
 
   const handleItemPress = (item: LowStockItem) => {
     if (isNavigating) return;
@@ -430,10 +569,15 @@ export default function LowStockScreen() {
           />
           <TouchableOpacity
             style={styles.filterButton}
-            onPress={handleFilter}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.7}
           >
             <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -460,6 +604,225 @@ export default function LowStockScreen() {
         )}
       </ScrollView>
 
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Low Stock Items</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Urgency Level Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Urgency Level</Text>
+                <View style={styles.filterOptions}>
+                  {['critical', 'moderate', 'low'].map(urgency => (
+                    <TouchableOpacity
+                      key={urgency}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.urgencyLevel.includes(urgency) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('urgencyLevel', urgency)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.urgencyLevel.includes(urgency) && styles.filterOptionTextActive
+                      ]}>
+                        {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Category Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Category</Text>
+                <View style={styles.filterOptions}>
+                  {['Smartphones', 'Laptops', 'Accessories', 'Tablets', 'Wearables'].map(category => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.category.includes(category) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('category', category)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.category.includes(category) && styles.filterOptionTextActive
+                      ]}>
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Supplier Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Supplier</Text>
+                <View style={styles.filterOptions}>
+                  {['Apple India Pvt Ltd', 'Samsung Electronics', 'Dell Technologies', 'HP Inc', 'Lenovo India'].map(supplier => (
+                    <TouchableOpacity
+                      key={supplier}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.supplier.includes(supplier) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('supplier', supplier)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.supplier.includes(supplier) && styles.filterOptionTextActive
+                      ]}>
+                        {supplier}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Location Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Location</Text>
+                <View style={styles.filterOptions}>
+                  {['Main Warehouse - A1', 'Main Warehouse - A2', 'Branch Office - B1', 'Branch Office - B2'].map(location => (
+                    <TouchableOpacity
+                      key={location}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.location.includes(location) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('location', location)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.location.includes(location) && styles.filterOptionTextActive
+                      ]}>
+                        {location}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Last Restocked</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'all', label: 'All Time' },
+                    { value: 'today', label: 'Today' },
+                    { value: 'week', label: 'This Week' },
+                    { value: 'month', label: 'This Month' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.dateRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('dateRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.dateRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Price Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Price Range</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.priceRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('priceRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.priceRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Stock Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Stock Range</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.stockRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('stockRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.stockRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -771,5 +1134,140 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

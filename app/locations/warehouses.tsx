@@ -8,10 +8,11 @@ import {
   Alert,
   Modal,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowLeft, Warehouse, MapPin, Plus, CreditCard as Edit3, Trash2, Search, Filter, Package, TrendingUp, TrendingDown } from 'lucide-react-native';
+import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
 
 const Colors = {
   background: '#FFFFFF',
@@ -48,6 +49,27 @@ interface WarehouseData {
   capacity?: string;
   currentStock?: number;
   stockValue?: number;
+  // Business performance data
+  usesManager: boolean;
+  staffCount?: number;
+  staffAttendance?: number;
+  // Sales data with different time periods
+  dailySales?: number;
+  weeklySales?: number;
+  monthlySales?: number;
+  dailyGrowth?: number;
+  weeklyGrowth?: number;
+  monthlyGrowth?: number;
+  // Financial data
+  cashInHand?: number;
+  receivables?: number;
+  payables?: number;
+  // Stock movement data
+  stockInToday?: number;
+  stockOutToday?: number;
+  // Stock data
+  lowStockItems?: number;
+  nearLowStockItems?: number;
 }
 
 // Mock warehouse data
@@ -70,7 +92,23 @@ const mockWarehouses: WarehouseData[] = [
     status: 'active',
     capacity: '10,000 sq ft',
     currentStock: 2500,
-    stockValue: 12500000
+    stockValue: 12500000,
+    usesManager: true,
+    staffCount: 32,
+    staffAttendance: 94,
+    dailySales: 620000,
+    weeklySales: 4250000,
+    monthlySales: 18500000,
+    dailyGrowth: 12.8,
+    weeklyGrowth: 18.5,
+    monthlyGrowth: 15.2,
+    cashInHand: 680000,
+    receivables: 3200000,
+    payables: 2100000,
+    stockInToday: 450000,
+    stockOutToday: 320000,
+    lowStockItems: 15,
+    nearLowStockItems: 12
   },
   {
     id: 'warehouse_002',
@@ -90,7 +128,23 @@ const mockWarehouses: WarehouseData[] = [
     status: 'active',
     capacity: '7,500 sq ft',
     currentStock: 1800,
-    stockValue: 8900000
+    stockValue: 8900000,
+    usesManager: true,
+    staffCount: 24,
+    staffAttendance: 89,
+    dailySales: 420000,
+    weeklySales: 2950000,
+    monthlySales: 12800000,
+    dailyGrowth: 8.9,
+    weeklyGrowth: 14.2,
+    monthlyGrowth: 9.8,
+    cashInHand: 450000,
+    receivables: 2100000,
+    payables: 1500000,
+    stockInToday: 320000,
+    stockOutToday: 280000,
+    lowStockItems: 10,
+    nearLowStockItems: 7
   },
   {
     id: 'warehouse_003',
@@ -110,7 +164,23 @@ const mockWarehouses: WarehouseData[] = [
     status: 'inactive',
     capacity: '5,000 sq ft',
     currentStock: 0,
-    stockValue: 0
+    stockValue: 0,
+    usesManager: false,
+    staffCount: 0,
+    staffAttendance: 0,
+    dailySales: 0,
+    weeklySales: 0,
+    monthlySales: 0,
+    dailyGrowth: 0,
+    weeklyGrowth: 0,
+    monthlyGrowth: 0,
+    cashInHand: 0,
+    receivables: 0,
+    payables: 0,
+    stockInToday: 0,
+    stockOutToday: 0,
+    lowStockItems: 0,
+    nearLowStockItems: 0
   },
 ];
 
@@ -120,6 +190,9 @@ export default function WarehousesScreen() {
   const [filteredWarehouses, setFilteredWarehouses] = useState<WarehouseData[]>(mockWarehouses);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [warehouseToDelete, setWarehouseToDelete] = useState<string | null>(null);
+  const [showOverviewModal, setShowOverviewModal] = useState(false);
+  const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseData | null>(null);
+  const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   useEffect(() => {
     // Filter warehouses based on search query
@@ -185,9 +258,11 @@ export default function WarehousesScreen() {
     }
   };
 
-  const handleFilter = () => {
-    console.log('Filter pressed');
-    // Implement filter functionality
+
+
+  const handleWarehouseCardPress = (warehouse: WarehouseData) => {
+    setSelectedWarehouse(warehouse);
+    setShowOverviewModal(true);
   };
 
   const getStatusColor = (status: string) => {
@@ -205,7 +280,12 @@ export default function WarehousesScreen() {
     const stockTrend = getStockTrend(warehouse.currentStock || 0);
 
     return (
-      <View key={warehouse.id} style={styles.warehouseCard}>
+      <TouchableOpacity
+        key={warehouse.id}
+        style={styles.warehouseCard}
+        onPress={() => handleWarehouseCardPress(warehouse)}
+        activeOpacity={0.8}
+      >
         {/* Header */}
         <View style={styles.warehouseHeader}>
           <View style={styles.warehouseLeft}>
@@ -316,32 +396,58 @@ export default function WarehousesScreen() {
           <Text style={styles.gstLabel}>GST State Code:</Text>
           <Text style={styles.gstCode}>{warehouse.stateCode}</Text>
         </View>
-      </View>
+
+        {/* Glassmorphism Overlay for Non-Manager Warehouses */}
+        {!warehouse.usesManager && (
+          <View style={styles.cardGlassmorphismOverlay}>
+            <View style={styles.cardGlassmorphismContent}>
+              <Text style={styles.cardGlassmorphismTitle}>Subscribe to Manager</Text>
+              <Text style={styles.cardGlassmorphismSubtitle}>
+                Get comprehensive business overview including staff attendance, sales performance, stock analysis, and financial insights for this warehouse.
+              </Text>
+            </View>
+          </View>
+        )}
+      </TouchableOpacity>
     );
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Warehouses</Text>
-          
-          <View style={styles.headerRight}>
-            <Text style={styles.totalCount}>
-              {filteredWarehouses.length} warehouses
-            </Text>
-          </View>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Warehouses</Text>
+        
+        <View style={styles.headerRight}>
+          <Text style={styles.totalCount}>
+            {filteredWarehouses.length} warehouses
+          </Text>
         </View>
-      </SafeAreaView>
+      </View>
+
+      {/* Search Bar - Top of screen */}
+      <View style={styles.topSearchContainer}>
+                  <View style={styles.searchContainer}>
+            <View style={styles.searchBar}>
+              <Search size={20} color={Colors.primary} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search warehouses..."
+                placeholderTextColor={Colors.textLight}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+          </View>
+      </View>
 
       {/* Warehouses List */}
       <ScrollView 
@@ -371,29 +477,6 @@ export default function WarehousesScreen() {
         <Plus size={20} color="#ffffff" />
         <Text style={styles.addWarehouseText}>Add Warehouse</Text>
       </TouchableOpacity>
-
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search warehouses..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={handleFilter}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
 
       {/* Delete Confirmation Modal */}
       <Modal
@@ -428,7 +511,267 @@ export default function WarehousesScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+
+      {/* Warehouse Overview Modal */}
+      <Modal
+        visible={showOverviewModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowOverviewModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.overviewModal}>
+            {selectedWarehouse && (
+              <>
+                {/* Header */}
+                <View style={styles.overviewHeader}>
+                  <View style={styles.overviewIconContainer}>
+                    <Warehouse size={32} color={Colors.warning} />
+                  </View>
+                  <View style={styles.overviewTitleSection}>
+                    <Text style={styles.overviewTitle}>{selectedWarehouse.name}</Text>
+                    <View style={styles.overviewStatusRow}>
+                      <View style={[
+                        styles.overviewStatusBadge,
+                        { backgroundColor: `${getStatusColor(selectedWarehouse.status)}20` }
+                      ]}>
+                        <Text style={[
+                          styles.overviewStatusText,
+                          { color: getStatusColor(selectedWarehouse.status) }
+                        ]}>
+                          {selectedWarehouse.status.toUpperCase()}
+                        </Text>
+                      </View>
+                      {selectedWarehouse.isPrimary && (
+                        <View style={styles.overviewPrimaryBadge}>
+                          <Text style={styles.overviewPrimaryText}>PRIMARY</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={() => setShowOverviewModal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={24} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Content */}
+                <ScrollView style={styles.overviewContent} showsVerticalScrollIndicator={false}>
+                  {/* Business Performance Overview */}
+                  {selectedWarehouse.usesManager ? (
+                    <>
+                      {/* Stock Movement Section - Top Priority for Warehouses */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Stock Movement Today</Text>
+                        <View style={styles.overviewStatsGrid}>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue} numberOfLines={1} adjustsFontSizeToFit>
+                              {formatCurrency(selectedWarehouse.stockInToday || 0)}
+                            </Text>
+                            <Text style={styles.overviewStatLabel}>Stock In Today</Text>
+                          </View>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue} numberOfLines={1} adjustsFontSizeToFit>
+                              {formatCurrency(selectedWarehouse.stockOutToday || 0)}
+                            </Text>
+                            <Text style={styles.overviewStatLabel}>Stock Out Today</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Sales Performance with Toggle */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Sales Performance</Text>
+                        <View style={styles.salesPeriodToggle}>
+                          <TouchableOpacity
+                            style={[styles.periodButton, salesPeriod === 'daily' && styles.activePeriodButton]}
+                            onPress={() => setSalesPeriod('daily')}
+                          >
+                            <Text style={[styles.periodButtonText, salesPeriod === 'daily' && styles.activePeriodButtonText]}>
+                              Daily
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.periodButton, salesPeriod === 'weekly' && styles.activePeriodButton]}
+                            onPress={() => setSalesPeriod('weekly')}
+                          >
+                            <Text style={[styles.periodButtonText, salesPeriod === 'weekly' && styles.activePeriodButtonText]}>
+                              Weekly
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.periodButton, salesPeriod === 'monthly' && styles.activePeriodButton]}
+                            onPress={() => setSalesPeriod('monthly')}
+                          >
+                            <Text style={[styles.periodButtonText, salesPeriod === 'monthly' && styles.activePeriodButtonText]}>
+                              Monthly
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.overviewStatsGrid}>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue} numberOfLines={1} adjustsFontSizeToFit>
+                              {salesPeriod === 'daily' && formatCurrency(selectedWarehouse.dailySales || 0)}
+                              {salesPeriod === 'weekly' && formatCurrency(selectedWarehouse.weeklySales || 0)}
+                              {salesPeriod === 'monthly' && formatCurrency(selectedWarehouse.monthlySales || 0)}
+                            </Text>
+                            <Text style={styles.overviewStatLabel}>
+                              {salesPeriod === 'daily' ? 'Daily Sales' : salesPeriod === 'weekly' ? 'Weekly Sales' : 'Monthly Sales'}
+                            </Text>
+                          </View>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue}>
+                              +{salesPeriod === 'daily' && (selectedWarehouse.dailyGrowth || 0)}
+                              {salesPeriod === 'weekly' && (selectedWarehouse.weeklyGrowth || 0)}
+                              {salesPeriod === 'monthly' && (selectedWarehouse.monthlyGrowth || 0)}%
+                            </Text>
+                            <Text style={styles.overviewStatLabel}>
+                              vs {salesPeriod === 'daily' ? 'Yesterday' : salesPeriod === 'weekly' ? 'Last Week' : 'Last Month'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Financial Overview */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Financial Overview</Text>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Cash in Hand:</Text>
+                          <Text style={styles.overviewLineValue}>{formatCurrency(selectedWarehouse.cashInHand || 0)}</Text>
+                        </View>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Receivables:</Text>
+                          <Text style={styles.overviewLineValue}>{formatCurrency(selectedWarehouse.receivables || 0)}</Text>
+                        </View>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Payables:</Text>
+                          <Text style={styles.overviewLineValue}>{formatCurrency(selectedWarehouse.payables || 0)}</Text>
+                        </View>
+                      </View>
+
+                      {/* Stock Overview */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Stock Overview</Text>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Current Stock Value:</Text>
+                          <Text style={styles.overviewLineValue}>{formatCurrency(selectedWarehouse.stockValue || 0)}</Text>
+                        </View>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Low Stock Items:</Text>
+                          <Text style={[styles.overviewLineValue, styles.lowStockAlert]}>{selectedWarehouse.lowStockItems || 0}</Text>
+                        </View>
+                        <View style={styles.overviewLineItem}>
+                          <Text style={styles.overviewLineLabel}>Near Low Stock:</Text>
+                          <Text style={[styles.overviewLineValue, styles.nearLowStockAlert]}>{selectedWarehouse.nearLowStockItems || 0}</Text>
+                        </View>
+                      </View>
+
+                      {/* Staff Overview */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Staff Overview</Text>
+                        <View style={styles.overviewStatsGrid}>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue}>{selectedWarehouse.staffCount || 0}</Text>
+                            <Text style={styles.overviewStatLabel}>Total Staff</Text>
+                          </View>
+                          <View style={styles.overviewStatCard}>
+                            <Text style={styles.overviewStatValue}>{selectedWarehouse.staffAttendance || 0}%</Text>
+                            <Text style={styles.overviewStatLabel}>Attendance Rate</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Staff on Leave */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Staff on Leave</Text>
+                        <View style={styles.leaveItem}>
+                          <Text style={styles.leaveName}>Vikram Patel</Text>
+                          <Text style={styles.leaveType}>Annual Leave</Text>
+                          <Text style={styles.leaveDuration}>3 days</Text>
+                        </View>
+                        <View style={styles.leaveItem}>
+                          <Text style={styles.leaveName}>Meera Joshi</Text>
+                          <Text style={styles.leaveType}>Sick Leave</Text>
+                          <Text style={styles.leaveDuration}>1 day</Text>
+                        </View>
+                      </View>
+
+                      {/* Address Section */}
+                      <View style={styles.overviewSection}>
+                        <Text style={styles.overviewSectionTitle}>Address</Text>
+                        <View style={styles.overviewAddressRow}>
+                          <MapPin size={20} color={Colors.textLight} />
+                          <Text style={styles.overviewAddressText}>{formatAddress(selectedWarehouse)}</Text>
+                        </View>
+                      </View>
+
+                      {/* Manager & Contact Section */}
+                      {(selectedWarehouse.manager || selectedWarehouse.phone) && (
+                        <View style={styles.overviewSection}>
+                          <Text style={styles.overviewSectionTitle}>Contact Information</Text>
+                          {selectedWarehouse.manager && (
+                            <View style={styles.overviewContactRow}>
+                              <Text style={styles.overviewContactLabel}>Manager:</Text>
+                              <Text style={styles.overviewContactValue}>{selectedWarehouse.manager}</Text>
+                            </View>
+                          )}
+                          {selectedWarehouse.phone && (
+                            <View style={styles.overviewContactRow}>
+                              <Text style={styles.overviewContactLabel}>Phone:</Text>
+                              <Text style={styles.overviewContactValue}>{selectedWarehouse.phone}</Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <View style={styles.overviewSection}>
+                      <View style={styles.glassmorphismOverlay}>
+                        <View style={styles.glassmorphismContent}>
+                          <Text style={styles.glassmorphismTitle}>Subscribe to Manager</Text>
+                          <Text style={styles.glassmorphismSubtitle}>
+                            Get comprehensive business overview including staff attendance, sales performance, stock analysis, and financial insights for this warehouse.
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.glassmorphismButton}
+                            onPress={() => {
+                              setShowOverviewModal(false);
+                              // Navigate to subscription page or show subscription modal
+                              console.log('Navigate to Manager subscription');
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.glassmorphismButtonText}>Subscribe to Manager</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                </ScrollView>
+
+                {/* Actions */}
+                <View style={styles.overviewActions}>
+                  <TouchableOpacity
+                    style={styles.overviewEditButton}
+                    onPress={() => {
+                      setShowOverviewModal(false);
+                      handleEditWarehouse(selectedWarehouse);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Edit3 size={20} color="#ffffff" />
+                    <Text style={styles.overviewEditButtonText}>Edit Warehouse</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -437,17 +780,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
+
+  header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: Colors.background,
   },
   backButton: {
     width: 40,
@@ -474,7 +815,15 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 120,
+    paddingBottom: 20,
+  },
+  // Top search container styles
+  topSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   emptyState: {
     flex: 1,
@@ -679,16 +1028,16 @@ const styles = StyleSheet.create({
   },
   addWarehouseFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
-    backgroundColor: Colors.warning,
+    backgroundColor: Colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 25,
     zIndex: 10,
-    shadowColor: '#000',
+    shadowColor: Colors.primary,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -703,54 +1052,30 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
+
   searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
-  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 25,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
     marginLeft: 12,
-    marginRight: 12,
-    
   },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -782,6 +1107,366 @@ const styles = StyleSheet.create({
   deleteModalActions: {
     flexDirection: 'row',
     gap: 12,
+  },
+  // Overview Modal Styles
+  overviewModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  overviewIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fffbeb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  overviewTitleSection: {
+    flex: 1,
+  },
+  overviewTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  overviewStatusRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  overviewStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  overviewStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  overviewPrimaryBadge: {
+    backgroundColor: '#ffc754',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  overviewPrimaryText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+  },
+  overviewContent: {
+    padding: 20,
+  },
+  overviewSection: {
+    marginBottom: 24,
+  },
+  overviewSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  overviewAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  overviewAddressText: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  overviewStatsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  overviewStatCard: {
+    flex: 1,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    marginHorizontal: 4,
+  },
+  criticalCard: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  // Line Item Styles for Financial and Stock Overview
+  overviewLineItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  overviewLineLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  overviewLineValue: {
+    fontSize: 14,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  // Stock Alert Styles
+  lowStockAlert: {
+    color: '#DC2626',
+    fontWeight: '700',
+  },
+  nearLowStockAlert: {
+    color: '#D97706',
+    fontWeight: '700',
+  },
+  // Leave Item Styles
+  leaveItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  leaveName: {
+    fontSize: 14,
+    color: Colors.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  leaveType: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    marginRight: 8,
+  },
+  leaveDuration: {
+    fontSize: 12,
+    color: Colors.warning,
+    fontWeight: '600',
+  },
+  overviewStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginTop: 8,
+    marginBottom: 4,
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+  overviewStatLabel: {
+    fontSize: 12,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  // Sales Period Toggle Styles
+  salesPeriodToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 16,
+  },
+  periodButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  activePeriodButton: {
+    backgroundColor: Colors.background,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  periodButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  activePeriodButtonText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  overviewContactRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  overviewContactLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+    width: 80,
+  },
+  overviewContactValue: {
+    fontSize: 14,
+    color: Colors.text,
+    flex: 1,
+  },
+  overviewGSTRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  overviewGSTLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+    marginRight: 12,
+  },
+  overviewGSTValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  overviewDateText: {
+    fontSize: 14,
+    color: Colors.text,
+  },
+  // Glassmorphism Overlay Styles
+  glassmorphismOverlay: {
+    backgroundColor: 'rgba(255, 199, 84, 0.95)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    shadowColor: '#FFC754',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  glassmorphismContent: {
+    alignItems: 'center',
+  },
+  glassmorphismTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  glassmorphismSubtitle: {
+    fontSize: 14,
+    color: '#000000',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+    opacity: 0.8,
+  },
+  glassmorphismButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  glassmorphismButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Card Glassmorphism Overlay Styles
+  cardGlassmorphismOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 199, 84, 0.95)',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    shadowColor: '#FFC754',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  cardGlassmorphismContent: {
+    alignItems: 'center',
+  },
+  cardGlassmorphismTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  cardGlassmorphismSubtitle: {
+    fontSize: 12,
+    color: '#000000',
+    textAlign: 'center',
+    lineHeight: 16,
+    opacity: 0.8,
+  },
+  overviewActions: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+  },
+  overviewEditButton: {
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  overviewEditButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   deleteModalCancel: {
     flex: 1,

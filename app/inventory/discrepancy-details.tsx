@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Package, PackageMinus, PackagePlus, TriangleAlert as AlertTriangle, Eye, FileText, User, Calendar, MapPin, Hash, Building2, Phone, Mail, Clock, CreditCard as Edit, Check, X, MessageSquare } from 'lucide-react-native';
+import { ArrowLeft, Package, PackageMinus, PackagePlus, TriangleAlert as AlertTriangle, Eye, FileText, User, Calendar, MapPin, Hash, Building2, Phone, Mail, Clock, Edit3, Check, X, MessageSquare } from 'lucide-react-native';
 
 const Colors = {
   background: '#FFFFFF',
@@ -187,31 +187,27 @@ export default function DiscrepancyDetailsScreen() {
   const priorityColor = getPriorityColor(discrepancy.priority);
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Discrepancy Details</Text>
-          
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={() => setShowStatusModal(true)}
-              activeOpacity={0.7}
-            >
-              <Edit size={20} color={Colors.primary} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Discrepancy Details</Text>
+        
+        <TouchableOpacity
+          style={styles.headerActionButton}
+          onPress={() => setShowStatusModal(true)}
+          activeOpacity={0.7}
+        >
+          <Edit3 size={20} color={Colors.primary} />
+        </TouchableOpacity>
+      </View>
 
       <ScrollView 
         style={styles.scrollView}
@@ -472,7 +468,7 @@ export default function DiscrepancyDetailsScreen() {
             onPress={() => setShowStatusModal(true)}
             activeOpacity={0.8}
           >
-            <Edit size={20} color="#ffffff" />
+                          <Edit3 size={20} color="#ffffff" />
             <Text style={styles.updateStatusButtonText}>Update Status</Text>
           </TouchableOpacity>
 
@@ -592,7 +588,7 @@ export default function DiscrepancyDetailsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -601,17 +597,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
+  header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: Colors.background,
   },
   backButton: {
     width: 40,
@@ -625,10 +618,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
     flex: 1,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
   },
   headerActionButton: {
     width: 40,

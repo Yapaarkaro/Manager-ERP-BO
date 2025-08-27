@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -230,6 +230,16 @@ export default function NotificationsScreen() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    type: [] as string[],
+    category: [] as string[],
+    status: [] as string[],
+    priority: [] as string[],
+    actionRequired: 'none' as string,
+    createdBy: [] as string[],
+    dateRange: 'none' as string,
+  });
   
   // Use debounced navigation for related entity buttons
   const debouncedNavigate = useDebounceNavigation(500);
@@ -265,7 +275,7 @@ export default function NotificationsScreen() {
       );
     }
 
-    // Apply category filter
+    // Apply quick filter tabs
     if (filter !== 'all') {
       filtered = filtered.filter(notification => {
         switch (filter) {
@@ -279,6 +289,72 @@ export default function NotificationsScreen() {
             return true;
         }
       });
+    }
+
+    // Apply advanced filters
+    if (activeFilters.type.length > 0) {
+      filtered = filtered.filter(notification => 
+        activeFilters.type.includes(notification.type)
+      );
+    }
+
+    if (activeFilters.category.length > 0) {
+      filtered = filtered.filter(notification => 
+        activeFilters.category.includes(notification.category)
+      );
+    }
+
+    if (activeFilters.status.length > 0) {
+      filtered = filtered.filter(notification => 
+        activeFilters.status.includes(notification.status)
+      );
+    }
+
+    if (activeFilters.priority.length > 0) {
+      filtered = filtered.filter(notification => 
+        activeFilters.priority.includes(notification.priority)
+      );
+    }
+
+    if (activeFilters.actionRequired !== 'none') {
+      filtered = filtered.filter(notification => 
+        activeFilters.actionRequired === 'required' ? notification.actionRequired : !notification.actionRequired
+      );
+    }
+
+    if (activeFilters.createdBy.length > 0) {
+      filtered = filtered.filter(notification => 
+        activeFilters.createdBy.includes(notification.createdBy.name)
+      );
+    }
+
+    // Apply date range filter
+    if (activeFilters.dateRange !== 'none') {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (activeFilters.dateRange) {
+        case 'today':
+          filtered = filtered.filter(notification => {
+            const timestamp = new Date(notification.timestamp);
+            return timestamp >= todayStart;
+          });
+          break;
+        case 'week':
+          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
+          filtered = filtered.filter(notification => {
+            const timestamp = new Date(notification.timestamp);
+            return timestamp >= weekStart;
+          });
+          break;
+        case 'month':
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          filtered = filtered.filter(notification => {
+            const timestamp = new Date(notification.timestamp);
+            return timestamp >= monthStart;
+          });
+          break;
+      }
     }
 
     setFilteredNotifications(filtered);
@@ -330,6 +406,54 @@ export default function NotificationsScreen() {
       default: return Colors.textLight;
     }
   };
+
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'actionRequired' || filterType === 'dateRange') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      type: [],
+      category: [],
+      status: [],
+      priority: [],
+      actionRequired: 'none',
+      createdBy: [],
+      dateRange: 'none',
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.type.length > 0) count++;
+    if (activeFilters.category.length > 0) count++;
+    if (activeFilters.status.length > 0) count++;
+    if (activeFilters.priority.length > 0) count++;
+    if (activeFilters.actionRequired !== 'none') count++;
+    if (activeFilters.createdBy.length > 0) count++;
+    if (activeFilters.dateRange !== 'none') count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery, selectedFilter);
+  }, [activeFilters]);
 
   const formatDateTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -651,10 +775,15 @@ export default function NotificationsScreen() {
           />
           <TouchableOpacity
             style={styles.filterButton}
-            onPress={() => console.log('Advanced filter')}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.7}
           >
             <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -795,6 +924,222 @@ export default function NotificationsScreen() {
                 </View>
               </View>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Notifications</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Type Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Notification Type</Text>
+                <View style={styles.filterOptions}>
+                  {['urgent', 'warning', 'info', 'success'].map(type => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.type.includes(type) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('type', type)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.type.includes(type) && styles.filterOptionTextActive
+                      ]}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Category Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Category</Text>
+                <View style={styles.filterOptions}>
+                  {['order', 'stock', 'payment', 'staff', 'system', 'customer'].map(category => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.category.includes(category) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('category', category)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.category.includes(category) && styles.filterOptionTextActive
+                      ]}>
+                        {category.charAt(0).toUpperCase() + category.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Status</Text>
+                <View style={styles.filterOptions}>
+                  {['unread', 'read', 'acknowledged', 'resolved'].map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.status.includes(status) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('status', status)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.status.includes(status) && styles.filterOptionTextActive
+                      ]}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Priority Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Priority</Text>
+                <View style={styles.filterOptions}>
+                  {['critical', 'high', 'medium', 'low'].map(priority => (
+                    <TouchableOpacity
+                      key={priority}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.priority.includes(priority) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('priority', priority)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.priority.includes(priority) && styles.filterOptionTextActive
+                      ]}>
+                        {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Action Required Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Action Required</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'All' },
+                    { value: 'required', label: 'Action Required' },
+                    { value: 'not_required', label: 'No Action Required' }
+                  ].map(option => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.actionRequired === option.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('actionRequired', option.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.actionRequired === option.value && styles.filterOptionTextActive
+                      ]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Created By Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Created By</Text>
+                <View style={styles.filterOptions}>
+                  {['System', 'Rajesh Kumar', 'Priya Sharma', 'Amit Singh', 'Warehouse Manager'].map(creator => (
+                    <TouchableOpacity
+                      key={creator}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.createdBy.includes(creator) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('createdBy', creator)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.createdBy.includes(creator) && styles.filterOptionTextActive
+                      ]}>
+                        {creator}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Notification Date</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'All Time' },
+                    { value: 'today', label: 'Today' },
+                    { value: 'week', label: 'This Week' },
+                    { value: 'month', label: 'This Month' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.dateRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('dateRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.dateRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1308,5 +1653,140 @@ const styles = StyleSheet.create({
   selectedStatusOptionText: {
     color: Colors.primary,
     fontWeight: '600',
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

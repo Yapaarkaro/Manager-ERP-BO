@@ -75,26 +75,26 @@ export default function BanksScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Banks</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={handleAddBankAccount}
-            activeOpacity={0.7}
-          >
-            <Plus size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Banks</Text>
+        
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={handleAddBankAccount}
+          activeOpacity={0.7}
+        >
+          <Plus size={24} color={Colors.primary} />
+        </TouchableOpacity>
+      </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Summary Cards */}
@@ -183,7 +183,7 @@ export default function BanksScreen() {
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -192,15 +192,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
+
+  header: {
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
-  },
-  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -209,13 +207,14 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 16,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
     flex: 1,
-    textAlign: 'center',
+    marginLeft: 8,
   },
   addButton: {
     width: 40,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Image,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -143,6 +144,15 @@ export default function ReceivablesScreen() {
   const [receivables, setReceivables] = useState<Receivable[]>(mockReceivables);
   const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>(mockReceivables);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    status: [] as string[],
+    customerType: [] as string[],
+    paymentTerms: [] as string[],
+    amountRange: 'none' as string,
+    daysPastDue: 'none' as string,
+    creditLimit: 'none' as string,
+  });
   
   // Use debounced navigation for customer cards
   const debouncedNavigate = useDebounceNavigation(500);
@@ -157,18 +167,80 @@ export default function ReceivablesScreen() {
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredReceivables(receivables);
-    } else {
-      const filtered = receivables.filter(receivable =>
-        receivable.customerName.toLowerCase().includes(query.toLowerCase()) ||
-        receivable.businessName?.toLowerCase().includes(query.toLowerCase()) ||
-        receivable.mobile.includes(query) ||
-        receivable.gstin?.toLowerCase().includes(query.toLowerCase()) ||
-        receivable.address.toLowerCase().includes(query.toLowerCase())
+    applyFilters(query);
+  };
+
+  const applyFilters = (searchQuery: string = '') => {
+    let filtered = receivables;
+
+    // Apply search filter
+    if (searchQuery.trim() !== '') {
+      filtered = filtered.filter(receivable =>
+        receivable.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        receivable.businessName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        receivable.mobile.includes(searchQuery) ||
+        receivable.gstin?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        receivable.address.toLowerCase().includes(searchQuery.toLowerCase())
       );
-      setFilteredReceivables(filtered);
     }
+
+    // Apply status filter
+    if (activeFilters.status.length > 0) {
+      filtered = filtered.filter(receivable => 
+        activeFilters.status.includes(receivable.status)
+      );
+    }
+
+    // Apply customer type filter
+    if (activeFilters.customerType.length > 0) {
+      filtered = filtered.filter(receivable => 
+        activeFilters.customerType.includes(receivable.customerType)
+      );
+    }
+
+    // Apply payment terms filter
+    if (activeFilters.paymentTerms.length > 0) {
+      filtered = filtered.filter(receivable => 
+        receivable.paymentTerms && activeFilters.paymentTerms.includes(receivable.paymentTerms)
+      );
+    }
+
+    // Apply amount range filter
+    if (activeFilters.amountRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.amountRange === 'lowToHigh') {
+          return a.totalReceivable - b.totalReceivable;
+        } else {
+          return b.totalReceivable - a.totalReceivable;
+        }
+      });
+    }
+
+    // Apply days past due filter
+    if (activeFilters.daysPastDue !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.daysPastDue === 'lowToHigh') {
+          return a.daysPastDue - b.daysPastDue;
+        } else {
+          return b.daysPastDue - a.daysPastDue;
+        }
+      });
+    }
+
+    // Apply credit limit filter
+    if (activeFilters.creditLimit !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        const aLimit = a.creditLimit || 0;
+        const bLimit = b.creditLimit || 0;
+        if (activeFilters.creditLimit === 'lowToHigh') {
+          return aLimit - bLimit;
+        } else {
+          return bLimit - aLimit;
+        }
+      });
+    }
+
+    setFilteredReceivables(filtered);
   };
 
   const getStatusColor = (status: string) => {
@@ -223,10 +295,51 @@ export default function ReceivablesScreen() {
     router.push('/receivables/receive-payment');
   };
 
-  const handleFilter = () => {
-    console.log('Filter pressed');
-    // Open filter modal
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'amountRange' || filterType === 'daysPastDue' || filterType === 'creditLimit') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
   };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      status: [],
+      customerType: [],
+      paymentTerms: [],
+      amountRange: 'none',
+      daysPastDue: 'none',
+      creditLimit: 'none',
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.status.length > 0) count++;
+    if (activeFilters.customerType.length > 0) count++;
+    if (activeFilters.paymentTerms.length > 0) count++;
+    if (activeFilters.amountRange !== 'none') count++;
+    if (activeFilters.daysPastDue !== 'none') count++;
+    if (activeFilters.creditLimit !== 'none') count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery);
+  }, [activeFilters]);
 
   const handleCustomerDetails = (receivable: Receivable) => {
     if (isNavigating) return;
@@ -470,10 +583,15 @@ export default function ReceivablesScreen() {
           />
           <TouchableOpacity
             style={styles.filterButton}
-            onPress={handleFilter}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.7}
           >
             <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -510,6 +628,200 @@ export default function ReceivablesScreen() {
         <Text style={styles.receivePaymentText}>Receive Payment</Text>
       </TouchableOpacity>
 
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Receivables</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Status</Text>
+                <View style={styles.filterOptions}>
+                  {['current', 'overdue', 'critical'].map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.status.includes(status) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('status', status)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.status.includes(status) && styles.filterOptionTextActive
+                      ]}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Customer Type Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Customer Type</Text>
+                <View style={styles.filterOptions}>
+                  {['individual', 'business'].map(type => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.customerType.includes(type) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('customerType', type)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.customerType.includes(type) && styles.filterOptionTextActive
+                      ]}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Payment Terms Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Payment Terms</Text>
+                <View style={styles.filterOptions}>
+                  {['Net 15', 'Net 30', 'Net 45', 'Net 60'].map(terms => (
+                    <TouchableOpacity
+                      key={terms}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.paymentTerms.includes(terms) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('paymentTerms', terms)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.paymentTerms.includes(terms) && styles.filterOptionTextActive
+                      ]}>
+                        {terms}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Amount Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Amount Range</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.amountRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('amountRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.amountRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Days Past Due Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Days Past Due</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.daysPastDue === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('daysPastDue', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.daysPastDue === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Credit Limit Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Credit Limit</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.creditLimit === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('creditLimit', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.creditLimit === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -859,5 +1171,140 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

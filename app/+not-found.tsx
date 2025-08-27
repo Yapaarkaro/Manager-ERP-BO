@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Link, Stack } from 'expo-router';
+import { Link, Stack, router } from 'expo-router';
 import { 
   StyleSheet, 
   Text, 
@@ -173,8 +173,11 @@ export default function NotFoundScreen() {
               <TouchableOpacity 
                 style={styles.secondaryButton} 
                 onPress={() => {
-                  if (typeof window !== 'undefined') {
-                    window.history.back();
+                  try {
+                    router.back();
+                  } catch (error) {
+                    // If router.back() fails, navigate to dashboard
+                    router.replace('/dashboard');
                   }
                 }}
                 activeOpacity={0.8}

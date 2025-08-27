@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Image,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -246,6 +247,17 @@ export default function StockDiscrepanciesScreen() {
   const [filteredDiscrepancies, setFilteredDiscrepancies] = useState(mockStockDiscrepancies);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'shortage' | 'excess' | 'pending' | 'critical'>('all');
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    discrepancyType: [] as string[],
+    status: [] as string[],
+    priority: [] as string[],
+    category: [] as string[],
+    location: [] as string[],
+    reportedBy: [] as string[],
+    amountRange: 'none' as string,
+    dateRange: 'none' as string,
+  });
   
   // Use debounced navigation for discrepancy cards
   const debouncedNavigate = useDebounceNavigation(500);
@@ -275,7 +287,7 @@ export default function StockDiscrepanciesScreen() {
       );
     }
 
-    // Apply category filter
+    // Apply quick filter tabs
     if (filter !== 'all') {
       filtered = filtered.filter(discrepancy => {
         switch (filter) {
@@ -291,6 +303,83 @@ export default function StockDiscrepanciesScreen() {
             return true;
         }
       });
+    }
+
+    // Apply advanced filters
+    if (activeFilters.discrepancyType.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.discrepancyType.includes(discrepancy.discrepancyType)
+      );
+    }
+
+    if (activeFilters.status.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.status.includes(discrepancy.status)
+      );
+    }
+
+    if (activeFilters.priority.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.priority.includes(discrepancy.priority)
+      );
+    }
+
+    if (activeFilters.category.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.category.includes(discrepancy.category)
+      );
+    }
+
+    if (activeFilters.location.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.location.includes(discrepancy.location)
+      );
+    }
+
+    if (activeFilters.reportedBy.length > 0) {
+      filtered = filtered.filter(discrepancy => 
+        activeFilters.reportedBy.includes(discrepancy.reportedBy.name)
+      );
+    }
+
+    // Apply amount range filter
+    if (activeFilters.amountRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (activeFilters.amountRange === 'lowToHigh') {
+          return a.discrepancyValue - b.discrepancyValue;
+        } else {
+          return b.discrepancyValue - a.discrepancyValue;
+        }
+      });
+    }
+
+    // Apply date range filter
+    if (activeFilters.dateRange !== 'none') {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (activeFilters.dateRange) {
+        case 'today':
+          filtered = filtered.filter(discrepancy => {
+            const reportedDate = new Date(discrepancy.reportedDate);
+            return reportedDate >= todayStart;
+          });
+          break;
+        case 'week':
+          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
+          filtered = filtered.filter(discrepancy => {
+            const reportedDate = new Date(discrepancy.reportedDate);
+            return reportedDate >= weekStart;
+          });
+          break;
+        case 'month':
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          filtered = filtered.filter(discrepancy => {
+            const reportedDate = new Date(discrepancy.reportedDate);
+            return reportedDate >= monthStart;
+          });
+          break;
+      }
     }
 
     setFilteredDiscrepancies(filtered);
@@ -339,6 +428,56 @@ export default function StockDiscrepanciesScreen() {
       minimumFractionDigits: 0,
     }).format(amount);
   };
+
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'amountRange' || filterType === 'dateRange') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      discrepancyType: [],
+      status: [],
+      priority: [],
+      category: [],
+      location: [],
+      reportedBy: [],
+      amountRange: 'none',
+      dateRange: 'none',
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.discrepancyType.length > 0) count++;
+    if (activeFilters.status.length > 0) count++;
+    if (activeFilters.priority.length > 0) count++;
+    if (activeFilters.category.length > 0) count++;
+    if (activeFilters.location.length > 0) count++;
+    if (activeFilters.reportedBy.length > 0) count++;
+    if (activeFilters.amountRange !== 'none') count++;
+    if (activeFilters.dateRange !== 'none') count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery, selectedFilter);
+  }, [activeFilters]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -741,10 +880,15 @@ export default function StockDiscrepanciesScreen() {
           />
           <TouchableOpacity
             style={styles.filterButton}
-            onPress={() => console.log('Advanced filter')}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.7}
           >
             <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -816,6 +960,245 @@ export default function StockDiscrepanciesScreen() {
         )}
       </ScrollView>
 
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Stock Discrepancies</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Discrepancy Type Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Discrepancy Type</Text>
+                <View style={styles.filterOptions}>
+                  {['shortage', 'excess'].map(type => (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.discrepancyType.includes(type) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('discrepancyType', type)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.discrepancyType.includes(type) && styles.filterOptionTextActive
+                      ]}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Status</Text>
+                <View style={styles.filterOptions}>
+                  {['pending', 'investigating', 'resolved', 'acknowledged'].map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.status.includes(status) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('status', status)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.status.includes(status) && styles.filterOptionTextActive
+                      ]}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Priority Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Priority</Text>
+                <View style={styles.filterOptions}>
+                  {['critical', 'high', 'medium', 'low'].map(priority => (
+                    <TouchableOpacity
+                      key={priority}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.priority.includes(priority) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('priority', priority)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.priority.includes(priority) && styles.filterOptionTextActive
+                      ]}>
+                        {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Category Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Category</Text>
+                <View style={styles.filterOptions}>
+                  {['Smartphones', 'Laptops', 'Accessories', 'Tablets', 'Wearables'].map(category => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.category.includes(category) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('category', category)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.category.includes(category) && styles.filterOptionTextActive
+                      ]}>
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Location Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Location</Text>
+                <View style={styles.filterOptions}>
+                  {['Main Warehouse - A1', 'Main Warehouse - A2', 'Branch Office - B1', 'Branch Office - B2'].map(location => (
+                    <TouchableOpacity
+                      key={location}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.location.includes(location) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('location', location)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.location.includes(location) && styles.filterOptionTextActive
+                      ]}>
+                        {location}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Reported By Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Reported By</Text>
+                <View style={styles.filterOptions}>
+                  {['Rajesh Kumar', 'Priya Sharma', 'Amit Singh', 'Warehouse Manager', 'Inventory Staff'].map(staff => (
+                    <TouchableOpacity
+                      key={staff}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.reportedBy.includes(staff) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('reportedBy', staff)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.reportedBy.includes(staff) && styles.filterOptionTextActive
+                      ]}>
+                        {staff}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Amount Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Discrepancy Value</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.amountRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('amountRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.amountRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Reported Date</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'All Time' },
+                    { value: 'today', label: 'Today' },
+                    { value: 'week', label: 'This Week' },
+                    { value: 'month', label: 'This Month' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.dateRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('dateRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.dateRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -1282,5 +1665,140 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

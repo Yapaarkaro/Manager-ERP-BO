@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   TextInput,
   Image,
   Alert,
+  Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -301,14 +303,28 @@ const mockStaffData: Staff[] = [
 export default function StaffScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStaff, setFilteredStaff] = useState(mockStaffData);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    status: [] as string[],
+    department: [] as string[],
+    role: [] as string[],
+    performanceRange: 'none' as string,
+    attendanceRange: 'none' as string,
+    dateRange: 'none' as string,
+  });
 
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredStaff(mockStaffData);
-    } else {
-      const filtered = mockStaffData.filter(staff =>
+    applyFilters(query, activeFilters);
+  };
+
+  const applyFilters = (query: string, filters: typeof activeFilters) => {
+    let filtered = mockStaffData;
+
+    // Apply search filter
+    if (query.trim() !== '') {
+      filtered = filtered.filter(staff =>
         staff.name.toLowerCase().includes(query.toLowerCase()) ||
         staff.role.toLowerCase().includes(query.toLowerCase()) ||
         staff.department.toLowerCase().includes(query.toLowerCase()) ||
@@ -316,8 +332,82 @@ export default function StaffScreen() {
         staff.email.toLowerCase().includes(query.toLowerCase()) ||
         staff.mobile.includes(query)
       );
-      setFilteredStaff(filtered);
     }
+
+    // Apply status filter
+    if (filters.status.length > 0) {
+      filtered = filtered.filter(staff => 
+        filters.status.includes(staff.status)
+      );
+    }
+
+    // Apply department filter
+    if (filters.department.length > 0) {
+      filtered = filtered.filter(staff => 
+        filters.department.includes(staff.department)
+      );
+    }
+
+    // Apply role filter
+    if (filters.role.length > 0) {
+      filtered = filtered.filter(staff => 
+        filters.role.includes(staff.role)
+      );
+    }
+
+    // Apply performance range filter
+    if (filters.performanceRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (filters.performanceRange === 'lowToHigh') {
+          return a.performance.score - b.performance.score;
+        } else {
+          return b.performance.score - a.performance.score;
+        }
+      });
+    }
+
+    // Apply attendance range filter
+    if (filters.attendanceRange !== 'none') {
+      filtered = [...filtered].sort((a, b) => {
+        if (filters.attendanceRange === 'lowToHigh') {
+          return a.attendance.percentage - b.attendance.percentage;
+        } else {
+          return b.attendance.percentage - a.attendance.percentage;
+        }
+      });
+    }
+
+    // Apply date range filter
+    if (filters.dateRange !== 'none') {
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      switch (filters.dateRange) {
+        case 'recent':
+          const recentDate = new Date(todayStart.getTime() - (30 * 24 * 60 * 60 * 1000)); // 30 days ago
+          filtered = filtered.filter(staff => {
+            const joinDate = new Date(staff.joinDate);
+            return joinDate >= recentDate;
+          });
+          break;
+        case 'month':
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          filtered = filtered.filter(staff => {
+            const joinDate = new Date(staff.joinDate);
+            return joinDate >= monthStart;
+          });
+          break;
+        case 'quarter':
+          const quarterStart = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
+          filtered = filtered.filter(staff => {
+            const joinDate = new Date(staff.joinDate);
+            return joinDate >= quarterStart;
+          });
+          break;
+      }
+    }
+
+    setFilteredStaff(filtered);
   };
 
   const handleStaffPress = (staff: Staff) => {
@@ -398,6 +488,52 @@ export default function StaffScreen() {
     if (score >= 70) return Colors.warning;
     return Colors.error;
   };
+
+  const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
+    setActiveFilters(prev => {
+      const newFilters = { ...prev };
+      
+      if (filterType === 'performanceRange' || filterType === 'attendanceRange' || filterType === 'dateRange') {
+        (newFilters[filterType] as string) = value;
+      } else {
+        const currentValues = newFilters[filterType] as string[];
+        if (currentValues.includes(value)) {
+          (newFilters[filterType] as string[]) = currentValues.filter(v => v !== value);
+        } else {
+          (newFilters[filterType] as string[]) = [...currentValues, value];
+        }
+      }
+      
+      return newFilters;
+    });
+  };
+
+  const clearAllFilters = () => {
+    setActiveFilters({
+      status: [],
+      department: [],
+      role: [],
+      performanceRange: 'none',
+      attendanceRange: 'none',
+      dateRange: 'none',
+    });
+  };
+
+  const getActiveFiltersCount = () => {
+    let count = 0;
+    if (activeFilters.status.length > 0) count++;
+    if (activeFilters.department.length > 0) count++;
+    if (activeFilters.role.length > 0) count++;
+    if (activeFilters.performanceRange !== 'none') count++;
+    if (activeFilters.attendanceRange !== 'none') count++;
+    if (activeFilters.dateRange !== 'none') count++;
+    return count;
+  };
+
+  // Apply filters whenever activeFilters change
+  useEffect(() => {
+    applyFilters(searchQuery, activeFilters);
+  }, [activeFilters]);
 
   const getTargetAchievement = (achieved: number, target: number) => {
     if (target === 0) return 0;
@@ -622,6 +758,38 @@ export default function StaffScreen() {
         </View>
       </View>
 
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search staff..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilterModal(true)}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+            {getActiveFiltersCount() > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{getActiveFiltersCount()}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
       {/* Staff List */}
       <ScrollView 
         style={styles.scrollView}
@@ -651,31 +819,201 @@ export default function StaffScreen() {
         <Text style={styles.addStaffText}>Add Staff</Text>
       </TouchableOpacity>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search staff..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Filter staff')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter Staff</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              {/* Status Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Status</Text>
+                <View style={styles.filterOptions}>
+                  {['active', 'inactive', 'on_leave'].map(status => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.status.includes(status) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('status', status)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.status.includes(status) && styles.filterOptionTextActive
+                      ]}>
+                        {status === 'on_leave' ? 'On Leave' : status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Department Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Department</Text>
+                <View style={styles.filterOptions}>
+                  {['Sales', 'Marketing', 'Finance', 'HR', 'IT', 'Operations', 'Customer Service'].map(dept => (
+                    <TouchableOpacity
+                      key={dept}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.department.includes(dept) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('department', dept)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.department.includes(dept) && styles.filterOptionTextActive
+                      ]}>
+                        {dept}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Role Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Role</Text>
+                <View style={styles.filterOptions}>
+                  {['Manager', 'Executive', 'Assistant', 'Specialist', 'Coordinator', 'Analyst', 'Director'].map(role => (
+                    <TouchableOpacity
+                      key={role}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.role.includes(role) && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('role', role)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.role.includes(role) && styles.filterOptionTextActive
+                      ]}>
+                        {role}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Performance Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Performance Score</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.performanceRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('performanceRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.performanceRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Attendance Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Attendance Rate</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'No Sort' },
+                    { value: 'lowToHigh', label: 'Low to High' },
+                    { value: 'highToLow', label: 'High to Low' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.attendanceRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('attendanceRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.attendanceRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Date Range Filter */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Join Date</Text>
+                <View style={styles.filterOptions}>
+                  {[
+                    { value: 'none', label: 'All Time' },
+                    { value: 'recent', label: 'Recent (30 days)' },
+                    { value: 'month', label: 'This Month' },
+                    { value: 'quarter', label: 'This Quarter' }
+                  ].map(range => (
+                    <TouchableOpacity
+                      key={range.value}
+                      style={[
+                        styles.filterOption,
+                        activeFilters.dateRange === range.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => handleFilterToggle('dateRange', range.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        activeFilters.dateRange === range.value && styles.filterOptionTextActive
+                      ]}>
+                        {range.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalActions}>
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={clearAllFilters}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear All Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyFiltersButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyFiltersButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
-
-
-
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -963,7 +1301,7 @@ const styles = StyleSheet.create({
   },
   addStaffFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -1010,12 +1348,14 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -1026,14 +1366,20 @@ const styles = StyleSheet.create({
     
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
 
   editButton: {
@@ -1049,5 +1395,150 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // New styles for inline search and filter modal
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  // Filter Badge Styles
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Filter Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '90%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  filterModalContent: {
+    padding: 20,
+  },
+  filterSection: {
+    marginBottom: 24,
+  },
+  filterSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  filterOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterOptionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  filterOptionTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  filterModalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    gap: 12,
+  },
+  clearFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+  },
+  clearFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  applyFiltersButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  applyFiltersButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
