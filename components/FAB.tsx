@@ -83,7 +83,6 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const animationValue = useRef(new Animated.Value(0)).current;
-  const rotationValue = useRef(new Animated.Value(0)).current;
   
   // Use debounced navigation for all FAB actions
   const debouncedNavigate = useDebounceNavigation(500);
@@ -91,19 +90,12 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
   const toggleFAB = () => {
     const toValue = isExpanded ? 0 : 1;
     
-    Animated.parallel([
-      Animated.spring(animationValue, {
-        toValue,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-      }),
-      Animated.timing(rotationValue, {
-        toValue,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    Animated.spring(animationValue, {
+      toValue,
+      useNativeDriver: true,
+      tension: 100,
+      friction: 8,
+    }).start();
     
     const newExpandedState = !isExpanded;
     setIsExpanded(newExpandedState);
@@ -151,11 +143,6 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
     
     toggleFAB();
   };
-
-  const rotation = rotationValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '90deg'],
-  });
 
   return (
     <View style={styles.container}>
@@ -228,16 +215,12 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
         onPress={toggleFAB}
         activeOpacity={0.8}
       >
-        <Animated.View style={{ transform: [{ rotate: rotation }] }}>
-          {isExpanded ? (
-            <X size={24} color="#ffffff" />
-          ) : (
-            <Plus size={24} color="#ffffff" />
-          )}
-        </Animated.View>
+        {isExpanded ? (
+          <X size={24} color="#ffffff" />
+        ) : (
+          <Plus size={24} color="#ffffff" />
+        )}
       </TouchableOpacity>
-
-
     </View>
   );
 }
@@ -258,36 +241,6 @@ const styles = StyleSheet.create({
     bottom: -1000,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     zIndex: 999, // High z-index to block all interactions
-  },
-  glassLayer1: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
-  },
-  glassLayer2: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  glassLayer3: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
   },
   actionButton: {
     marginBottom: 8,

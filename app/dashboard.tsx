@@ -4,9 +4,10 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
-  ScrollView,
+  FlatList,
   Image,
+  TouchableWithoutFeedback,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { 
@@ -51,6 +52,46 @@ const Colors = {
   }
 };
 
+// Platform-specific shadow utilities
+const getShadowStyle = (elevation: number = 2) => ({
+  shadowColor: Platform.OS === 'ios' ? '#000' : undefined,
+  shadowOffset: Platform.OS === 'ios' ? { width: 0, height: elevation } : undefined,
+  shadowOpacity: Platform.OS === 'ios' ? 0.1 : undefined,
+  shadowRadius: Platform.OS === 'ios' ? elevation * 2 : undefined,
+  elevation: Platform.OS === 'android' ? elevation : undefined,
+});
+
+// Platform-specific font utilities
+const getFontStyles = () => ({
+  header: {
+    fontSize: Platform.OS === 'ios' ? 18 : 18,
+    fontWeight: '600' as const,
+    fontFamily: Platform.OS === 'android' ? 'sans-serif-medium' : undefined,
+  },
+  title: {
+    fontSize: Platform.OS === 'ios' ? 16 : 16,
+    fontWeight: '600' as const,
+    fontFamily: Platform.OS === 'android' ? 'sans-serif-medium' : undefined,
+  },
+  body: {
+    fontSize: Platform.OS === 'ios' ? 14 : 14,
+    fontWeight: '500' as const,
+    fontFamily: Platform.OS === 'android' ? 'sans-serif' : undefined,
+  },
+  caption: {
+    fontSize: Platform.OS === 'ios' ? 12 : 12,
+    fontWeight: '500' as const,
+    fontFamily: Platform.OS === 'android' ? 'sans-serif' : undefined,
+  },
+});
+
+// Platform-specific touch feedback utilities
+const getTouchProps = () => ({
+  activeOpacity: 0.7,
+  delayPressIn: Platform.OS === 'android' ? 50 : 0,
+  delayPressOut: Platform.OS === 'android' ? 50 : 0,
+});
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 12) return 'Good Morning';
@@ -58,16 +99,13 @@ function getGreeting() {
   return 'Good Evening';
 }
 
-
-
 export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const userName = 'John Doe'; // This would come from user data
-  const businessName = 'ABC Electronics'; // This would come from business data
+  const userName = 'John Doe';
+  const businessName = 'ABC Electronics';
   
-  // Use debounced navigation for all KPI cards
   const debouncedNavigate = useDebounceNavigation(500);
 
   const handleMenuPress = () => {
@@ -150,437 +188,371 @@ export default function DashboardScreen() {
 
   const handleFABAction = (action: string) => {
     console.log('FAB action:', action);
-    // Add FAB action logic here
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.menuButton}
-          onPress={handleMenuPress}
-          activeOpacity={0.7}
-        >
-          <Menu size={24} color={Colors.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Dashboard</Text>
-      </View>
+  // Render greeting section
+  const renderGreeting = () => (
+    <View style={styles.greetingSection}>
+      <Text style={styles.greeting}>
+        {getGreeting()}, {userName}
+      </Text>
+      <Text style={styles.greetingSubtext}>
+        Welcome to {businessName}
+      </Text>
+    </View>
+  );
 
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        bounces={true}
-        alwaysBounceVertical={false}
-      >
-        {/* Greeting */}
-        <View style={styles.greetingSection}>
-          <Text style={styles.greeting}>
-            {getGreeting()}, {userName}
-          </Text>
-          <Text style={styles.greetingSubtext}>
-            Welcome to {businessName}
-          </Text>
+  // Render KPI cards section
+  const renderKPICards = () => (
+    <View style={styles.kpiContainer}>
+      <TouchableWithoutFeedback onPress={handleSalesPress} disabled={isNavigating}>
+        <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>Total Sales</Text>
+            <ShoppingCart size={20} color={Colors.success} />
+          </View>
+          <Text style={[styles.kpiAmount, { color: Colors.success }]}>₹1,25,000</Text>
+          <View style={styles.kpiFooter}>
+            <TrendingUp size={16} color={Colors.success} />
+            <Text style={[styles.kpiChange, { color: Colors.success }]}>12.5%</Text>
+            <Text style={styles.kpiPeriod}>vs same day last month</Text>
+          </View>
         </View>
+      </TouchableWithoutFeedback>
 
-        {/* KPI Cards */}
-        <View style={styles.kpiContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.kpiCard, 
-              styles.salesCard,
-              isNavigating && styles.kpiCardDisabled
-            ]}
-            onPress={handleSalesPress}
-            activeOpacity={0.7}
-            disabled={isNavigating}
-          >
-            <View style={styles.kpiHeader}>
-              <Text style={styles.kpiTitle}>Total Sales</Text>
-              <ShoppingCart size={20} color={Colors.success} />
-            </View>
-            <Text style={[styles.kpiAmount, styles.salesAmount]}>₹1,25,000</Text>
-            <View style={styles.kpiFooter}>
-              <TrendingUp size={16} color={Colors.success} />
-              <Text style={[styles.kpiChange, styles.positive]}>12.5%</Text>
-              <Text style={styles.kpiPeriod}>vs same day last month</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[
-              styles.kpiCard, 
-              styles.returnsCard,
-              isNavigating && styles.kpiCardDisabled
-            ]}
-            onPress={handleReturnsPress}
-            activeOpacity={0.7}
-            disabled={isNavigating}
-          >
-            <View style={styles.kpiHeader}>
-              <Text style={styles.kpiTitle}>Returns</Text>
-              <RotateCcw size={20} color={Colors.error} />
-            </View>
-            <Text style={[styles.kpiAmount, styles.returnsAmount]}>₹8,500</Text>
-            <View style={styles.kpiFooter}>
-              <TrendingDown size={16} color={Colors.success} />
-              <Text style={[styles.kpiChange, styles.positive]}>3.2%</Text>
-              <Text style={styles.kpiPeriod}>decline vs last month</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[
-              styles.kpiCard, 
-              styles.stockCard,
-              isNavigating && styles.kpiCardDisabled
-            ]}
-            onPress={handleLowStockPress}
-            activeOpacity={0.7}
-            disabled={isNavigating}
-          >
-            <View style={styles.kpiHeader}>
-              <Text style={styles.kpiTitle}>Low Stock Items</Text>
-              <AlertTriangle size={20} color={Colors.error} />
-            </View>
-            <Text style={[styles.kpiAmount, styles.stockAmount]}>23</Text>
-            <View style={styles.kpiFooter}>
-              <AlertTriangle size={16} color={Colors.warning} />
-              <Text style={[styles.kpiChange, styles.warning]}>15.8%</Text>
-              <Text style={styles.kpiPeriod}>of stock needs attention</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[
-              styles.kpiCard, 
-              styles.receivablesCard,
-              isNavigating && styles.kpiCardDisabled
-            ]}
-            onPress={handleReceivablesPress}
-            activeOpacity={0.7}
-            disabled={isNavigating}
-          >
-            <View style={styles.kpiHeader}>
-              <Text style={styles.kpiTitle}>Receivables</Text>
-              <ArrowDownLeft size={20} color={Colors.success} />
-            </View>
-            <Text style={[styles.kpiAmount, styles.receivablesAmount]}>₹45,000</Text>
-            <View style={styles.kpiFooter}>
-              <TrendingUp size={16} color={Colors.success} />
-              <Text style={[styles.kpiChange, styles.positive]}>8.7%</Text>
-              <Text style={styles.kpiPeriod}>from 8 unpaid invoices</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={[
-              styles.kpiCard, 
-              styles.payablesCard,
-              isNavigating && styles.kpiCardDisabled
-            ]}
-            onPress={handlePayablesPress}
-            activeOpacity={0.7}
-            disabled={isNavigating}
-          >
-            <View style={styles.kpiHeader}>
-              <Text style={styles.kpiTitle}>Payables</Text>
-              <ArrowUpRight size={20} color={Colors.error} />
-            </View>
-            <Text style={[styles.kpiAmount, styles.payablesAmount]}>₹32,000</Text>
-            <View style={styles.kpiFooter}>
-              <TrendingDown size={16} color={Colors.error} />
-              <Text style={[styles.kpiChange, styles.negative]}>5.4%</Text>
-              <Text style={styles.kpiPeriod}>due to 12 suppliers</Text>
-            </View>
-          </TouchableOpacity>
+      <TouchableWithoutFeedback onPress={handleReturnsPress} disabled={isNavigating}>
+        <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>Returns</Text>
+            <RotateCcw size={20} color={Colors.error} />
+          </View>
+          <Text style={[styles.kpiAmount, { color: Colors.error }]}>₹8,500</Text>
+          <View style={styles.kpiFooter}>
+            <TrendingDown size={16} color={Colors.success} />
+            <Text style={[styles.kpiChange, { color: Colors.success }]}>3.2%</Text>
+            <Text style={styles.kpiPeriod}>decline vs last month</Text>
+          </View>
         </View>
+      </TouchableWithoutFeedback>
 
-        {/* Stock Discrepancies */}
-        <View style={styles.section}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={handleStockDiscrepancyPress}
-            disabled={isNavigating}
-          >
-            <Text style={styles.sectionTitle}>Stock Discrepancies</Text>
-            <AlertTriangle size={20} color={Colors.text} />
-          </TouchableOpacity>
-          <View style={styles.discrepancyList}>
-            {[
-              { 
-                product: 'iPhone 14 Pro',
-                expected: 100,
-                actual: 95,
-                type: 'shortage',
-                supplier: {
-                  name: 'Apple India Pvt Ltd',
-                  id: 'SUP001'
-                },
-                staff: {
-                  name: 'Rajesh Kumar',
-                  avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-                }
-              },
-              { 
-                product: 'Samsung Galaxy S23',
-                expected: 50,
-                actual: 52,
-                type: 'excess',
-                supplier: {
-                  name: 'Samsung Electronics',
-                  id: 'SUP002'
-                },
-                staff: {
-                  name: 'Priya Sharma',
-                  avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-                }
-              }
-            ].map((item, index) => (
-              <TouchableOpacity 
-                key={index} 
-                style={[
-                  styles.discrepancyItem,
-                  item.type === 'shortage' ? styles.shortageItem : styles.excessItem
-                ]}
-                onPress={handleStockDiscrepancyPress}
-                disabled={isNavigating}
-              >
-                <View style={styles.discrepancyHeader}>
-                  <Text style={styles.discrepancyProduct}>{item.product}</Text>
-                  {item.type === 'shortage' ? (
-                    <PackageMinus size={20} color={Colors.error} />
-                  ) : (
-                    <PackagePlus size={20} color={Colors.orange} />
-                  )}
+      <TouchableWithoutFeedback onPress={handleLowStockPress} disabled={isNavigating}>
+        <View style={[styles.kpiCard, { borderLeftColor: Colors.warning }]}>
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>Low Stock Items</Text>
+            <AlertTriangle size={20} color={Colors.error} />
+          </View>
+          <Text style={[styles.kpiAmount, { color: Colors.error }]}>23</Text>
+          <View style={styles.kpiFooter}>
+            <AlertTriangle size={16} color={Colors.warning} />
+            <Text style={[styles.kpiChange, { color: Colors.warning }]}>15.8%</Text>
+            <Text style={styles.kpiPeriod}>of stock needs attention</Text>
+          </View>
+        </View>
+      </TouchableWithoutFeedback>
+
+      <TouchableWithoutFeedback onPress={handleReceivablesPress} disabled={isNavigating}>
+        <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>Receivables</Text>
+            <ArrowDownLeft size={20} color={Colors.success} />
+          </View>
+          <Text style={[styles.kpiAmount, { color: Colors.success }]}>₹45,000</Text>
+          <View style={styles.kpiFooter}>
+            <TrendingUp size={16} color={Colors.success} />
+            <Text style={[styles.kpiChange, { color: Colors.success }]}>8.7%</Text>
+            <Text style={styles.kpiPeriod}>from 8 unpaid invoices</Text>
+          </View>
+        </View>
+      </TouchableWithoutFeedback>
+
+      <TouchableWithoutFeedback onPress={handlePayablesPress} disabled={isNavigating}>
+        <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>Payables</Text>
+            <ArrowUpRight size={20} color={Colors.error} />
+          </View>
+          <Text style={[styles.kpiAmount, { color: Colors.error }]}>₹32,000</Text>
+          <View style={styles.kpiFooter}>
+            <TrendingDown size={16} color={Colors.error} />
+            <Text style={[styles.kpiChange, { color: Colors.error }]}>5.4%</Text>
+            <Text style={styles.kpiPeriod}>due to 12 suppliers</Text>
+          </View>
+        </View>
+      </TouchableWithoutFeedback>
+    </View>
+  );
+
+  // Render stock discrepancies section
+  const renderStockDiscrepancies = () => (
+    <View style={styles.section}>
+      <TouchableWithoutFeedback onPress={handleStockDiscrepancyPress} disabled={isNavigating}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Stock Discrepancies</Text>
+          <AlertTriangle size={20} color={Colors.text} />
+        </View>
+      </TouchableWithoutFeedback>
+      <View style={styles.discrepancyList}>
+        {([
+          { 
+            product: 'iPhone 14 Pro',
+            expected: 100,
+            actual: 95,
+            type: 'shortage' as const,
+            supplier: {
+              name: 'Apple India Pvt Ltd',
+              id: 'SUP001'
+            },
+            staff: {
+              name: 'Rajesh Kumar',
+              avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+            }
+          },
+          { 
+            product: 'Samsung Galaxy S23',
+            expected: 50,
+            actual: 52,
+            type: 'excess' as const,
+            supplier: {
+              name: 'Samsung Electronics',
+              id: 'SUP002'
+            },
+            staff: {
+              name: 'Priya Sharma',
+              avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+            }
+          }
+        ] as const).map((item, index) => (
+          <TouchableWithoutFeedback key={index} onPress={handleStockDiscrepancyPress} disabled={isNavigating}>
+            <View style={[
+              styles.discrepancyItem,
+              item.type === 'shortage' ? styles.shortageItem : styles.excessItem
+            ]}>
+              <View style={styles.discrepancyHeader}>
+                <Text style={styles.discrepancyProduct}>{item.product}</Text>
+                {item.type === 'shortage' ? (
+                  <PackageMinus size={20} color={Colors.error} />
+                ) : (
+                  <PackagePlus size={20} color={Colors.orange} />
+                )}
+              </View>
+              <View style={styles.discrepancyDetails}>
+                <View style={styles.discrepancyInfo}>
+                  <Text style={styles.discrepancyText}>
+                    Expected: {item.expected} • Actual: {item.actual}
+                  </Text>
+                  <Text style={styles.supplierName}>{item.supplier.name}</Text>
                 </View>
-                <View style={styles.discrepancyDetails}>
-                  <View style={styles.discrepancyInfo}>
-                    <Text style={styles.discrepancyText}>
-                      Expected: {item.expected} • Actual: {item.actual}
-                    </Text>
-                    <Text style={styles.supplierName}>{item.supplier.name}</Text>
-                  </View>
+                <View style={styles.staffInfo}>
+                  <Image 
+                    source={{ uri: item.staff.avatar }}
+                    style={styles.staffAvatar}
+                  />
+                  <Text style={[
+                    styles.discrepancyDiff,
+                    item.type === 'shortage' ? styles.shortageText : styles.excessText
+                  ]}>
+                    {item.type === 'shortage' ? '-' : '+'}
+                    {Math.abs(item.actual - item.expected)} units
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        ))}
+      </View>
+    </View>
+  );
+
+  // Render notifications section
+  const renderNotifications = () => (
+    <View style={styles.section}>
+      <TouchableWithoutFeedback onPress={handleNotificationsPress} disabled={isNavigating}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Notification Center</Text>
+          <Bell size={20} color={Colors.text} />
+        </View>
+      </TouchableWithoutFeedback>
+      <View style={styles.notificationList}>
+        {([
+          { 
+            type: 'urgent' as const, 
+            message: 'New order received from customer #1234. Order value: ₹5,500', 
+            time: '2h ago',
+            staff: {
+              name: 'Rajesh Kumar',
+              avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+            }
+          },
+          { 
+            type: 'warning' as const, 
+            message: 'Low stock alert: iPhone 14 Pro has only 3 units left', 
+            time: '4h ago',
+            staff: {
+              name: 'System',
+              avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+            }
+          },
+          { 
+            type: 'info' as const, 
+            message: 'Payment of ₹12,000 received from customer #5678', 
+            time: '6h ago',
+            staff: {
+              name: 'Priya Sharma',
+              avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
+            }
+          },
+        ] as const).map((notification, index) => (
+          <TouchableWithoutFeedback key={index} onPress={handleNotificationsPress} disabled={isNavigating}>
+            <View style={styles.notificationItem}>
+              <View style={[
+                styles.notificationIcon,
+                notification.type === 'urgent' ? styles.urgentIcon :
+                notification.type === 'warning' ? styles.warningIcon :
+                styles.infoIcon
+              ]}>
+                {notification.type === 'urgent' ? (
+                  <AlertTriangle size={16} color={Colors.success} />
+                ) : notification.type === 'warning' ? (
+                  <AlertCircle size={16} color={Colors.warning} />
+                ) : (
+                  <Bell size={16} color={Colors.primary} />
+                )}
+              </View>
+              <View style={styles.notificationContent}>
+                <Text style={styles.notificationText}>{notification.message}</Text>
+                <View style={styles.notificationFooter}>
                   <View style={styles.staffInfo}>
                     <Image 
-                      source={{ uri: item.staff.avatar }}
+                      source={{ uri: notification.staff.avatar }}
                       style={styles.staffAvatar}
                     />
-                    <Text style={[
-                      styles.discrepancyDiff,
-                      item.type === 'shortage' ? styles.shortageText : styles.excessText
-                    ]}>
-                      {item.type === 'shortage' ? '-' : '+'}
-                      {Math.abs(item.actual - item.expected)} units
-                    </Text>
+                    <Text style={styles.staffName}>{notification.staff.name}</Text>
                   </View>
+                  <Text style={styles.notificationTime}>{notification.time}</Text>
                 </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        ))}
+      </View>
+    </View>
+  );
 
-        {/* Notifications */}
-        <View style={styles.section}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={handleNotificationsPress}
-            disabled={isNavigating}
-          >
-            <Text style={styles.sectionTitle}>Notification Center</Text>
-            <Bell size={20} color={Colors.text} />
-          </TouchableOpacity>
-          <View style={styles.notificationList}>
-            {[
-              { 
-                type: 'urgent', 
-                message: 'New order received from customer #1234. Order value: ₹5,500', 
-                time: '2h ago',
-                staff: {
-                  name: 'Rajesh Kumar',
-                  avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-                }
-              },
-              { 
-                type: 'warning', 
-                message: 'Low stock alert: iPhone 14 Pro has only 3 units left', 
-                time: '4h ago',
-                staff: {
-                  name: 'System',
-                  avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-                }
-              },
-              { 
-                type: 'info', 
-                message: 'Payment of ₹12,000 received from customer #5678', 
-                time: '6h ago',
-                staff: {
-                  name: 'Priya Sharma',
-                  avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-                }
-              },
-            ].map((notification, index) => (
-              <TouchableOpacity 
-                key={index} 
-                style={styles.notificationItem}
-                onPress={handleNotificationsPress}
-                disabled={isNavigating}
-              >
-                <View style={[
-                  styles.notificationIcon,
-                  notification.type === 'urgent' ? styles.urgentIcon :
-                  notification.type === 'warning' ? styles.warningIcon :
-                  styles.infoIcon
-                ]}>
-                  {notification.type === 'urgent' ? (
-                    <AlertTriangle size={16} color={Colors.success} />
-                  ) : notification.type === 'warning' ? (
-                    <AlertCircle size={16} color={Colors.warning} />
-                  ) : (
-                    <Bell size={16} color={Colors.primary} />
-                  )}
+  // Render staff performance section
+  const renderStaffPerformance = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Staff Performance</Text>
+        <Users size={20} color={Colors.text} />
+      </View>
+      <View style={styles.staffList}>
+        {[
+          {
+            id: 'STAFF001',
+            name: 'Rajesh Kumar',
+            image: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
+            attendance: '95%',
+            sales: '₹45,000',
+            invoices: 28,
+            score: 92
+          },
+          {
+            id: 'STAFF002',
+            name: 'Priya Sharma',
+            image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
+            attendance: '88%',
+            sales: '₹38,000',
+            invoices: 22,
+            score: 85
+          },
+          {
+            id: 'STAFF003',
+            name: 'Amit Singh',
+            image: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
+            attendance: '92%',
+            sales: '₹52,000',
+            invoices: 31,
+            score: 89
+          },
+        ].map((staff) => (
+          <TouchableWithoutFeedback key={staff.id} onPress={() => handleStaffPress(staff.id)} disabled={isNavigating}>
+            <View style={styles.staffCard}>
+              <View style={styles.staffHeader}>
+                <Image source={{ uri: staff.image }} style={styles.staffImage} />
+                <View>
+                  <Text style={styles.staffNameText}>{staff.name}</Text>
+                  <Text style={styles.staffAttendance}>
+                    Attendance: {staff.attendance}
+                  </Text>
                 </View>
-                <View style={styles.notificationContent}>
-                  <Text style={styles.notificationText}>{notification.message}</Text>
-                  <View style={styles.notificationFooter}>
-                    <View style={styles.staffInfo}>
-                      <Image 
-                        source={{ uri: notification.staff.avatar }}
-                        style={styles.staffAvatar}
-                      />
-                      <Text style={styles.staffName}>{notification.staff.name}</Text>
-                    </View>
-                    <Text style={styles.notificationTime}>{notification.time}</Text>
-                  </View>
+              </View>
+              <View style={styles.staffStats}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Sales</Text>
+                  <Text style={styles.statValue}>{staff.sales}</Text>
                 </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Invoices</Text>
+                  <Text style={styles.statValue}>{staff.invoices}</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Score</Text>
+                  <Text style={[styles.statValue, styles.scoreValue]}>{staff.score}/100</Text>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        ))}
+      </View>
+    </View>
+  );
 
-        {/* Staff Performance */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Staff Performance</Text>
-            <Users size={20} color={Colors.text} />
-          </View>
-          <View style={styles.staffList}>
-            {[
-              {
-                id: 'STAFF001',
-                name: 'Rajesh Kumar',
-                image: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-                attendance: '95%',
-                sales: '₹45,000',
-                invoices: 28,
-                score: 92
-              },
-              {
-                id: 'STAFF002',
-                name: 'Priya Sharma',
-                image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-                attendance: '88%',
-                sales: '₹38,000',
-                invoices: 22,
-                score: 85
-              },
-              {
-                id: 'STAFF003',
-                name: 'Amit Singh',
-                image: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-                attendance: '92%',
-                sales: '₹52,000',
-                invoices: 31,
-                score: 89
-              },
-            ].map((staff) => (
-              <TouchableOpacity
-                key={staff.id}
-                style={styles.staffCard}
-                onPress={() => handleStaffPress(staff.id)}
-                disabled={isNavigating}
-              >
-                <View style={styles.staffHeader}>
-                  <Image source={{ uri: staff.image }} style={styles.staffImage} />
-                  <View>
-                    <Text style={styles.staffNameText}>{staff.name}</Text>
-                    <Text style={styles.staffAttendance}>
-                      Attendance: {staff.attendance}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.staffStats}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Sales</Text>
-                    <Text style={styles.statValue}>{staff.sales}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Invoices</Text>
-                    <Text style={styles.statValue}>{staff.invoices}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Score</Text>
-                    <Text style={[styles.statValue, styles.scoreValue]}>{staff.score}/100</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+  // Render business overview section
+  const renderBusinessOverview = () => (
+    <View style={[styles.section, styles.lastSection]}>
+      <Text style={styles.sectionTitle}>Business Overview</Text>
 
-        {/* Business Overview */}
-        <View style={[styles.section, styles.lastSection]}>
-          <Text style={styles.sectionTitle}>Business Overview</Text>
+      <TouchableWithoutFeedback onPress={handleSalesOverviewPress} disabled={isNavigating}>
+        <View style={styles.salesOverview}>
+          <View style={styles.periodSection}>
+            <View style={styles.periodHeader}>
+              <Text style={styles.periodTitle}>Today</Text>
+              <View style={styles.periodStats}>
+                <Text style={styles.periodAmount}>₹88,000</Text>
+                <View style={styles.orderBadge}>
+                  <Text style={styles.orderCount}>12 orders</Text>
+                </View>
+              </View>
+            </View>
+            <View style={styles.trendContainer}>
+              <TrendingUp size={16} color={Colors.success} />
+              <Text style={[styles.trendValue, styles.positive]}>12.5%</Text>
+            </View>
+          </View>
 
-          <TouchableOpacity 
-            style={styles.salesOverview}
-            onPress={handleSalesOverviewPress}
-            disabled={isNavigating}
-          >
+          <View style={styles.divider} />
+
+          <View style={styles.paymentMethods}>
+            <View style={styles.paymentMethod}>
+              <Text style={styles.paymentTitle}>Cash</Text>
+              <Text style={styles.paymentAmount}>₹25,000</Text>
+            </View>
+
+            <View style={styles.paymentMethod}>
+              <Text style={styles.paymentTitle}>UPI</Text>
+              <Text style={styles.paymentAmount}>₹45,000</Text>
+            </View>
+
+            <View style={styles.paymentMethod}>
+              <Text style={styles.paymentTitle}>Card</Text>
+              <Text style={styles.paymentAmount}>₹18,000</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <TouchableWithoutFeedback onPress={toggleLastWeekExpansion}>
             <View style={styles.periodSection}>
-              <View style={styles.periodHeader}>
-                <Text style={styles.periodTitle}>Today</Text>
-                <View style={styles.periodStats}>
-                  <Text style={styles.periodAmount}>₹88,000</Text>
-                  <View style={styles.orderBadge}>
-                    <Text style={styles.orderCount}>12 orders</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={styles.trendContainer}>
-                <TrendingUp size={16} color={Colors.success} />
-                <Text style={[styles.trendValue, styles.positive]}>12.5%</Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <View style={styles.paymentMethods}>
-              <View style={styles.paymentMethod}>
-                <Text style={styles.paymentTitle}>Cash</Text>
-                <Text style={styles.paymentAmount}>₹25,000</Text>
-              </View>
-
-              <View style={styles.paymentMethod}>
-                <Text style={styles.paymentTitle}>UPI</Text>
-                <Text style={styles.paymentAmount}>₹45,000</Text>
-              </View>
-
-              <View style={styles.paymentMethod}>
-                <Text style={styles.paymentTitle}>Card</Text>
-                <Text style={styles.paymentAmount}>₹18,000</Text>
-              </View>
-            </View>
-
-            <View style={styles.divider} />
-
-            <TouchableOpacity 
-              style={styles.periodSection}
-              onPress={toggleLastWeekExpansion}
-              activeOpacity={0.7}
-            >
               <View style={styles.expandableHeader}>
                 <View style={styles.periodHeader}>
                   <Text style={styles.periodTitle}>Last Week</Text>
@@ -601,36 +573,81 @@ export default function DashboardScreen() {
                 <TrendingUp size={16} color={Colors.success} />
                 <Text style={[styles.trendValue, styles.positive]}>8.7%</Text>
               </View>
-            </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
 
-            {isLastWeekExpanded && (
-              <>
-                <View style={styles.divider} />
-                <View style={styles.dayWiseSection}>
-                  <Text style={styles.dayWiseTitle}>Day-wise Sales</Text>
-                  {[
-                    { day: 'Monday', amount: '₹28,000', orders: 12 },
-                    { day: 'Tuesday', amount: '₹32,500', orders: 14 },
-                    { day: 'Wednesday', amount: '₹25,800', orders: 11 },
-                    { day: 'Thursday', amount: '₹35,200', orders: 16 },
-                    { day: 'Friday', amount: '₹42,000', orders: 18 },
-                    { day: 'Saturday', amount: '₹31,500', orders: 13 },
-                  ].map((dayData, index) => (
-                    <View key={index} style={styles.dayWiseItem}>
-                      <Text style={styles.dayName}>{dayData.day}</Text>
-                      <View style={styles.dayStats}>
-                        <Text style={styles.dayAmount}>{dayData.amount}</Text>
-                        <Text style={styles.dayOrders}>{dayData.orders} orders</Text>
-                      </View>
+          {isLastWeekExpanded && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.dayWiseSection}>
+                <Text style={styles.dayWiseTitle}>Day-wise Sales</Text>
+                {[
+                  { day: 'Monday', amount: '₹28,000', orders: 12 },
+                  { day: 'Tuesday', amount: '₹32,500', orders: 14 },
+                  { day: 'Wednesday', amount: '₹25,800', orders: 11 },
+                  { day: 'Thursday', amount: '₹35,200', orders: 16 },
+                  { day: 'Friday', amount: '₹42,000', orders: 18 },
+                  { day: 'Saturday', amount: '₹31,500', orders: 13 },
+                ].map((dayData, index) => (
+                  <View key={index} style={styles.dayWiseItem}>
+                    <Text style={styles.dayName}>{dayData.day}</Text>
+                    <View style={styles.dayStats}>
+                      <Text style={styles.dayAmount}>{dayData.amount}</Text>
+                      <Text style={styles.dayOrders}>{dayData.orders} orders</Text>
                     </View>
-                  ))}
-                </View>
-              </>
-            )}
-          </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
         </View>
+      </TouchableWithoutFeedback>
+    </View>
+  );
 
-      </ScrollView>
+  // Dashboard sections data
+  const dashboardSections = [
+    { id: 'greeting', render: renderGreeting },
+    { id: 'kpi', render: renderKPICards },
+    { id: 'discrepancies', render: renderStockDiscrepancies },
+    { id: 'notifications', render: renderNotifications },
+    { id: 'staff', render: renderStaffPerformance },
+    { id: 'overview', render: renderBusinessOverview },
+  ];
+
+  const renderSection = ({ item }: { item: { id: string; render: () => React.ReactElement } }) => {
+    return item.render();
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableWithoutFeedback onPress={handleMenuPress}>
+          <View style={styles.menuButton}>
+            <Menu size={24} color={Colors.text} />
+          </View>
+        </TouchableWithoutFeedback>
+        
+        <Text style={styles.headerTitle}>Dashboard</Text>
+      </View>
+
+      <FlatList
+        data={dashboardSections}
+        renderItem={renderSection}
+        keyExtractor={(item) => item.id}
+        style={styles.flatList}
+        contentContainerStyle={styles.flatListContent}
+        showsVerticalScrollIndicator={false}
+        bounces={true}
+        alwaysBounceVertical={false}
+        scrollEventThrottle={16}
+        keyboardShouldPersistTaps="handled"
+        removeClippedSubviews={false}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={10}
+      />
 
       {/* Hamburger Menu */}
       <HamburgerMenu
@@ -650,13 +667,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  scrollView: {
+  flatList: {
     flex: 1,
     backgroundColor: Colors.background,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 100, // Add bottom padding for FAB
+  flatListContent: {
+    paddingBottom: 100,
   },
   header: {
     backgroundColor: Colors.background,
@@ -683,8 +699,7 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...getFontStyles().header,
     color: Colors.text,
   },
   greeting: {
@@ -708,37 +723,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
-  },
-  kpiCardDisabled: {
-    opacity: 0.6,
-  },
-  salesCard: {
     borderLeftWidth: 4,
-    borderLeftColor: Colors.success,
-  },
-  returnsCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.error,
-  },
-  stockCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.warning,
-  },
-  receivablesCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.success,
-  },
-  payablesCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.error,
+    ...getShadowStyle(2),
   },
   kpiHeader: {
     flexDirection: 'row',
@@ -747,30 +733,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   kpiTitle: {
-    fontSize: 14,
+    ...getFontStyles().body,
     color: Colors.textLight,
-    fontWeight: '500',
   },
   kpiAmount: {
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 8,
     textAlign: 'left',
-  },
-  salesAmount: {
-    color: Colors.success,
-  },
-  receivablesAmount: {
-    color: Colors.success,
-  },
-  returnsAmount: {
-    color: Colors.error,
-  },
-  payablesAmount: {
-    color: Colors.error,
-  },
-  stockAmount: {
-    color: Colors.error,
   },
   kpiFooter: {
     flexDirection: 'row',
@@ -779,11 +749,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   kpiChange: {
-    fontSize: 14,
+    ...getFontStyles().body,
     fontWeight: '600',
   },
   kpiPeriod: {
-    fontSize: 12,
+    ...getFontStyles().caption,
     color: Colors.textLight,
     marginLeft: 4,
   },
@@ -816,8 +786,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.grey[200],
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...getFontStyles().header,
     color: Colors.text,
   },
   notificationList: {
@@ -832,14 +801,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    ...getShadowStyle(1),
   },
   notificationIcon: {
     width: 40,
@@ -898,14 +860,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     borderRadius: 12,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    ...getShadowStyle(1),
   },
   shortageItem: {
     borderColor: Colors.error,
@@ -962,14 +917,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
+    ...getShadowStyle(2),
   },
   staffHeader: {
     flexDirection: 'row',
@@ -1018,14 +966,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
+    ...getShadowStyle(2),
   },
   periodSection: {
     padding: 16,
@@ -1091,14 +1032,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    ...getShadowStyle(1),
   },
   paymentTitle: {
     fontSize: 16,

@@ -40,11 +40,7 @@ const menuSections: MenuSection[] = [
     id: 'transactions',
     title: 'Transactions',
     icon: IndianRupee,
-    subsections: [
-      { id: 'sales', title: 'Sales', route: '/sales' },
-      { id: 'returns', title: 'Returns', route: '/returns' },
-      { id: 'all-invoices', title: 'All Invoices', route: '/all-invoices' },
-    ],
+    route: '/all-invoices',
   },
   {
     id: 'inventory',

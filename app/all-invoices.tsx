@@ -32,7 +32,8 @@ import {
   ChevronDown,
   X,
   Search,
-  Filter
+  Filter,
+  Plus
 } from 'lucide-react-native';
 
 const Colors = {
@@ -64,8 +65,9 @@ interface Invoice {
   itemCount: number;
   date: string;
   time: string;
-  status: 'sale' | 'return';
+  status: 'sale' | 'return' | 'purchase';
   originalInvoice?: string;
+  supplierName?: string;
 }
 
 const mockAllInvoices: Invoice[] = [
@@ -226,6 +228,72 @@ const mockAllInvoices: Invoice[] = [
     status: 'return',
     originalInvoice: 'INV-2024-003'
   },
+  
+  // Purchase Invoices
+  {
+    id: '11',
+    invoiceNumber: 'PUR-2024-001',
+    customerName: 'Apple India Pvt Ltd',
+    customerType: 'business',
+    staffName: 'Priya Sharma',
+    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    paymentStatus: 'paid',
+    paymentMethod: 'upi',
+    amount: 125000,
+    itemCount: 25,
+    date: '2024-01-16',
+    time: '08:45 AM',
+    status: 'purchase',
+    supplierName: 'Apple India Pvt Ltd'
+  },
+  {
+    id: '12',
+    invoiceNumber: 'PUR-2024-002',
+    customerName: 'Samsung Electronics',
+    customerType: 'business',
+    staffName: 'Rajesh Kumar',
+    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    paymentStatus: 'pending',
+    paymentMethod: 'card',
+    amount: 85000,
+    itemCount: 15,
+    date: '2024-01-15',
+    time: '02:30 PM',
+    status: 'purchase',
+    supplierName: 'Samsung Electronics'
+  },
+  {
+    id: '13',
+    invoiceNumber: 'PUR-2024-003',
+    customerName: 'OnePlus Technology',
+    customerType: 'business',
+    staffName: 'Amit Singh',
+    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    paymentStatus: 'paid',
+    paymentMethod: 'upi',
+    amount: 45000,
+    itemCount: 8,
+    date: '2024-01-14',
+    time: '10:15 AM',
+    status: 'purchase',
+    supplierName: 'OnePlus Technology'
+  },
+  {
+    id: '14',
+    invoiceNumber: 'PUR-2024-004',
+    customerName: 'Xiaomi India',
+    customerType: 'business',
+    staffName: 'Priya Sharma',
+    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+    paymentStatus: 'paid',
+    paymentMethod: 'cash',
+    amount: 32000,
+    itemCount: 12,
+    date: '2024-01-13',
+    time: '03:45 PM',
+    status: 'purchase',
+    supplierName: 'Xiaomi India'
+  },
 ];
 
 type TimeRange = 'today' | 'week' | 'month' | 'custom';
@@ -233,12 +301,13 @@ type TimeRange = 'today' | 'week' | 'month' | 'custom';
 export default function AllInvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(mockAllInvoices);
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns' | 'purchases'>('all');
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('today');
   const [showTimeRangeModal, setShowTimeRangeModal] = useState(false);
   const [customFromDate, setCustomFromDate] = useState('');
   const [customToDate, setCustomToDate] = useState('');
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showFABMenu, setShowFABMenu] = useState(false);
   
   // Use debounced navigation for FAB buttons
   const debouncedNavigate = useDebounceNavigation(500);
@@ -290,6 +359,13 @@ export default function AllInvoicesScreen() {
     setTimeout(() => setIsNavigating(false), 1000);
   };
 
+  const handleNewPurchasePress = () => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    debouncedNavigate('/purchasing/add-purchase-invoice');
+    setTimeout(() => setIsNavigating(false), 1000);
+  };
+
   const applyFilters = (query: string, filter: typeof selectedFilter, timeRange: TimeRange) => {
     let filtered = mockAllInvoices;
 
@@ -307,6 +383,7 @@ export default function AllInvoicesScreen() {
       filtered = filtered.filter(invoice => {
         if (filter === 'sales') return invoice.status === 'sale';
         if (filter === 'returns') return invoice.status === 'return';
+        if (filter === 'purchases') return invoice.status === 'purchase';
         return true;
       });
     }
@@ -473,8 +550,9 @@ export default function AllInvoicesScreen() {
 
   const renderInvoiceCard = (invoice: Invoice) => {
     const isReturn = invoice.status === 'return';
-    const statusColor = isReturn ? Colors.error : Colors.success;
-    const StatusIcon = isReturn ? RotateCcw : ShoppingCart;
+    const isPurchase = invoice.status === 'purchase';
+    const statusColor = isReturn ? Colors.error : isPurchase ? Colors.warning : Colors.success;
+    const StatusIcon = isReturn ? RotateCcw : isPurchase ? ShoppingCart : ShoppingCart;
     const PaymentIcon = getPaymentMethodIcon(invoice.paymentMethod);
     const paymentColor = getPaymentMethodColor(invoice.paymentMethod);
 
@@ -523,9 +601,9 @@ export default function AllInvoicesScreen() {
               styles.statusBadge,
               { backgroundColor: `${statusColor}20` }
             ]}>
-              <Text style={[styles.statusText, { color: statusColor }]}>
-                {isReturn ? 'RETURN' : 'SALE'}
-              </Text>
+                          <Text style={[styles.statusText, { color: statusColor }]}>
+              {isReturn ? 'RETURN' : isPurchase ? 'PURCHASE' : 'SALE'}
+            </Text>
             </View>
           </View>
         </View>
@@ -584,8 +662,10 @@ export default function AllInvoicesScreen() {
 
   const salesInvoices = filteredInvoices.filter(inv => inv.status === 'sale');
   const returnInvoices = filteredInvoices.filter(inv => inv.status === 'return');
+  const purchaseInvoices = filteredInvoices.filter(inv => inv.status === 'purchase');
   const totalSalesAmount = salesInvoices.reduce((sum, inv) => sum + inv.amount, 0);
   const totalReturns = returnInvoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const totalPurchases = purchaseInvoices.reduce((sum, inv) => sum + inv.amount, 0);
   const netSales = totalSalesAmount - totalReturns;
 
   return (
@@ -652,14 +732,14 @@ export default function AllInvoicesScreen() {
         </View>
 
         <View style={styles.summaryCard}>
-          <IndianRupee size={20} color={Colors.primary} />
+          <ShoppingCart size={20} color={Colors.warning} />
           <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Net Sales</Text>
-            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
-              {formatAmount(netSales)}
+            <Text style={styles.summaryLabel}>Purchases</Text>
+            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
+              {formatAmount(totalPurchases)}
             </Text>
             <Text style={styles.summaryCount}>
-              {filteredInvoices.length} total
+              {purchaseInvoices.length} invoices
             </Text>
           </View>
         </View>
@@ -694,53 +774,119 @@ export default function AllInvoicesScreen() {
 
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
-        <TouchableOpacity
-          style={[
-            styles.filterTab,
-            selectedFilter === 'all' && styles.activeFilterTab
-          ]}
-          onPress={() => handleFilterChange('all')}
-          activeOpacity={0.7}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterTabsWrapper}
         >
-          <Text style={[
-            styles.filterTabText,
-            selectedFilter === 'all' && styles.activeFilterTabText
-          ]}>
-            All ({mockAllInvoices.length})
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[
-            styles.filterTab,
-            selectedFilter === 'sales' && styles.activeFilterTab
-          ]}
-          onPress={() => handleFilterChange('sales')}
-          activeOpacity={0.7}
-        >
-          <Text style={[
-            styles.filterTabText,
-            selectedFilter === 'sales' && styles.activeFilterTabText
-          ]}>
-            Sales ({salesInvoices.length})
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[
-            styles.filterTab,
-            selectedFilter === 'returns' && styles.activeFilterTab
-          ]}
-          onPress={() => handleFilterChange('returns')}
-          activeOpacity={0.7}
-        >
-          <Text style={[
-            styles.filterTabText,
-            selectedFilter === 'returns' && styles.activeFilterTabText
-          ]}>
-            Returns ({returnInvoices.length})
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              selectedFilter === 'all' && styles.activeFilterTab
+            ]}
+            onPress={() => handleFilterChange('all')}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.filterTabText,
+              selectedFilter === 'all' && styles.activeFilterTabText
+            ]}>
+              All
+            </Text>
+            <View style={[
+              styles.filterTabBadge,
+              selectedFilter === 'all' && styles.activeFilterTabBadge
+            ]}>
+              <Text style={[
+                styles.filterTabCount,
+                selectedFilter === 'all' && styles.activeFilterTabCount
+              ]}>
+                {mockAllInvoices.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              selectedFilter === 'sales' && styles.activeFilterTab
+            ]}
+            onPress={() => handleFilterChange('sales')}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.filterTabText,
+              selectedFilter === 'sales' && styles.activeFilterTabText
+            ]}>
+              Sales
+            </Text>
+            <View style={[
+              styles.filterTabBadge,
+              selectedFilter === 'sales' && styles.activeFilterTabBadge
+            ]}>
+              <Text style={[
+                styles.filterTabCount,
+                selectedFilter === 'sales' && styles.activeFilterTabCount
+              ]}>
+                {salesInvoices.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              selectedFilter === 'returns' && styles.activeFilterTab
+            ]}
+            onPress={() => handleFilterChange('returns')}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.filterTabText,
+              selectedFilter === 'returns' && styles.activeFilterTabText
+            ]}>
+              Returns
+            </Text>
+            <View style={[
+              styles.filterTabBadge,
+              selectedFilter === 'returns' && styles.activeFilterTabBadge
+            ]}>
+              <Text style={[
+                styles.filterTabCount,
+                selectedFilter === 'returns' && styles.activeFilterTabCount
+              ]}>
+                {returnInvoices.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              selectedFilter === 'purchases' && styles.activeFilterTab
+            ]}
+            onPress={() => handleFilterChange('purchases')}
+            activeOpacity={0.7}
+          >
+            <Text style={[
+              styles.filterTabText,
+              selectedFilter === 'purchases' && styles.activeFilterTabText
+            ]}>
+              Purchases
+            </Text>
+            <View style={[
+              styles.filterTabBadge,
+              selectedFilter === 'purchases' && styles.activeFilterTabBadge
+            ]}>
+              <Text style={[
+                styles.filterTabCount,
+                selectedFilter === 'purchases' && styles.activeFilterTabCount
+              ]}>
+                {purchaseInvoices.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Invoice List */}
@@ -764,26 +910,48 @@ export default function AllInvoicesScreen() {
 
 
 
-      {/* FABs */}
+      {/* FAB Menu */}
       <View style={styles.fabContainer}>
-        {/* New Sale FAB */}
+        {/* FAB Menu Options */}
+        {showFABMenu && (
+          <View style={styles.fabMenu}>
+            <TouchableOpacity
+              style={[styles.fabMenuItem, { backgroundColor: Colors.success }]}
+              onPress={handleNewSalePress}
+              activeOpacity={0.8}
+              disabled={isNavigating}
+            >
+              <Text style={styles.fabMenuText}>New Sale</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.fabMenuItem, { backgroundColor: Colors.error }]}
+              onPress={handleNewReturnPress}
+              activeOpacity={0.8}
+              disabled={isNavigating}
+            >
+              <Text style={styles.fabMenuText}>New Return</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.fabMenuItem, { backgroundColor: Colors.warning }]}
+              onPress={handleNewPurchasePress}
+              activeOpacity={0.8}
+              disabled={isNavigating}
+            >
+              <Text style={styles.fabMenuText}>New Purchase</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {/* Main FAB */}
         <TouchableOpacity
-          style={[styles.saleFAB, isNavigating && styles.fabDisabled]}
-          onPress={handleNewSalePress}
+          style={[styles.mainFAB, isNavigating && styles.fabDisabled]}
+          onPress={() => setShowFABMenu(!showFABMenu)}
           activeOpacity={0.8}
           disabled={isNavigating}
         >
-          <Text style={styles.fabText}>New Sale</Text>
-        </TouchableOpacity>
-
-        {/* New Return FAB */}
-        <TouchableOpacity
-          style={[styles.returnFAB, isNavigating && styles.fabDisabled]}
-          onPress={handleNewReturnPress}
-          activeOpacity={0.8}
-          disabled={isNavigating}
-        >
-          <Text style={styles.fabText}>New Return</Text>
+          <Plus size={24} color={Colors.background} />
         </TouchableOpacity>
       </View>
 
@@ -1038,21 +1206,28 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   filterContainer: {
-    flexDirection: 'row',
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
+  },
+  filterTabsWrapper: {
     paddingHorizontal: 16,
+    gap: 8,
   },
   filterTab: {
-    flex: 1,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    gap: 8,
   },
   activeFilterTab: {
-    borderBottomColor: Colors.primary,
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   filterTabText: {
     fontSize: 14,
@@ -1060,8 +1235,27 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
   },
   activeFilterTabText: {
-    color: Colors.primary,
+    color: Colors.background,
     fontWeight: '600',
+  },
+  filterTabBadge: {
+    backgroundColor: Colors.grey[200],
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    minWidth: 20,
+    alignItems: 'center',
+  },
+  activeFilterTabBadge: {
+    backgroundColor: Colors.background,
+  },
+  filterTabCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  activeFilterTabCount: {
+    color: Colors.primary,
   },
   scrollView: {
     flex: 1,
@@ -1347,20 +1541,19 @@ const styles = StyleSheet.create({
   },
   fabContainer: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
-    left: 16,
-    right: 16,
-    flexDirection: 'row', // Side by side layout
+    bottom: Platform.OS === 'ios' ? 50 : 40,
+    right: 20,
+    alignItems: 'flex-end',
+  },
+  fabMenu: {
+    marginBottom: 16,
     gap: 12,
   },
-  returnFAB: {
-    flex: 1, // Equal width - takes half the available space
-    backgroundColor: Colors.error,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
+  fabMenuItem: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderRadius: 25,
-    shadowColor: Colors.error,
+    shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
@@ -1369,27 +1562,26 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 5,
   },
-  saleFAB: {
-    flex: 1, // Equal width - takes half the available space
-    backgroundColor: Colors.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 25,
-    shadowColor: Colors.success,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  fabText: {
+  fabMenuText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    marginLeft: 8,
+  },
+  mainFAB: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
   },
   fabDisabled: {
     opacity: 0.6,

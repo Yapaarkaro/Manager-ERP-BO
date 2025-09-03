@@ -16,7 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Send, Search, X, Phone, Video, MoveVertical as MoreVertical, Paperclip, Camera, Mic, Check, CheckCheck, Play, Pause, Square } from 'lucide-react-native';
-import { Audio } from 'expo-av';
+import { Audio } from 'expo-audio';
 
 const Colors = {
   background: '#FFFFFF',

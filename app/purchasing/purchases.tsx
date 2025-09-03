@@ -356,6 +356,12 @@ export default function PurchasesScreen() {
     router.push('/purchasing/create-po');
   };
 
+  const handleAddPurchaseInvoice = () => {
+    router.push({
+      pathname: '/purchasing/add-purchase-invoice' as any
+    });
+  };
+
   const renderInvoiceCard = (invoice: PurchaseInvoice) => (
     <TouchableOpacity
       key={invoice.id}
@@ -471,6 +477,27 @@ export default function PurchasesScreen() {
           <Text style={styles.headerTitle}>Purchases</Text>
         </View>
 
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <Search size={20} color={Colors.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={`Search ${activeTab === 'invoices' ? 'invoices' : 'orders'}...`}
+              placeholderTextColor={Colors.textLight}
+              value={searchQuery}
+              onChangeText={handleSearch}
+            />
+            <TouchableOpacity
+              style={styles.filterButton}
+              onPress={() => console.log('Filter purchases')}
+              activeOpacity={0.7}
+            >
+              <Filter size={20} color={Colors.textLight} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Tab Navigation */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
@@ -562,40 +589,17 @@ export default function PurchasesScreen() {
             )}
           </ScrollView>
 
-          {/* Create PO FAB (only for orders tab) */}
-          {activeTab === 'orders' && (
-            <TouchableOpacity
-              style={styles.createPoFAB}
-              onPress={handleCreatePO}
-              activeOpacity={0.8}
-            >
-              <Plus size={20} color={Colors.background} />
-              <Text style={styles.createPoFABText}>Create New PO</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Search Bar at Bottom */}
-        <View style={styles.floatingSearchContainer}>
-          <View style={styles.searchContainer}>
-            <View style={styles.searchBar}>
-              <Search size={20} color={Colors.textLight} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder={`Search ${activeTab === 'invoices' ? 'invoices' : 'orders'}...`}
-                placeholderTextColor={Colors.textLight}
-                value={searchQuery}
-                onChangeText={handleSearch}
-              />
-              <TouchableOpacity
-                style={styles.filterButton}
-                onPress={() => console.log('Filter purchases')}
-                activeOpacity={0.7}
-              >
-                <Filter size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
-          </View>
+          {/* FAB for both tabs */}
+          <TouchableOpacity
+            style={styles.fab}
+            onPress={activeTab === 'invoices' ? handleAddPurchaseInvoice : handleCreatePO}
+            activeOpacity={0.8}
+          >
+            <Plus size={20} color={Colors.background} />
+            <Text style={styles.fabText}>
+              {activeTab === 'invoices' ? 'Add Invoice' : 'Create PO'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </View>
@@ -704,7 +708,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingVertical: 16,
-    paddingBottom: 120, // Space for search bar and FAB
+    paddingBottom: 100, // Space for FAB
   },
   card: {
     backgroundColor: Colors.background,
@@ -827,42 +831,28 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
   },
 
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-  },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
   },
   filterButton: {
     width: 32,
@@ -892,9 +882,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 32,
   },
-  createPoFAB: {
+  fab: {
     position: 'absolute',
-    bottom: 80,
+    bottom: 20,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -906,13 +896,13 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
     shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  createPoFABText: {
+  fabText: {
     fontSize: 14,
     fontWeight: '600',
     color: Colors.background,
