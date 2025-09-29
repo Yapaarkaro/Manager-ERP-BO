@@ -382,7 +382,7 @@ export default function ReturnsScreen() {
       <TouchableOpacity
         key={returnInvoice.id}
         style={styles.returnCard}
-        onPress={() => router.push({
+        onPress={() => debouncedNavigate({
           pathname: '/return-details',
           params: {
             returnId: returnInvoice.id,

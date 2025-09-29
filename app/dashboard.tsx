@@ -639,6 +639,7 @@ export default function DashboardScreen() {
         style={styles.flatList}
         contentContainerStyle={styles.flatListContent}
         showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
         bounces={true}
         alwaysBounceVertical={false}
         scrollEventThrottle={16}
@@ -647,6 +648,9 @@ export default function DashboardScreen() {
         initialNumToRender={6}
         maxToRenderPerBatch={6}
         windowSize={10}
+        scrollIndicatorInsets={{ right: -1000, bottom: -1000 }}
+        persistentScrollbar={false}
+        indicatorStyle="white"
       />
 
       {/* Hamburger Menu */}

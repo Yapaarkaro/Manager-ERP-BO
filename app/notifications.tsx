@@ -494,7 +494,7 @@ export default function NotificationsScreen() {
   };
 
   const handleNotifyStaff = () => {
-    router.push('/notifications/notify-staff');
+    debouncedNavigate('/notifications/notify-staff');
   };
 
   const handleRelatedEntityPress = (notification: Notification) => {
@@ -1673,12 +1673,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // Filter Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   filterModal: {
     backgroundColor: Colors.background,
     borderRadius: 20,

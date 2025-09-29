@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { 
   ArrowLeft, 
   Calendar,
@@ -213,6 +214,8 @@ export default function ReportsScreen() {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
   const [selectedDayData, setSelectedDayData] = useState<DailySalesData | null>(null);
 
+  const debouncedNavigate = useDebounceNavigation(500);
+
   const toggleDayExpansion = (date: string) => {
     const newExpanded = new Set(expandedDays);
     if (newExpanded.has(date)) {
@@ -232,7 +235,7 @@ export default function ReportsScreen() {
       invoice.paymentMethod === paymentMethod
     );
 
-    router.push({
+    debouncedNavigate({
       pathname: '/reports/payment-details',
       params: {
         date: dayData.date,
@@ -266,7 +269,7 @@ export default function ReportsScreen() {
         }
       };
 
-      router.push({
+      debouncedNavigate({
         pathname: '/return-details',
         params: {
           returnId: returnData.id,
@@ -294,7 +297,7 @@ export default function ReportsScreen() {
         }
       };
 
-      router.push({
+      debouncedNavigate({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
@@ -566,36 +569,6 @@ export default function ReportsScreen() {
               </View>
             </View>
 
-            {/* Recent Invoices */}
-            {dayData.invoices.length > 0 && (
-              <View style={styles.invoicesSection}>
-                <Text style={styles.invoicesSectionTitle}>
-                  Recent Transactions ({dayData.invoices.length})
-                </Text>
-                <View style={styles.invoicesList}>
-                  {dayData.invoices.slice(0, 3).map(renderInvoiceCard)}
-                  {dayData.invoices.length > 3 && (
-                    <TouchableOpacity
-                      style={styles.viewAllInvoicesButton}
-                      onPress={() => {
-                        router.push({
-                          pathname: '/reports/daily-invoices',
-                          params: {
-                            date: dayData.date,
-                            invoices: JSON.stringify(dayData.invoices)
-                          }
-                        });
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.viewAllInvoicesText}>
-                        View All {dayData.invoices.length} Transactions
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            )}
           </View>
         )}
       </View>

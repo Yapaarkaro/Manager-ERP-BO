@@ -294,7 +294,7 @@ export default function PayablesScreen() {
   };
 
   const handleMakePayment = () => {
-    router.push('/payables/make-payment');
+    debouncedNavigate('/payables/make-payment');
   };
 
   const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {

@@ -93,8 +93,8 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
     Animated.spring(animationValue, {
       toValue,
       useNativeDriver: true,
-      tension: 100,
-      friction: 8,
+      tension: 120,
+      friction: 10,
     }).start();
     
     const newExpandedState = !isExpanded;
@@ -232,6 +232,8 @@ const styles = StyleSheet.create({
     right: 20,
     alignItems: 'flex-end',
     zIndex: 1000, // Higher than backdrop to ensure FAB is clickable
+    pointerEvents: 'box-none', // Allow touch events to pass through when not interacting with FAB
+    overflow: 'visible', // Ensure proper rendering of animated elements
   },
   backdrop: {
     position: 'absolute',
@@ -306,6 +308,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     zIndex: 1002, // Highest z-index to ensure main button is always clickable
+    overflow: 'hidden', // Prevent any visual artifacts from overflowing
   },
   actionButtonDisabled: {
     opacity: 0.6,

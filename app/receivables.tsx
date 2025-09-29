@@ -292,7 +292,7 @@ export default function ReceivablesScreen() {
   };
 
   const handleReceivePayment = () => {
-    router.push('/receivables/receive-payment');
+    debouncedNavigate('/receivables/receive-payment');
   };
 
   const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {

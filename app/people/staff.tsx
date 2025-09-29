@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX } from 'lucide-react-native';
 
 const Colors = {
@@ -313,6 +314,8 @@ export default function StaffScreen() {
     dateRange: 'none' as string,
   });
 
+  const debouncedNavigate = useDebounceNavigation(500);
+
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -411,18 +414,18 @@ export default function StaffScreen() {
   };
 
   const handleStaffPress = (staff: Staff) => {
-    router.push({
+    debouncedNavigate({
       pathname: '/people/staff-details',
       params: { staffId: staff.id }
     });
   };
 
   const handleAddStaff = () => {
-    router.push('/people/add-staff');
+    debouncedNavigate('/people/add-staff');
   };
 
   const handleEditStaff = (staffId: string) => {
-    router.push({
+    debouncedNavigate({
       pathname: '/people/add-staff',
       params: { staffId }
     });
