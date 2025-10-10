@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   Gift
 } from 'lucide-react-native';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -74,6 +75,7 @@ const onboardingData = [
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const debouncedNavigate = useDebounceNavigation();
 
   const handleNext = () => {
     if (currentIndex < onboardingData.length - 1) {
@@ -110,7 +112,7 @@ export default function OnboardingScreen() {
   };
 
   const handleGetStarted = () => {
-    router.push('/auth/mobile');
+    debouncedNavigate('/auth/mobile');
   };
 
   const renderContent = () => {

@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
+import { dataStore, BusinessAddress } from '../../utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -185,14 +186,64 @@ const mockWarehouses: WarehouseData[] = [
 ];
 
 export default function WarehousesScreen() {
-  const [warehouses, setWarehouses] = useState<WarehouseData[]>(mockWarehouses);
+  const [warehouses, setWarehouses] = useState<WarehouseData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredWarehouses, setFilteredWarehouses] = useState<WarehouseData[]>(mockWarehouses);
+  const [filteredWarehouses, setFilteredWarehouses] = useState<WarehouseData[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [warehouseToDelete, setWarehouseToDelete] = useState<string | null>(null);
   const [showOverviewModal, setShowOverviewModal] = useState(false);
   const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseData | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+
+  // Load warehouses from dataStore
+  useEffect(() => {
+    const loadWarehouses = () => {
+      const allAddresses = dataStore.getAddresses();
+      const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+      
+      // Convert BusinessAddress to WarehouseData format
+      const warehouseData: WarehouseData[] = warehouseAddresses.map(addr => ({
+        id: addr.id,
+        name: addr.name,
+        type: 'warehouse' as const,
+        doorNumber: addr.doorNumber || '',
+        addressLine1: addr.addressLine1,
+        addressLine2: addr.addressLine2,
+        city: addr.city,
+        pincode: addr.pincode,
+        stateName: addr.stateName,
+        stateCode: addr.stateCode,
+        isPrimary: addr.isPrimary,
+        createdAt: addr.createdAt,
+        manager: addr.manager,
+        phone: addr.phone,
+        status: addr.status,
+        // Default business performance data (can be enhanced later)
+        usesManager: !!addr.manager,
+        staffCount: 0,
+        staffAttendance: 0,
+        dailySales: 0,
+        weeklySales: 0,
+        monthlySales: 0,
+        dailyGrowth: 0,
+        weeklyGrowth: 0,
+        monthlyGrowth: 0,
+        cashInHand: 0,
+        stockValue: 0,
+        receivables: 0,
+        payables: 0,
+        overdueReceivables: 0,
+        overduePayables: 0,
+        lowStockItems: 0,
+        nearLowStockItems: 0,
+      }));
+      
+      setWarehouses(warehouseData);
+      setFilteredWarehouses(warehouseData);
+    };
+    
+    loadWarehouses();
+  }, []);
 
   useEffect(() => {
     // Filter warehouses based on search query

@@ -12,10 +12,13 @@ import {
   SafeAreaView,
   Alert,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Phone } from 'lucide-react-native';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -28,10 +31,17 @@ const COLORS = {
 };
 
 export default function MobileScreen() {
+  const { setStatusBarStyle } = useStatusBar();
+  const insets = useSafeAreaInsets();
   const [mobileNumber, setMobileNumber] = useState('');
   const [isValid, setIsValid] = useState(false);
 
   const [isNavigating, setIsNavigating] = useState(false);
+
+  // Set status bar to dark for white background
+  useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
 
   useEffect(() => {
     // Test bypass: Auto-navigate to dashboard for test number
@@ -74,14 +84,19 @@ export default function MobileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.iconContainer}>
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+        <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
           <View style={styles.iconCircle}>
             <Phone size={32} color={COLORS.primary} />
           </View>
@@ -129,7 +144,8 @@ export default function MobileScreen() {
         <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
           <Text style={styles.loginButtonText}>I already have an account</Text>
         </TouchableOpacity>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -138,6 +154,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   content: {
     flex: 1,

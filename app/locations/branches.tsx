@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lucide-react-native';
+import { dataStore, BusinessAddress } from '../../utils/dataStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -176,14 +177,64 @@ const mockBranches: Branch[] = [
 ];
 
 export default function BranchesScreen() {
-  const [branches, setBranches] = useState<Branch[]>(mockBranches);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredBranches, setFilteredBranches] = useState<Branch[]>(mockBranches);
+  const [filteredBranches, setFilteredBranches] = useState<Branch[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [branchToDelete, setBranchToDelete] = useState<string | null>(null);
   const [showOverviewModal, setShowOverviewModal] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+
+  // Load branches from dataStore
+  useEffect(() => {
+    const loadBranches = () => {
+      const allAddresses = dataStore.getAddresses();
+      const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
+      
+      // Convert BusinessAddress to Branch format
+      const branchData: Branch[] = branchAddresses.map(addr => ({
+        id: addr.id,
+        name: addr.name,
+        type: 'branch' as const,
+        doorNumber: addr.doorNumber || '',
+        addressLine1: addr.addressLine1,
+        addressLine2: addr.addressLine2,
+        city: addr.city,
+        pincode: addr.pincode,
+        stateName: addr.stateName,
+        stateCode: addr.stateCode,
+        isPrimary: addr.isPrimary,
+        createdAt: addr.createdAt,
+        manager: addr.manager,
+        phone: addr.phone,
+        status: addr.status,
+        // Default business performance data (can be enhanced later)
+        usesManager: !!addr.manager,
+        staffCount: 0,
+        staffAttendance: 0,
+        dailySales: 0,
+        weeklySales: 0,
+        monthlySales: 0,
+        dailyGrowth: 0,
+        weeklyGrowth: 0,
+        monthlyGrowth: 0,
+        cashInHand: 0,
+        stockValue: 0,
+        receivables: 0,
+        payables: 0,
+        overdueReceivables: 0,
+        overduePayables: 0,
+        lowStockItems: 0,
+        nearLowStockItems: 0,
+      }));
+      
+      setBranches(branchData);
+      setFilteredBranches(branchData);
+    };
+    
+    loadBranches();
+  }, []);
 
   useEffect(() => {
     // Filter branches based on search query

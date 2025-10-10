@@ -6,12 +6,18 @@ export function useDebounceNavigation(delay: number = 500) {
   const lastNavigationTime = useRef(0);
   const isNavigatingRef = useRef(false);
   
-  const debouncedNavigate = useCallback((route: any) => {
+  const debouncedNavigate = useCallback((route: any, method: 'push' | 'replace' = 'push') => {
     const now = Date.now();
     if (now - lastNavigationTime.current > delay && !isNavigatingRef.current) {
       lastNavigationTime.current = now;
       isNavigatingRef.current = true;
-      router.push(route);
+      
+      if (method === 'replace') {
+        router.replace(route);
+      } else {
+        router.push(route);
+      }
+      
       // Reset after a delay to allow for navigation completion
       setTimeout(() => {
         isNavigatingRef.current = false;

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 export default function BankingDetailsScreen() {
   const { 
@@ -69,7 +70,10 @@ export default function BankingDetailsScreen() {
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
   const ifscInputRef = useRef<TextInput>(null);
+  const accountHolderNameRef = useRef<TextInput>(null);
+  const accountNumberRef = useRef<TextInput>(null);
   const colors = useThemeColors();
+  const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
     // Pre-fill bank if editing
@@ -104,20 +108,23 @@ export default function BankingDetailsScreen() {
     if (bank.id !== 'others') {
       if (ifscCode.length === 0 || !ifscCode.startsWith(bank.ifscPrefix)) {
         setIfscCode(bank.ifscPrefix + '0');
-        // Set cursor position after the prefix
-        setTimeout(() => {
-          if (ifscInputRef.current) {
-            const cursorPosition = bank.ifscPrefix.length + 1;
-            setIfscSelection({ start: cursorPosition, end: cursorPosition });
-            ifscInputRef.current.focus();
-          }
-        }, 100);
       }
     } else {
       // Clear IFSC for Others option
       setIfscCode('');
       setCustomBankName('');
     }
+    
+    // Smart cursor focus after bank selection
+    setTimeout(() => {
+      if (accountHolderName.trim().length === 0) {
+        // If account holder name is empty, focus on it
+        accountHolderNameRef.current?.focus();
+      } else {
+        // If account holder name is pre-filled, focus on account number
+        accountNumberRef.current?.focus();
+      }
+    }, 100);
   };
 
   const handleBankModalOpen = () => {
@@ -162,14 +169,51 @@ export default function BankingDetailsScreen() {
     setConfirmAccountNumber(cleaned);
   };
 
+  // Format number in Indian style (1,00,000 instead of 100,000)
+  const formatIndianNumber = (num: string): string => {
+    if (!num) return '';
+    
+    // Remove all non-numeric characters except decimal point
+    const cleaned = num.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    let integerPart = parts[0];
+    const decimalPart = parts[1];
+    
+    if (!integerPart) return '';
+    
+    // Indian number formatting
+    let lastThree = integerPart.substring(integerPart.length - 3);
+    let otherNumbers = integerPart.substring(0, integerPart.length - 3);
+    
+    if (otherNumbers !== '') {
+      lastThree = ',' + lastThree;
+    }
+    
+    let formatted = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
+    
+    if (decimalPart !== undefined) {
+      formatted += '.' + decimalPart;
+    }
+    
+    return formatted;
+  };
+
   const handleInitialBalanceChange = (text: string) => {
-    // Allow numbers and decimal point
+    // Remove all non-numeric characters except decimal point
     const cleaned = text.replace(/[^0-9.]/g, '');
+    
     // Ensure only one decimal point
     const parts = cleaned.split('.');
     if (parts.length > 2) {
       return;
     }
+    
+    // Limit decimal places to 2
+    if (parts.length === 2 && parts[1].length > 2) {
+      return;
+    }
+    
+    // Store the raw value for calculations, display formatted
     setInitialBalance(cleaned);
   };
 
@@ -264,7 +308,8 @@ export default function BankingDetailsScreen() {
     }
 
     setTimeout(() => {
-      router.push({
+      // Use regular push here as user might need to go back to bank details to add more accounts
+      debouncedNavigate({
         pathname: '/auth/bank-accounts',
         params: {
           type,
@@ -427,6 +472,7 @@ export default function BankingDetailsScreen() {
                   <View style={styles.inputContainer}>
                     <User size={20} color="#64748b" style={styles.inputIcon} />
                     <TextInput
+                      ref={accountHolderNameRef}
                       style={styles.input}
                       value={accountHolderName}
                       onChangeText={setAccountHolderName}
@@ -442,6 +488,7 @@ export default function BankingDetailsScreen() {
                   <View style={styles.inputContainer}>
                     <Hash size={20} color="#64748b" style={styles.inputIcon} />
                     <TextInput
+                      ref={accountNumberRef}
                       style={styles.input}
                       value={accountNumber}
                       onChangeText={handleAccountNumberChange}
@@ -572,7 +619,7 @@ export default function BankingDetailsScreen() {
                     <Text style={styles.currencySymbol}>₹</Text>
                     <TextInput
                       style={[styles.input, styles.balanceInput]}
-                      value={initialBalance}
+                      value={formatIndianNumber(initialBalance)}
                       onChangeText={handleInitialBalanceChange}
                       placeholder="0.00"
                       placeholderTextColor="#999999"

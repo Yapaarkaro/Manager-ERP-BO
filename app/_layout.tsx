@@ -3,12 +3,21 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import Toast from 'react-native-toast-message';
+import { StatusBarProvider } from '@/contexts/StatusBarContext';
+import { dataStore } from '@/utils/dataStore';
 
 export default function RootLayout() {
   useFrameworkReady();
 
+  // Load data from persistent storage when app starts
+  useEffect(() => {
+    // Clear addresses for testing (remove this in production)
+    dataStore.clearAddresses();
+    dataStore.loadData();
+  }, []);
+
   return (
-    <>
+    <StatusBarProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="auth/mobile" />
@@ -86,8 +95,7 @@ export default function RootLayout() {
         <Stack.Screen name="reports/daily-invoices" />
         <Stack.Screen name="+not-found" />
       </Stack>
-      <StatusBar style="auto" />
       <Toast />
-    </>
+    </StatusBarProvider>
   );
 }

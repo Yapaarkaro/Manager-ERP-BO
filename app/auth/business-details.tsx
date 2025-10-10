@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
+import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -38,7 +39,7 @@ const businessTypes = [
 ];
 
 export default function BusinessDetailsScreen() {
-  const { type, value, gstinData } = useLocalSearchParams();
+  const { type, value, gstinData, panName, panDob } = useLocalSearchParams();
   const [name, setName] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('');
@@ -49,6 +50,14 @@ export default function BusinessDetailsScreen() {
 
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // Auto-fill name for PAN users
+  useEffect(() => {
+    if (type === 'PAN' && panName && !name) {
+      setName(panName as string);
+      console.log('📝 Auto-filled name from PAN:', panName);
+    }
+  }, [type, panName]);
 
   // Auto-fill data from GSTIN verification (only once)
   useEffect(() => {
@@ -129,22 +138,101 @@ export default function BusinessDetailsScreen() {
 
     setIsCompleting(true);
     
-    // Navigate to address search/selection screen
-    setTimeout(() => {
-      router.push({
-        pathname: '/auth/business-address',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType: businessType !== 'Others' ? businessType : customBusinessType,
-          customBusinessType: businessType === 'Others' ? customBusinessType : '',
+    // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
+    if (type === 'GSTIN' && gstinData) {
+      try {
+        const parsedGstinData = JSON.parse(gstinData as string);
+        
+        // Extract address from GSTIN data
+        if (parsedGstinData.pradr && parsedGstinData.pradr.addr) {
+          const addr = parsedGstinData.pradr.addr;
+          
+          // Build address components from GSTIN data
+          // addressLine1: Building Name, Floor Number (not door number - that's separate)
+          const addressLine1Parts = [addr.bnm, addr.flno].filter(Boolean).join(', ');
+          const addressLine2 = addr.st || addr.loc || '';
+          const city = addr.city || addr.dst || '';
+          const pincode = addr.pncd || '';
+          const stateName = addr.stcd || '';
+          
+          // Create primary address from GSTIN data
+          const primaryAddress = {
+            id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: businessName.trim() || 'Primary Address',
+            type: 'primary' as const,
+            doorNumber: addr.bno || '', // Door number goes in its own field
+            addressLine1: addressLine1Parts || addr.st || '', // Building name, floor
+            addressLine2: addressLine2, // Street, locality
+            city: city,
+            pincode: pincode,
+            stateName: stateName,
+            stateCode: getGSTINStateCode(stateName),
+            isPrimary: true,
+          };
+          
+          console.log('🏢 Auto-creating primary address from GSTIN data:', primaryAddress);
+          
+          // Save the primary address to dataStore
+          dataStore.addAddress(primaryAddress);
+          
+          // Navigate directly to address confirmation screen
+          setTimeout(() => {
+            router.push({
+              pathname: '/auth/address-confirmation',
+              params: {
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType: businessType !== 'Others' ? businessType : customBusinessType,
+                customBusinessType: businessType === 'Others' ? customBusinessType : '',
+                allAddresses: JSON.stringify(dataStore.getAddresses()),
+              }
+            });
+            setIsCompleting(false);
+          }, 500);
+        } else {
+          // No address in GSTIN data, fall back to normal flow
+          throw new Error('No address in GSTIN data');
         }
-      });
-      setIsCompleting(false);
-    }, 500);
+      } catch (error) {
+        console.error('Error auto-creating address from GSTIN:', error);
+        // Fall back to normal flow if auto-creation fails
+        setTimeout(() => {
+          router.push({
+            pathname: '/auth/business-address',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+            }
+          });
+          setIsCompleting(false);
+        }, 500);
+      }
+    } else {
+      // For PAN users, continue with normal flow (select address from map/search)
+      setTimeout(() => {
+        router.push({
+          pathname: '/auth/business-address',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType: businessType !== 'Others' ? businessType : customBusinessType,
+            customBusinessType: businessType === 'Others' ? customBusinessType : '',
+          }
+        });
+        setIsCompleting(false);
+      }, 500);
+    }
   };
 
   const renderBusinessTypeModal = () => (

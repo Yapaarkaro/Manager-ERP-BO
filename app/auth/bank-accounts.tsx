@@ -8,11 +8,14 @@ import {
   Alert,
   Modal,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { CreditCard, Plus, CreditCard as Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 interface BankAccount {
   id: string;
@@ -48,6 +51,7 @@ export default function BankAccountsScreen() {
   const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
+  const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
     // Load bank accounts
@@ -164,7 +168,8 @@ export default function BankAccountsScreen() {
     }
 
     // Navigate to final setup screen
-    router.push({
+    // Use replace to prevent going back to bank accounts list after continuing
+    debouncedNavigate({
       pathname: '/auth/final-setup',
       params: {
         type,
@@ -177,7 +182,7 @@ export default function BankAccountsScreen() {
         allAddresses,
         allBankAccounts: JSON.stringify(bankAccounts),
       }
-    });
+    }, 'replace');
   };
 
   const renderBankAccountCard = (account: BankAccount) => {
@@ -365,7 +370,12 @@ export default function BankAccountsScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -417,8 +427,20 @@ export default function BankAccountsScreen() {
             <View style={styles.summaryContainer}>
               <Text style={styles.summaryTitle}>Setup Summary</Text>
               <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Business Owner:</Text>
+                <Text style={styles.summaryValue}>{name}</Text>
+              </View>
+              <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Business Name:</Text>
                 <Text style={styles.summaryValue}>{businessName}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Tax ID Type:</Text>
+                <Text style={styles.summaryValue}>{type}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>{type} Number:</Text>
+                <Text style={styles.summaryValue}>{value}</Text>
               </View>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Total Addresses:</Text>
@@ -445,7 +467,8 @@ export default function BankAccountsScreen() {
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
           </Animated.View>
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
 
         {/* Delete Confirmation Modal */}
         <Modal
@@ -491,6 +514,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   safeArea: {
+    flex: 1,
+  },
+  keyboardAvoidingView: {
     flex: 1,
   },
   scrollView: {

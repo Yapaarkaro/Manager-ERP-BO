@@ -28,7 +28,7 @@ import {
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
 import { dataStore, Customer } from '@/utils/dataStore';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import GoogleGoogleAddressAutocomplete from '@/components/GoogleGoogleAddressAutocomplete';
 
 const Colors = {
   background: '#FFFFFF',
@@ -441,7 +441,7 @@ export default function AddCustomerScreen() {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address *</Text>
-                <AddressAutocomplete
+                <GoogleAddressAutocomplete
                   placeholder="Search for address or enter manually"
                   value={formData.address}
                   onChangeText={(text) => updateFormAddress(text)}

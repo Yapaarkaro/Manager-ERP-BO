@@ -29,7 +29,7 @@ import {
   Map
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import GoogleGoogleAddressAutocomplete from '@/components/GoogleGoogleAddressAutocomplete';
 import { dataStore, Supplier } from '@/utils/dataStore';
 
 const Colors = {
@@ -754,7 +754,7 @@ export default function AddSupplierScreen() {
 
               {showMap ? (
                 <View style={styles.mapContainer}>
-                  <AddressAutocomplete
+                  <GoogleAddressAutocomplete
                     placeholder="Search for address..."
                     value={addressSearch}
                     onChangeText={setAddressSearch}

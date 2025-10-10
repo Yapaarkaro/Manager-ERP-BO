@@ -9,7 +9,10 @@ import {
   Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
-import AndroidMapFallback from './AndroidMapFallback';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+
+// Google Maps API Key
+const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
 
 // Web fallback component
 const WebMapFallback: React.FC<{
@@ -43,7 +46,7 @@ const WebMapFallback: React.FC<{
 );
 
 // Main component that chooses between web and native
-const OlaMapView = (props: any) => {
+const GoogleMapView = (props: any) => {
   const {
     initialLocation = { lat: 28.6139, lng: 77.2090 },
     onMapClick,
@@ -54,6 +57,7 @@ const OlaMapView = (props: any) => {
 
   const [markerLocation, setMarkerLocation] = useState(selectedLocation || initialLocation);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const mapRef = useRef<MapView>(null);
 
   const getCurrentLocation = async () => {
     try {
@@ -77,6 +81,16 @@ const OlaMapView = (props: any) => {
 
       setMarkerLocation(newLocation);
       onMapClick?.(newLocation.lat, newLocation.lng);
+      
+      // Animate to current location
+      if (mapRef.current) {
+        mapRef.current.animateToRegion({
+          latitude: newLocation.lat,
+          longitude: newLocation.lng,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        });
+      }
     } catch (error) {
       console.error('❌ Error getting current location:', error);
       Alert.alert('Location Error', 'Failed to get current location. Please try again.');
@@ -85,22 +99,36 @@ const OlaMapView = (props: any) => {
     }
   };
 
-  // Check if we should use fallback for Android
-  const shouldUseFallback = Platform.OS === 'android' && !__DEV__;
+  const handleMapPress = (event: any) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    const newLocation = { lat: latitude, lng: longitude };
+    setMarkerLocation(newLocation);
+    onMapClick?.(latitude, longitude);
+  };
 
-  if (shouldUseFallback) {
-    return (
-      <AndroidMapFallback
-        onLocationSelect={(lat, lng) => {
-          const newLocation = { lat, lng };
-          setMarkerLocation(newLocation);
-          onMapClick?.(lat, lng);
-        }}
-        selectedLocation={markerLocation}
-        onMapLoad={onMapLoad}
-      />
-    );
-  }
+  const handleMarkerDragEnd = (event: any) => {
+    const { latitude, longitude } = event.nativeEvent.coordinate;
+    const newLocation = { lat: latitude, lng: longitude };
+    setMarkerLocation(newLocation);
+    onMarkerDragEnd?.(latitude, longitude);
+  };
+
+  const handleMapReady = () => {
+    onMapLoad?.();
+  };
+
+  // Update marker location when selectedLocation changes
+  useEffect(() => {
+    if (selectedLocation && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: selectedLocation.lat,
+        longitude: selectedLocation.lng,
+        latitudeDelta: 0.002, // Much closer zoom for street view
+        longitudeDelta: 0.002, // Much closer zoom for street view
+      });
+      setMarkerLocation(selectedLocation);
+    }
+  }, [selectedLocation]);
 
   // On web, use the web fallback
   if (Platform.OS === 'web') {
@@ -116,18 +144,48 @@ const OlaMapView = (props: any) => {
     );
   }
 
-  // On native platforms, use the native map component
-  // This will only be loaded on native platforms, preventing web bundling issues
-  const NativeMapComponent = require('./NativeMapView').default;
-  
+  // On native platforms, use Google Maps
   return (
-    <NativeMapComponent
-      initialLocation={initialLocation}
-      onMapClick={onMapClick}
-      onMarkerDragEnd={onMarkerDragEnd}
-      selectedLocation={selectedLocation}
-      onMapLoad={onMapLoad}
-    />
+    <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={{
+          latitude: initialLocation.lat,
+          longitude: initialLocation.lng,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        }}
+        onPress={handleMapPress}
+        onMapReady={handleMapReady}
+        showsUserLocation={true}
+        showsMyLocationButton={false}
+        mapType="standard"
+      >
+        <Marker
+          coordinate={{
+            latitude: markerLocation.lat,
+            longitude: markerLocation.lng,
+          }}
+          draggable={true}
+          onDragEnd={handleMarkerDragEnd}
+          title="Selected Location"
+        />
+      </MapView>
+      
+      {/* Current Location Button */}
+      <TouchableOpacity
+        style={[styles.currentLocationIcon, isGettingLocation && styles.currentLocationIconLoading]}
+        onPress={getCurrentLocation}
+        activeOpacity={0.8}
+        disabled={isGettingLocation}
+      >
+        <Text style={styles.currentLocationIconText}>📍</Text>
+      </TouchableOpacity>
+
+      {/* Location Info Panel - Hidden as requested */}
+    </View>
   );
 };
 
@@ -198,7 +256,6 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontStyle: 'italic',
   },
-
   loadingOverlay: {
     position: 'absolute',
     top: 0,
@@ -267,4 +324,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default OlaMapView; 
+export default GoogleMapView;

@@ -8,11 +8,15 @@ import {
   SafeAreaView,
   Alert,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
 import { verifyGSTIN } from '../../services/gstinApi';
+import { useStatusBar } from '@/contexts/StatusBarContext';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -25,9 +29,58 @@ const COLORS = {
   success: '#10B981',
 };
 
+// Helper function to get keyboard type based on GSTIN/PAN position
+const getKeyboardType = (type: 'GSTIN' | 'PAN', position: number): 'default' | 'number-pad' => {
+  if (type === 'GSTIN') {
+    // GSTIN Format: 33ALHPL7224K1Z0
+    // Position 0-1: Numbers (33)
+    // Position 2-6: Letters (ALHPL)
+    // Position 7-10: Numbers (7224)
+    // Position 11: Letter (K)
+    // Position 12: Number (1)
+    // Position 13: Letter (Z)
+    // Position 14: Number/Letter (0-9 or A-Z) - use default
+    if (position < 2) return 'number-pad'; // 0-1: Numbers
+    if (position >= 2 && position < 7) return 'default'; // 2-6: Letters
+    if (position >= 7 && position < 11) return 'number-pad'; // 7-10: Numbers
+    if (position === 11) return 'default'; // 11: Letter
+    if (position === 12) return 'number-pad'; // 12: Number
+    if (position === 13) return 'default'; // 13: Letter
+    if (position === 14) return 'default'; // 14: Can be number or letter
+  } else {
+    // PAN Format: AAAAA0000A
+    // Position 0-4: Letters (AAAAA)
+    // Position 5-8: Numbers (0000)
+    // Position 9: Letter (A)
+    if (position < 5) return 'default'; // 0-4: Letters
+    if (position >= 5 && position < 9) return 'number-pad'; // 5-8: Numbers
+    if (position === 9) return 'default'; // 9: Letter
+  }
+  return 'default';
+};
+
 export default function GstinPanScreen() {
+  const { setStatusBarStyle } = useStatusBar();
+  const debouncedNavigate = useDebounceNavigation();
+  const insets = useSafeAreaInsets();
+  const inputRef = React.useRef<TextInput>(null);
   const [selectedType, setSelectedType] = useState<'GSTIN' | 'PAN'>('GSTIN');
   const [inputValue, setInputValue] = useState('');
+  const [keyboardType, setKeyboardType] = useState<'default' | 'number-pad'>('number-pad');
+
+  // Set status bar to dark for white background
+  React.useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
+  
+  // Initialize keyboard type based on selected type and input value
+  React.useEffect(() => {
+    const currentPosition = inputValue.length;
+    const currentKeyboardType = getKeyboardType(selectedType, currentPosition);
+    console.log(`🔄 Type changed or initialized - Type: ${selectedType}, Position: ${currentPosition}, Keyboard: ${currentKeyboardType}`);
+    setKeyboardType(currentKeyboardType);
+  }, [selectedType]);
+  
   const [isValid, setIsValid] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
@@ -62,6 +115,24 @@ export default function GstinPanScreen() {
     setIsValid(isFormatValid);
     setVerificationError(null);
     
+    // Update keyboard type based on the NEXT character position (current length is where next char will go)
+    const nextPosition = formatted.length;
+    const currentKeyboardType = keyboardType;
+    const nextKeyboardType = getKeyboardType(selectedType, nextPosition);
+    console.log(`📝 Typed: "${formatted}", Length: ${formatted.length}, Next Position: ${nextPosition}, Current KB: ${currentKeyboardType}, Next KB: ${nextKeyboardType}`);
+    
+    // Only update keyboard if it needs to change, and blur/refocus to force keyboard change
+    if (nextKeyboardType !== currentKeyboardType) {
+      setKeyboardType(nextKeyboardType);
+      // Blur and refocus to force keyboard type change
+      setTimeout(() => {
+        inputRef.current?.blur();
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 50);
+      }, 50);
+    }
+    
     // Auto-verify GSTIN when format is valid (only once)
     if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15 && !hasAutoVerified && !isVerifying) {
       setHasAutoVerified(true);
@@ -76,6 +147,9 @@ export default function GstinPanScreen() {
     setVerificationError(null);
     setIsVerifying(false);
     setHasAutoVerified(false);
+    // Reset keyboard type based on the first character of the new type
+    const initialKeyboardType = getKeyboardType(type, 0);
+    setKeyboardType(initialKeyboardType);
     // Auto-focus input after type switch
     setTimeout(() => {
       // Focus will be handled by the input field's autoFocus prop
@@ -114,24 +188,26 @@ export default function GstinPanScreen() {
   const handleContinue = () => {
     if (isValid && !isVerifying) {
       if (selectedType === 'GSTIN') {
-        // For GSTIN, we already have verified data, so pass it directly to business details
-        router.push({
-          pathname: '/auth/business-details',
+        // For GSTIN, go to OTP verification screen
+        // Use replace to prevent going back to GSTIN/PAN screen
+        debouncedNavigate({
+          pathname: '/auth/gstin-pan-otp',
           params: { 
             type: selectedType,
             value: inputValue,
             gstinData: JSON.stringify(verifiedGstinData)
           }
-        });
+        }, 'replace');
       } else {
-        // For PAN, go to OTP verification first
-        router.push({
+        // For PAN, go to PAN details screen
+        // Use replace to prevent going back to GSTIN/PAN screen
+        debouncedNavigate({
           pathname: '/auth/gstin-pan-otp',
           params: { 
             type: selectedType,
             value: inputValue 
           }
-        });
+        }, 'replace');
       }
     } else {
       if (verificationError) {
@@ -148,14 +224,19 @@ export default function GstinPanScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.iconContainer}>
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+        <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
           <View style={styles.iconCircle}>
             {selectedType === 'GSTIN' ? (
               <FileText size={32} color={COLORS.primary} />
@@ -205,6 +286,7 @@ export default function GstinPanScreen() {
 
         <View style={styles.inputContainer}>
           <TextInput
+            ref={inputRef}
             style={[
               styles.input,
               isValid && styles.validInput,
@@ -218,6 +300,7 @@ export default function GstinPanScreen() {
             autoCapitalize="characters"
             autoCorrect={false}
             maxLength={selectedType === 'GSTIN' ? 15 : 10}
+            keyboardType={keyboardType}
             autoFocus
           />
         </View>
@@ -258,7 +341,8 @@ export default function GstinPanScreen() {
               : 'Format: 5 letters + 4 numbers + 1 letter (e.g., ABCDE1234F)'}
           </Text>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -267,6 +351,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   content: {
     flex: 1,

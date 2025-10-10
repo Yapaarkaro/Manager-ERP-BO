@@ -24,7 +24,7 @@ import {
   X,
   Mail
 } from 'lucide-react-native';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 import { dataStore, Customer as StoreCustomer } from '@/utils/dataStore';
 
 
@@ -628,7 +628,7 @@ export default function CustomerDetailsScreen() {
             </Text>
             {customer.isBusinessCustomer ? (
               <>
-                <AddressAutocomplete
+                <GoogleAddressAutocomplete
                   placeholder="Search for business address..."
                   value={businessAddressSearch}
                   onChangeText={setBusinessAddressSearch}
@@ -645,7 +645,7 @@ export default function CustomerDetailsScreen() {
               </>
             ) : (
               <>
-                <AddressAutocomplete
+                <GoogleAddressAutocomplete
                   placeholder="Search for address..."
                   value={individualAddressSearch}
                   onChangeText={setIndividualAddressSearch}
@@ -666,7 +666,7 @@ export default function CustomerDetailsScreen() {
           {customer.isBusinessCustomer && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Ship-to Address</Text>
-              <AddressAutocomplete
+              <GoogleAddressAutocomplete
                 placeholder="Search for shipping address..."
                 value={shipToAddressSearch}
                 onChangeText={setShipToAddressSearch}

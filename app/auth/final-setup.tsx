@@ -12,8 +12,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { IndianRupee, CircleCheck as CheckCircle, User, Building2, CreditCard, MapPin, Banknote } from 'lucide-react-native';
+import { CircleCheck as CheckCircle, Banknote } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
+import { dataStore } from '@/utils/dataStore';
+import InvoicePatternConfig from '@/components/InvoicePatternConfig';
+import FiscalYearSelector from '@/components/FiscalYearSelector';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 export default function FinalSetupScreen() {
   const { 
@@ -29,9 +33,14 @@ export default function FinalSetupScreen() {
   } = useLocalSearchParams();
 
   const [initialCashBalance, setInitialCashBalance] = useState('');
+  const [invoicePrefix, setInvoicePrefix] = useState('INV');
+  const [invoicePattern, setInvoicePattern] = useState('');
+  const [startingInvoiceNumber, setStartingInvoiceNumber] = useState('1');
+  const [fiscalYear, setFiscalYear] = useState<'JAN-DEC' | 'APR-MAR'>('APR-MAR');
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
+  const debouncedNavigate = useDebounceNavigation();
 
   // Parse data for summary
   const addresses = JSON.parse(allAddresses as string || '[]');
@@ -48,14 +57,50 @@ export default function FinalSetupScreen() {
     }).start();
   }, []);
 
+  const formatIndianNumber = (num: string): string => {
+    if (!num) return '';
+    
+    // Remove all non-numeric characters except decimal point
+    const cleaned = num.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    let integerPart = parts[0];
+    const decimalPart = parts[1];
+    
+    if (!integerPart) return '';
+    
+    // Indian number formatting
+    let lastThree = integerPart.substring(integerPart.length - 3);
+    let otherNumbers = integerPart.substring(0, integerPart.length - 3);
+    
+    if (otherNumbers !== '') {
+      lastThree = ',' + lastThree;
+    }
+    
+    let formatted = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
+    
+    if (decimalPart !== undefined) {
+      formatted += '.' + decimalPart;
+    }
+    
+    return formatted;
+  };
+
   const handleInitialCashBalanceChange = (text: string) => {
-    // Allow numbers and decimal point
+    // Remove all non-numeric characters except decimal point
     const cleaned = text.replace(/[^0-9.]/g, '');
+    
     // Ensure only one decimal point
     const parts = cleaned.split('.');
     if (parts.length > 2) {
       return;
     }
+    
+    // Limit decimal places to 2
+    if (parts.length === 2 && parts[1].length > 2) {
+      return;
+    }
+    
+    // Store the raw value for calculations
     setInitialCashBalance(cleaned);
   };
 
@@ -70,38 +115,39 @@ export default function FinalSetupScreen() {
     return `₹${formatBalance(balance)}`;
   };
 
-  const handleCompleteSetup = async () => {
-    setIsLoading(true);
+  const handleContinue = () => {
+    if (!isFormValid()) return;
 
-    // Here you would typically save all the data to your backend
-    const businessData = {
-      personalInfo: {
-        name,
-        businessName,
-        businessType: businessType !== 'Others' ? businessType : customBusinessType,
-      },
-      verification: {
+    // Navigate to business summary with all collected data
+    debouncedNavigate({
+      pathname: '/auth/business-summary',
+      params: {
         type,
         value,
-        gstinData: gstinData ? JSON.parse(gstinData as string) : null,
-      },
-      addresses,
-      bankAccounts,
-      initialCashBalance: totalCashBalance,
-      totalBalance: grandTotal,
-      setupCompletedAt: new Date().toISOString(),
-    };
-
-    console.log('Complete business setup data:', businessData);
-
-    setTimeout(() => {
-      router.push('/dashboard');
-      setIsLoading(false);
-    }, 1000);
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        allAddresses,
+        allBankAccounts,
+        initialCashBalance: totalCashBalance.toString(),
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
+      }
+    }, 'replace');
   };
 
   const isFormValid = () => {
-    return initialCashBalance.length > 0 && !isNaN(parseFloat(initialCashBalance));
+    return (
+      initialCashBalance.length > 0 && 
+      !isNaN(parseFloat(initialCashBalance)) &&
+      invoicePrefix.length > 0 &&
+      invoicePattern.length > 0 &&
+      startingInvoiceNumber.length > 0
+    );
   };
 
   const slideTransform = {
@@ -134,7 +180,7 @@ export default function FinalSetupScreen() {
               <View style={styles.textContainer}>
                 <Text style={styles.title}>Final Setup</Text>
                 <Text style={styles.subtitle}>
-                  Add your initial cash balance and review your business summary
+                  Configure your invoice settings and add initial cash balance
                 </Text>
               </View>
 
@@ -146,7 +192,7 @@ export default function FinalSetupScreen() {
                   <Text style={styles.currencySymbol}>₹</Text>
                   <TextInput
                     style={styles.input}
-                    value={initialCashBalance}
+                    value={formatIndianNumber(initialCashBalance)}
                     onChangeText={handleInitialCashBalanceChange}
                     placeholder="0.00"
                     placeholderTextColor="#999999"
@@ -167,83 +213,24 @@ export default function FinalSetupScreen() {
                 )}
               </View>
 
-              {/* Business Summary */}
-              <View style={styles.summaryContainer}>
-                <Text style={styles.summaryTitle}>Business Summary</Text>
-                
-                <View style={styles.summarySection}>
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <User size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Owner Name</Text>
-                    </View>
-                    <Text style={styles.summaryValue}>{name}</Text>
-                  </View>
+              {/* Fiscal Year Selection - Moved below cash balance */}
+              <View style={styles.fiscalContainer}>
+                <FiscalYearSelector
+                  onFiscalYearChange={setFiscalYear}
+                  initialValue={fiscalYear}
+                />
+              </View>
 
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <Building2 size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Business Name</Text>
-                    </View>
-                    <Text style={styles.summaryValue}>{businessName}</Text>
-                  </View>
-
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <CreditCard size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>{type} Number</Text>
-                    </View>
-                    <Text style={styles.summaryValue}>{value}</Text>
-                  </View>
-
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <Building2 size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Business Type</Text>
-                    </View>
-                    <Text style={styles.summaryValue}>
-                      {businessType !== 'Others' ? businessType : customBusinessType}
-                    </Text>
-                  </View>
-
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <MapPin size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Addresses</Text>
-                    </View>
-                    <Text style={styles.summaryValue}>{addresses.length}</Text>
-                  </View>
-
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <CreditCard size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Bank Account Balance</Text>
-                    </View>
-                    <Text style={[styles.summaryValue, styles.balanceValue]}>
-                      ₹{formatBalance(totalBankBalance)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.summaryItem}>
-                    <View style={styles.summaryItemLeft}>
-                      <Banknote size={16} color="#64748b" />
-                      <Text style={styles.summaryLabel}>Initial Cash Balance</Text>
-                    </View>
-                    <Text style={[styles.summaryValue, styles.balanceValue]}>
-                      ₹{formatBalance(totalCashBalance)}
-                    </Text>
-                  </View>
-
-                  <View style={[styles.summaryItem, styles.totalItem]}>
-                    <View style={styles.summaryItemLeft}>
-                      <IndianRupee size={16} color="#10b981" />
-                      <Text style={[styles.summaryLabel, styles.totalLabel]}>Total</Text>
-                    </View>
-                    <Text style={[styles.summaryValue, styles.totalValue]}>
-                      {formatBalanceWithSymbol(grandTotal)}
-                    </Text>
-                  </View>
-                </View>
+              {/* Invoice Configuration */}
+              <View style={styles.invoiceContainer}>
+                <Text style={styles.sectionTitle}>Invoice Configuration</Text>
+                <InvoicePatternConfig
+                  onPatternChange={setInvoicePattern}
+                  onPrefixChange={setInvoicePrefix}
+                  onStartingNumberChange={setStartingInvoiceNumber}
+                  initialPrefix={invoicePrefix}
+                  initialStartingNumber={startingInvoiceNumber}
+                />
               </View>
 
               <TouchableOpacity
@@ -251,15 +238,15 @@ export default function FinalSetupScreen() {
                   styles.completeButton,
                   isFormValid() ? styles.enabledButton : styles.disabledButton,
                 ]}
-                onPress={handleCompleteSetup}
-                disabled={!isFormValid() || isLoading}
+                onPress={handleContinue}
+                disabled={!isFormValid()}
                 activeOpacity={0.8}
               >
                 <Text style={[
                   styles.completeButtonText,
                   isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
                 ]}>
-                  {isLoading ? 'Setting up your business...' : 'Complete Setup'}
+                  Continue to Summary
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -391,69 +378,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#047857',
   },
-  summaryContainer: {
+  invoiceContainer: {
     backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#3F66AC',
     borderRadius: 16,
     padding: 20,
     marginBottom: 32,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
   },
-  summaryTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  summarySection: {
-    gap: 16,
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  summaryItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#64748b',
-    marginLeft: 8,
-    flex: 1,
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    flex: 1,
-    textAlign: 'right',
-  },
-  balanceValue: {
-    color: '#10b981',
-    fontWeight: '700',
-  },
-  totalItem: {
-    borderTopWidth: 2,
-    borderTopColor: '#e2e8f0',
-    paddingTop: 16,
-    marginTop: 8,
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#10b981',
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#10b981',
-    flex: 1,
-    textAlign: 'right',
+  fiscalContainer: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#10b981',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 32,
   },
   completeButton: {
     borderRadius: 16,

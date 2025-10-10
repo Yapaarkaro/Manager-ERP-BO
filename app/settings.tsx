@@ -46,6 +46,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { dataStore } from '@/utils/dataStore';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -116,6 +117,8 @@ const getPlatformShadow = () => {
 };
 
 export default function SettingsScreen() {
+  const { setStatusBarStyle } = useStatusBar();
+  
   const [userProfile, setUserProfile] = useState({
     name: 'John Doe',
     position: 'Business Owner',
@@ -123,6 +126,27 @@ export default function SettingsScreen() {
     gstin: '22AAAAA0000A1Z5',
     profilePhoto: null, // Set to actual photo URL when available
   });
+
+  // Set status bar to dark for white header
+  useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
+
+  // Check if signup is complete (allow access during signup process)
+  useEffect(() => {
+    const isSignupComplete = dataStore.getSignupComplete();
+    // Allow access to settings during signup process for address management
+    // Only redirect if user is not in the middle of signup
+    if (!isSignupComplete) {
+      // Check if user is in signup process by looking for addresses
+      const addresses = dataStore.getAddresses();
+      if (addresses.length === 0) {
+        // No addresses means user hasn't started signup, redirect to dashboard
+        router.replace('/dashboard');
+      }
+      // If addresses exist, user is in signup process, allow access
+    }
+  }, []);
 
   const [addresses, setAddresses] = useState<BusinessAddress[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
@@ -213,25 +237,9 @@ export default function SettingsScreen() {
   }, []);
 
   const loadAddresses = () => {
-    // Mock data for now - replace with actual dataStore.getAddresses() when available
-    const mockAddresses: BusinessAddress[] = [
-      {
-        id: '1',
-      name: 'Main Office',
-        type: 'primary',
-      doorNumber: '123',
-        addressLine1: 'Business Park',
-        addressLine2: 'Floor 5',
-      city: 'Mumbai',
-      stateName: 'Maharashtra',
-        stateCode: 'MH',
-        pincode: '400001',
-        manager: 'John Doe',
-      phone: '+91 98765 43210',
-        isPrimary: true
-      }
-    ];
-    setAddresses(mockAddresses);
+    // Load real addresses from dataStore
+    const realAddresses = dataStore.getAddresses();
+    setAddresses(realAddresses);
   };
 
   const loadBankAccounts = () => {
@@ -266,6 +274,12 @@ export default function SettingsScreen() {
     router.back();
   };
 
+  // Clear addresses for testing (remove this in production)
+  const handleClearAddresses = () => {
+    dataStore.clearAddresses();
+    Alert.alert('Addresses Cleared', 'All addresses have been cleared for testing purposes.');
+  };
+
   const handleEditProfile = () => {
     // TODO: Navigate to edit profile screen
     console.log('Edit profile pressed');
@@ -279,11 +293,12 @@ export default function SettingsScreen() {
     
     setIsAddingAddress(true);
     
-    // Navigate to add address page immediately
-    router.push({
-      pathname: '/add-address',
-      params: { type }
-    } as any);
+    // Navigate to the correct address flow based on type
+    if (type === 'branch') {
+      router.push('/locations/add-branch');
+    } else if (type === 'warehouse') {
+      router.push('/locations/add-warehouse');
+    }
   };
 
   const handleEditAddress = (address: BusinessAddress) => {
@@ -294,14 +309,34 @@ export default function SettingsScreen() {
     
     setIsAddingAddress(true);
     
-    // Navigate to edit address page
-    router.push({
-      pathname: '/add-address',
-      params: {
-        type: address.type,
-        address: JSON.stringify(address)
-      }
-    } as any);
+    // Navigate to the correct map screen based on address type
+    if (address.type === 'branch') {
+      router.push({
+        pathname: '/locations/add-branch',
+        params: {
+          editMode: 'true',
+          editAddress: JSON.stringify(address)
+        }
+      });
+    } else if (address.type === 'warehouse') {
+      router.push({
+        pathname: '/locations/add-warehouse',
+        params: {
+          editMode: 'true',
+          editAddress: JSON.stringify(address)
+        }
+      });
+    } else {
+      // For primary addresses, go to business-address screen
+      router.push({
+        pathname: '/auth/business-address',
+        params: {
+          addressType: 'primary',
+          editMode: 'true',
+          editAddress: JSON.stringify(address)
+        }
+      });
+    }
   };
 
   const handleDeleteAddress = (addressId: string) => {
@@ -1474,6 +1509,20 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
+      {/* Test Button - Remove in production */}
+      <TouchableOpacity
+        style={{
+          position: 'absolute',
+          bottom: 20,
+          right: 20,
+          backgroundColor: '#ff0000',
+          padding: 10,
+          borderRadius: 5,
+        }}
+        onPress={handleClearAddresses}
+      >
+        <Text style={{ color: 'white', fontSize: 12 }}>Clear Addresses (Test)</Text>
+      </TouchableOpacity>
 
     </SafeAreaView>
   );

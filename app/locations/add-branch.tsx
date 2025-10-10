@@ -11,8 +11,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Navigation, CreditCard as Edit, MapPin, Building2 } from 'lucide-react-native';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
+import GoogleMapView from '@/components/GoogleMapView';
 import * as Location from 'expo-location';
+import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
+import { dataStore } from '../../utils/dataStore';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -28,38 +32,41 @@ interface SelectedAddress {
   lng?: number;
 }
 
-// Ola Maps API configuration
-const OLA_MAPS_API_KEY = '7lWg0vFb2XZqdPXSOzseDmd4QaSSyNKf74TMC93i';
+// Google Maps API configuration
+const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
 
 export default function AddBranchScreen() {
+  const { setStatusBarStyle } = useStatusBar();
+  const { editMode, editAddress } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Get branch count for dynamic header
+  const getBranchCount = () => {
+    if (editMode === 'true') {
+      // For edit mode, don't show counter
+      return '';
+    }
+    const allAddresses = dataStore.getAddresses();
+    const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
+    return ` - ${branchAddresses.length + 1}`; // +1 for the new branch being added
+  };
+
+  // Set status bar to light for blue header
+  useEffect(() => {
+    setStatusBarStyle('light-content');
+  }, [setStatusBarStyle]);
   const [selectedAddress, setSelectedAddress] = useState<SelectedAddress | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [isMapLoading, setIsMapLoading] = useState(true);
-  const [mapInstance, setMapInstance] = useState<any>(null);
-  const [currentMarker, setCurrentMarker] = useState<any>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getCurrentLocationAndInitMap();
   }, []);
 
   useEffect(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js';
-      script.onload = () => {
-        const link = document.createElement('link');
-        link.href = 'https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css';
-        link.rel = 'stylesheet';
-        document.head.appendChild(link);
-        
-        if (userLocation) {
-          initializeMap(userLocation);
-        }
-      };
-      document.head.appendChild(script);
+    if (userLocation) {
+      setIsMapLoading(false);
     }
   }, [userLocation]);
 
@@ -67,54 +74,25 @@ export default function AddBranchScreen() {
     setIsGettingLocation(true);
     
     try {
-      if (Platform.OS === 'web') {
-        if (!navigator.geolocation) {
-          throw new Error('Geolocation is not supported by this browser');
-        }
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
         
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const userCoords = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            };
-            
-            setUserLocation(userCoords);
-            setIsGettingLocation(false);
-          },
-          (error) => {
-            console.error('Web geolocation error:', error);
-            const defaultLocation = { lat: 28.6139, lng: 77.2090 };
-            setUserLocation(defaultLocation);
-            setIsGettingLocation(false);
-          },
-          {
-            enableHighAccuracy: false,
-            timeout: 10000,
-            maximumAge: 60000
-          }
-        );
+        const userCoords = {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+        };
+        
+        setUserLocation(userCoords);
       } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
-          
-          const userCoords = {
-            lat: location.coords.latitude,
-            lng: location.coords.longitude,
-          };
-          
-          setUserLocation(userCoords);
-        } else {
-          const defaultLocation = { lat: 28.6139, lng: 77.2090 };
-          setUserLocation(defaultLocation);
-        }
-        
-        setIsGettingLocation(false);
+        const defaultLocation = { lat: 28.6139, lng: 77.2090 };
+        setUserLocation(defaultLocation);
       }
+      
+      setIsGettingLocation(false);
     } catch (error) {
       console.error('Location error:', error);
       const defaultLocation = { lat: 28.6139, lng: 77.2090 };
@@ -123,193 +101,44 @@ export default function AddBranchScreen() {
     }
   };
 
-  const initializeMap = async (location: { lat: number; lng: number }) => {
-    if (Platform.OS !== 'web') {
-      setIsMapLoading(false);
-      return;
-    }
-    
-    if (!mapContainerRef.current) return;
-    
+  const handleMapClick = async (lat: number, lng: number) => {
     try {
-      setIsMapLoading(true);
-      
-      const checkMapLibre = () => {
-        if (typeof window !== 'undefined' && (window as any).maplibregl) {
-          const maplibregl = (window as any).maplibregl;
-          
-          const map = new maplibregl.Map({
-            container: mapContainerRef.current,
-            style: {
-              version: 8,
-              sources: {
-                'carto-tiles': {
-                  type: 'raster',
-                  tiles: [
-                    'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                    'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                    'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-                    'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
-                  ],
-                  tileSize: 256,
-                  attribution: '© CARTO © OpenStreetMap contributors'
-                }
-              },
-              layers: [
-                {
-                  id: 'carto-tiles',
-                  type: 'raster',
-                  source: 'carto-tiles'
-                }
-              ]
-            },
-            center: [location.lng, location.lat],
-            zoom: 16,
-            attributionControl: true,
-          });
-
-          setMapInstance(map);
-
-          map.on('load', () => {
-            setIsMapLoading(false);
-            console.log('Map loaded successfully with CARTO tiles');
-          });
-
-          map.on('error', (e: any) => {
-            console.error('Map error:', e);
-            // Try fallback tile provider
-            try {
-              map.getStyle().sources['carto-tiles'] = {
-                type: 'raster',
-                tiles: [
-                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
-                ],
-                tileSize: 256,
-                attribution: '© OpenStreetMap contributors'
-              };
-              map.getStyle().layers[0].source = 'carto-tiles';
-              map.setStyle(map.getStyle());
-              console.log('Switched to fallback OpenStreetMap tiles');
-            } catch (fallbackError) {
-              console.error('Fallback tile provider also failed:', fallbackError);
-              setIsMapLoading(false);
-            }
-          });
-
-          map.on('click', (e: any) => {
-            const { lng, lat } = e.lngLat;
-            handleMapClick(lat, lng);
-          });
-        } else {
-          setTimeout(checkMapLibre, 100);
-        }
-      };
-      
-      checkMapLibre();
+      await handleMarkerDragEnd(lat, lng);
     } catch (error) {
-      console.error('Error initializing map:', error);
-      setIsMapLoading(false);
-    }
-  };
-
-  const addMarkerToMap = (lat: number, lng: number, address: string, isDraggable: boolean = true) => {
-    if (!mapInstance || Platform.OS !== 'web') return;
-
-    try {
-      const maplibregl = (window as any).maplibregl;
-      
-      if (currentMarker) {
-        currentMarker.remove();
-      }
-
-      const markerElement = document.createElement('div');
-      markerElement.style.width = '30px';
-      markerElement.style.height = '30px';
-      markerElement.style.backgroundColor = '#10b981';
-      markerElement.style.borderRadius = '50%';
-      markerElement.style.border = '3px solid #ffffff';
-      markerElement.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-      markerElement.style.cursor = isDraggable ? 'grab' : 'pointer';
-
-      const marker = new maplibregl.Marker({
-        element: markerElement,
-        draggable: isDraggable,
-      })
-        .setLngLat([lng, lat])
-        .addTo(mapInstance);
-
-      if (isDraggable) {
-        marker.on('dragend', () => {
-          const lngLat = marker.getLngLat();
-          handleMarkerDragEnd(lngLat.lat, lngLat.lng);
-        });
-      }
-
-      setCurrentMarker(marker);
-    } catch (error) {
-      console.error('Error adding marker:', error);
+      console.error('Map click error:', error);
     }
   };
 
   const handleMarkerDragEnd = async (lat: number, lng: number) => {
     try {
-      const requestId = `reverse-geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const response = await fetch(
-        `https://api.olamaps.io/places/v1/reverse-geocode?latlng=${lat},${lng}&api_key=${OLA_MAPS_API_KEY}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Request-Id': requestId,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
+      const results = await reverseGeocode(lat, lng);
+      
+      if (results && results.length > 0) {
+        const result = results[0];
+        const addressData = extractAddressComponents(result);
         
-        if (data.results && data.results.length > 0) {
-          const result = data.results[0];
-          const addressComponents = result.address_components || [];
-          
-          const getComponent = (types: string[]) => {
-            const component = addressComponents.find((comp: any) => 
-              types.some(type => comp.types.includes(type))
-            );
-            return component?.long_name || '';
-          };
-
-          const stateName = getComponent(['administrative_area_level_1', 'state']);
-          
-          const addressData: SelectedAddress = {
-            street: result.name || getComponent(['street_number', 'route']) || '',
-            area: result.vicinity || getComponent(['sublocality', 'neighborhood']) || '',
-            city: getComponent(['locality', 'administrative_area_level_2']) || '',
-            state: stateName,
-            pincode: getComponent(['postal_code']) || '',
-            formatted_address: result.formatted_address || `${result.name || ''}, ${result.vicinity || ''}`,
-            stateCode: getGSTStateCode(stateName),
-            lat,
-            lng,
-          };
-          
-          setSelectedAddress(addressData);
-          setSearchQuery(addressData.formatted_address);
-        }
+        const processedAddress: SelectedAddress = {
+          street: addressData.street_number && addressData.route 
+            ? `${addressData.street_number} ${addressData.route}` 
+            : addressData.route || '',
+          area: addressData.district || '',
+          city: addressData.city || '',
+          state: addressData.state || '',
+          pincode: addressData.pincode || '',
+          formatted_address: addressData.formatted_address,
+          stateCode: addressData.state ? getGSTStateCode(addressData.state) : '',
+          lat,
+          lng,
+        };
+        
+        setSelectedAddress(processedAddress);
+        setSearchQuery(processedAddress.formatted_address);
       }
     } catch (error) {
       console.error('Reverse geocoding error:', error);
     }
   };
 
-  const handleMapClick = async (lat: number, lng: number) => {
-    try {
-      addMarkerToMap(lat, lng, 'Loading...', true);
-      await handleMarkerDragEnd(lat, lng);
-    } catch (error) {
-      console.error('Map click error:', error);
-    }
-  };
 
   const parseAddressText = (addressText: string) => {
     const parts = addressText.split(',').map(part => part.trim()).filter(part => part.length > 0);
@@ -392,76 +221,55 @@ export default function AddBranchScreen() {
     try {
       setSearchQuery('');
       
-      const addressText = addressData.formatted_address || searchQuery;
-      const parsedData = parseAddressText(addressText);
+      // Build street address with premise name priority
+      let street = '';
+      
+      // Priority 1: Use place name from search suggestion
+      if (addressData.placeName && addressData.placeName.trim()) {
+        street = addressData.placeName;
+        console.log('📍 Branch - Using place name from search:', addressData.placeName);
+        // Add route if available and different
+        if (addressData.route && !street.includes(addressData.route)) {
+          street += `, ${addressData.route}`;
+        }
+      } 
+      // Priority 2: Use premise/subpremise
+      else if (addressData.premise || addressData.subpremise) {
+        street = [addressData.subpremise, addressData.premise].filter(Boolean).join(', ');
+        console.log('📍 Branch - Using premise:', street);
+        if (addressData.route) {
+          street += `, ${addressData.route}`;
+        }
+      }
+      // Priority 3: Build from street components
+      else if (addressData.street_number && addressData.route) {
+        street = `${addressData.street_number} ${addressData.route}`;
+      } else if (addressData.route) {
+        street = addressData.route;
+      } else if (addressData.street) {
+        street = addressData.street;
+      }
       
       const processedAddress: SelectedAddress = {
-        street: parsedData.street || addressData.street || '',
-        area: parsedData.area || addressData.area || '',
-        city: parsedData.city || addressData.city || '',
-        state: parsedData.state || addressData.state || '',
-        pincode: parsedData.pincode || addressData.pincode || '',
-        formatted_address: addressText,
-        stateCode: parsedData.state ? getGSTStateCode(parsedData.state) : '',
+        street: street,
+        area: addressData.area || addressData.sublocality || addressData.district || '',
+        city: addressData.city || '',
+        state: addressData.state || '',
+        pincode: addressData.pincode || '',
+        formatted_address: addressData.formatted_address,
+        stateCode: addressData.state ? getGSTStateCode(addressData.state) : '',
+        lat: addressData.lat,
+        lng: addressData.lng,
       };
       
+      console.log('📍 Branch - Processed address:', processedAddress);
       setSelectedAddress(processedAddress);
-      
-      if (addressText) {
-        geocodeAddress(addressText, processedAddress);
-      }
     } catch (error) {
       console.error('Error processing selected address:', error);
       setSearchQuery('');
     }
   };
 
-  const geocodeAddress = async (addressText: string, addressData: any) => {
-    try {
-      const requestId = `geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const response = await fetch(
-        `https://api.olamaps.io/places/v1/geocode?address=${encodeURIComponent(addressText)}&api_key=${OLA_MAPS_API_KEY}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Request-Id': requestId,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.geocodingResults && data.geocodingResults.length > 0) {
-          const result = data.geocodingResults[0];
-          const lat = result.geometry?.location?.lat;
-          const lng = result.geometry?.location?.lng;
-          
-          if (lat && lng) {
-            if (mapInstance) {
-              mapInstance.flyTo({
-                center: [lng, lat],
-                zoom: 17,
-                duration: 1000,
-              });
-              
-              addMarkerToMap(lat, lng, addressText, true);
-            }
-            
-            setSelectedAddress(prev => ({
-              ...prev!,
-              lat,
-              lng,
-            }));
-            return;
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Geocoding error:', error);
-    }
-  };
 
   const getGSTStateCode = (stateName: string): string => {
     const stateCodeMap: { [key: string]: string } = {
@@ -483,81 +291,36 @@ export default function AddBranchScreen() {
     setIsGettingLocation(true);
     
     try {
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            const { latitude, longitude } = position.coords;
-            
-            try {
-              const requestId = `reverse-geocode-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-              const response = await fetch(
-                `https://api.olamaps.io/places/v1/reverse-geocode?latlng=${latitude},${longitude}&api_key=${OLA_MAPS_API_KEY}`,
-                {
-                  method: 'GET',
-                  headers: {
-                    'X-Request-Id': requestId,
-                    'Content-Type': 'application/json',
-                  },
-                }
-              );
-
-              if (response.ok) {
-                const data = await response.json();
-                
-                if (data.results && data.results.length > 0) {
-                  const result = data.results[0];
-                  const addressComponents = result.address_components || [];
-                  
-                  const getComponent = (types: string[]) => {
-                    const component = addressComponents.find((comp: any) => 
-                      types.some(type => comp.types.includes(type))
-                    );
-                    return component?.long_name || '';
-                  };
-
-                  const stateName = getComponent(['administrative_area_level_1', 'state']);
-                  
-                  const addressData = {
-                    street: result.name || getComponent(['street_number', 'route']) || '',
-                    area: result.vicinity || getComponent(['sublocality', 'neighborhood']) || '',
-                    city: getComponent(['locality', 'administrative_area_level_2']) || '',
-                    state: stateName,
-                    pincode: getComponent(['postal_code']) || '',
-                    formatted_address: result.formatted_address || `${result.name || ''}, ${result.vicinity || ''}`,
-                  };
-                  
-                  handleAddressSelect(addressData);
-                } else {
-                  Alert.alert('Location Error', 'Could not get address for your current location');
-                }
-              } else {
-                Alert.alert('Location Error', 'Failed to get address from location');
-              }
-            } catch (error) {
-              console.error('Reverse geocoding error:', error);
-              Alert.alert('Location Error', 'Failed to get address from location');
-            }
-            
-            setIsGettingLocation(false);
-          },
-          (error) => {
-            console.error('Location error:', error);
-            Alert.alert('Location Error', 'Could not get your current location. Please check location permissions.');
-            setIsGettingLocation(false);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 60000,
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        
+        const { latitude, longitude } = location.coords;
+        
+        try {
+          const results = await reverseGeocode(latitude, longitude);
+          
+          if (results && results.length > 0) {
+            const result = results[0];
+            const addressData = extractAddressComponents(result);
+            handleAddressSelect(addressData);
+          } else {
+            Alert.alert('Location Error', 'Could not get address for your current location');
           }
-        );
+        } catch (error) {
+          console.error('Reverse geocoding error:', error);
+          Alert.alert('Location Error', 'Failed to get address from location');
+        }
       } else {
-        Alert.alert('Location Error', 'Geolocation is not supported by this browser');
-        setIsGettingLocation(false);
+        Alert.alert('Location Permission', 'Please grant location permission to use this feature.');
       }
     } catch (error) {
       console.error('Location error:', error);
       Alert.alert('Location Error', 'Failed to get current location');
+    } finally {
       setIsGettingLocation(false);
     }
   };
@@ -617,6 +380,7 @@ export default function AddBranchScreen() {
       pathname: '/locations/branch-details',
       params: {
         addressType: 'branch',
+        prefilledAddressName: 'Branch Office',
         prefilledStreet: selectedAddress.street,
         prefilledArea: selectedAddress.area,
         prefilledCity: selectedAddress.city,
@@ -632,6 +396,7 @@ export default function AddBranchScreen() {
       pathname: '/locations/branch-details',
       params: { 
         addressType: 'branch',
+        prefilledAddressName: 'Branch Office',
       }
     });
   };
@@ -649,16 +414,14 @@ export default function AddBranchScreen() {
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Add Branch Office</Text>
+          <Text style={styles.headerTitle}>Branch Address{getBranchCount()}</Text>
         </View>
 
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={styles.searchWrapper}>
-            <AddressAutocomplete
+            <GoogleAddressAutocomplete
               placeholder="Search for branch address..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
               onAddressSelect={handleAddressSelect}
             />
           </View>
@@ -666,60 +429,22 @@ export default function AddBranchScreen() {
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
-          {Platform.OS === 'web' ? (
-            <div
-              ref={mapContainerRef}
-              style={{
-                width: '100%',
-                height: '100%',
-                borderRadius: 0,
-                backgroundColor: '#f8fafc',
-              }}
-            />
-          ) : (
-            <View style={styles.mapPlaceholder}>
-              <MapPin size={48} color="#64748b" />
-              <Text style={styles.mapPlaceholderText}>
-                Use search to find branch address
-              </Text>
-              <Text style={styles.mapPlaceholderSubtext}>
-                Search above or use current location button
-              </Text>
-            </View>
-          )}
-          
-          <TouchableOpacity
-            style={styles.floatingLocationButton}
-            onPress={handleGetCurrentLocation}
-            disabled={isGettingLocation}
-            activeOpacity={0.7}
-          >
-            <Navigation size={20} color="#10b981" />
-          </TouchableOpacity>
-          
-          {(isGettingLocation || isMapLoading) && (
-            <View style={styles.mapOverlay}>
-              <View style={styles.loadingContainer}>
-                <Text style={styles.mapOverlayText}>
-                  {isGettingLocation ? 'Getting your location...' : 'Loading map tiles...'}
-                </Text>
-                <Text style={styles.mapOverlaySubtext}>
-                  {isMapLoading ? 'This may take a few seconds' : ''}
-                </Text>
-              </View>
-            </View>
-          )}
+          <GoogleMapView
+            initialLocation={userLocation || { lat: 28.6139, lng: 77.2090 }}
+            selectedLocation={selectedAddress ? { lat: selectedAddress.lat!, lng: selectedAddress.lng! } : undefined}
+            onMapClick={handleMapClick}
+            onMarkerDragEnd={handleMarkerDragEnd}
+            onMapLoad={() => setIsMapLoading(false)}
+          />
           
           {selectedAddress && (
             <View style={styles.selectedAddressIndicator}>
               <Text style={styles.selectedAddressText} numberOfLines={2}>
                 🏢 {selectedAddress.formatted_address}
               </Text>
-              {Platform.OS === 'web' && (
-                <Text style={styles.dragHintText}>
-                  💡 Drag the pin to fine-tune the location
-                </Text>
-              )}
+              <Text style={styles.dragHintText}>
+                💡 Tap on map or drag the pin to fine-tune the location
+              </Text>
             </View>
           )}
         </View>

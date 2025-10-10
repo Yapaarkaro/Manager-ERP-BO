@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 import { 
   Menu, 
   TrendingUp, 
@@ -106,7 +107,13 @@ export default function DashboardScreen() {
   const userName = 'John Doe';
   const businessName = 'ABC Electronics';
   
+  const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
+
+  // Set status bar to dark for white header
+  useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
 
   const handleMenuPress = () => {
     setShowHamburgerMenu(true);

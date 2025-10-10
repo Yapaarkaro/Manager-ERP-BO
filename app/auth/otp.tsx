@@ -8,10 +8,13 @@ import {
   SafeAreaView,
   Alert,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, RotateCcw } from 'lucide-react-native';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -24,10 +27,24 @@ const COLORS = {
   success: '#10B981',
 };
 
+// Helper function to mask mobile number (show only last 4 digits)
+const maskMobileNumber = (mobile: string | string[] | undefined): string => {
+  if (!mobile || typeof mobile !== 'string') return '********';
+  if (mobile.length < 4) return mobile;
+  const lastFour = mobile.slice(-4);
+  return '******' + lastFour;
+};
+
 export default function OTPScreen() {
+  const { setStatusBarStyle } = useStatusBar();
   const { mobile } = useLocalSearchParams();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [countdown, setCountdown] = useState(30);
+
+  // Set status bar to dark for white background
+  useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
   const [canResend, setCanResend] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const inputRefs = useRef<TextInput[]>([]);
@@ -96,7 +113,8 @@ export default function OTPScreen() {
     // Simulate API call
     setTimeout(() => {
       if (otpCode === '123456') { // Demo OTP
-        router.push('/auth/gstin-pan');
+        // Use replace to prevent going back to OTP screen after verification
+        router.replace('/auth/gstin-pan');
       } else {
         setOtp(['', '', '', '', '', '']);
         setHasAutoVerified(false);
@@ -122,12 +140,17 @@ export default function OTPScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Shield size={32} color={COLORS.primary} />
@@ -136,7 +159,7 @@ export default function OTPScreen() {
 
         <Text style={styles.title}>Verify Mobile Number</Text>
         <Text style={styles.subtitle}>
-          Enter the 6-digit code sent to{'\n'}+91 {mobile}
+          Enter the 6-digit code sent to{'\n'}+91 {maskMobileNumber(mobile)}
         </Text>
 
         <View style={styles.otpContainer}>
@@ -187,7 +210,8 @@ export default function OTPScreen() {
         <View style={styles.demoContainer}>
           <Text style={styles.demoText}>Demo: Use OTP 123456</Text>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -196,6 +220,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.white,
+  },
+  keyboardAvoidingView: {
+    flex: 1,
   },
   content: {
     flex: 1,

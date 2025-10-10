@@ -15,7 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Warehouse, ChevronDown, Search, X, Plus, User, Phone, Package } from 'lucide-react-native';
-import { dataStore, BusinessAddress, getStateCode } from '@/utils/dataStore';
+import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/utils/dataStore';
+import { useStatusBar } from '@/contexts/StatusBarContext';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -57,19 +58,43 @@ const indianStates = [
 ];
 
 export default function WarehouseDetailsScreen() {
+  const { setStatusBarStyle } = useStatusBar();
   const { 
     addressType = 'warehouse',
+    prefilledAddressName = 'Warehouse',
     prefilledStreet = '',
     prefilledArea = '',
     prefilledCity = '',
     prefilledState = '',
     prefilledPincode = '',
     prefilledFormatted = '',
+    // Signup flow parameters
+    type,
+    value,
+    gstinData,
+    name,
+    businessName,
+    businessType,
+    customBusinessType,
+    existingAddresses = '[]',
   } = useLocalSearchParams();
   
+  // Get warehouse count for dynamic header
+  const getWarehouseCount = () => {
+    const allAddresses = dataStore.getAddresses();
+    const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+    return warehouseAddresses.length + 1; // +1 for the new warehouse being added
+  };
+
+  // Set status bar to dark for white header
+  useEffect(() => {
+    setStatusBarStyle('dark-content');
+  }, [setStatusBarStyle]);
+  
   const [warehouseName, setWarehouseName] = useState('');
-  const [addressLine1, setAddressLine1] = useState(prefilledStreet as string);
-  const [addressLine2, setAddressLine2] = useState(prefilledArea as string);
+  const [doorNumber, setDoorNumber] = useState(''); // Door number - user should enter this
+  const [addressLine1, setAddressLine1] = useState(prefilledStreet as string); // Address Line 1 from parsed data
+  const [addressLine2, setAddressLine2] = useState(prefilledArea as string); // Address Line 2 from parsed data
   const [additionalLines, setAdditionalLines] = useState<string[]>([]);
   const [city, setCity] = useState(prefilledCity as string);
   const [pincode, setPincode] = useState(prefilledPincode as string);
@@ -78,9 +103,6 @@ export default function WarehouseDetailsScreen() {
   const [stateSearchQuery, setStateSearchQuery] = useState('');
   const [managerName, setManagerName] = useState('');
   const [managerPhone, setManagerPhone] = useState('');
-  const [capacity, setCapacity] = useState('');
-  const [initialStock, setInitialStock] = useState('');
-  const [stockValue, setStockValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
@@ -155,24 +177,13 @@ export default function WarehouseDetailsScreen() {
     setManagerPhone(cleaned);
   };
 
-  const handleInitialStockChange = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    setInitialStock(cleaned);
-  };
-
-  const handleStockValueChange = (text: string) => {
-    const cleaned = text.replace(/[^0-9.]/g, '');
-    const parts = cleaned.split('.');
-    if (parts.length > 2) {
-      return;
-    }
-    setStockValue(cleaned);
-  };
 
   const isFormValid = () => {
     return (
       warehouseName.trim().length > 0 &&
+      doorNumber.trim().length > 0 &&
       addressLine1.trim().length > 0 &&
+      addressLine2.trim().length > 0 &&
       city.trim().length > 0 &&
       pincode.trim().length === 6 &&
       /^\d{6}$/.test(pincode) &&
@@ -211,19 +222,17 @@ export default function WarehouseDetailsScreen() {
       id: `warehouse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: warehouseName.trim(),
       type: 'warehouse',
-      addressLine1: addressLine1.trim(), // Door number
-      addressLine2: addressLine2.trim(), // Street address
+      doorNumber: doorNumber.trim(), // Door number - user input
+      addressLine1: addressLine1.trim(), // Address Line 1 - auto-filled
+      addressLine2: addressLine2.trim(), // Address Line 2 - auto-filled
       additionalLines: additionalLines.filter(line => line.trim().length > 0),
       city: city.trim(),
       pincode: pincode,
       stateName: selectedState?.name || '',
-      stateCode: getStateCode(selectedState?.name || ''),
+      stateCode: getGSTINStateCode(selectedState?.name || ''),
       isPrimary: false,
       manager: managerName.trim() || undefined,
       phone: managerPhone || undefined,
-      capacity: capacity.trim() || undefined,
-      currentStock: parseInt(initialStock) || 0,
-      stockValue: parseFloat(stockValue) || 0,
       status: 'active',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -234,13 +243,28 @@ export default function WarehouseDetailsScreen() {
     // Save to data store
     dataStore.addAddress(newWarehouse);
     
+    // Navigate immediately without success alert for cleaner UX
     setTimeout(() => {
-      Alert.alert('Success', 'Warehouse added successfully', [
-        {
-          text: 'OK',
-          onPress: () => router.push('/locations/warehouses')
-        }
-      ]);
+      // Navigate back to address confirmation screen with signup parameters
+      if (type && value) {
+        // User is in signup flow, go to address confirmation
+        router.push({
+          pathname: '/auth/address-confirmation',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            allAddresses: JSON.stringify(dataStore.getAddresses()),
+          }
+        });
+      } else {
+        // User is not in signup flow, go to settings
+        router.push('/settings');
+      }
       setIsLoading(false);
     }, 500);
   };
@@ -281,7 +305,7 @@ export default function WarehouseDetailsScreen() {
               </View>
 
               <View style={styles.textContainer}>
-                <Text style={styles.title}>Warehouse Details</Text>
+                <Text style={styles.title}>Warehouse Address - {getWarehouseCount()}</Text>
                 <Text style={styles.subtitle}>
                   Enter the details for your new warehouse location
                 </Text>
@@ -315,86 +339,80 @@ export default function WarehouseDetailsScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Door Number / Building Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={addressLine1}
-                    onChangeText={setAddressLine1}
-                    placeholder="e.g., Unit 15, Block B, Warehouse Complex"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={doorNumber}
+                      onChangeText={setDoorNumber}
+                      placeholder="e.g., Unit 15, Block B, Warehouse Complex"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
                   <Text style={styles.fieldHint}>
                     Enter the specific unit number, block, or building name
                   </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Street Address *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={addressLine2}
-                    onChangeText={setAddressLine2}
-                    placeholder="Street name, area, landmark"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
+                  <Text style={styles.label}>Address Line 1 *</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={addressLine1}
+                      onChangeText={setAddressLine1}
+                      placeholder="Street name, area, landmark"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Address Line 2 *</Text>
+                  <View style={styles.inputContainer}>
+                    <TextInput
+                      style={styles.input}
+                      value={addressLine2}
+                      onChangeText={setAddressLine2}
+                      placeholder="Additional address information"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
                 </View>
 
 
 
-                {additionalLines.map((line, index) => (
-                  <View key={index} style={styles.inputGroup}>
-                    <View style={styles.additionalLineHeader}>
-                      <Text style={styles.label}>Address Line {index + 3}</Text>
-                      <TouchableOpacity
-                        style={styles.removeLineButton}
-                        onPress={() => removeAdditionalLine(index)}
-                      >
-                        <X size={16} color="#ef4444" />
-                      </TouchableOpacity>
-                    </View>
-                    <TextInput
-                      style={styles.input}
-                      value={line}
-                      onChangeText={(text) => updateAdditionalLine(index, text)}
-                      placeholder="Additional address line"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                    />
-                  </View>
-                ))}
-
-                {additionalLines.length < 3 && (
-                  <TouchableOpacity style={styles.addLineButton} onPress={addAddressLine}>
-                    <Plus size={16} color="#f59e0b" />
-                    <Text style={styles.addLineText}>Add Address Line</Text>
-                  </TouchableOpacity>
-                )}
 
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={city}
-                      onChangeText={setCity}
-                      placeholder="City name"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                    />
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        value={city}
+                        onChangeText={setCity}
+                        placeholder="City name"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                      />
+                    </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.pincodeInput]}>
                     <Text style={styles.label}>Pincode *</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={pincode}
-                      onChangeText={handlePincodeChange}
-                      placeholder="000000"
-                      placeholderTextColor="#999999"
-                      keyboardType="numeric"
-                      maxLength={6}
-                    />
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        value={pincode}
+                        onChangeText={handlePincodeChange}
+                        placeholder="000000"
+                        placeholderTextColor="#999999"
+                        keyboardType="numeric"
+                        maxLength={6}
+                      />
+                    </View>
                   </View>
                 </View>
 
@@ -422,79 +440,41 @@ export default function WarehouseDetailsScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Warehouse Manager</Text>
-                  <View style={styles.inputContainer}>
-                    <User size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.input}
-                      value={managerName}
-                      onChangeText={setManagerName}
-                      placeholder="Manager name (optional)"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                    />
+                <View style={styles.contactFieldGroup}>
+                  <Text style={styles.contactSectionTitle}>Contact Person Details</Text>
+                  
+                  <View style={styles.contactFieldRow}>
+                    <Text style={styles.contactLabel}>Warehouse Manager</Text>
+                    <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                      <User size={20} color="#fbbf24" style={styles.inputIcon} />
+                      <TextInput
+                        style={[styles.input, styles.contactInput]}
+                        value={managerName}
+                        onChangeText={setManagerName}
+                        placeholder="Manager name (optional)"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.contactFieldRow}>
+                    <Text style={styles.contactLabel}>Manager Phone</Text>
+                    <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                      <Phone size={20} color="#fbbf24" style={styles.inputIcon} />
+                      <TextInput
+                        style={[styles.input, styles.contactInput]}
+                        value={managerPhone}
+                        onChangeText={handleManagerPhoneChange}
+                        placeholder="Manager phone (optional)"
+                        placeholderTextColor="#999999"
+                        keyboardType="numeric"
+                        maxLength={10}
+                      />
+                    </View>
                   </View>
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Manager Phone</Text>
-                  <View style={styles.inputContainer}>
-                    <Phone size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.input}
-                      value={managerPhone}
-                      onChangeText={handleManagerPhoneChange}
-                      placeholder="Manager phone (optional)"
-                      placeholderTextColor="#999999"
-                      keyboardType="numeric"
-                      maxLength={10}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Warehouse Capacity</Text>
-                  <View style={styles.inputContainer}>
-                    <Package size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
-                      style={styles.input}
-                      value={capacity}
-                      onChangeText={setCapacity}
-                      placeholder="e.g., 10,000 sq ft, 5000 units"
-                      placeholderTextColor="#999999"
-                    />
-                  </View>
-                  <Text style={styles.fieldHint}>
-                    Enter capacity in sq ft, units, or any relevant measure
-                  </Text>
-                </View>
-
-                <View style={styles.rowContainer}>
-                  <View style={[styles.inputGroup, styles.halfWidth]}>
-                    <Text style={styles.label}>Initial Stock Count</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={initialStock}
-                      onChangeText={handleInitialStockChange}
-                      placeholder="0"
-                      placeholderTextColor="#999999"
-                      keyboardType="numeric"
-                    />
-                  </View>
-
-                  <View style={[styles.inputGroup, styles.halfWidth]}>
-                    <Text style={styles.label}>Stock Value (₹)</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={stockValue}
-                      onChangeText={handleStockValueChange}
-                      placeholder="0.00"
-                      placeholderTextColor="#999999"
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-                </View>
               </View>
 
               <TouchableOpacity
@@ -903,5 +883,39 @@ const styles = StyleSheet.create({
   },
   stateCodeTextSelected: {
     color: '#ffffff',
+  },
+  // Contact field styles
+  contactFieldGroup: {
+    backgroundColor: '#fefce8',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+  },
+  contactSectionTitle: {
+    color: '#fbbf24',
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  contactFieldRow: {
+    marginBottom: 12,
+  },
+  contactLabel: {
+    color: '#000000',
+    fontWeight: '700',
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  contactInputContainer: {
+    backgroundColor: '#ffffff',
+    borderColor: '#fbbf24',
+    borderWidth: 2,
+  },
+  contactInput: {
+    color: '#000000',
+    fontWeight: '500',
   },
 });

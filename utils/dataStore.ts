@@ -1,6 +1,8 @@
 // Comprehensive data store for the ERP app
 // Manages customers, suppliers, sales, invoices, and inventory
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // State code mapping function
 export function getStateCode(stateName: string): string {
   const stateCodeMap: { [key: string]: string } = {
@@ -44,6 +46,51 @@ export function getStateCode(stateName: string): string {
   };
   
   return stateCodeMap[stateName] || stateName.substring(0, 2).toUpperCase();
+}
+
+// GSTIN State code mapping function
+export function getGSTINStateCode(stateName: string): string {
+  const gstinStateCodeMap: { [key: string]: string } = {
+    'Andhra Pradesh': '37',
+    'Arunachal Pradesh': '12',
+    'Assam': '18',
+    'Bihar': '10',
+    'Chhattisgarh': '22',
+    'Goa': '30',
+    'Gujarat': '24',
+    'Haryana': '06',
+    'Himachal Pradesh': '02',
+    'Jharkhand': '20',
+    'Karnataka': '29',
+    'Kerala': '32',
+    'Madhya Pradesh': '23',
+    'Maharashtra': '27',
+    'Manipur': '14',
+    'Meghalaya': '17',
+    'Mizoram': '15',
+    'Nagaland': '13',
+    'Odisha': '21',
+    'Punjab': '03',
+    'Rajasthan': '08',
+    'Sikkim': '11',
+    'Tamil Nadu': '33',
+    'Telangana': '36',
+    'Tripura': '16',
+    'Uttar Pradesh': '09',
+    'Uttarakhand': '05',
+    'West Bengal': '19',
+    'Andaman and Nicobar Islands': '35',
+    'Chandigarh': '04',
+    'Dadra and Nagar Haveli': '26',
+    'Daman and Diu': '25',
+    'Delhi': '07',
+    'Jammu and Kashmir': '01',
+    'Ladakh': '38',
+    'Lakshadweep': '31',
+    'Puducherry': '34'
+  };
+  
+  return gstinStateCodeMap[stateName] || '00';
 }
 
 // Business Address interface
@@ -488,6 +535,48 @@ class DataStore {
   private bankAccounts: BankAccount[] = [];
   private bankTransactions: BankTransaction[] = [];
   private listeners: (() => void)[] = [];
+  private isSignupComplete: boolean = false;
+
+  // Persistence methods
+  async loadData() {
+    try {
+      const addressesData = await AsyncStorage.getItem('addresses');
+      if (addressesData) {
+        this.addresses = JSON.parse(addressesData);
+      }
+      
+      const bankAccountsData = await AsyncStorage.getItem('bankAccounts');
+      if (bankAccountsData) {
+        this.bankAccounts = JSON.parse(bankAccountsData);
+      }
+      
+      const signupCompleteData = await AsyncStorage.getItem('isSignupComplete');
+      if (signupCompleteData) {
+        this.isSignupComplete = signupCompleteData === 'true';
+      }
+      
+      console.log('Data loaded from storage:', {
+        addresses: this.addresses.length,
+        bankAccounts: this.bankAccounts.length,
+        isSignupComplete: this.isSignupComplete
+      });
+      
+      // Notify listeners after loading data
+      this.notifyListeners();
+    } catch (error) {
+      console.error('Error loading data from storage:', error);
+    }
+  }
+
+  async saveData() {
+    try {
+      await AsyncStorage.setItem('addresses', JSON.stringify(this.addresses));
+      await AsyncStorage.setItem('bankAccounts', JSON.stringify(this.bankAccounts));
+      console.log('Data saved to storage');
+    } catch (error) {
+      console.error('Error saving data to storage:', error);
+    }
+  }
 
   // Customer methods
   addCustomer(customer: Customer) {
@@ -725,6 +814,7 @@ class DataStore {
   // Address methods
   addAddress(address: BusinessAddress) {
     this.addresses.push(address);
+    this.saveData(); // Save to persistent storage
     this.notifyListeners();
   }
 
@@ -744,6 +834,7 @@ class DataStore {
     const index = this.addresses.findIndex(address => address.id === id);
     if (index !== -1) {
       this.addresses[index] = { ...this.addresses[index], ...updates };
+      this.saveData(); // Save to persistent storage
       this.notifyListeners();
     }
   }
@@ -752,6 +843,7 @@ class DataStore {
     const index = this.addresses.findIndex(address => address.id === id);
     if (index !== -1) {
       this.addresses.splice(index, 1);
+      this.saveData(); // Save to persistent storage
       this.notifyListeners();
     }
   }
@@ -781,6 +873,7 @@ class DataStore {
   // Bank Account methods
   addBankAccount(bankAccount: BankAccount) {
     this.bankAccounts.push(bankAccount);
+    this.saveData(); // Save to persistent storage
     console.log('=== BANK ACCOUNT ADDED TO STORE ===');
     console.log('Bank Account ID:', bankAccount.id);
     console.log('Bank Name:', bankAccount.bankName);
@@ -810,6 +903,7 @@ class DataStore {
     const index = this.bankAccounts.findIndex(account => account.id === id);
     if (index !== -1) {
       this.bankAccounts[index] = { ...this.bankAccounts[index], ...updates };
+      this.saveData(); // Save to persistent storage
       console.log('=== BANK ACCOUNT UPDATED ===');
       console.log('Bank Account ID:', id);
       console.log('Updated at:', new Date().toISOString());
@@ -823,6 +917,7 @@ class DataStore {
     if (index !== -1) {
       const deletedAccount = this.bankAccounts[index];
       this.bankAccounts.splice(index, 1);
+      this.saveData(); // Save to persistent storage
       console.log('=== BANK ACCOUNT DELETED ===');
       console.log('Bank Account ID:', id);
       console.log('Bank Name:', deletedAccount.bankName);
@@ -843,6 +938,7 @@ class DataStore {
     const account = this.bankAccounts.find(acc => acc.id === id);
     if (account) {
       account.isPrimary = true;
+      this.saveData(); // Save to persistent storage
       console.log('=== PRIMARY BANK ACCOUNT SET ===');
       console.log('Bank Account ID:', id);
       console.log('Bank Name:', account.bankName);
@@ -1117,6 +1213,27 @@ class DataStore {
     console.log('Cleared at:', new Date().toISOString());
     console.log('========================');
     this.notifyListeners();
+  }
+
+  // Clear addresses only (for testing)
+  clearAddresses() {
+    this.addresses = [];
+    this.saveData();
+    console.log('=== ADDRESSES CLEARED ===');
+    console.log('Cleared at:', new Date().toISOString());
+    console.log('==========================');
+    this.notifyListeners();
+  }
+
+  // Signup completion methods
+  setSignupComplete(complete: boolean) {
+    this.isSignupComplete = complete;
+    AsyncStorage.setItem('isSignupComplete', complete.toString());
+    this.notifyListeners();
+  }
+
+  getSignupComplete(): boolean {
+    return this.isSignupComplete;
   }
 
 

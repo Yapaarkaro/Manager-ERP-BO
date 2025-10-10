@@ -8,11 +8,15 @@ import {
   Alert,
   Modal,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { MapPin, Building2, Warehouse, Plus, CreditCard as Edit3, Trash2, Check, ArrowRight, Chrome as Home, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, Chrome as Home, ChevronDown, ChevronUp, User, Phone } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
+import { dataStore } from '@/utils/dataStore';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 interface Address {
   id: string;
@@ -25,6 +29,8 @@ interface Address {
   pincode: string;
   stateName: string;
   stateCode: string;
+  manager?: string;
+  phone?: string;
   isPrimary: boolean;
 }
 
@@ -32,14 +38,15 @@ type AddressSection = 'primary' | 'branch' | 'warehouse';
 
 export default function AddressConfirmationScreen() {
   const { 
-    type,
-    value,
+    type: taxIdType,
+    value: taxIdValue,
     gstinData,
     name,
     businessName,
     businessType,
     customBusinessType,
     allAddresses = '[]',
+    addressType,
   } = useLocalSearchParams();
 
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -49,16 +56,32 @@ export default function AddressConfirmationScreen() {
   const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
+  const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
-    // Parse and set all addresses from the previous screen
-    try {
-      const parsedAddresses = JSON.parse(allAddresses as string);
-      setAddresses(parsedAddresses);
-      console.log('Loaded addresses:', parsedAddresses);
-    } catch (error) {
-      console.log('No addresses to parse or parse error');
-      setAddresses([]);
+    // Debug type parameter
+    console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
+    console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
+    console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
+    console.log('🔍 Address Confirmation - All params:', { taxIdType, taxIdValue, addressType, name, businessName });
+    
+    // Load addresses from dataStore first, then fallback to parameter
+    const dataStoreAddresses = dataStore.getAddresses();
+    console.log('DataStore addresses:', dataStoreAddresses);
+    
+    if (dataStoreAddresses.length > 0) {
+      setAddresses(dataStoreAddresses);
+      console.log('Loaded addresses from dataStore:', dataStoreAddresses);
+    } else {
+      // Fallback to parsing addresses from the previous screen
+      try {
+        const parsedAddresses = JSON.parse(allAddresses as string);
+        setAddresses(parsedAddresses);
+        console.log('Loaded addresses from parameter:', parsedAddresses);
+      } catch (error) {
+        console.log('No addresses to parse or parse error');
+        setAddresses([]);
+      }
     }
 
     Animated.timing(slideAnimation, {
@@ -130,22 +153,22 @@ export default function AddressConfirmationScreen() {
     return getAddressesByType(type).length;
   };
 
-  const handleAddAddress = (type: 'branch' | 'warehouse') => {
+  const handleAddAddress = (addressTypeParam: 'branch' | 'warehouse') => {
     setShowAddOptions(false);
-    console.log('🏢 Adding new address of type:', type);
+    console.log('🏢 Adding new address of type:', addressTypeParam);
     console.log('📋 Current addresses before adding:', addresses);
     
     router.push({
       pathname: '/auth/business-address',
       params: {
-        type: type, // This should be the original auth type (GSTIN/PAN)
-        value: value,
+        type: taxIdType, // TAX ID type (GSTIN/PAN)
+        value: taxIdValue,
         gstinData: gstinData,
         name: name,
         businessName: businessName,
         businessType: businessType,
         customBusinessType: customBusinessType,
-        addressType: type,
+        addressType: addressTypeParam, // Address type (branch/warehouse)
         existingAddresses: JSON.stringify(addresses),
       }
     });
@@ -153,25 +176,18 @@ export default function AddressConfirmationScreen() {
 
   const handleEditAddress = (address: Address) => {
     router.push({
-      pathname: '/auth/business-address-manual',
+      pathname: '/edit-address-simple',
       params: {
-        type: type,
-        value: value,
+        editAddressId: address.id,
+        addressType: address.type,
+        // Signup flow parameters
+        type: taxIdType,
+        value: taxIdValue,
         gstinData: gstinData,
         name: name,
         businessName: businessName,
         businessType: businessType,
         customBusinessType: customBusinessType,
-        editMode: 'true',
-        editAddressId: address.id,
-        prefilledAddressName: address.name,
-        prefilledDoorNumber: address.doorNumber,
-        prefilledStreet: address.addressLine1,
-        prefilledArea: address.addressLine2,
-        prefilledCity: address.city,
-        prefilledPincode: address.pincode,
-        prefilledState: address.stateName,
-        addressType: address.type,
         existingAddresses: JSON.stringify(addresses),
       }
     });
@@ -197,11 +213,12 @@ export default function AddressConfirmationScreen() {
     }
 
     // Navigate to banking details screen
-    router.push({
+    // Use replace to prevent going back to address confirmation after continuing
+    debouncedNavigate({
       pathname: '/auth/banking-details',
       params: {
-        type,
-        value,
+        type: taxIdType,
+        value: taxIdValue,
         gstinData,
         name,
         businessName,
@@ -209,7 +226,7 @@ export default function AddressConfirmationScreen() {
         customBusinessType,
         allAddresses: JSON.stringify(addresses),
       }
-    });
+    }, 'replace');
   };
 
   const renderAddressCard = (address: Address) => {
@@ -259,10 +276,33 @@ export default function AddressConfirmationScreen() {
           
           {address.stateCode && (
             <View style={styles.stateCodeContainer}>
-              <Text style={styles.stateCodeLabel}>GST State Code:</Text>
-              <Text style={[styles.stateCodeValue, { color: typeInfo.color }]}>
-                {address.stateCode}
+              <Text style={styles.stateCodeLabel}>
+                State Name: {address.stateName} Code: {address.stateCode}
               </Text>
+            </View>
+          )}
+          
+          {/* Contact Person Information */}
+          {(address.manager || address.phone) && (
+            <View style={styles.contactContainer}>
+              <View style={styles.contactItem}>
+                {address.manager && (
+                  <>
+                    <User size={14} color={typeInfo.color} />
+                    <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                      {address.manager}
+                    </Text>
+                  </>
+                )}
+                {address.phone && (
+                  <>
+                    <Phone size={14} color={typeInfo.color} />
+                    <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                      {address.phone}
+                    </Text>
+                  </>
+                )}
+              </View>
             </View>
           )}
         </View>
@@ -376,7 +416,12 @@ export default function AddressConfirmationScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -428,6 +473,10 @@ export default function AddressConfirmationScreen() {
             <View style={styles.summaryContainer}>
               <Text style={styles.summaryTitle}>Setup Summary</Text>
               <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Business Owner Name:</Text>
+                <Text style={styles.summaryValue}>{name}</Text>
+              </View>
+              <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Business Name:</Text>
                 <Text style={styles.summaryValue}>{businessName}</Text>
               </View>
@@ -436,6 +485,16 @@ export default function AddressConfirmationScreen() {
                 <Text style={styles.summaryValue}>
                   {businessType !== 'Others' ? businessType : customBusinessType}
                 </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>TAX ID Type:</Text>
+                <Text style={styles.summaryValue}>
+                  {taxIdType === 'GSTIN' ? 'GSTIN' : 'PAN'}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>TAX ID:</Text>
+                <Text style={styles.summaryValue}>{taxIdValue}</Text>
               </View>
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Total Addresses:</Text>
@@ -452,7 +511,8 @@ export default function AddressConfirmationScreen() {
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
           </Animated.View>
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
 
         {/* Delete Confirmation Modal */}
         <Modal
@@ -498,6 +558,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   safeArea: {
+    flex: 1,
+  },
+  keyboardAvoidingView: {
     flex: 1,
   },
   scrollView: {
@@ -868,5 +931,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  // Contact person styles
+  contactContainer: {
+    marginTop: 12,
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  contactText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginRight: 8,
   },
 });

@@ -22,7 +22,7 @@ import {
   ChevronDown,
   X,
 } from 'lucide-react-native';
-import AddressAutocomplete from '../components/AddressAutocomplete';
+import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 import { dataStore, BusinessAddress, getStateCode } from '@/utils/dataStore';
 
 const Colors = {
@@ -463,7 +463,7 @@ export default function AddAddress() {
                 Search for an address to auto-fill the form, or scroll down to fill manually
               </Text>
               
-        <AddressAutocomplete
+        <GoogleAddressAutocomplete
           value={searchQuery}
           onChangeText={setSearchQuery}
           onAddressSelect={handleAddressSelect}

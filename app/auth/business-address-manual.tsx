@@ -16,6 +16,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
+import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import GooglePlacesSearch from '@/components/GooglePlacesSearch';
+import { extractAddressComponents } from '@/services/googleMapsApi';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -89,18 +93,88 @@ export default function BusinessAddressManualScreen() {
   const [showStates, setShowStates] = useState(false);
   const [stateSearch, setStateSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const slideAnimation = useRef(new Animated.Value(0)).current;
+  const glowAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
+  const stateSearchInputRef = useRef<TextInput>(null);
   const colors = useThemeColors();
+  const debouncedNavigate = useDebounceNavigation();
 
   const typeInfo = React.useMemo(() => {
-    // Default to primary address styling
-    return {
-      color: '#ffc754', // Primary business address color
-      title: 'Primary Business Address',
-      subtitle: 'Enter your primary business address details'
-    };
-  }, []);
+    // Dynamic header based on address type and edit mode
+    if (editMode === 'true') {
+      const allAddresses = dataStore.getAddresses();
+      if (addressType === 'branch') {
+        const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
+        const currentBranchIndex = branchAddresses.findIndex(addr => addr.id === editAddressId);
+        const branchNumber = currentBranchIndex >= 0 ? currentBranchIndex + 1 : branchAddresses.length + 1;
+        return {
+          color: '#3f66ac',
+          title: `Branch Address - ${branchNumber}`,
+          subtitle: 'Edit your branch address details'
+        };
+      } else if (addressType === 'warehouse') {
+        const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+        const currentWarehouseIndex = warehouseAddresses.findIndex(addr => addr.id === editAddressId);
+        const warehouseNumber = currentWarehouseIndex >= 0 ? currentWarehouseIndex + 1 : warehouseAddresses.length + 1;
+        return {
+          color: '#f59e0b',
+          title: `Warehouse Address - ${warehouseNumber}`,
+          subtitle: 'Edit your warehouse address details'
+        };
+      } else {
+        return {
+          color: '#ffc754',
+          title: 'Primary Address',
+          subtitle: 'Edit your primary address details'
+        };
+      }
+    } else {
+      // Default to primary address styling for new addresses
+      return {
+        color: '#ffc754', // Primary business address color
+        title: 'Primary Business Address',
+        subtitle: 'Enter your primary business address details'
+      };
+    }
+  }, [editMode, addressType, editAddressId]);
+
+  // Glowy animation effect
+  useEffect(() => {
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnimation, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: false,
+        }),
+        Animated.timing(glowAnimation, {
+          toValue: 0,
+          duration: 2000,
+          useNativeDriver: false,
+        }),
+      ])
+    );
+    glowLoop.start();
+    return () => glowLoop.stop();
+  }, [glowAnimation]);
+
+  // Auto-focus on state search input when modal opens
+  useEffect(() => {
+    if (showStates) {
+      // Longer delay to ensure modal slide animation completes fully
+      const timer = setTimeout(() => {
+        console.log('🔍 Attempting to focus state search input');
+        stateSearchInputRef.current?.focus();
+      }, 800); // Increased from 500ms to 800ms for slide animation
+      return () => clearTimeout(timer);
+    } else {
+      // Clear search when modal closes
+      setStateSearch('');
+    }
+  }, [showStates]);
 
   useEffect(() => {
     console.log('🏠 Business Address Manual Screen - Prefilled Data:');
@@ -194,6 +268,106 @@ export default function BusinessAddressManualScreen() {
     }
   };
 
+  const handleAddressSelect = (addressData: any) => {
+    console.log('🔍 Selected address from search:', addressData);
+    
+    // addressData is already the extracted components from GooglePlacesSearch
+    const components = addressData;
+    console.log('📍 Extracted components:', components);
+    
+    // Address Line 1: Premise/Building name + Road name
+    // Address Line 2: Locality/Area name
+    
+    let addressLine1Parts: string[] = [];
+    
+    // First, try to get the premise/building name
+    // Priority 1: Use the place name from the search suggestion (most accurate)
+    if (components.placeName && components.placeName.trim()) {
+      addressLine1Parts.push(components.placeName);
+      console.log('📍 Using place name from search:', components.placeName);
+    } else if (components.premise) {
+      addressLine1Parts.push(components.premise);
+      console.log('📍 Using premise:', components.premise);
+    } else if (components.subpremise) {
+      addressLine1Parts.push(components.subpremise);
+      console.log('📍 Using subpremise:', components.subpremise);
+    } else {
+      // If no premise, try to extract from formatted address (first part that's not a code)
+      const formattedParts = components.formatted_address?.split(',') || [];
+      const firstPart = formattedParts[0]?.trim();
+      
+      // Check if first part is a plus code (e.g., "VJ99+78R")
+      const isPlusCode = /^[A-Z0-9]+\+[A-Z0-9]+$/.test(firstPart || '');
+      
+      if (firstPart && !isPlusCode) {
+        // Check if it looks like a road name (starts with road keywords)
+        const isRoadName = /^(road|street|avenue|lane|marg|cross)/i.test(firstPart);
+        
+        if (!isRoadName) {
+          // It's likely a premise name, use it
+          addressLine1Parts.push(firstPart);
+          console.log('📍 Using first part of formatted address:', firstPart);
+        }
+      }
+    }
+    
+    // Then add the road/street name
+    if (components.route) {
+      addressLine1Parts.push(components.route);
+    } else if (components.street && !addressLine1Parts.includes(components.street)) {
+      addressLine1Parts.push(components.street);
+    }
+    
+    // Set Address Line 1
+    if (addressLine1Parts.length > 0) {
+      setAddressLine1(addressLine1Parts.join(', '));
+      console.log('📍 Set addressLine1:', addressLine1Parts.join(', '));
+    } else {
+      // Absolute fallback: use first part of formatted address
+      const firstPart = components.formatted_address?.split(',')[0]?.trim();
+      if (firstPart) {
+        setAddressLine1(firstPart);
+        console.log('📍 Set addressLine1 (fallback):', firstPart);
+      }
+    }
+    
+    // Address Line 2: Locality/Area name
+    if (components.sublocality || components.area) {
+      const area = components.sublocality || components.area;
+      setAddressLine2(area);
+      console.log('📍 Set addressLine2 from area/sublocality:', area);
+    } else if (components.district) {
+      setAddressLine2(components.district);
+      console.log('📍 Set addressLine2 from district:', components.district);
+    } else if (components.locality) {
+      setAddressLine2(components.locality);
+      console.log('📍 Set addressLine2 from locality:', components.locality);
+    }
+    
+    if (components.city) {
+      setCity(components.city);
+      console.log('📍 Set city:', components.city);
+    }
+    if (components.pincode) {
+      setPincode(components.pincode);
+      console.log('📍 Set pincode:', components.pincode);
+    }
+    if (components.state) {
+      // Find matching state
+      const matchingState = indianStates.find(state => 
+        state.name.toLowerCase() === components.state.toLowerCase()
+      );
+      if (matchingState) {
+        setSelectedState(matchingState);
+        console.log('📍 Set state:', matchingState.name);
+      }
+    }
+    
+    // Hide search bar after selection
+    setShowSearchBar(false);
+    setSearchQuery('');
+  };
+
   const updateAdditionalLine = (index: number, value: string) => {
     const newLines = [...additionalLines];
     newLines[index] = value;
@@ -252,7 +426,7 @@ export default function BusinessAddressManualScreen() {
               city: city.trim(),
               pincode: pincode,
               stateName: selectedState?.name || '',
-              stateCode: selectedState?.code || '',
+              stateCode: getGSTINStateCode(selectedState?.name || ''),
             }
           : addr
       );
@@ -279,11 +453,18 @@ export default function BusinessAddressManualScreen() {
       // Add new address to existing addresses
       allAddresses = [...existingAddressList, newAddress];
       console.log('📦 Final address list:', allAddresses);
+      
+      // Save primary address to dataStore
+      if ((addressType || 'primary') === 'primary') {
+        console.log('💾 Saving primary address to dataStore');
+        dataStore.addAddress(newAddress);
+      }
     }
     
     setTimeout(() => {
       // Navigate to address confirmation with all addresses
-      router.push({
+      // Use replace to prevent going back to address form after submission
+      debouncedNavigate({
         pathname: '/auth/address-confirmation',
         params: {
           type,
@@ -295,7 +476,7 @@ export default function BusinessAddressManualScreen() {
           customBusinessType,
           allAddresses: JSON.stringify(allAddresses),
         }
-      });
+      }, 'replace');
       setIsLoading(false);
     }, 500);
   };
@@ -336,9 +517,9 @@ export default function BusinessAddressManualScreen() {
               </View>
 
               <View style={styles.textContainer}>
-                <Text style={styles.title}>Primary Business Address</Text>
+                <Text style={[styles.title, { color: typeInfo.color }]}>{typeInfo.title}</Text>
                 <Text style={styles.subtitle}>
-                  Enter your primary business address details
+                  {typeInfo.subtitle}
                 </Text>
                 
                 <View style={styles.primaryNotice}>
@@ -511,6 +692,12 @@ export default function BusinessAddressManualScreen() {
             transparent={true}
             animationType="fade"
             onRequestClose={() => setShowStates(false)}
+            onShow={() => {
+              // Focus the search input when modal is shown
+              setTimeout(() => {
+                stateSearchInputRef.current?.focus();
+              }, 100);
+            }}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContainer}>
@@ -528,13 +715,13 @@ export default function BusinessAddressManualScreen() {
                 <View style={styles.searchContainer}>
                   <Search size={18} color="#64748b" />
                   <TextInput
-                    ref={searchInputRef}
+                    ref={stateSearchInputRef}
                     style={styles.searchInput}
                     value={stateSearch}
                     onChangeText={setStateSearch}
                     placeholder="Search states..."
                     placeholderTextColor="#94a3b8"
-                    autoFocus={false}
+                    autoFocus={true}
                   />
                 </View>
                 
@@ -908,5 +1095,43 @@ const styles = StyleSheet.create({
   },
   stateCodeTextSelected: {
     color: '#ffffff',
+  },
+  // Search bar styles
+  searchContainer: {
+    marginBottom: 20,
+  },
+  searchButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  searchButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 2,
+    borderColor: '#3f66ac',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  searchButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#3f66ac',
+  },
+  searchBarContainer: {
+    position: 'relative',
+    marginBottom: 20,
+  },
+  closeSearchButton: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    zIndex: 10,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 20,
+    padding: 8,
   },
 });
