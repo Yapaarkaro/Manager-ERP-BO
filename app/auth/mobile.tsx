@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Phone } from 'lucide-react-native';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import { dataStore } from '@/utils/dataStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -35,6 +36,7 @@ export default function MobileScreen() {
   const insets = useSafeAreaInsets();
   const [mobileNumber, setMobileNumber] = useState('');
   const [isValid, setIsValid] = useState(false);
+  const [isReturningUser, setIsReturningUser] = useState(false);
 
   const [isNavigating, setIsNavigating] = useState(false);
 
@@ -42,6 +44,24 @@ export default function MobileScreen() {
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
+
+  // Check for returning user when mobile number changes
+  useEffect(() => {
+    const checkReturningUser = async () => {
+      if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber)) {
+        const existingProgress = await dataStore.getSignupProgressByMobile(mobileNumber);
+        if (existingProgress && existingProgress.ownerName) {
+          setIsReturningUser(true);
+          console.log('👋 Welcome back! Found existing signup for:', mobileNumber);
+        } else {
+          setIsReturningUser(false);
+        }
+      } else {
+        setIsReturningUser(false);
+      }
+    };
+    checkReturningUser();
+  }, [mobileNumber]);
 
   useEffect(() => {
     // Test bypass: Auto-navigate to dashboard for test number
@@ -130,12 +150,22 @@ export default function MobileScreen() {
           />
         </View>
 
+        {isReturningUser && mobileNumber.length === 10 && (
+          <View style={styles.returningUserContainer}>
+            <Text style={styles.returningUserText}>
+              👋 Welcome back! We'll help you continue where you left off.
+            </Text>
+          </View>
+        )}
+
         {isValid && (
           <View style={styles.successContainer}>
             <Text style={styles.successText}>
               {mobileNumber === '1234567890' 
                 ? 'Test mode: Proceeding to dashboard...' 
-                : 'Proceeding to verification...'
+                : isReturningUser 
+                  ? 'Resuming your signup...'
+                  : 'Proceeding to verification...'
               }
             </Text>
           </View>
@@ -226,6 +256,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 16,
     textAlign: 'center',
+  },
+  returningUserContainer: {
+    backgroundColor: '#DBEAFE',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+  },
+  returningUserText: {
+    color: '#1E40AF',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '500',
   },
   successContainer: {
     backgroundColor: '#D1FAE5',

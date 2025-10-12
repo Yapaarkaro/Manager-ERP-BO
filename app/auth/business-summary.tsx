@@ -27,6 +27,10 @@ import {
   ChevronDown,
   ChevronUp,
   Edit3,
+  ArrowLeft,
+  Home,
+  Warehouse,
+  Phone,
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
@@ -137,6 +141,15 @@ export default function BusinessSummaryScreen() {
 
   const formatBalanceWithSymbol = (balance: number) => {
     return `₹${formatBalance(balance)}`;
+  };
+
+  const formatAccountNumber = (accountNumber: string) => {
+    // Mask account number for security - show only last 4 digits
+    if (!accountNumber) return '';
+    if (accountNumber.length <= 4) return accountNumber;
+    const visibleDigits = accountNumber.slice(-4);
+    const maskedPart = '*'.repeat(Math.max(0, accountNumber.length - 4));
+    return maskedPart + visibleDigits;
   };
 
   const formatIndianNumber = (num: string): string => {
@@ -317,6 +330,36 @@ export default function BusinessSummaryScreen() {
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          {/* Back Button */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              router.replace({
+                pathname: '/auth/final-setup',
+                params: {
+                  type,
+                  value,
+                  gstinData,
+                  name: editableName,
+                  businessName: editableBusinessName,
+                  businessType: editableBusinessType,
+                  customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                  allAddresses: JSON.stringify(editableAddresses),
+                  allBankAccounts: JSON.stringify(editableBankAccounts),
+                  // Pass invoice configuration back
+                  initialCashBalance: editableCashBalance,
+                  invoicePrefix: editableInvoicePrefix,
+                  invoicePattern: editableInvoicePattern,
+                  startingInvoiceNumber: editableStartingNumber,
+                  fiscalYear: editableFiscalYear,
+                }
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color="#3f66ac" />
+          </TouchableOpacity>
+
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -436,21 +479,40 @@ export default function BusinessSummaryScreen() {
                     <View style={styles.summaryRow}>
                       <View style={styles.summaryItemContent}>
                         <MapPin size={16} color="#64748b" />
-                        <View style={styles.summaryTextContainer}>
+                        <View style={styles.summaryTextContainerInline}>
                           <Text style={styles.summaryLabel}>Total Addresses</Text>
-                          <Text style={styles.summaryValue}>{editableAddresses.length}</Text>
+                          <Text style={styles.summaryValueInline}>{editableAddresses.length}</Text>
                         </View>
                       </View>
                     </View>
 
-                    {editableAddresses.map((address: any, index: number) => (
+                    {editableAddresses
+                      .sort((a: any, b: any) => {
+                        // Sort: Primary (0), Branch (1), Warehouse (2)
+                        const typeOrder = { primary: 0, branch: 1, warehouse: 2 };
+                        return typeOrder[a.type as keyof typeof typeOrder] - typeOrder[b.type as keyof typeof typeOrder];
+                      })
+                      .map((address: any, index: number) => (
                       <View key={address.id} style={styles.addressCard}>
                         <View style={styles.addressHeader}>
-                          <Text style={styles.addressType}>
-                            {address.type === 'primary' ? '🏢 Primary Address' : 
-                             address.type === 'branch' ? '🏪 Branch' : 
-                             '📦 Warehouse'}
-                          </Text>
+                          <View style={styles.addressTypeContainer}>
+                            {address.type === 'primary' ? (
+                              <>
+                                <Home size={16} color="#3f66ac" />
+                                <Text style={styles.addressType}>Primary Address</Text>
+                              </>
+                            ) : address.type === 'branch' ? (
+                              <>
+                                <Building2 size={16} color="#10b981" />
+                                <Text style={styles.addressType}>Branch</Text>
+                              </>
+                            ) : (
+                              <>
+                                <Warehouse size={16} color="#f59e0b" />
+                                <Text style={styles.addressType}>Warehouse</Text>
+                              </>
+                            )}
+                          </View>
                           <EditButton onPress={() => {
                             // Navigate to edit-address-simple with the actual address data
                             router.push({
@@ -473,24 +535,94 @@ export default function BusinessSummaryScreen() {
                         <Text style={styles.addressText}>
                           {[address.doorNumber, address.addressLine1, address.addressLine2, address.city, address.stateName, address.pincode].filter(Boolean).join(', ')}
                         </Text>
+                        {/* Contact Person Details for Branch/Warehouse */}
+                        {(address.type === 'branch' || address.type === 'warehouse') && (address.manager || address.phone) && (
+                          <View style={styles.addressContactInfo}>
+                            {address.manager && (
+                              <View style={styles.contactRow}>
+                                <User size={12} color="#64748b" />
+                                <Text style={styles.contactText}>{address.manager}</Text>
+                              </View>
+                            )}
+                            {address.phone && (
+                              <View style={styles.contactRow}>
+                                <Phone size={12} color="#64748b" />
+                                <Text style={styles.contactText}>{address.phone}</Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
                       </View>
                     ))}
 
-                    {/* Add Address Button */}
-                    <TouchableOpacity
-                      style={styles.addButton}
-                      onPress={() => {
-                        // Navigate to add branch or warehouse
-                        router.push('/locations/add-branch');
-                      }}
-                    >
-                      <View style={styles.addButtonContent}>
-                        <View style={styles.addIcon}>
-                          <Text style={styles.addIconText}>+</Text>
-                        </View>
-                        <Text style={styles.addButtonText}>Add Branch or Warehouse</Text>
-                      </View>
-                    </TouchableOpacity>
+                    {/* Add Address Buttons - Inline */}
+                    <View style={styles.addAddressButtonsContainer}>
+                      <TouchableOpacity
+                        style={[styles.addAddressButton, styles.addBranchButton]}
+                        onPress={() => {
+                          // Navigate to business address screen with branch type
+                          router.push({
+                            pathname: '/auth/business-address',
+                            params: {
+                              type,
+                              value,
+                              gstinData,
+                              name: editableName,
+                              businessName: editableBusinessName,
+                              businessType: editableBusinessType,
+                              customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                              mobile: '', // Not needed for branch/warehouse, but prevent error
+                              addressType: 'branch',
+                              existingAddresses: JSON.stringify(editableAddresses),
+                              fromSummary: 'true',
+                              allBankAccounts: JSON.stringify(editableBankAccounts),
+                              initialCashBalance: editableCashBalance,
+                              invoicePrefix: editableInvoicePrefix,
+                              invoicePattern: editableInvoicePattern,
+                              startingInvoiceNumber: editableStartingNumber,
+                              fiscalYear: editableFiscalYear,
+                            }
+                          });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Building2 size={20} color="#10b981" />
+                        <Text style={[styles.addAddressButtonText, { color: '#10b981' }]}>Add Branch</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.addAddressButton, styles.addWarehouseButton]}
+                        onPress={() => {
+                          // Navigate to business address screen with warehouse type
+                          router.push({
+                            pathname: '/auth/business-address',
+                            params: {
+                              type,
+                              value,
+                              gstinData,
+                              name: editableName,
+                              businessName: editableBusinessName,
+                              businessType: editableBusinessType,
+                              customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                              mobile: '', // Not needed for branch/warehouse, but prevent error
+                              addressType: 'warehouse',
+                              existingAddresses: JSON.stringify(editableAddresses),
+                              fromSummary: 'true',
+                              allBankAccounts: JSON.stringify(editableBankAccounts),
+                              initialCashBalance: editableCashBalance,
+                              invoicePrefix: editableInvoicePrefix,
+                              invoicePattern: editableInvoicePattern,
+                              startingInvoiceNumber: editableStartingNumber,
+                              fiscalYear: editableFiscalYear,
+                            }
+                          });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Warehouse size={20} color="#f59e0b" />
+                        <Text style={[styles.addAddressButtonText, { color: '#f59e0b' }]}>Add Warehouse</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
               </View>
@@ -508,9 +640,9 @@ export default function BusinessSummaryScreen() {
                     <View style={styles.summaryRow}>
                       <View style={styles.summaryItemContent}>
                         <CreditCard size={16} color="#64748b" />
-                        <View style={styles.summaryTextContainer}>
+                        <View style={styles.summaryTextContainerInline}>
                           <Text style={styles.summaryLabel}>Bank Accounts</Text>
-                          <Text style={styles.summaryValue}>{editableBankAccounts.length}</Text>
+                          <Text style={styles.summaryValueInline}>{editableBankAccounts.length}</Text>
                         </View>
                       </View>
                     </View>
@@ -538,7 +670,9 @@ export default function BusinessSummaryScreen() {
                         </View>
                         <View style={styles.bankDetails}>
                           <Text style={styles.bankDetail}>Account Holder: {account.accountHolderName}</Text>
-                          <Text style={styles.bankDetail}>A/C Number: {account.accountNumber}</Text>
+                          <Text style={styles.bankDetail}>
+                            A/C Number: <Text style={styles.accountNumberMasked}>{formatAccountNumber(account.accountNumber)}</Text>
+                          </Text>
                           <Text style={styles.bankDetail}>IFSC: {account.ifscCode}</Text>
                           <Text style={[styles.bankDetail, styles.bankBalance]}>
                             Balance: {formatBalanceWithSymbol(parseFloat(account.initialBalance) || 0)}
@@ -551,7 +685,28 @@ export default function BusinessSummaryScreen() {
                     <TouchableOpacity
                       style={styles.addButton}
                       onPress={() => {
-                        router.push('/add-bank-account');
+                        // Navigate to banking-details with fromSummary and isAddingSecondary flags
+                        router.push({
+                          pathname: '/auth/banking-details',
+                          params: {
+                            fromSummary: 'true',
+                            isAddingSecondary: 'true', // ✅ Important: Adding additional bank, not primary
+                            type,
+                            value,
+                            gstinData,
+                            name: editableName,
+                            businessName: editableBusinessName,
+                            businessType: editableBusinessType,
+                            customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                            allAddresses: JSON.stringify(editableAddresses),
+                            allBankAccounts: JSON.stringify(editableBankAccounts),
+                            currentCashBalance: editableCashBalance,
+                            currentInvoicePrefix: editableInvoicePrefix,
+                            currentInvoicePattern: editableInvoicePattern,
+                            currentStartingNumber: editableStartingNumber,
+                            currentFiscalYear: editableFiscalYear,
+                          }
+                        });
                       }}
                     >
                       <View style={styles.addButtonContent}>
@@ -709,9 +864,14 @@ export default function BusinessSummaryScreen() {
                           </View>
                         </View>
 
-                        <View style={[styles.previewContainer, styles.noBorder]}>
-                          <Text style={styles.previewLabel}>Sample Invoice Number:</Text>
-                          <Text style={styles.previewValue}>{generateInvoicePreview()}</Text>
+                        <View style={[styles.summaryRow, styles.noBorder]}>
+                          <View style={styles.summaryItemContent}>
+                            <FileText size={16} color="#64748b" />
+                            <View style={styles.summaryTextContainer}>
+                              <Text style={styles.summaryLabel}>Sample Invoice Number</Text>
+                              <Text style={styles.summaryValue}>{generateInvoicePreview()}</Text>
+                            </View>
+                          </View>
                         </View>
                       </>
                     )}
@@ -750,6 +910,20 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     paddingHorizontal: 24,
@@ -834,6 +1008,12 @@ const styles = StyleSheet.create({
   summaryTextContainer: {
     flex: 1,
   },
+  summaryTextContainerInline: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   summaryLabel: {
     fontSize: 12,
     color: '#64748b',
@@ -843,6 +1023,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1a1a1a',
+  },
+  summaryValueInline: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginLeft: 8,
   },
   balanceValue: {
     color: '#10b981',
@@ -1007,6 +1193,34 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#3F66AC',
   },
+  addAddressButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginVertical: 12,
+  },
+  addAddressButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 8,
+  },
+  addBranchButton: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#10b981',
+  },
+  addWarehouseButton: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#f59e0b',
+  },
+  addAddressButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   saveButton: {
     backgroundColor: '#10b981',
     borderRadius: 10,
@@ -1033,10 +1247,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
+  addressTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   addressType: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#3F66AC',
+    color: '#1a1a1a',
     textTransform: 'uppercase',
   },
   addressName: {
@@ -1049,6 +1268,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748b',
     lineHeight: 18,
+  },
+  addressContactInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    flexDirection: 'row',
+    gap: 16,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  contactText: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
   },
   bankCard: {
     backgroundColor: '#ffffff',
@@ -1080,6 +1317,13 @@ const styles = StyleSheet.create({
   bankDetail: {
     fontSize: 12,
     color: '#64748b',
+  },
+  accountNumberMasked: {
+    fontFamily: 'monospace',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    letterSpacing: 0.5,
   },
   bankBalance: {
     fontSize: 13,

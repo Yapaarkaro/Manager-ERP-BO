@@ -43,7 +43,17 @@ export default function BusinessAddressScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     addressType = 'primary',
+    existingAddresses = '[]',
+    // From business summary
+    fromSummary,
+    allBankAccounts,
+    initialCashBalance,
+    invoicePrefix,
+    invoicePattern,
+    startingInvoiceNumber,
+    fiscalYear,
   } = useLocalSearchParams();
 
   const { setStatusBarStyle } = useStatusBar();
@@ -321,8 +331,9 @@ export default function BusinessAddressScreen() {
         businessName,
         businessType,
         customBusinessType,
+        mobile,
         addressType: addressType,
-        existingAddresses: '[]',
+        existingAddresses: existingAddresses,
         editMode: 'false',
         editAddressId: '',
         prefilledAddressName: businessName || '',
@@ -333,6 +344,15 @@ export default function BusinessAddressScreen() {
         prefilledState: selectedAddress.state,
         prefilledPincode: selectedAddress.pincode,
         prefilledFormatted: selectedAddress.formatted_address,
+        // Pass through business summary params
+        fromSummary,
+        allAddresses: existingAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
       }
     }, 'replace'); // Use replace to prevent going back to map screen
   };
@@ -350,8 +370,9 @@ export default function BusinessAddressScreen() {
         businessName,
         businessType,
         customBusinessType,
+        mobile,
         addressType: addressType,
-        existingAddresses: '[]',
+        existingAddresses: existingAddresses,
         editMode: 'false',
         editAddressId: '',
         prefilledAddressName: businessName || '',
@@ -362,6 +383,15 @@ export default function BusinessAddressScreen() {
         prefilledState: '',
         prefilledPincode: '',
         prefilledFormatted: '',
+        // Pass through business summary params
+        fromSummary,
+        allAddresses: existingAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
       }
     }, 'replace'); // Use replace to prevent going back to map screen
   };

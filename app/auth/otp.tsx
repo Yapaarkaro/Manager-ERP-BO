@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, RotateCcw } from 'lucide-react-native';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import { dataStore } from '@/utils/dataStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -111,10 +112,33 @@ export default function OTPScreen() {
     const otpCode = otp.join('');
     
     // Simulate API call
-    setTimeout(() => {
+    setTimeout(async () => {
       if (otpCode === '123456') { // Demo OTP
-        // Use replace to prevent going back to OTP screen after verification
-        router.replace('/auth/gstin-pan');
+        // Check if user has existing signup progress
+        const existingProgress = await dataStore.getSignupProgressByMobile(mobile as string);
+        
+        if (existingProgress && existingProgress.taxIdValue && existingProgress.ownerName) {
+          console.log('✅ Found existing signup progress, resuming from business details');
+          // User has existing progress with tax ID already verified, skip to business details
+          router.replace({
+            pathname: '/auth/business-details',
+            params: {
+              type: existingProgress.taxIdType,
+              value: existingProgress.taxIdValue,
+              gstinData: '', // Will be populated if needed
+              panName: existingProgress.ownerName,
+              panDob: existingProgress.ownerDob || '',
+              mobile: mobile,
+            }
+          });
+        } else {
+          console.log('📝 No existing progress, proceeding with GSTIN/PAN verification');
+          // No existing progress, proceed with normal flow
+          router.replace({
+            pathname: '/auth/gstin-pan',
+            params: { mobile }
+          });
+        }
       } else {
         setOtp(['', '', '', '', '', '']);
         setHasAutoVerified(false);

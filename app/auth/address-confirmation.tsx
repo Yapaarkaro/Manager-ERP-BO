@@ -12,8 +12,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
-import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, Chrome as Home, ChevronDown, ChevronUp, User, Phone } from 'lucide-react-native';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, Home, ChevronDown, ChevronUp, User, Phone, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
@@ -45,8 +45,15 @@ export default function AddressConfirmationScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     allAddresses = '[]',
     addressType,
+    // Invoice configuration (for returning users from business summary)
+    initialCashBalance,
+    invoicePrefix,
+    invoicePattern,
+    startingInvoiceNumber,
+    fiscalYear,
   } = useLocalSearchParams();
 
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -59,37 +66,42 @@ export default function AddressConfirmationScreen() {
   const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
-    // Debug type parameter
-    console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
-    console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
-    console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
-    console.log('🔍 Address Confirmation - All params:', { taxIdType, taxIdValue, addressType, name, businessName });
-    
-    // Load addresses from dataStore first, then fallback to parameter
-    const dataStoreAddresses = dataStore.getAddresses();
-    console.log('DataStore addresses:', dataStoreAddresses);
-    
-    if (dataStoreAddresses.length > 0) {
-      setAddresses(dataStoreAddresses);
-      console.log('Loaded addresses from dataStore:', dataStoreAddresses);
-    } else {
-      // Fallback to parsing addresses from the previous screen
-      try {
-        const parsedAddresses = JSON.parse(allAddresses as string);
-        setAddresses(parsedAddresses);
-        console.log('Loaded addresses from parameter:', parsedAddresses);
-      } catch (error) {
-        console.log('No addresses to parse or parse error');
-        setAddresses([]);
-      }
-    }
-
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Reload addresses when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 Address Confirmation screen focused - reloading addresses');
+      console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
+      console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
+      console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
+      console.log('🔍 Address Confirmation - All params:', { taxIdType, taxIdValue, addressType, name, businessName });
+      
+      // Load addresses from dataStore first, then fallback to parameter
+      const dataStoreAddresses = dataStore.getAddresses();
+      console.log('DataStore addresses:', dataStoreAddresses);
+      
+      if (dataStoreAddresses.length > 0) {
+        setAddresses(dataStoreAddresses);
+        console.log('Loaded addresses from dataStore:', dataStoreAddresses);
+      } else {
+        // Fallback to parsing addresses from the previous screen
+        try {
+          const parsedAddresses = JSON.parse(allAddresses as string);
+          setAddresses(parsedAddresses);
+          console.log('Loaded addresses from parameter:', parsedAddresses);
+        } catch (error) {
+          console.log('No addresses to parse or parse error');
+          setAddresses([]);
+        }
+      }
+    }, [taxIdType, taxIdValue, addressType, allAddresses])
+  );
 
   const getAddressTypeInfo = (type: Address['type']) => {
     switch (type) {
@@ -146,7 +158,15 @@ export default function AddressConfirmationScreen() {
   };
 
   const getAddressesByType = (type: AddressSection) => {
-    return addresses.filter(addr => addr.type === type);
+    const filtered = addresses.filter(addr => addr.type === type);
+    console.log(`📋 Filtering addresses for type "${type}":`, filtered.map(a => ({ 
+      id: a.id, 
+      name: a.name, 
+      isPrimary: a.isPrimary,
+      manager: a.manager,
+      phone: a.phone
+    })));
+    return filtered;
   };
 
   const getAddressCount = (type: AddressSection) => {
@@ -168,6 +188,7 @@ export default function AddressConfirmationScreen() {
         businessName: businessName,
         businessType: businessType,
         customBusinessType: customBusinessType,
+        mobile: mobile,
         addressType: addressTypeParam, // Address type (branch/warehouse)
         existingAddresses: JSON.stringify(addresses),
       }
@@ -200,10 +221,147 @@ export default function AddressConfirmationScreen() {
 
   const confirmDeleteAddress = () => {
     if (addressToDelete) {
+      // Update local state
       setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
+      
+      // Update dataStore
+      dataStore.deleteAddress(addressToDelete);
+      
       setAddressToDelete(null);
       setShowDeleteModal(false);
     }
+  };
+
+  const handleMakePrimary = (addressId: string) => {
+    setAddresses(prev => {
+      const currentPrimaryIndex = prev.findIndex(addr => addr.isPrimary);
+      const newPrimaryIndex = prev.findIndex(addr => addr.id === addressId);
+      
+      if (currentPrimaryIndex === -1 || newPrimaryIndex === -1) return prev;
+      
+      const currentPrimary = prev[currentPrimaryIndex];
+      const newPrimary = prev[newPrimaryIndex];
+      
+      console.log('🔄 KEEPING ADDRESS DATA, ONLY CHANGING TYPE');
+      console.log('📍 Current primary BEFORE:', { 
+        id: currentPrimary.id, 
+        type: currentPrimary.type, 
+        name: currentPrimary.name, 
+        city: currentPrimary.city,
+        manager: currentPrimary.manager,
+        phone: currentPrimary.phone
+      });
+      console.log('⭐ New primary (branch/warehouse) BEFORE:', { 
+        id: newPrimary.id, 
+        type: newPrimary.type, 
+        name: newPrimary.name, 
+        city: newPrimary.city,
+        manager: newPrimary.manager,
+        phone: newPrimary.phone
+      });
+      
+      // Keep each address's own data, only change type and isPrimary
+      const swappedOldPrimary = {
+        ...currentPrimary, // Keep ALL the primary's address data (including undefined manager/phone)
+        isPrimary: false,
+        type: newPrimary.type, // Becomes branch or warehouse type
+      };
+      
+      const swappedNewPrimary = {
+        ...newPrimary, // Keep ALL the branch/warehouse's address data (including manager/phone)
+        isPrimary: true,
+        type: 'primary', // Becomes primary type
+      };
+      
+      console.log('✏️ Old primary will become:', { 
+        id: swappedOldPrimary.id,
+        type: swappedOldPrimary.type, 
+        name: swappedOldPrimary.name,
+        city: swappedOldPrimary.city,
+        manager: swappedOldPrimary.manager,
+        phone: swappedOldPrimary.phone
+      });
+      console.log('✏️ New primary will become:', { 
+        id: swappedNewPrimary.id,
+        type: swappedNewPrimary.type, 
+        name: swappedNewPrimary.name,
+        city: swappedNewPrimary.city,
+        manager: swappedNewPrimary.manager,
+        phone: swappedNewPrimary.phone
+      });
+      
+      // Create new array with swapped addresses at their original positions
+      const updatedAddresses = [...prev];
+      updatedAddresses[currentPrimaryIndex] = swappedOldPrimary;
+      updatedAddresses[newPrimaryIndex] = swappedNewPrimary;
+      
+      // Update in dataStore
+      dataStore.updateAddress(currentPrimary.id, swappedOldPrimary);
+      dataStore.updateAddress(newPrimary.id, swappedNewPrimary);
+      
+      // Log the complete address swap
+      dataStore.logChange(
+        'address_primary_change',
+        `⭐ COMPLETE ADDRESS SWAP via star icon: ${currentPrimary.name} (${currentPrimary.city}) ↔ ${newPrimary.name} (${newPrimary.city})`,
+        {
+          id: currentPrimary.id,
+          type: currentPrimary.type,
+          name: currentPrimary.name,
+          city: currentPrimary.city,
+          isPrimary: true,
+          manager: currentPrimary.manager,
+          phone: currentPrimary.phone
+        },
+        {
+          id: newPrimary.id,
+          type: 'primary',
+          name: newPrimary.name,
+          city: newPrimary.city,
+          isPrimary: true,
+          manager: newPrimary.manager,
+          phone: newPrimary.phone
+        },
+        { 
+          action: 'star_icon_click',
+          completeAddressSwap: true,
+          swappedAllFields: true,
+          oldPrimaryNewType: newPrimary.type,
+          addressesExchanged: true
+        }
+      );
+      
+      console.log('✅ COMPLETE ADDRESS SWAP finished - all data swapped');
+      console.log('📊 Final addresses state:', updatedAddresses.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        isPrimary: a.isPrimary,
+        city: a.city,
+        manager: a.manager,
+        phone: a.phone
+      })));
+      
+      // Log the complete new primary address details
+      console.log('');
+      console.log('='.repeat(60));
+      console.log('⭐ NEW PRIMARY ADDRESS - COMPLETE DETAILS');
+      console.log('='.repeat(60));
+      console.log('Name:', swappedNewPrimary.name);
+      console.log('Door/Flat:', swappedNewPrimary.doorNumber || 'N/A');
+      console.log('Address Line 1:', swappedNewPrimary.addressLine1);
+      console.log('Address Line 2:', swappedNewPrimary.addressLine2 || 'N/A');
+      console.log('City:', swappedNewPrimary.city);
+      console.log('State:', `${swappedNewPrimary.stateName} (${swappedNewPrimary.stateCode})`);
+      console.log('Pincode:', swappedNewPrimary.pincode);
+      console.log('Contact Person:', swappedNewPrimary.manager || 'User (from params)');
+      console.log('Contact Phone:', swappedNewPrimary.phone || 'User mobile (from params)');
+      console.log('Type:', swappedNewPrimary.type);
+      console.log('Is Primary:', swappedNewPrimary.isPrimary);
+      console.log('='.repeat(60));
+      console.log('');
+      
+      return updatedAddresses;
+    });
   };
 
   const handleContinue = () => {
@@ -212,29 +370,73 @@ export default function AddressConfirmationScreen() {
       return;
     }
 
-    // Navigate to banking details screen
-    // Use replace to prevent going back to address confirmation after continuing
-    debouncedNavigate({
-      pathname: '/auth/banking-details',
-      params: {
-        type: taxIdType,
-        value: taxIdValue,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses: JSON.stringify(addresses),
-      }
-    }, 'replace');
+    // Check if user already has bank accounts (returning from business summary)
+    const existingBankAccounts = dataStore.getBankAccounts();
+    const hasExistingBanks = existingBankAccounts && existingBankAccounts.length > 0;
+
+    // Get latest data from dataStore to ensure we have all updates
+    const latestAddresses = dataStore.getAddresses();
+
+    if (hasExistingBanks) {
+      // Returning user with existing banks - go directly to bank account management
+      console.log('🔄 User has existing bank accounts, navigating to bank account management');
+      debouncedNavigate({
+        pathname: '/auth/bank-accounts',
+        params: {
+          type: taxIdType,
+          value: taxIdValue,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          mobile,
+          allAddresses: JSON.stringify(latestAddresses),
+          allBankAccounts: JSON.stringify(existingBankAccounts),
+          // Pass invoice configuration for returning users
+          initialCashBalance,
+          invoicePrefix,
+          invoicePattern,
+          startingInvoiceNumber,
+          fiscalYear,
+        }
+      }, 'replace');
+    } else {
+      // Fresh signup - go to banking details to add primary bank account
+      console.log('📝 Fresh signup, navigating to banking details');
+      debouncedNavigate({
+        pathname: '/auth/banking-details',
+        params: {
+          type: taxIdType,
+          value: taxIdValue,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          mobile,
+          allAddresses: JSON.stringify(latestAddresses),
+        }
+      }, 'replace');
+    }
   };
 
   const renderAddressCard = (address: Address) => {
     const typeInfo = getAddressTypeInfo(address.type);
     const IconComponent = typeInfo.icon;
+    
+    console.log(`🎨 Rendering address card:`, {
+      id: address.id,
+      name: address.name,
+      type: address.type,
+      isPrimary: address.isPrimary,
+      city: address.city,
+      manager: address.manager,
+      phone: address.phone
+    });
 
     return (
-      <View key={address.id} style={[styles.addressCard, { backgroundColor: typeInfo.bgColor }]}>
+      <View key={`${address.id}-${address.isPrimary}-${address.name}-${address.city}`} style={[styles.addressCard, { backgroundColor: typeInfo.bgColor }]}>
         <View style={styles.addressHeader}>
           <View style={styles.addressTypeContainer}>
             <View style={[styles.addressTypeIcon, { backgroundColor: typeInfo.color }]}>
@@ -251,6 +453,15 @@ export default function AddressConfirmationScreen() {
           </View>
           
           <View style={styles.addressActions}>
+            {!address.isPrimary && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.starButton]}
+                onPress={() => handleMakePrimary(address.id)}
+                activeOpacity={0.7}
+              >
+                <Star size={16} color="#fbbf24" fill="none" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.actionButton, styles.editButton]}
               onPress={() => handleEditAddress(address)}
@@ -283,23 +494,48 @@ export default function AddressConfirmationScreen() {
           )}
           
           {/* Contact Person Information */}
-          {(address.manager || address.phone) && (
+          {(address.isPrimary ? (address.manager || address.phone || name || mobile) : (address.manager || address.phone || name || mobile)) && (
             <View style={styles.contactContainer}>
               <View style={styles.contactItem}>
-                {address.manager && (
+                {address.isPrimary ? (
                   <>
-                    <User size={14} color={typeInfo.color} />
-                    <Text style={[styles.contactText, { color: typeInfo.color }]}>
-                      {address.manager}
-                    </Text>
+                    {/* If primary has manager/phone (from swap), show them. Otherwise show user name/mobile */}
+                    {(address.manager || name) && (
+                      <>
+                        <User size={14} color={typeInfo.color} />
+                        <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                          {address.manager || name}
+                        </Text>
+                      </>
+                    )}
+                    {(address.phone || mobile) && (
+                      <>
+                        <Phone size={14} color={typeInfo.color} />
+                        <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                          {address.phone || mobile}
+                        </Text>
+                      </>
+                    )}
                   </>
-                )}
-                {address.phone && (
+                ) : (
                   <>
-                    <Phone size={14} color={typeInfo.color} />
-                    <Text style={[styles.contactText, { color: typeInfo.color }]}>
-                      {address.phone}
-                    </Text>
+                    {/* For non-primary, show address contact if exists, otherwise show user contact as fallback */}
+                    {(address.manager || name) && (
+                      <>
+                        <User size={14} color={typeInfo.color} />
+                        <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                          {address.manager || name}
+                        </Text>
+                      </>
+                    )}
+                    {(address.phone || mobile) && (
+                      <>
+                        <Phone size={14} color={typeInfo.color} />
+                        <Text style={[styles.contactText, { color: typeInfo.color }]}>
+                          {address.phone || mobile}
+                        </Text>
+                      </>
+                    )}
                   </>
                 )}
               </View>
@@ -381,18 +617,7 @@ export default function AddressConfirmationScreen() {
                     ? 'No primary address added yet' 
                     : `No ${sectionType} addresses added yet`}
                 </Text>
-                {sectionType !== 'primary' && (
-                  <TouchableOpacity
-                    style={[styles.addFirstButton, { backgroundColor: typeInfo.color }]}
-                    onPress={() => handleAddAddress(sectionType)}
-                    activeOpacity={0.7}
-                  >
-                    <Plus size={16} color="#ffffff" />
-                    <Text style={styles.addFirstButtonText}>
-                      Add First {sectionType === 'branch' ? 'Branch' : 'Warehouse'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                {/* Removed "Add First" button - users can use quick add buttons instead */}
               </View>
             )}
           </View>
@@ -421,6 +646,35 @@ export default function AddressConfirmationScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
+          {/* Back Button */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              router.replace({
+                pathname: '/auth/business-details',
+                params: {
+                  type: taxIdType,
+                  value: taxIdValue,
+                  gstinData,
+                  name,
+                  businessName,
+                  businessType,
+                  customBusinessType,
+                  mobile,
+                  // Pass invoice configuration for returning users
+                  initialCashBalance,
+                  invoicePrefix,
+                  invoicePattern,
+                  startingInvoiceNumber,
+                  fiscalYear,
+                }
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color="#3f66ac" />
+          </TouchableOpacity>
+
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
@@ -565,6 +819,20 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     paddingHorizontal: 24,
@@ -722,6 +990,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  starButton: {
+    backgroundColor: '#fef3c7',
   },
   editButton: {
     backgroundColor: '#f1f5f9',

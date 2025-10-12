@@ -47,10 +47,11 @@ const InvoicePatternConfig: React.FC<InvoicePatternConfigProps> = ({
   const [selectedItems, setSelectedItems] = useState<PatternItem[]>([]);
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
-  // Initialize with Prefix and Number on mount
-  React.useEffect(() => {
-    if (selectedItems.length === 0) {
-      const initialItems = [
+  // Parse initial pattern and reconstruct selected items
+  const parseInitialPattern = (pattern: string): PatternItem[] => {
+    if (!pattern) {
+      // Default items if no pattern provided
+      return [
         {
           id: 'prefix',
           type: 'prefix' as const,
@@ -67,6 +68,85 @@ const InvoicePatternConfig: React.FC<InvoicePatternConfigProps> = ({
           format: 'padded',
         },
       ];
+    }
+
+    const parts = pattern.split('-');
+    const items: PatternItem[] = [];
+
+    parts.forEach((part, index) => {
+      if (part === 'YYYY') {
+        items.push({
+          id: `year-${index}`,
+          type: 'year',
+          label: 'Year',
+          value: new Date().getFullYear().toString(),
+          icon: <Calendar size={16} color="#3F66AC" />,
+          format: 'full',
+        });
+      } else if (part === 'YYYY-YY') {
+        items.push({
+          id: `year-${index}`,
+          type: 'year',
+          label: 'Year',
+          value: new Date().getFullYear().toString(),
+          icon: <Calendar size={16} color="#3F66AC" />,
+          format: 'fiscal',
+        });
+      } else if (part === 'MM') {
+        items.push({
+          id: `month-${index}`,
+          type: 'month',
+          label: 'Month',
+          value: (new Date().getMonth() + 1).toString().padStart(2, '0'),
+          icon: <Calendar size={16} color="#3F66AC" />,
+          format: 'numeric',
+        });
+      } else if (part === 'MMM') {
+        items.push({
+          id: `month-${index}`,
+          type: 'month',
+          label: 'Month',
+          value: (new Date().getMonth() + 1).toString().padStart(2, '0'),
+          icon: <Calendar size={16} color="#3F66AC" />,
+          format: 'short',
+        });
+      } else if (part === 'MMMM') {
+        items.push({
+          id: `month-${index}`,
+          type: 'month',
+          label: 'Month',
+          value: (new Date().getMonth() + 1).toString().padStart(2, '0'),
+          icon: <Calendar size={16} color="#3F66AC" />,
+          format: 'full',
+        });
+      } else if (part === '####') {
+        items.push({
+          id: `number-${index}`,
+          type: 'number',
+          label: 'Number',
+          value: startingNumber,
+          icon: <Hash size={16} color="#3F66AC" />,
+          format: 'padded',
+        });
+      } else {
+        // Treat as prefix
+        items.push({
+          id: `prefix-${index}`,
+          type: 'prefix',
+          label: 'Prefix',
+          value: part,
+          icon: <Type size={16} color="#3F66AC" />,
+        });
+      }
+    });
+
+    return items;
+  };
+
+  // Initialize with Prefix and Number on mount, or parse from initialPattern
+  React.useEffect(() => {
+    if (selectedItems.length === 0) {
+      const initialItems = parseInitialPattern(initialPattern);
       setSelectedItems(initialItems);
       generatePattern(initialItems);
     }

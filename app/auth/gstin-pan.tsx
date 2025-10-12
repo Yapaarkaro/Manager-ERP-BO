@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
 import { verifyGSTIN } from '../../services/gstinApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
@@ -63,6 +63,7 @@ export default function GstinPanScreen() {
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation();
   const insets = useSafeAreaInsets();
+  const { mobile } = useLocalSearchParams();
   const inputRef = React.useRef<TextInput>(null);
   const [selectedType, setSelectedType] = useState<'GSTIN' | 'PAN'>('GSTIN');
   const [inputValue, setInputValue] = useState('');
@@ -77,7 +78,6 @@ export default function GstinPanScreen() {
   React.useEffect(() => {
     const currentPosition = inputValue.length;
     const currentKeyboardType = getKeyboardType(selectedType, currentPosition);
-    console.log(`🔄 Type changed or initialized - Type: ${selectedType}, Position: ${currentPosition}, Keyboard: ${currentKeyboardType}`);
     setKeyboardType(currentKeyboardType);
   }, [selectedType]);
   
@@ -119,7 +119,6 @@ export default function GstinPanScreen() {
     const nextPosition = formatted.length;
     const currentKeyboardType = keyboardType;
     const nextKeyboardType = getKeyboardType(selectedType, nextPosition);
-    console.log(`📝 Typed: "${formatted}", Length: ${formatted.length}, Next Position: ${nextPosition}, Current KB: ${currentKeyboardType}, Next KB: ${nextKeyboardType}`);
     
     // Only update keyboard if it needs to change, and blur/refocus to force keyboard change
     if (nextKeyboardType !== currentKeyboardType) {
@@ -168,6 +167,14 @@ export default function GstinPanScreen() {
       if (result.error) {
         setVerificationError(result.message || 'GSTIN verification failed');
         setIsValid(false);
+        // Clear input and reset for re-entry when GSTIN is invalid
+        setInputValue('');
+        setHasAutoVerified(false);
+        setVerifiedGstinData(null);
+        // Focus input so user can start typing again
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 300);
       } else if (result.taxpayerInfo) {
         // GSTIN is valid and verified
         setVerifiedGstinData(result.taxpayerInfo);
@@ -176,10 +183,26 @@ export default function GstinPanScreen() {
       } else {
         setVerificationError('Invalid GSTIN number');
         setIsValid(false);
+        // Clear input and reset for re-entry when GSTIN is invalid
+        setInputValue('');
+        setHasAutoVerified(false);
+        setVerifiedGstinData(null);
+        // Focus input so user can start typing again
+        setTimeout(() => {
+          inputRef.current?.focus();
+        }, 300);
       }
     } catch (error) {
       setVerificationError('Network error. Please check your connection and try again.');
       setIsValid(false);
+      // Clear input and reset for re-entry on network error
+      setInputValue('');
+      setHasAutoVerified(false);
+      setVerifiedGstinData(null);
+      // Focus input so user can start typing again
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 300);
     } finally {
       setIsVerifying(false);
     }
@@ -195,7 +218,8 @@ export default function GstinPanScreen() {
           params: { 
             type: selectedType,
             value: inputValue,
-            gstinData: JSON.stringify(verifiedGstinData)
+            gstinData: JSON.stringify(verifiedGstinData),
+            mobile: mobile
           }
         }, 'replace');
       } else {
@@ -205,7 +229,8 @@ export default function GstinPanScreen() {
           pathname: '/auth/gstin-pan-otp',
           params: { 
             type: selectedType,
-            value: inputValue 
+            value: inputValue,
+            mobile: mobile
           }
         }, 'replace');
       }

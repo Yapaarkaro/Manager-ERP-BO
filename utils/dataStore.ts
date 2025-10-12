@@ -3,6 +3,27 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Title case conversion utility
+// Converts "EXANITE TECHNOLOGIES PRIVATE LIMITED" to "Exanite Technologies Private Limited"
+export function toTitleCase(str: string | undefined | null): string {
+  if (!str) return '';
+  
+  // Words that should remain lowercase (unless at start of string)
+  const minorWords = ['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with'];
+  
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map((word, index) => {
+      // Always capitalize first word, or if not a minor word
+      if (index === 0 || !minorWords.includes(word)) {
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }
+      return word;
+    })
+    .join(' ');
+}
+
 // State code mapping function
 export function getStateCode(stateName: string): string {
   const stateCodeMap: { [key: string]: string } = {
@@ -334,6 +355,42 @@ export interface BankTransaction {
   clearanceDate?: string;
 }
 
+// Signup Progress Tracking
+export interface SignupProgress {
+  mobile?: string;
+  mobileVerified?: boolean;
+  taxIdType?: 'GSTIN' | 'PAN';
+  taxIdValue?: string;
+  taxIdVerified?: boolean;
+  ownerName?: string;
+  ownerDob?: string;
+  businessName?: string;
+  businessType?: string;
+  primaryAddressAdded?: boolean;
+  addressesCount?: number;
+  bankAccountsCount?: number;
+  initialCashBalance?: string;
+  invoicePrefix?: string;
+  invoicePattern?: string;
+  startingInvoiceNumber?: string;
+  fiscalYear?: string;
+  currentStep?: 'mobile' | 'otp' | 'taxId' | 'taxIdOtp' | 'businessDetails' | 'address' | 'banking' | 'finalSetup' | 'summary' | 'complete';
+  lastUpdated?: string;
+}
+
+// Change Log
+export interface ChangeLog {
+  id: string;
+  timestamp: string;
+  changeType: 'address_add' | 'address_edit' | 'address_delete' | 'address_primary_change' | 
+              'bank_add' | 'bank_edit' | 'bank_delete' | 'bank_primary_change' |
+              'business_info_update' | 'invoice_config_update' | 'signup_step';
+  description: string;
+  oldValue?: any;
+  newValue?: any;
+  metadata?: any;
+}
+
 class DataStore {
   private customers: Customer[] = [
     // Mock customers for demonstration
@@ -536,29 +593,63 @@ class DataStore {
   private bankTransactions: BankTransaction[] = [];
   private listeners: (() => void)[] = [];
   private isSignupComplete: boolean = false;
+  private signupProgress: SignupProgress = {};
+  private changeLogs: ChangeLog[] = [];
+
+  constructor() {
+    // Data will be loaded manually in _layout.tsx after clearing
+    // this.loadData(); // Removed automatic loading
+  }
 
   // Persistence methods
   async loadData() {
     try {
+      console.log('🔄 Loading data from AsyncStorage...');
+      
       const addressesData = await AsyncStorage.getItem('addresses');
       if (addressesData) {
         this.addresses = JSON.parse(addressesData);
+        console.log('📥 Loaded addresses:', this.addresses.length);
+      } else {
+        console.log('📭 No addresses found in storage');
       }
       
       const bankAccountsData = await AsyncStorage.getItem('bankAccounts');
       if (bankAccountsData) {
         this.bankAccounts = JSON.parse(bankAccountsData);
+        console.log('📥 Loaded bank accounts:', this.bankAccounts.length);
+      } else {
+        console.log('📭 No bank accounts found in storage');
       }
       
       const signupCompleteData = await AsyncStorage.getItem('isSignupComplete');
       if (signupCompleteData) {
         this.isSignupComplete = signupCompleteData === 'true';
+        console.log('📥 Loaded signup complete status:', this.isSignupComplete);
+      }
+      
+      const signupProgressData = await AsyncStorage.getItem('signupProgress');
+      if (signupProgressData) {
+        this.signupProgress = JSON.parse(signupProgressData);
+        console.log('📥 Loaded signup progress:', this.signupProgress);
+      } else {
+        console.log('📭 No signup progress found in storage');
+      }
+      
+      const changeLogsData = await AsyncStorage.getItem('changeLogs');
+      if (changeLogsData) {
+        this.changeLogs = JSON.parse(changeLogsData);
+        console.log('📥 Loaded change logs:', this.changeLogs.length);
+      } else {
+        console.log('📭 No change logs found in storage');
       }
       
       console.log('Data loaded from storage:', {
         addresses: this.addresses.length,
         bankAccounts: this.bankAccounts.length,
-        isSignupComplete: this.isSignupComplete
+        isSignupComplete: this.isSignupComplete,
+        signupProgress: this.signupProgress.currentStep || 'none',
+        changeLogs: this.changeLogs.length
       });
       
       // Notify listeners after loading data
@@ -572,6 +663,8 @@ class DataStore {
     try {
       await AsyncStorage.setItem('addresses', JSON.stringify(this.addresses));
       await AsyncStorage.setItem('bankAccounts', JSON.stringify(this.bankAccounts));
+      await AsyncStorage.setItem('signupProgress', JSON.stringify(this.signupProgress));
+      await AsyncStorage.setItem('changeLogs', JSON.stringify(this.changeLogs));
       console.log('Data saved to storage');
     } catch (error) {
       console.error('Error saving data to storage:', error);
@@ -815,6 +908,22 @@ class DataStore {
   addAddress(address: BusinessAddress) {
     this.addresses.push(address);
     this.saveData(); // Save to persistent storage
+    
+    // Log the change
+    this.logChange(
+      'address_add',
+      `Added ${address.type} address: ${address.name}`,
+      null,
+      {
+        id: address.id,
+        type: address.type,
+        name: address.name,
+        isPrimary: address.isPrimary,
+        city: address.city,
+        state: address.stateName
+      }
+    );
+    
     this.notifyListeners();
   }
 
@@ -833,8 +942,31 @@ class DataStore {
   updateAddress(id: string, updates: Partial<BusinessAddress>) {
     const index = this.addresses.findIndex(address => address.id === id);
     if (index !== -1) {
+      const oldAddress = { ...this.addresses[index] };
       this.addresses[index] = { ...this.addresses[index], ...updates };
       this.saveData(); // Save to persistent storage
+      
+      // Log the change
+      this.logChange(
+        'address_edit',
+        `Updated ${this.addresses[index].type} address: ${this.addresses[index].name}`,
+        {
+          id: oldAddress.id,
+          type: oldAddress.type,
+          name: oldAddress.name,
+          city: oldAddress.city,
+          state: oldAddress.stateName
+        },
+        {
+          id: this.addresses[index].id,
+          type: this.addresses[index].type,
+          name: this.addresses[index].name,
+          city: this.addresses[index].city,
+          state: this.addresses[index].stateName
+        },
+        { updatedFields: Object.keys(updates).join(', ') }
+      );
+      
       this.notifyListeners();
     }
   }
@@ -842,13 +974,33 @@ class DataStore {
   deleteAddress(id: string) {
     const index = this.addresses.findIndex(address => address.id === id);
     if (index !== -1) {
+      const deletedAddress = { ...this.addresses[index] };
       this.addresses.splice(index, 1);
       this.saveData(); // Save to persistent storage
+      
+      // Log the change
+      this.logChange(
+        'address_delete',
+        `Deleted ${deletedAddress.type} address: ${deletedAddress.name}`,
+        {
+          id: deletedAddress.id,
+          type: deletedAddress.type,
+          name: deletedAddress.name,
+          city: deletedAddress.city,
+          state: deletedAddress.stateName
+        },
+        null
+      );
+      
       this.notifyListeners();
     }
   }
 
   setPrimaryAddress(id: string) {
+    // Find the current primary and the new primary
+    const currentPrimary = this.addresses.find(addr => addr.isPrimary);
+    const newPrimary = this.addresses.find(addr => addr.id === id);
+    
     // Remove primary status from all addresses
     this.addresses.forEach(address => {
       address.isPrimary = false;
@@ -858,6 +1010,24 @@ class DataStore {
     const address = this.addresses.find(addr => addr.id === id);
     if (address) {
       address.isPrimary = true;
+      this.saveData(); // Save to persistent storage
+      
+      // Log the change
+      this.logChange(
+        'address_primary_change',
+        `Changed primary address from ${currentPrimary?.name || 'none'} to ${newPrimary?.name}`,
+        currentPrimary ? {
+          id: currentPrimary.id,
+          type: currentPrimary.type,
+          name: currentPrimary.name
+        } : null,
+        {
+          id: newPrimary?.id,
+          type: newPrimary?.type,
+          name: newPrimary?.name
+        }
+      );
+      
       this.notifyListeners();
     }
   }
@@ -884,6 +1054,21 @@ class DataStore {
     console.log('Total bank accounts in store:', this.bankAccounts.length);
     console.log('Added at:', new Date().toISOString());
     console.log('====================================');
+    
+    // Log the change
+    this.logChange(
+      'bank_add',
+      `Added bank account: ${bankAccount.bankName} - ${bankAccount.accountHolderName}`,
+      null,
+      {
+        id: bankAccount.id,
+        bankName: bankAccount.bankName,
+        accountNumber: bankAccount.accountNumber,
+        isPrimary: bankAccount.isPrimary,
+        initialBalance: bankAccount.initialBalance
+      }
+    );
+    
     this.notifyListeners();
   }
 
@@ -902,12 +1087,33 @@ class DataStore {
   updateBankAccount(id: string, updates: Partial<BankAccount>) {
     const index = this.bankAccounts.findIndex(account => account.id === id);
     if (index !== -1) {
+      const oldAccount = { ...this.bankAccounts[index] };
       this.bankAccounts[index] = { ...this.bankAccounts[index], ...updates };
       this.saveData(); // Save to persistent storage
       console.log('=== BANK ACCOUNT UPDATED ===');
       console.log('Bank Account ID:', id);
       console.log('Updated at:', new Date().toISOString());
       console.log('============================');
+      
+      // Log the change
+      this.logChange(
+        'bank_edit',
+        `Updated bank account: ${this.bankAccounts[index].bankName} - ${this.bankAccounts[index].accountHolderName}`,
+        {
+          id: oldAccount.id,
+          bankName: oldAccount.bankName,
+          accountNumber: oldAccount.accountNumber,
+          isPrimary: oldAccount.isPrimary
+        },
+        {
+          id: this.bankAccounts[index].id,
+          bankName: this.bankAccounts[index].bankName,
+          accountNumber: this.bankAccounts[index].accountNumber,
+          isPrimary: this.bankAccounts[index].isPrimary
+        },
+        { updatedFields: Object.keys(updates).join(', ') }
+      );
+      
       this.notifyListeners();
     }
   }
@@ -924,11 +1130,29 @@ class DataStore {
       console.log('Total bank accounts remaining:', this.bankAccounts.length);
       console.log('Deleted at:', new Date().toISOString());
       console.log('============================');
+      
+      // Log the change
+      this.logChange(
+        'bank_delete',
+        `Deleted bank account: ${deletedAccount.bankName} - ${deletedAccount.accountHolderName}`,
+        {
+          id: deletedAccount.id,
+          bankName: deletedAccount.bankName,
+          accountNumber: deletedAccount.accountNumber,
+          isPrimary: deletedAccount.isPrimary
+        },
+        null
+      );
+      
       this.notifyListeners();
     }
   }
 
   setPrimaryBankAccount(id: string) {
+    // Find the current primary and the new primary
+    const currentPrimary = this.bankAccounts.find(acc => acc.isPrimary);
+    const newPrimary = this.bankAccounts.find(acc => acc.id === id);
+    
     // Remove primary status from all bank accounts
     this.bankAccounts.forEach(account => {
       account.isPrimary = false;
@@ -944,6 +1168,23 @@ class DataStore {
       console.log('Bank Name:', account.bankName);
       console.log('Set at:', new Date().toISOString());
       console.log('=================================');
+      
+      // Log the change
+      this.logChange(
+        'bank_primary_change',
+        `Changed primary bank from ${currentPrimary?.bankName || 'none'} to ${newPrimary?.bankName}`,
+        currentPrimary ? {
+          id: currentPrimary.id,
+          bankName: currentPrimary.bankName,
+          accountNumber: currentPrimary.accountNumber
+        } : null,
+        {
+          id: newPrimary?.id,
+          bankName: newPrimary?.bankName,
+          accountNumber: newPrimary?.accountNumber
+        }
+      );
+      
       this.notifyListeners();
     }
   }
@@ -1183,6 +1424,202 @@ class DataStore {
     return this.invoices.length;
   }
 
+  // Signup Progress Methods
+  updateSignupProgress(updates: Partial<SignupProgress>) {
+    this.signupProgress = {
+      ...this.signupProgress,
+      ...updates,
+      lastUpdated: new Date().toISOString()
+    };
+    this.saveData();
+    
+    console.log('=== SIGNUP PROGRESS UPDATED ===');
+    console.log('Updated fields:', Object.keys(updates).join(', '));
+    console.log('Current step:', this.signupProgress.currentStep);
+    console.log('Full progress:', JSON.stringify(this.signupProgress, null, 2));
+    console.log('================================');
+  }
+
+  getSignupProgress(): SignupProgress {
+    return this.signupProgress;
+  }
+
+  // Get signup progress by mobile number
+  async getSignupProgressByMobile(mobile: string): Promise<SignupProgress | null> {
+    try {
+      const signupProgressData = await AsyncStorage.getItem('signupProgress');
+      if (signupProgressData) {
+        const progress = JSON.parse(signupProgressData);
+        if (progress.mobile === mobile) {
+          console.log('📥 Found existing signup progress for mobile:', mobile);
+          console.log('Progress:', JSON.stringify(progress, null, 2));
+          return progress;
+        }
+      }
+      console.log('📭 No signup progress found for mobile:', mobile);
+      return null;
+    } catch (error) {
+      console.error('Error getting signup progress by mobile:', error);
+      return null;
+    }
+  }
+
+  clearSignupProgress() {
+    this.signupProgress = {};
+    this.saveData();
+    console.log('✅ Signup progress cleared');
+  }
+
+  // Change Log Methods
+  logChange(changeType: ChangeLog['changeType'], description: string, oldValue?: any, newValue?: any, metadata?: any) {
+    const changeLog: ChangeLog = {
+      id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date().toISOString(),
+      changeType,
+      description,
+      oldValue,
+      newValue,
+      metadata
+    };
+    
+    this.changeLogs.push(changeLog);
+    this.saveData();
+    
+    console.log('=== CHANGE LOGGED ===');
+    console.log('Type:', changeType);
+    console.log('Description:', description);
+    console.log('Timestamp:', changeLog.timestamp);
+    if (oldValue) console.log('Old Value:', JSON.stringify(oldValue, null, 2));
+    if (newValue) console.log('New Value:', JSON.stringify(newValue, null, 2));
+    if (metadata) console.log('Metadata:', JSON.stringify(metadata, null, 2));
+    console.log('Total logs:', this.changeLogs.length);
+    console.log('====================');
+  }
+
+  getChangeLogs(): ChangeLog[] {
+    return this.changeLogs;
+  }
+
+  getChangeLogsByType(changeType: ChangeLog['changeType']): ChangeLog[] {
+    return this.changeLogs.filter(log => log.changeType === changeType);
+  }
+
+  clearChangeLogs() {
+    this.changeLogs = [];
+    this.saveData();
+    console.log('✅ Change logs cleared');
+  }
+
+  // Get comprehensive signup summary
+  getSignupSummary() {
+    const progress = this.signupProgress;
+    const addresses = this.addresses;
+    const bankAccounts = this.bankAccounts;
+    const primaryAddress = addresses.find(addr => addr.isPrimary);
+    const branchAddresses = addresses.filter(addr => addr.type === 'branch');
+    const warehouseAddresses = addresses.filter(addr => addr.type === 'warehouse');
+    const primaryBank = bankAccounts.find(bank => bank.isPrimary);
+    const secondaryBanks = bankAccounts.filter(bank => !bank.isPrimary);
+    
+    const summary = {
+      // User & Business Info
+      userName: progress.ownerName,
+      mobileNumber: progress.mobile,
+      businessName: progress.businessName,
+      businessType: progress.businessType,
+      taxIdType: progress.taxIdType,
+      taxIdValue: progress.taxIdValue,
+      ownerDob: progress.ownerDob,
+      
+      // Addresses
+      primaryAddress: primaryAddress ? {
+        id: primaryAddress.id,
+        name: primaryAddress.name,
+        doorNumber: primaryAddress.doorNumber,
+        addressLine1: primaryAddress.addressLine1,
+        addressLine2: primaryAddress.addressLine2,
+        city: primaryAddress.city,
+        state: primaryAddress.stateName,
+        stateCode: primaryAddress.stateCode,
+        pincode: primaryAddress.pincode,
+        type: primaryAddress.type
+      } : null,
+      
+      branchAddresses: branchAddresses.map(addr => ({
+        id: addr.id,
+        name: addr.name,
+        doorNumber: addr.doorNumber,
+        addressLine1: addr.addressLine1,
+        addressLine2: addr.addressLine2,
+        city: addr.city,
+        state: addr.stateName,
+        stateCode: addr.stateCode,
+        pincode: addr.pincode,
+        manager: addr.manager,
+        phone: addr.phone
+      })),
+      
+      warehouseAddresses: warehouseAddresses.map(addr => ({
+        id: addr.id,
+        name: addr.name,
+        doorNumber: addr.doorNumber,
+        addressLine1: addr.addressLine1,
+        addressLine2: addr.addressLine2,
+        city: addr.city,
+        state: addr.stateName,
+        stateCode: addr.stateCode,
+        pincode: addr.pincode,
+        manager: addr.manager,
+        phone: addr.phone
+      })),
+      
+      totalAddresses: addresses.length,
+      
+      // Bank Accounts
+      primaryBankAccount: primaryBank ? {
+        id: primaryBank.id,
+        bankName: primaryBank.bankName,
+        accountHolderName: primaryBank.accountHolderName,
+        accountNumber: primaryBank.accountNumber,
+        ifscCode: primaryBank.ifscCode,
+        branchName: primaryBank.branchName,
+        initialBalance: primaryBank.initialBalance,
+        upiId: primaryBank.upiId
+      } : null,
+      
+      additionalBankAccounts: secondaryBanks.map(bank => ({
+        id: bank.id,
+        bankName: bank.bankName,
+        accountHolderName: bank.accountHolderName,
+        accountNumber: bank.accountNumber,
+        ifscCode: bank.ifscCode,
+        branchName: bank.branchName,
+        initialBalance: bank.initialBalance,
+        upiId: bank.upiId
+      })),
+      
+      totalBankAccounts: bankAccounts.length,
+      
+      // Financial & Invoice Config
+      initialCashBalance: progress.initialCashBalance,
+      invoicePrefix: progress.invoicePrefix,
+      invoicePattern: progress.invoicePattern,
+      startingInvoiceNumber: progress.startingInvoiceNumber,
+      fiscalYear: progress.fiscalYear,
+      
+      // Signup Status
+      currentStep: progress.currentStep,
+      lastUpdated: progress.lastUpdated,
+      isComplete: this.isSignupComplete
+    };
+    
+    console.log('=== COMPREHENSIVE SIGNUP SUMMARY ===');
+    console.log(JSON.stringify(summary, null, 2));
+    console.log('====================================');
+    
+    return summary;
+  }
+
   // Subscribe to changes
   subscribe(listener: () => void) {
     this.listeners.push(listener);
@@ -1199,7 +1636,7 @@ class DataStore {
   }
 
   // Clear all data (for testing)
-  clearAll() {
+  async clearAll() {
     this.customers = [];
     this.suppliers = [];
     this.sales = [];
@@ -1209,6 +1646,19 @@ class DataStore {
     this.addresses = [];
     this.bankAccounts = [];
     this.bankTransactions = [];
+    this.isSignupComplete = false;
+    this.signupProgress = {};
+    this.changeLogs = [];
+    
+    // Clear from AsyncStorage as well
+    await AsyncStorage.removeItem('isSignupComplete');
+    await AsyncStorage.removeItem('signupProgress');
+    await AsyncStorage.removeItem('changeLogs');
+    await AsyncStorage.removeItem('addresses');
+    await AsyncStorage.removeItem('bankAccounts');
+    await AsyncStorage.removeItem('cartItems');
+    await AsyncStorage.removeItem('colorScheme');
+    
     console.log('=== ALL DATA CLEARED ===');
     console.log('Cleared at:', new Date().toISOString());
     console.log('========================');

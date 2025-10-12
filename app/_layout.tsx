@@ -11,9 +11,14 @@ export default function RootLayout() {
 
   // Load data from persistent storage when app starts
   useEffect(() => {
-    // Clear addresses for testing (remove this in production)
-    dataStore.clearAddresses();
-    dataStore.loadData();
+    const initializeData = async () => {
+      // Clear all data for testing (remove this in production)
+      console.log('🧹 Starting fresh - clearing all data...');
+      await dataStore.clearAll();
+      console.log('✅ Data cleared, loading fresh data...');
+      await dataStore.loadData();
+    };
+    initializeData();
   }, []);
 
   return (

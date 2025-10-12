@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Navigation, CreditCard as Edit, MapPin, Building2 } from 'lucide-react-native';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 import GoogleMapView from '@/components/GoogleMapView';
@@ -37,7 +37,26 @@ const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
 
 export default function AddBranchScreen() {
   const { setStatusBarStyle } = useStatusBar();
-  const { editMode, editAddress } = useLocalSearchParams();
+  const { 
+    editMode, 
+    editAddress,
+    // From business summary
+    fromSummary,
+    type,
+    value,
+    gstinData,
+    name,
+    businessName,
+    businessType,
+    customBusinessType,
+    allAddresses,
+    allBankAccounts,
+    initialCashBalance,
+    invoicePrefix,
+    invoicePattern,
+    startingInvoiceNumber,
+    fiscalYear,
+  } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   
   // Get branch count for dynamic header
@@ -387,6 +406,22 @@ export default function AddBranchScreen() {
         prefilledState: matchingState ? matchingState.name : selectedAddress.state,
         prefilledPincode: selectedAddress.pincode,
         prefilledFormatted: selectedAddress.formatted_address,
+        // Pass through business summary params
+        fromSummary,
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        allAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
       }
     });
   };
@@ -397,6 +432,22 @@ export default function AddBranchScreen() {
       params: { 
         addressType: 'branch',
         prefilledAddressName: 'Branch Office',
+        // Pass through business summary params
+        fromSummary,
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        allAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
       }
     });
   };

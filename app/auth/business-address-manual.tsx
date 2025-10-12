@@ -69,6 +69,7 @@ export default function BusinessAddressManualScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     addressType = 'primary',
     existingAddresses = '[]',
     editMode = 'false',
@@ -474,6 +475,7 @@ export default function BusinessAddressManualScreen() {
           businessName,
           businessType,
           customBusinessType,
+          mobile,
           allAddresses: JSON.stringify(allAddresses),
         }
       }, 'replace');

@@ -13,9 +13,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { dataStore } from '@/utils/dataStore';
 
 interface BankAccount {
   id: string;
@@ -28,6 +29,7 @@ interface BankAccount {
   branchName: string;
   accountType: string;
   initialBalance: number;
+  upiId?: string;
   isPrimary: boolean;
   createdAt: string;
 }
@@ -43,6 +45,12 @@ export default function BankAccountsScreen() {
     customBusinessType,
     allAddresses,
     allBankAccounts = '[]',
+    // Invoice configuration (for returning users from business summary)
+    initialCashBalance,
+    invoicePrefix,
+    invoicePattern,
+    startingInvoiceNumber,
+    fiscalYear,
   } = useLocalSearchParams();
 
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
@@ -54,14 +62,22 @@ export default function BankAccountsScreen() {
   const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
-    // Load bank accounts
-    try {
-      const accounts = JSON.parse(allBankAccounts as string);
-      setBankAccounts(accounts);
-      console.log('Loaded bank accounts:', accounts);
-    } catch (error) {
-      console.log('No bank accounts to load');
-      setBankAccounts([]);
+    // Load bank accounts from dataStore first (for returning users), then fallback to params
+    const dataStoreBankAccounts = dataStore.getBankAccounts();
+    
+    if (dataStoreBankAccounts && dataStoreBankAccounts.length > 0) {
+      console.log('📥 Loaded bank accounts from dataStore:', dataStoreBankAccounts.length);
+      setBankAccounts(dataStoreBankAccounts);
+    } else {
+      // Fallback to params if dataStore is empty
+      try {
+        const accounts = JSON.parse(allBankAccounts as string);
+        setBankAccounts(accounts);
+        console.log('📥 Loaded bank accounts from params:', accounts.length);
+      } catch (error) {
+        console.log('📭 No bank accounts to load');
+        setBankAccounts([]);
+      }
     }
 
     Animated.timing(slideAnimation, {
@@ -69,7 +85,7 @@ export default function BankAccountsScreen() {
       duration: 500,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [allBankAccounts]);
 
   const toggleSection = (section: string) => {
     const newExpanded = new Set(expandedSections);
@@ -144,6 +160,8 @@ export default function BankAccountsScreen() {
         prefilledIFSC: account.ifscCode,
         prefilledAccountType: account.accountType,
         prefilledInitialBalance: account.initialBalance.toString(),
+        prefilledUpiId: account.upiId || '',
+        prefilledIsPrimary: account.isPrimary.toString(),
       }
     });
   };
@@ -155,9 +173,68 @@ export default function BankAccountsScreen() {
 
   const confirmDeleteAccount = () => {
     if (accountToDelete) {
+      // Update local state
       setBankAccounts(prev => prev.filter(acc => acc.id !== accountToDelete));
+      
+      // Update dataStore
+      dataStore.deleteBankAccount(accountToDelete);
+      
       setAccountToDelete(null);
       setShowDeleteModal(false);
+    }
+  };
+
+  const handleMakePrimary = (accountId: string) => {
+    const currentPrimary = bankAccounts.find(acc => acc.isPrimary);
+    const newPrimary = bankAccounts.find(acc => acc.id === accountId);
+    
+    setBankAccounts(prev => prev.map(acc => ({
+      ...acc,
+      isPrimary: acc.id === accountId
+    })));
+    
+    // Update in dataStore
+    dataStore.setPrimaryBankAccount(accountId);
+    
+    // Log the primary change via star icon
+    dataStore.logChange(
+      'bank_primary_change',
+      `⭐ Changed primary bank via star icon from ${currentPrimary?.bankName || 'none'} to ${newPrimary?.bankName}`,
+      currentPrimary ? {
+        id: currentPrimary.id,
+        bankName: currentPrimary.bankName,
+        accountNumber: currentPrimary.accountNumber,
+        isPrimary: true
+      } : null,
+      {
+        id: newPrimary?.id,
+        bankName: newPrimary?.bankName,
+        accountNumber: newPrimary?.accountNumber,
+        isPrimary: true
+      },
+      { 
+        action: 'star_icon_click',
+        screen: 'bank_accounts'
+      }
+    );
+    
+    // Log the complete new primary bank account details
+    if (newPrimary) {
+      console.log('');
+      console.log('='.repeat(60));
+      console.log('⭐ NEW PRIMARY BANK ACCOUNT - COMPLETE DETAILS');
+      console.log('='.repeat(60));
+      console.log('Bank Name:', newPrimary.bankName);
+      console.log('Bank Short Name:', newPrimary.bankShortName);
+      console.log('Account Holder Name:', newPrimary.accountHolderName);
+      console.log('Account Number:', newPrimary.accountNumber);
+      console.log('IFSC Code:', newPrimary.ifscCode);
+      console.log('Account Type:', newPrimary.accountType);
+      console.log('UPI ID:', newPrimary.upiId || 'N/A');
+      console.log('Initial Balance:', `₹${newPrimary.initialBalance.toLocaleString('en-IN')}`);
+      console.log('Is Primary:', newPrimary.isPrimary);
+      console.log('='.repeat(60));
+      console.log('');
     }
   };
 
@@ -166,6 +243,10 @@ export default function BankAccountsScreen() {
       Alert.alert('No Bank Account', 'Please add at least one bank account to continue');
       return;
     }
+
+    // Get latest data from dataStore to ensure we have all updates
+    const latestAddresses = dataStore.getAddresses();
+    const latestBankAccounts = dataStore.getBankAccounts();
 
     // Navigate to final setup screen
     // Use replace to prevent going back to bank accounts list after continuing
@@ -179,8 +260,14 @@ export default function BankAccountsScreen() {
         businessName,
         businessType,
         customBusinessType,
-        allAddresses,
-        allBankAccounts: JSON.stringify(bankAccounts),
+        allAddresses: JSON.stringify(latestAddresses),
+        allBankAccounts: JSON.stringify(latestBankAccounts),
+        // Pass invoice configuration for returning users
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
       }
     }, 'replace');
   };
@@ -210,6 +297,15 @@ export default function BankAccountsScreen() {
           </View>
           
           <View style={styles.accountActions}>
+            {!account.isPrimary && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.starButton]}
+                onPress={() => handleMakePrimary(account.id)}
+                activeOpacity={0.7}
+              >
+                <Star size={16} color="#fbbf24" fill="none" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.actionButton, styles.editButton]}
               onPress={() => handleEditAccount(account)}
@@ -375,6 +471,36 @@ export default function BankAccountsScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
+          {/* Back Button */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              router.replace({
+                pathname: '/auth/address-confirmation',
+                params: {
+                  type,
+                  value,
+                  gstinData,
+                  name,
+                  businessName,
+                  businessType,
+                  customBusinessType,
+                  allAddresses,
+                  allBankAccounts: JSON.stringify(bankAccounts),
+                  // Pass invoice configuration for returning users
+                  initialCashBalance,
+                  invoicePrefix,
+                  invoicePattern,
+                  startingInvoiceNumber,
+                  fiscalYear,
+                }
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color="#3f66ac" />
+          </TouchableOpacity>
+
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
@@ -521,6 +647,20 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     paddingHorizontal: 24,
@@ -711,6 +851,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  starButton: {
+    backgroundColor: '#fef3c7',
   },
   editButton: {
     backgroundColor: '#f1f5f9',

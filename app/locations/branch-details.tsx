@@ -76,7 +76,17 @@ export default function BranchDetailsScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     existingAddresses = '[]',
+    // From business summary
+    fromSummary,
+    allAddresses,
+    allBankAccounts,
+    initialCashBalance,
+    invoicePrefix,
+    invoicePattern,
+    startingInvoiceNumber,
+    fiscalYear,
   } = useLocalSearchParams();
   
   // Get branch count for dynamic header
@@ -93,11 +103,11 @@ export default function BranchDetailsScreen() {
   
   const [branchName, setBranchName] = useState('');
   const [doorNumber, setDoorNumber] = useState(''); // Door number - user should enter this
-  const [addressLine1, setAddressLine1] = useState(prefilledStreet as string); // Address Line 1 from parsed data
-  const [addressLine2, setAddressLine2] = useState(prefilledArea as string); // Address Line 2 from parsed data
+  const [addressLine1, setAddressLine1] = useState(''); // Address Line 1 from parsed data
+  const [addressLine2, setAddressLine2] = useState(''); // Address Line 2 from parsed data
   const [additionalLines, setAdditionalLines] = useState<string[]>([]);
-  const [city, setCity] = useState(prefilledCity as string);
-  const [pincode, setPincode] = useState(prefilledPincode as string);
+  const [city, setCity] = useState('');
+  const [pincode, setPincode] = useState('');
   const [selectedState, setSelectedState] = useState<{ name: string; code: string } | null>(null);
   const [showStateModal, setShowStateModal] = useState(false);
   const [stateSearchQuery, setStateSearchQuery] = useState('');
@@ -106,6 +116,36 @@ export default function BranchDetailsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
+
+  // Update state when prefilled values are received
+  useEffect(() => {
+    console.log('🏢 Branch Details - Prefilled values received:');
+    console.log('  - prefilledStreet:', prefilledStreet, typeof prefilledStreet);
+    console.log('  - prefilledArea:', prefilledArea, typeof prefilledArea);
+    console.log('  - prefilledCity:', prefilledCity, typeof prefilledCity);
+    console.log('  - prefilledState:', prefilledState, typeof prefilledState);
+    console.log('  - prefilledPincode:', prefilledPincode, typeof prefilledPincode);
+
+    // Set values if they exist and are not empty
+    if (prefilledStreet && prefilledStreet !== '') {
+      console.log('✅ Setting addressLine1 to:', prefilledStreet);
+      setAddressLine1(prefilledStreet as string);
+    }
+    if (prefilledArea && prefilledArea !== '') {
+      console.log('✅ Setting addressLine2 to:', prefilledArea);
+      setAddressLine2(prefilledArea as string);
+    } else {
+      console.log('⚠️ prefilledArea is empty or undefined:', prefilledArea);
+    }
+    if (prefilledCity && prefilledCity !== '') {
+      console.log('✅ Setting city to:', prefilledCity);
+      setCity(prefilledCity as string);
+    }
+    if (prefilledPincode && prefilledPincode !== '') {
+      console.log('✅ Setting pincode to:', prefilledPincode);
+      setPincode(prefilledPincode as string);
+    }
+  }, [prefilledStreet, prefilledArea, prefilledCity, prefilledPincode]);
 
   useEffect(() => {
     // Auto-select state if prefilled
@@ -198,22 +238,43 @@ export default function BranchDetailsScreen() {
 
     // Check for duplicate addresses
     const allAddresses = dataStore.getAddresses();
+    console.log('🔍 Checking for duplicates among', allAddresses.length, 'existing addresses');
+    console.log('📍 New branch address to check:', {
+      addressLine1: addressLine1.trim(),
+      city: city.trim(),
+      pincode: pincode,
+      stateName: selectedState?.name
+    });
+    
     const isDuplicate = allAddresses.some(addr => {
-      // Check if address components match (excluding name and ID)
-      return addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
-             addr.city.toLowerCase() === city.trim().toLowerCase() &&
-             addr.pincode === pincode &&
-             addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
+      const matches = addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
+                     addr.city.toLowerCase() === city.trim().toLowerCase() &&
+                     addr.pincode === pincode &&
+                     addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
+      
+      if (matches) {
+        console.log('⚠️ Found duplicate:', {
+          existingId: addr.id,
+          existingName: addr.name,
+          existingType: addr.type
+        });
+      }
+      
+      return matches;
     });
 
     if (isDuplicate) {
+      console.log('❌ Duplicate branch detected - blocking creation');
       Alert.alert(
         'Duplicate Address', 
         'An address with these details already exists. Please use a different location or edit the existing one.',
         [{ text: 'OK' }]
       );
+      setIsLoading(false);
       return;
     }
+    
+    console.log('✅ No duplicate found - proceeding with branch creation');
 
     setIsLoading(true);
     
@@ -244,10 +305,31 @@ export default function BranchDetailsScreen() {
     
     // Navigate immediately without success alert for cleaner UX
     setTimeout(() => {
-      // Navigate back to address confirmation screen with signup parameters
-      if (type && value) {
+      if (fromSummary === 'true') {
+        // User came from business summary, navigate back with all data
+        router.replace({
+          pathname: '/auth/business-summary',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            allAddresses: JSON.stringify(dataStore.getAddresses()),
+            allBankAccounts,
+            initialCashBalance,
+            invoicePrefix,
+            invoicePattern,
+            startingInvoiceNumber,
+            fiscalYear,
+          }
+        });
+      } else if (type && value) {
         // User is in signup flow, go to address confirmation
-        router.push({
+        // Use replace to prevent going back to branch details screen
+        router.replace({
           pathname: '/auth/address-confirmation',
           params: {
             type,
@@ -257,6 +339,7 @@ export default function BranchDetailsScreen() {
             businessName,
             businessType,
             customBusinessType,
+            mobile,
             allAddresses: JSON.stringify(dataStore.getAddresses()),
           }
         });

@@ -370,24 +370,24 @@ export default function EditAddressScreen() {
       
       // Navigate immediately without success alert for cleaner UX
       setTimeout(() => {
-        // Navigate back to address confirmation screen with signup parameters
-        if (type && value) {
-          router.push({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType,
-              customBusinessType,
-              allAddresses: JSON.stringify(dataStore.getAddresses()),
-            }
-          });
-        } else {
-          router.push('/settings');
-        }
+              // Navigate back to address confirmation screen with signup parameters
+              if (type && value) {
+                router.push({
+                  pathname: '/auth/address-confirmation',
+                  params: {
+                    type,
+                    value,
+                    gstinData,
+                    name,
+                    businessName,
+                    businessType,
+                    customBusinessType,
+                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                  }
+                });
+              } else {
+                router.push('/settings');
+              }
         setIsLoading(false);
       }, 500);
     } catch (error) {

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { CircleCheck as CheckCircle, Banknote } from 'lucide-react-native';
+import { CircleCheck as CheckCircle, Banknote, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
@@ -30,17 +30,54 @@ export default function FinalSetupScreen() {
     customBusinessType,
     allAddresses,
     allBankAccounts,
+    // Invoice configuration from business summary (if coming back)
+    initialCashBalance: incomingCashBalance,
+    invoicePrefix: incomingInvoicePrefix,
+    invoicePattern: incomingInvoicePattern,
+    startingInvoiceNumber: incomingStartingNumber,
+    fiscalYear: incomingFiscalYear,
   } = useLocalSearchParams();
 
-  const [initialCashBalance, setInitialCashBalance] = useState('');
-  const [invoicePrefix, setInvoicePrefix] = useState('INV');
-  const [invoicePattern, setInvoicePattern] = useState('');
-  const [startingInvoiceNumber, setStartingInvoiceNumber] = useState('1');
-  const [fiscalYear, setFiscalYear] = useState<'JAN-DEC' | 'APR-MAR'>('APR-MAR');
+  // Check if we have incoming invoice config (returning user from business summary)
+  // Need to check for actual values, not just truthy check (empty string '' is falsy)
+  const hasIncomingConfig = 
+    (incomingCashBalance !== undefined && incomingCashBalance !== null) ||
+    (incomingInvoicePrefix !== undefined && incomingInvoicePrefix !== null) ||
+    (incomingInvoicePattern !== undefined && incomingInvoicePattern !== null);
+
+  const [initialCashBalance, setInitialCashBalance] = useState(
+    (incomingCashBalance !== undefined && incomingCashBalance !== null) ? (incomingCashBalance as string) : ''
+  );
+  const [invoicePrefix, setInvoicePrefix] = useState(
+    (incomingInvoicePrefix !== undefined && incomingInvoicePrefix !== null) ? (incomingInvoicePrefix as string) : 'INV'
+  );
+  const [invoicePattern, setInvoicePattern] = useState(
+    (incomingInvoicePattern !== undefined && incomingInvoicePattern !== null) ? (incomingInvoicePattern as string) : ''
+  );
+  const [startingInvoiceNumber, setStartingInvoiceNumber] = useState(
+    (incomingStartingNumber !== undefined && incomingStartingNumber !== null) ? (incomingStartingNumber as string) : '1'
+  );
+  const [fiscalYear, setFiscalYear] = useState<'JAN-DEC' | 'APR-MAR'>(
+    (incomingFiscalYear !== undefined && incomingFiscalYear !== null) ? (incomingFiscalYear as 'JAN-DEC' | 'APR-MAR') : 'APR-MAR'
+  );
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
   const debouncedNavigate = useDebounceNavigation();
+
+  // Log configuration status for debugging
+  useEffect(() => {
+    if (hasIncomingConfig) {
+      console.log('✅ Returning user - preserving invoice configuration:');
+      console.log('  - Cash Balance:', incomingCashBalance);
+      console.log('  - Invoice Prefix:', incomingInvoicePrefix);
+      console.log('  - Invoice Pattern:', incomingInvoicePattern);
+      console.log('  - Starting Number:', incomingStartingNumber);
+      console.log('  - Fiscal Year:', incomingFiscalYear);
+    } else {
+      console.log('📝 Fresh user - requesting new invoice configuration');
+    }
+  }, [hasIncomingConfig, incomingCashBalance, incomingInvoicePrefix, incomingInvoicePattern, incomingStartingNumber, incomingFiscalYear]);
 
   // Parse data for summary
   const addresses = JSON.parse(allAddresses as string || '[]');
@@ -118,6 +155,10 @@ export default function FinalSetupScreen() {
   const handleContinue = () => {
     if (!isFormValid()) return;
 
+    // Get latest data from dataStore to ensure we have all updates
+    const latestAddresses = dataStore.getAddresses();
+    const latestBankAccounts = dataStore.getBankAccounts();
+
     // Navigate to business summary with all collected data
     debouncedNavigate({
       pathname: '/auth/business-summary',
@@ -129,8 +170,8 @@ export default function FinalSetupScreen() {
         businessName,
         businessType,
         customBusinessType,
-        allAddresses,
-        allBankAccounts,
+        allAddresses: JSON.stringify(latestAddresses),
+        allBankAccounts: JSON.stringify(latestBankAccounts),
         initialCashBalance: totalCashBalance.toString(),
         invoicePrefix,
         invoicePattern,
@@ -169,6 +210,36 @@ export default function FinalSetupScreen() {
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          {/* Back Button */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              router.replace({
+                pathname: '/auth/bank-accounts',
+                params: {
+                  type,
+                  value,
+                  gstinData,
+                  name,
+                  businessName,
+                  businessType,
+                  customBusinessType,
+                  allAddresses,
+                  allBankAccounts,
+                  // Pass current invoice configuration
+                  initialCashBalance,
+                  invoicePrefix,
+                  invoicePattern,
+                  startingInvoiceNumber,
+                  fiscalYear,
+                }
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={24} color="#3f66ac" />
+          </TouchableOpacity>
+
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -219,7 +290,7 @@ export default function FinalSetupScreen() {
                   onFiscalYearChange={setFiscalYear}
                   initialValue={fiscalYear}
                 />
-              </View>
+                  </View>
 
               {/* Invoice Configuration */}
               <View style={styles.invoiceContainer}>
@@ -270,6 +341,20 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   content: {
     paddingHorizontal: 32,

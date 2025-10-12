@@ -76,6 +76,7 @@ export default function EditAddressSimpleScreen() {
     businessType,
     customBusinessType,
     existingAddresses = '[]',
+    fromSummary = 'false',
   } = useLocalSearchParams();
 
   console.log('🔧 EditAddressSimpleScreen - Parameters:', { editAddressId, addressType, type, value });
@@ -420,8 +421,30 @@ export default function EditAddressSimpleScreen() {
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back to address confirmation screen with signup parameters
-              if (type && value) {
+              // Check if we came from business summary page
+              if (fromSummary === 'true') {
+                // Return to business summary page
+                router.replace({
+                  pathname: '/auth/business-summary',
+                  params: {
+                    type,
+                    value,
+                    gstinData,
+                    name,
+                    businessName,
+                    businessType,
+                    customBusinessType,
+                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                    allBankAccounts: '[]', // Will be updated from summary
+                    initialCashBalance: '0',
+                    invoicePrefix: 'INV',
+                    invoicePattern: '',
+                    startingInvoiceNumber: '1',
+                    fiscalYear: 'APR-MAR',
+                  }
+                });
+              } else if (type && value) {
+                // Navigate back to address confirmation screen with signup parameters
                 router.push({
                   pathname: '/auth/address-confirmation',
                   params: {
@@ -476,13 +499,7 @@ export default function EditAddressSimpleScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color="#3f66ac" />
-          </TouchableOpacity>
+          {/* Back button removed for edit forms to prevent navigation back */}
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>

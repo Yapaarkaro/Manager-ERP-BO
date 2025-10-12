@@ -229,43 +229,81 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
   components.forEach(component => {
     const types = component.types;
     
+    // Address Line 1: street_number + route
     if (types.includes('street_number')) {
       extracted.street_number = component.long_name;
     }
     if (types.includes('route')) {
       extracted.route = component.long_name;
     }
+    
+    // Address Line 2/Additional: floor, suite, subpremise, establishment
+    if (types.includes('floor')) {
+      extracted.floor = component.long_name;
+    }
+    if (types.includes('suite')) {
+      extracted.suite = component.long_name;
+    }
+    if (types.includes('subpremise')) {
+      extracted.subpremise = component.long_name;
+    }
+    if (types.includes('establishment')) {
+      extracted.establishment = component.long_name;
+    }
+    
+    // City: locality OR postal_town OR sublocality_level_1 (priority order)
     if (types.includes('locality')) {
-      extracted.city = component.long_name;
+      if (!extracted.city) extracted.city = component.long_name;
       extracted.locality = component.long_name;
     }
+    if (types.includes('postal_town')) {
+      if (!extracted.city) extracted.city = component.long_name;
+      extracted.postal_town = component.long_name;
+    }
+    if (types.includes('sublocality_level_1')) {
+      if (!extracted.city) extracted.city = component.long_name;
+      extracted.sublocality_level_1 = component.long_name;
+    }
+    
+    // Capture other sublocality levels for area/additional info
     if (types.includes('sublocality')) {
       extracted.sublocality = component.long_name;
     }
-    if (types.includes('sublocality_level_1')) {
-      extracted.area = component.long_name;
+    if (types.includes('sublocality_level_2')) {
+      extracted.sublocality_level_2 = component.long_name;
     }
+    if (types.includes('sublocality_level_3')) {
+      extracted.sublocality_level_3 = component.long_name;
+    }
+    
+    // Administrative levels
     if (types.includes('administrative_area_level_2')) {
       extracted.district = component.long_name;
+      extracted.administrative_area_level_2 = component.long_name;
     }
+    
+    // State: administrative_area_level_1
     if (types.includes('administrative_area_level_1')) {
       extracted.state = component.long_name;
       extracted.state_code = component.short_name;
       extracted.administrative_area_level_1 = component.long_name;
     }
+    
+    // Pincode: postal_code
     if (types.includes('postal_code')) {
       extracted.pincode = component.long_name;
       extracted.postal_code = component.long_name;
     }
+    
+    // Country
     if (types.includes('country')) {
       extracted.country = component.long_name;
       extracted.country_code = component.short_name;
     }
+    
+    // Premise (for building/complex names)
     if (types.includes('premise')) {
       extracted.premise = component.long_name;
-    }
-    if (types.includes('subpremise')) {
-      extracted.subpremise = component.long_name;
     }
   });
 
@@ -302,11 +340,27 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
     }
   }
 
-  // Create area from available components
-  if (extracted.sublocality) {
-    extracted.area = extracted.sublocality;
-  } else if (extracted.district) {
-    extracted.area = extracted.district;
+  // Create area for Address Line 2 from available components
+  // Priority: establishment/premise (building name) > sublocality levels > district
+  if (!extracted.area || extracted.area === '') {
+    // First priority: Use establishment or premise for Address Line 2 (e.g., "WeWork", "Salarpuria Symphony")
+    if (extracted.establishment) {
+      extracted.area = extracted.establishment;
+    } else if (extracted.premise) {
+      extracted.area = extracted.premise;
+    }
+    // Second priority: Use sublocality levels (neighborhood/area names)
+    else if (extracted.sublocality_level_2) {
+      extracted.area = extracted.sublocality_level_2;
+    } else if (extracted.sublocality_level_3) {
+      extracted.area = extracted.sublocality_level_3;
+    } else if (extracted.sublocality) {
+      extracted.area = extracted.sublocality;
+    }
+    // Third priority: Use district as fallback
+    else if (extracted.district) {
+      extracted.area = extracted.district;
+    }
   }
 
   console.log('🔍 Extracted address components:', extracted);

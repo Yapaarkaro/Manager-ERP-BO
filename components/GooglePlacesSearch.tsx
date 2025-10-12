@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { MapPin, Navigation } from 'lucide-react-native';
 import { getPlacePredictions, getPlaceDetails, extractAddressComponents } from '../services/googleMapsApi';
 
 interface PlaceSuggestion {
@@ -132,15 +133,24 @@ const GooglePlacesSearch: React.FC<GooglePlacesSearchProps> = ({
     }
   };
 
-  const renderSuggestion = ({ item }: { item: PlaceSuggestion }) => (
+  const renderSuggestion = ({ item, index }: { item: PlaceSuggestion; index: number }) => (
     <TouchableOpacity
-      style={styles.suggestionItem}
+      style={[
+        styles.suggestionItem,
+        index === suggestions.length - 1 && styles.lastSuggestionItem
+      ]}
       onPress={() => handleAddressSelect(item)}
-      activeOpacity={0.7}
+      activeOpacity={0.6}
     >
+      <View style={styles.suggestionIconContainer}>
+        <MapPin size={18} color="#3f66ac" strokeWidth={2.5} />
+      </View>
       <View style={styles.suggestionContent}>
-        <Text style={styles.mainText}>{item.main_text}</Text>
-        <Text style={styles.secondaryText}>{item.secondary_text}</Text>
+        <Text style={styles.mainText} numberOfLines={1}>{item.main_text}</Text>
+        <Text style={styles.secondaryText} numberOfLines={1}>{item.secondary_text}</Text>
+      </View>
+      <View style={styles.suggestionArrow}>
+        <Navigation size={16} color="#94a3b8" />
       </View>
     </TouchableOpacity>
   );
@@ -205,25 +215,26 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     position: 'relative',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    shadowColor: '#000',
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    shadowColor: '#3f66ac',
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 2,
     },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   input: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     fontSize: 16,
-    color: '#333',
-    minHeight: 48,
+    color: '#1e293b',
+    minHeight: 52,
+    fontWeight: '500',
   },
   loadingContainer: {
     position: 'absolute',
@@ -238,43 +249,68 @@ const styles = StyleSheet.create({
     top: '100%',
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderTopWidth: 0,
-    maxHeight: 200,
-    shadowColor: '#000',
+    borderColor: '#e2e8f0',
+    marginTop: 4,
+    maxHeight: 280,
+    shadowColor: '#3f66ac',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 8,
     zIndex: 1001,
+    overflow: 'hidden',
   },
   suggestionsList: {
     flexGrow: 0,
   },
   suggestionItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#f1f5f9',
+    backgroundColor: '#ffffff',
+  },
+  lastSuggestionItem: {
+    borderBottomWidth: 0,
+  },
+  suggestionIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   suggestionContent: {
     flex: 1,
+    marginRight: 8,
   },
   mainText: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-    marginBottom: 2,
+    fontSize: 15,
+    color: '#1e293b',
+    fontWeight: '600',
+    marginBottom: 3,
   },
   secondaryText: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '400',
+  },
+  suggestionArrow: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.6,
   },
 });
 

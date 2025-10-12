@@ -33,7 +33,7 @@ const COLORS = {
 export default function GstinPanOTPScreen() {
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation();
-  const { type, value, gstinData } = useLocalSearchParams();
+  const { type, value, gstinData, mobile } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [countdown, setCountdown] = useState(30);
@@ -60,7 +60,7 @@ export default function GstinPanOTPScreen() {
     // For PAN, auto-focus on the Full Name field
     setTimeout(() => {
       if (type === 'GSTIN') {
-        inputRefs.current[0]?.focus();
+      inputRefs.current[0]?.focus();
       } else if (type === 'PAN') {
         panNameInputRef.current?.focus();
       }
@@ -137,6 +137,7 @@ export default function GstinPanOTPScreen() {
           value: value,
           panName: panName.trim(),
           panDob: dateOfBirth?.toISOString() || '',
+          mobile: mobile,
         }
       }, 'replace');
       setIsVerifying(false);
@@ -163,6 +164,7 @@ export default function GstinPanOTPScreen() {
               type: type,
               value: value,
               gstinData: gstinData,
+              mobile: mobile,
             }
           }, 'replace');
         } else {
@@ -288,12 +290,12 @@ export default function GstinPanOTPScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView 
-          style={styles.content}
+      <ScrollView 
+        style={styles.content}
           contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
           <View style={styles.iconCircle}>
             <Shield size={32} color={COLORS.primary} />
@@ -388,54 +390,54 @@ export default function GstinPanOTPScreen() {
         {/* OTP fields - only for GSTIN */}
         {type === 'GSTIN' && (
           <>
-            <View style={styles.otpContainer}>
-              {otp.map((digit, index) => (
-                <TextInput
-                  key={index}
-                  ref={(ref) => {
-                    if (ref) inputRefs.current[index] = ref;
-                  }}
-                  style={[
-                    styles.otpInput,
-                    digit && styles.filledInput,
-                    isVerifying && styles.verifyingInput,
-                  ]}
-                  value={digit}
-                  onChangeText={(text) => handleOtpChange(text.slice(-1), index)}
-                  onKeyPress={(e) => handleKeyPress(e, index)}
-                  keyboardType="numeric"
-                  maxLength={1}
-                  textAlign="center"
-                />
-              ))}
-            </View>
+        <View style={styles.otpContainer}>
+          {otp.map((digit, index) => (
+            <TextInput
+              key={index}
+              ref={(ref) => {
+                if (ref) inputRefs.current[index] = ref;
+              }}
+              style={[
+                styles.otpInput,
+                digit && styles.filledInput,
+                isVerifying && styles.verifyingInput,
+              ]}
+              value={digit}
+              onChangeText={(text) => handleOtpChange(text.slice(-1), index)}
+              onKeyPress={(e) => handleKeyPress(e, index)}
+              keyboardType="numeric"
+              maxLength={1}
+              textAlign="center"
+            />
+          ))}
+        </View>
 
-            {isVerifying && (
-              <View style={styles.verifyingContainer}>
-                <Text style={styles.verifyingText}>Verifying {type}...</Text>
-              </View>
-            )}
+        {isVerifying && (
+          <View style={styles.verifyingContainer}>
+            <Text style={styles.verifyingText}>Verifying {type}...</Text>
+          </View>
+        )}
 
-            <View style={styles.resendContainer}>
-              {canResend ? (
-                <TouchableOpacity style={styles.resendButton} onPress={resendOTP}>
-                  <Text style={styles.resendText}>Resend OTP</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={styles.countdownText}>
-                  Resend code in {countdown}s
-                </Text>
-              )}
-            </View>
+        <View style={styles.resendContainer}>
+          {canResend ? (
+            <TouchableOpacity style={styles.resendButton} onPress={resendOTP}>
+              <Text style={styles.resendText}>Resend OTP</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.countdownText}>
+              Resend code in {countdown}s
+            </Text>
+          )}
+        </View>
           </>
         )}
 
         {/* Action buttons */}
         <View style={styles.actionButtonsContainer}>
           {type === 'GSTIN' && (
-            <TouchableOpacity style={styles.changeButton} onPress={changeGstinPan}>
-              <Text style={styles.changeButtonText}>Change {type}</Text>
-            </TouchableOpacity>
+        <TouchableOpacity style={styles.changeButton} onPress={changeGstinPan}>
+          <Text style={styles.changeButtonText}>Change {type}</Text>
+        </TouchableOpacity>
           )}
 
           {type === 'PAN' && (
@@ -446,13 +448,13 @@ export default function GstinPanOTPScreen() {
         </View>
 
         {type === 'GSTIN' && (
-          <View style={styles.demoContainer}>
-            <Text style={styles.demoText}>
+        <View style={styles.demoContainer}>
+          <Text style={styles.demoText}>
               Demo: Use OTP 654321
-            </Text>
-          </View>
+          </Text>
+        </View>
         )}
-        </ScrollView>
+      </ScrollView>
       </KeyboardAvoidingView>
 
       {/* Date Picker Modal */}

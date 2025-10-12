@@ -28,6 +28,7 @@ import {
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { dataStore } from '@/utils/dataStore';
 
 export default function BankingDetailsScreen() {
   const { 
@@ -49,6 +50,14 @@ export default function BankingDetailsScreen() {
     prefilledIFSC = '',
     prefilledAccountType = '',
     prefilledInitialBalance = '',
+    prefilledUpiId = '',
+    prefilledIsPrimary = 'false',
+    fromSummary = 'false',
+    currentCashBalance = '0',
+    currentInvoicePrefix = 'INV',
+    currentInvoicePattern = '',
+    currentStartingNumber = '1',
+    currentFiscalYear = 'APR-MAR',
   } = useLocalSearchParams();
 
   const [selectedBank, setSelectedBank] = useState<IndianBank | null>(null);
@@ -61,7 +70,7 @@ export default function BankingDetailsScreen() {
     (prefilledAccountType as 'Savings' | 'Current') || 'Savings'
   );
   const [initialBalance, setInitialBalance] = useState(prefilledInitialBalance as string || '');
-  const [upiId, setUpiId] = useState('');
+  const [upiId, setUpiId] = useState(prefilledUpiId as string || '');
   const [ifscSelection, setIfscSelection] = useState<{start: number, end: number} | undefined>();
   const [showBankModal, setShowBankModal] = useState(false);
   const [bankSearch, setBankSearch] = useState('');
@@ -292,39 +301,78 @@ export default function BankingDetailsScreen() {
       upiId: upiId.trim(),
       accountType: accountType,
       initialBalance: parseFloat(initialBalance),
-      isPrimary: isAddingSecondary === 'false' && editMode === 'false',
-      createdAt: new Date().toISOString(),
+      isPrimary: editMode === 'true' ? (prefilledIsPrimary === 'true') : (isAddingSecondary === 'false'),
+      createdAt: editMode === 'true' ? existingBankAccounts.find((acc: any) => acc.id === editAccountId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
     };
 
     let allBankAccountsList;
-    if (editMode === 'true') {
-      // Edit existing account
-      allBankAccountsList = existingBankAccounts.map((acc: any) => 
-        acc.id === editAccountId ? bankAccount : acc
-      );
-    } else {
-      // Add new account
-      allBankAccountsList = [...existingBankAccounts, bankAccount];
-    }
+    try {
+      if (editMode === 'true') {
+        // Edit existing account
+        allBankAccountsList = existingBankAccounts.map((acc: any) => 
+          acc.id === editAccountId ? bankAccount : acc
+        );
+        // Update in dataStore
+        console.log('💾 Updating bank account in dataStore:', editAccountId);
+        dataStore.updateBankAccount(editAccountId as string, bankAccount);
+      } else {
+        // Add new account
+        allBankAccountsList = [...existingBankAccounts, bankAccount];
+        // Add to dataStore
+        console.log('💾 Adding bank account to dataStore:', bankAccount.id);
+        dataStore.addBankAccount(bankAccount);
+      }
+      
+      console.log('✅ Bank account saved, navigating to bank-accounts screen');
+      console.log('📊 Total bank accounts:', allBankAccountsList.length);
 
-    setTimeout(() => {
-      // Use regular push here as user might need to go back to bank details to add more accounts
-      debouncedNavigate({
-        pathname: '/auth/bank-accounts',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses,
-          allBankAccounts: JSON.stringify(allBankAccountsList),
+      setTimeout(() => {
+        // Check if we came from business summary page
+        if (fromSummary === 'true') {
+          // Return to business summary page with preserved values
+          debouncedNavigate({
+            pathname: '/auth/business-summary',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType,
+              customBusinessType,
+              allAddresses,
+              allBankAccounts: JSON.stringify(allBankAccountsList),
+              initialCashBalance: currentCashBalance, // Preserve actual cash balance
+              invoicePrefix: currentInvoicePrefix,
+              invoicePattern: currentInvoicePattern,
+              startingInvoiceNumber: currentStartingNumber,
+              fiscalYear: currentFiscalYear,
+            }
+          }, 'replace');
+        } else {
+          // Use regular push here as user might need to go back to bank details to add more accounts
+          debouncedNavigate({
+            pathname: '/auth/bank-accounts',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType,
+              customBusinessType,
+              allAddresses,
+              allBankAccounts: JSON.stringify(allBankAccountsList),
+            }
+          });
         }
-      });
+        setIsLoading(false);
+      }, 500);
+    } catch (error) {
+      console.error('❌ Error saving bank account:', error);
       setIsLoading(false);
-    }, 500);
+      Alert.alert('Error', 'Failed to save bank account. Please try again.');
+    }
   };
 
   const getBankCategoryColor = (category: string) => {
@@ -368,13 +416,15 @@ export default function BankingDetailsScreen() {
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color="#3f66ac" />
-          </TouchableOpacity>
+          {editMode !== 'true' && (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color="#3f66ac" />
+            </TouchableOpacity>
+          )}
 
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
