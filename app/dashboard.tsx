@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import { dataStore } from '@/utils/dataStore';
 import { 
   Menu, 
   TrendingUp, 
@@ -104,8 +105,8 @@ export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const userName = 'John Doe';
-  const businessName = 'ABC Electronics';
+  const [userName, setUserName] = useState('John Doe');
+  const [businessName, setBusinessName] = useState('ABC Electronics');
   
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
@@ -114,6 +115,34 @@ export default function DashboardScreen() {
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
+
+  // Load real user data from signup progress
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        // Load data from AsyncStorage first
+        await dataStore.loadData();
+        
+        // Get signup summary which contains user and business names
+        const signupSummary = dataStore.getSignupSummary();
+        
+        if (signupSummary.userName) {
+          setUserName(signupSummary.userName);
+          console.log('✅ Loaded real user name:', signupSummary.userName);
+        }
+        
+        if (signupSummary.businessName) {
+          setBusinessName(signupSummary.businessName);
+          console.log('✅ Loaded real business name:', signupSummary.businessName);
+        }
+      } catch (error) {
+        console.error('Error loading user data:', error);
+        // Keep default values if loading fails
+      }
+    };
+
+    loadUserData();
+  }, []);
 
   const handleMenuPress = () => {
     setShowHamburgerMenu(true);

@@ -46,6 +46,7 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { dataStore } from '@/utils/dataStore';
+import { subscriptionStore } from '@/utils/subscriptionStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 
 // Temporary interfaces until they're added to dataStore
@@ -126,6 +127,8 @@ export default function SettingsScreen() {
     gstin: '22AAAAA0000A1Z5',
     profilePhoto: null, // Set to actual photo URL when available
   });
+  const [subscription, setSubscription] = useState(subscriptionStore.getSubscription());
+  const [trialProgress, setTrialProgress] = useState(subscriptionStore.getTrialProgress());
 
   // Set status bar to dark for white header
   useEffect(() => {
@@ -146,6 +149,42 @@ export default function SettingsScreen() {
       }
       // If addresses exist, user is in signup process, allow access
     }
+  }, []);
+
+  // Load real user data from signup progress
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        // Load data from AsyncStorage first
+        await dataStore.loadData();
+        
+        // Get signup summary which contains user and business names
+        const signupSummary = dataStore.getSignupSummary();
+        
+        if (signupSummary.userName || signupSummary.businessName || signupSummary.taxIdValue) {
+          setUserProfile(prev => ({
+            ...prev,
+            name: signupSummary.userName || prev.name,
+            businessName: signupSummary.businessName || prev.businessName,
+            gstin: signupSummary.taxIdValue || prev.gstin,
+          }));
+          console.log('✅ Loaded real user data in settings:', {
+            userName: signupSummary.userName,
+            businessName: signupSummary.businessName,
+            taxId: signupSummary.taxIdValue
+          });
+        }
+
+        // Update subscription data
+        setSubscription(subscriptionStore.getSubscription());
+        setTrialProgress(subscriptionStore.getTrialProgress());
+      } catch (error) {
+        console.error('Error loading user data in settings:', error);
+        // Keep default values if loading fails
+      }
+    };
+
+    loadUserData();
   }, []);
 
   const [addresses, setAddresses] = useState<BusinessAddress[]>([]);
@@ -274,11 +313,6 @@ export default function SettingsScreen() {
     router.back();
   };
 
-  // Clear addresses for testing (remove this in production)
-  const handleClearAddresses = () => {
-    dataStore.clearAddresses();
-    Alert.alert('Addresses Cleared', 'All addresses have been cleared for testing purposes.');
-  };
 
   const handleEditProfile = () => {
     // TODO: Navigate to edit profile screen
@@ -973,6 +1007,39 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Subscription Section */}
+        {subscription.isOnTrial && (
+          <View style={styles.subscriptionSection}>
+            <View style={styles.subscriptionHeader}>
+              <CreditCard size={20} color="#3f66ac" />
+              <Text style={styles.subscriptionTitle}>Free Trial</Text>
+            </View>
+            <Text style={styles.subscriptionSubtitle}>
+              {trialProgress.daysRemaining} days remaining
+            </Text>
+            <View style={styles.progressBarContainer}>
+              <View style={styles.progressBar}>
+                <View 
+                  style={[
+                    styles.progressFill, 
+                    { width: `${trialProgress.percentage}%` }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.progressText}>
+                {trialProgress.daysUsed} of 30 days used
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.upgradeButton}
+              onPress={() => router.push('/subscription')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Business Addresses Section */}
         <View style={styles.section}>
             <TouchableOpacity 
@@ -1509,20 +1576,6 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* Test Button - Remove in production */}
-      <TouchableOpacity
-        style={{
-          position: 'absolute',
-          bottom: 20,
-          right: 20,
-          backgroundColor: '#ff0000',
-          padding: 10,
-          borderRadius: 5,
-        }}
-        onPress={handleClearAddresses}
-      >
-        <Text style={{ color: 'white', fontSize: 12 }}>Clear Addresses (Test)</Text>
-      </TouchableOpacity>
 
     </SafeAreaView>
   );
@@ -2289,6 +2342,60 @@ const styles = StyleSheet.create({
     color: Colors.text,
     paddingVertical: 0,
     marginLeft: 12,
+  },
+  subscriptionSection: {
+    backgroundColor: '#f0f4ff',
+    margin: 16,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#3f66ac',
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  subscriptionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3f66ac',
+    marginLeft: 8,
+  },
+  subscriptionSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 12,
+  },
+  progressBarContainer: {
+    marginBottom: 16,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e9ecef',
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#3f66ac',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'center',
+  },
+  upgradeButton: {
+    backgroundColor: '#3f66ac',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  upgradeButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

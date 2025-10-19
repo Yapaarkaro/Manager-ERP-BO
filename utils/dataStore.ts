@@ -378,6 +378,33 @@ export interface SignupProgress {
   lastUpdated?: string;
 }
 
+// User Account for Login
+export interface UserAccount {
+  id: string;
+  mobile: string;
+  mobileVerified: boolean;
+  ownerName: string;
+  businessName: string;
+  businessType: string;
+  taxIdType: 'GSTIN' | 'PAN';
+  taxIdValue: string;
+  taxIdVerified: boolean;
+  ownerDob?: string;
+  createdAt: string;
+  lastLoginAt: string;
+  isActive: boolean;
+  // Business data
+  addresses: BusinessAddress[];
+  bankAccounts: BankAccount[];
+  initialCashBalance: number;
+  invoiceConfig: {
+    prefix: string;
+    pattern: string;
+    startingNumber: string;
+    fiscalYear: string;
+  };
+}
+
 // Change Log
 export interface ChangeLog {
   id: string;
@@ -595,6 +622,7 @@ class DataStore {
   private isSignupComplete: boolean = false;
   private signupProgress: SignupProgress = {};
   private changeLogs: ChangeLog[] = [];
+  private userAccounts: UserAccount[] = [];
 
   constructor() {
     // Data will be loaded manually in _layout.tsx after clearing
@@ -605,6 +633,9 @@ class DataStore {
   async loadData() {
     try {
       console.log('🔄 Loading data from AsyncStorage...');
+      
+      // Debug AsyncStorage contents
+      await this.debugAsyncStorage();
       
       const addressesData = await AsyncStorage.getItem('addresses');
       if (addressesData) {
@@ -644,12 +675,34 @@ class DataStore {
         console.log('📭 No change logs found in storage');
       }
       
+      const userAccountsData = await AsyncStorage.getItem('userAccounts');
+      console.log('🔍 Raw userAccountsData from AsyncStorage:', userAccountsData);
+      if (userAccountsData) {
+        try {
+          this.userAccounts = JSON.parse(userAccountsData);
+          console.log('📥 Loaded user accounts:', this.userAccounts.length);
+          console.log('📋 User account details:', this.userAccounts.map(acc => ({
+            id: acc.id,
+            mobile: acc.mobile,
+            businessName: acc.businessName,
+            isActive: acc.isActive
+          })));
+        } catch (parseError) {
+          console.error('❌ Error parsing user accounts data:', parseError);
+          console.log('Raw data that failed to parse:', userAccountsData);
+          this.userAccounts = [];
+        }
+      } else {
+        console.log('📭 No user accounts found in storage');
+      }
+      
       console.log('Data loaded from storage:', {
         addresses: this.addresses.length,
         bankAccounts: this.bankAccounts.length,
         isSignupComplete: this.isSignupComplete,
         signupProgress: this.signupProgress.currentStep || 'none',
-        changeLogs: this.changeLogs.length
+        changeLogs: this.changeLogs.length,
+        userAccounts: this.userAccounts.length
       });
       
       // Notify listeners after loading data
@@ -663,9 +716,13 @@ class DataStore {
     try {
       await AsyncStorage.setItem('addresses', JSON.stringify(this.addresses));
       await AsyncStorage.setItem('bankAccounts', JSON.stringify(this.bankAccounts));
+      await AsyncStorage.setItem('isSignupComplete', this.isSignupComplete.toString());
       await AsyncStorage.setItem('signupProgress', JSON.stringify(this.signupProgress));
       await AsyncStorage.setItem('changeLogs', JSON.stringify(this.changeLogs));
+      await AsyncStorage.setItem('userAccounts', JSON.stringify(this.userAccounts));
       console.log('Data saved to storage');
+      console.log('💾 User accounts saved:', this.userAccounts.length);
+      console.log('💾 User accounts data:', this.userAccounts.map(acc => ({ id: acc.id, mobile: acc.mobile, isActive: acc.isActive })));
     } catch (error) {
       console.error('Error saving data to storage:', error);
     }
@@ -1470,6 +1527,168 @@ class DataStore {
     console.log('✅ Signup progress cleared');
   }
 
+  // Debug method to check AsyncStorage contents
+  async debugAsyncStorage() {
+    try {
+      console.log('🔍 DEBUG: Checking AsyncStorage contents...');
+      const keys = await AsyncStorage.getAllKeys();
+      console.log('🔑 All AsyncStorage keys:', keys);
+      
+      for (const key of keys) {
+        const value = await AsyncStorage.getItem(key);
+        console.log(`📦 ${key}:`, value ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : 'null');
+      }
+    } catch (error) {
+      console.error('❌ Error debugging AsyncStorage:', error);
+    }
+  }
+
+  // Method to clear all data for fresh testing
+  async clearAllDataForTesting() {
+    try {
+      console.log('🧹 CLEARING ALL DATA FOR FRESH TESTING...');
+      
+      // Clear all arrays and objects
+      this.addresses = [];
+      this.bankAccounts = [];
+      this.customers = [];
+      this.products = [];
+      this.invoices = [];
+      this.purchases = [];
+      this.receivables = [];
+      this.payables = [];
+      this.bankTransactions = [];
+      this.changeLogs = [];
+      this.userAccounts = [];
+      
+      // Reset signup progress
+      this.signupProgress = {};
+      this.isSignupComplete = false;
+      
+      // Clear all AsyncStorage data
+      await AsyncStorage.multiRemove([
+        'addresses',
+        'bankAccounts',
+        'customers',
+        'products',
+        'invoices',
+        'purchases',
+        'receivables',
+        'payables',
+        'bankTransactions',
+        'changeLogs',
+        'userAccounts',
+        'isSignupComplete',
+        'signupProgress',
+        'appSubscription', // Clear subscription data too
+        'subscription_data' // Also clear the other subscription key
+      ]);
+      
+      console.log('✅ ALL DATA CLEARED SUCCESSFULLY!');
+      console.log('🎯 Ready for fresh signup testing');
+      
+      // Notify listeners
+      this.notifyListeners();
+      
+    } catch (error) {
+      console.error('❌ Error clearing data:', error);
+    }
+  }
+
+  // User Account Methods
+  createUserAccount(): UserAccount {
+    const progress = this.signupProgress;
+    const now = new Date().toISOString();
+    
+    console.log('🏗️ Creating user account with signup progress:', progress);
+    console.log('📱 Mobile from progress:', progress.mobile);
+    console.log('👤 Owner name from progress:', progress.ownerName);
+    console.log('🏢 Business name from progress:', progress.businessName);
+    
+    const userAccount: UserAccount = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      mobile: progress.mobile || '',
+      mobileVerified: progress.mobileVerified || false,
+      ownerName: progress.ownerName || '',
+      businessName: progress.businessName || '',
+      businessType: progress.businessType || '',
+      taxIdType: progress.taxIdType || 'PAN',
+      taxIdValue: progress.taxIdValue || '',
+      taxIdVerified: progress.taxIdVerified || false,
+      ownerDob: progress.ownerDob,
+      createdAt: now,
+      lastLoginAt: now,
+      isActive: true,
+      addresses: [...this.addresses],
+      bankAccounts: [...this.bankAccounts],
+      initialCashBalance: parseFloat(progress.initialCashBalance || '0'),
+      invoiceConfig: {
+        prefix: progress.invoicePrefix || 'INV',
+        pattern: progress.invoicePattern || '',
+        startingNumber: progress.startingInvoiceNumber || '1',
+        fiscalYear: progress.fiscalYear || 'APR-MAR',
+      },
+    };
+
+    // Add to user accounts array
+    this.userAccounts.push(userAccount);
+    this.saveData();
+
+    console.log('=== USER ACCOUNT CREATED ===');
+    console.log('User ID:', userAccount.id);
+    console.log('Mobile:', userAccount.mobile);
+    console.log('Business Name:', userAccount.businessName);
+    console.log('Created At:', userAccount.createdAt);
+    console.log('============================');
+
+    // Debug AsyncStorage after saving
+    setTimeout(async () => {
+      await this.debugAsyncStorage();
+    }, 1000);
+
+    return userAccount;
+  }
+
+  getUserAccountByMobile(mobile: string): UserAccount | null {
+    console.log('🔍 Searching for user account with mobile:', mobile);
+    console.log('📊 Total user accounts:', this.userAccounts.length);
+    console.log('📋 All user accounts:', this.userAccounts.map(acc => ({ mobile: acc.mobile, isActive: acc.isActive })));
+    
+    const account = this.userAccounts.find(acc => acc.mobile === mobile && acc.isActive);
+    if (account) {
+      console.log('📱 Found user account for mobile:', mobile);
+      console.log('Account ID:', account.id);
+      console.log('Business Name:', account.businessName);
+      console.log('Is Active:', account.isActive);
+    } else {
+      console.log('📭 No user account found for mobile:', mobile);
+      console.log('🔍 Available mobiles:', this.userAccounts.map(acc => acc.mobile));
+    }
+    return account || null;
+  }
+
+  updateUserLastLogin(mobile: string): void {
+    const account = this.userAccounts.find(acc => acc.mobile === mobile && acc.isActive);
+    if (account) {
+      account.lastLoginAt = new Date().toISOString();
+      this.saveData();
+      console.log('🔄 Updated last login for user:', mobile);
+    }
+  }
+
+  getAllUserAccounts(): UserAccount[] {
+    return this.userAccounts.filter(acc => acc.isActive);
+  }
+
+  deactivateUserAccount(mobile: string): void {
+    const account = this.userAccounts.find(acc => acc.mobile === mobile);
+    if (account) {
+      account.isActive = false;
+      this.saveData();
+      console.log('🚫 Deactivated user account for mobile:', mobile);
+    }
+  }
+
   // Change Log Methods
   logChange(changeType: ChangeLog['changeType'], description: string, oldValue?: any, newValue?: any, metadata?: any) {
     const changeLog: ChangeLog = {
@@ -1649,6 +1868,7 @@ class DataStore {
     this.isSignupComplete = false;
     this.signupProgress = {};
     this.changeLogs = [];
+    this.userAccounts = [];
     
     // Clear from AsyncStorage as well
     await AsyncStorage.removeItem('isSignupComplete');
@@ -1656,6 +1876,7 @@ class DataStore {
     await AsyncStorage.removeItem('changeLogs');
     await AsyncStorage.removeItem('addresses');
     await AsyncStorage.removeItem('bankAccounts');
+    await AsyncStorage.removeItem('userAccounts');
     await AsyncStorage.removeItem('cartItems');
     await AsyncStorage.removeItem('colorScheme');
     
@@ -1682,8 +1903,17 @@ class DataStore {
     this.notifyListeners();
   }
 
-  getSignupComplete(): boolean {
-    return this.isSignupComplete;
+  async getSignupComplete(): Promise<boolean> {
+    try {
+      const stored = await AsyncStorage.getItem('isSignupComplete');
+      if (stored !== null) {
+        this.isSignupComplete = stored === 'true';
+      }
+      return this.isSignupComplete;
+    } catch (error) {
+      console.error('Error loading signup complete status:', error);
+      return this.isSignupComplete;
+    }
   }
 
 

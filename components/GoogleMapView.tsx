@@ -63,15 +63,26 @@ const GoogleMapView = (props: any) => {
     try {
       setIsGettingLocation(true);
       
+      // Request permissions with Android-specific handling
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Location Permission', 'Please grant location permission to use this feature.');
+        Alert.alert(
+          'Location Permission', 
+          'Please grant location permission to use this feature. You can enable it in your device settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Settings', onPress: () => Location.openAppSettingsAsync() }
+          ]
+        );
         setIsGettingLocation(false);
         return;
       }
 
+      // Use appropriate accuracy based on platform
       const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+        accuracy: Platform.OS === 'android' ? Location.Accuracy.Balanced : Location.Accuracy.High,
+        maximumAge: 10000, // Use cached location if less than 10 seconds old
+        timeout: 15000, // 15 second timeout
       });
 
       const newLocation = {
@@ -82,18 +93,21 @@ const GoogleMapView = (props: any) => {
       setMarkerLocation(newLocation);
       onMapClick?.(newLocation.lat, newLocation.lng);
       
-      // Animate to current location
+      // Animate to current location with platform-specific timing
       if (mapRef.current) {
         mapRef.current.animateToRegion({
           latitude: newLocation.lat,
           longitude: newLocation.lng,
           latitudeDelta: 0.005,
           longitudeDelta: 0.005,
-        });
+        }, Platform.OS === 'android' ? 1000 : 500); // Slower animation on Android for better performance
       }
     } catch (error) {
       console.error('❌ Error getting current location:', error);
-      Alert.alert('Location Error', 'Failed to get current location. Please try again.');
+      const errorMessage = Platform.OS === 'android' 
+        ? 'Failed to get current location. Please check your GPS settings and try again.'
+        : 'Failed to get current location. Please try again.';
+      Alert.alert('Location Error', errorMessage);
     } finally {
       setIsGettingLocation(false);
     }
@@ -130,21 +144,8 @@ const GoogleMapView = (props: any) => {
     }
   }, [selectedLocation]);
 
-  // On web, use the web fallback
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.container}>
-        <WebMapFallback
-          markerLocation={markerLocation}
-          onMapClick={onMapClick}
-          isGettingLocation={isGettingLocation}
-          getCurrentLocation={getCurrentLocation}
-        />
-      </View>
-    );
-  }
+  // This component is only used on native platforms
 
-  // On native platforms, use Google Maps
   return (
     <View style={styles.container}>
       <MapView
@@ -162,6 +163,19 @@ const GoogleMapView = (props: any) => {
         showsUserLocation={true}
         showsMyLocationButton={false}
         mapType="standard"
+        // Android-specific optimizations
+        loadingEnabled={true}
+        loadingIndicatorColor="#3f66ac"
+        loadingBackgroundColor="#ffffff"
+        // Ensure proper rendering on Android
+        moveOnMarkerPress={false}
+        showsCompass={false}
+        showsScale={false}
+        showsBuildings={true}
+        showsTraffic={false}
+        showsIndoors={true}
+        // Android-specific map styling
+        customMapStyle={Platform.OS === 'android' ? undefined : undefined}
       >
         <Marker
           coordinate={{
@@ -171,6 +185,13 @@ const GoogleMapView = (props: any) => {
           draggable={true}
           onDragEnd={handleMarkerDragEnd}
           title="Selected Location"
+          description="Tap and drag to adjust location"
+          // Android-specific marker optimizations
+          anchor={{ x: 0.5, y: 0.5 }}
+          centerOffset={{ x: 0, y: 0 }}
+          // Ensure proper marker rendering on Android
+          flat={false}
+          tracksViewChanges={false}
         />
       </MapView>
       

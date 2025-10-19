@@ -49,11 +49,34 @@ export default function MobileScreen() {
   useEffect(() => {
     const checkReturningUser = async () => {
       if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber)) {
-        const existingProgress = await dataStore.getSignupProgressByMobile(mobileNumber);
-        if (existingProgress && existingProgress.ownerName) {
-          setIsReturningUser(true);
-          console.log('👋 Welcome back! Found existing signup for:', mobileNumber);
-        } else {
+        try {
+          console.log('🔍 Checking for returning user with mobile:', mobileNumber);
+          
+          // First check if user has a completed account
+          const userAccount = dataStore.getUserAccountByMobile(mobileNumber);
+          
+          if (userAccount) {
+            setIsReturningUser(true);
+            console.log('👋 Welcome back! Found existing account for:', mobileNumber);
+            console.log('Account ID:', userAccount.id);
+            console.log('Business Name:', userAccount.businessName);
+            
+            // Don't redirect immediately - user needs to verify OTP first
+            console.log('✅ User account found, proceeding to OTP verification');
+          } else {
+            console.log('🔍 No completed account found, checking for incomplete signup...');
+            // Check if user has incomplete signup progress
+            const existingProgress = await dataStore.getSignupProgressByMobile(mobileNumber);
+            if (existingProgress && existingProgress.ownerName) {
+              setIsReturningUser(true);
+              console.log('👋 Welcome back! Found incomplete signup for:', mobileNumber);
+            } else {
+              setIsReturningUser(false);
+              console.log('📭 No existing data found for mobile:', mobileNumber);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking returning user:', error);
           setIsReturningUser(false);
         }
       } else {
@@ -98,10 +121,6 @@ export default function MobileScreen() {
     setMobileNumber(cleaned);
   };
 
-  const handleLogin = () => {
-    // Handle existing user login
-    Alert.alert('Login', 'Login functionality will be implemented');
-  };
 
   return (
     <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
@@ -153,7 +172,7 @@ export default function MobileScreen() {
         {isReturningUser && mobileNumber.length === 10 && (
           <View style={styles.returningUserContainer}>
             <Text style={styles.returningUserText}>
-              👋 Welcome back! We'll help you continue where you left off.
+              👋 Welcome back! Redirecting you to your account...
             </Text>
           </View>
         )}
@@ -164,16 +183,13 @@ export default function MobileScreen() {
               {mobileNumber === '1234567890' 
                 ? 'Test mode: Proceeding to dashboard...' 
                 : isReturningUser 
-                  ? 'Resuming your signup...'
+                  ? 'Welcome back! Redirecting to your account...'
                   : 'Proceeding to verification...'
               }
             </Text>
           </View>
         )}
 
-        <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-          <Text style={styles.loginButtonText}>I already have an account</Text>
-        </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -284,14 +300,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontWeight: '500',
-  },
-  loginButton: {
-    marginTop: 40,
-    alignItems: 'center',
-  },
-  loginButtonText: {
-    fontSize: 16,
-    color: COLORS.primary,
-    fontWeight: '600',
   },
 });

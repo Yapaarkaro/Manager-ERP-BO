@@ -67,16 +67,10 @@ const menuSections: MenuSection[] = [
     ],
   },
   {
-    id: 'banks',
-    title: 'Banks',
-    icon: Building,
-    route: '/banks',
-  },
-  {
-    id: 'cash',
-    title: 'Cash',
+    id: 'bank-accounts',
+    title: 'Bank Accounts & Cash',
     icon: CreditCard,
-    route: '/cash',
+    route: '/bank-accounts',
   },
   {
     id: 'locations',

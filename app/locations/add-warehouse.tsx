@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Navigation, CreditCard as Edit, MapPin, Warehouse } from 'lucide-react-native';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
-import GoogleMapView from '@/components/GoogleMapView';
+import PlatformMapView from '@/components/PlatformMapView';
 import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
 import { dataStore } from '../../utils/dataStore';
@@ -607,7 +607,7 @@ export default function AddWarehouseScreen() {
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
-          <GoogleMapView
+          <PlatformMapView
             initialLocation={userLocation || { lat: 28.6139, lng: 77.2090 }}
             selectedLocation={selectedAddress ? { lat: selectedAddress.lat!, lng: selectedAddress.lng! } : undefined}
             onMapClick={handleMapClick}

@@ -5,6 +5,15 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import Toast from 'react-native-toast-message';
 import { StatusBarProvider } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
+import { subscriptionStore } from '@/utils/subscriptionStore';
+
+// Global function to clear all data - call this when needed for testing
+global.clearAllData = async () => {
+  console.log('🧹 MANUALLY CLEARING ALL DATA...');
+  await dataStore.clearAllDataForTesting();
+  await subscriptionStore.clearSubscriptionData();
+  console.log('✅ ALL DATA CLEARED MANUALLY!');
+};
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -12,11 +21,9 @@ export default function RootLayout() {
   // Load data from persistent storage when app starts
   useEffect(() => {
     const initializeData = async () => {
-      // Clear all data for testing (remove this in production)
-      console.log('🧹 Starting fresh - clearing all data...');
-      await dataStore.clearAll();
-      console.log('✅ Data cleared, loading fresh data...');
+      console.log('🔄 Loading data from persistent storage...');
       await dataStore.loadData();
+      console.log('✅ Data loaded successfully');
     };
     initializeData();
   }, []);

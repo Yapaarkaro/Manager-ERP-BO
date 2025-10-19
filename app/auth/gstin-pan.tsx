@@ -149,10 +149,14 @@ export default function GstinPanScreen() {
     // Reset keyboard type based on the first character of the new type
     const initialKeyboardType = getKeyboardType(type, 0);
     setKeyboardType(initialKeyboardType);
-    // Auto-focus input after type switch
+    
+    // Force keyboard type change by blurring and refocusing
     setTimeout(() => {
-      // Focus will be handled by the input field's autoFocus prop
-    }, 100);
+      inputRef.current?.blur();
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }, 50);
   };
 
   const verifyGSTINNumber = async (gstinNumber: string) => {

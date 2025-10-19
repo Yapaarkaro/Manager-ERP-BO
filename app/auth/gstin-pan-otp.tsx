@@ -12,6 +12,7 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, User, CreditCard, Calendar } from 'lucide-react-native';
@@ -329,7 +330,7 @@ export default function GstinPanOTPScreen() {
               <Text style={styles.label}>Full Name (as per PAN) *</Text>
               <View style={styles.inputContainer}>
                 <User size={20} color={COLORS.gray} style={styles.inputIcon} />
-                <TextInput
+                <CapitalizedTextInput
                   ref={panNameInputRef}
                   style={styles.panInput}
                   placeholder="Enter your full name"
@@ -461,7 +462,7 @@ export default function GstinPanOTPScreen() {
       {showDatePicker && type === 'PAN' && (
         <Modal
           transparent={true}
-          animationType="slide"
+          animationType="fade"
           visible={showDatePicker}
           onRequestClose={handleDatePickerDone}
         >
@@ -733,15 +734,19 @@ const styles = StyleSheet.create({
   // Date Picker Modal styles
   datePickerModal: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 20,
   },
   datePickerContainer: {
     backgroundColor: COLORS.white,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
-    paddingTop: Platform.OS === 'android' ? 10 : 0,
+    borderRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
+    paddingTop: Platform.OS === 'android' ? 16 : 20,
+    maxWidth: 400,
+    width: '100%',
+    maxHeight: '80%',
   },
   datePickerHeader: {
     flexDirection: 'row',

@@ -12,6 +12,7 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
@@ -405,7 +406,7 @@ export default function BranchDetailsScreen() {
                   <Text style={styles.label}>Branch Name *</Text>
                   <View style={styles.inputContainer}>
                     <Building2 size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={branchName}
                       onChangeText={setBranchName}
@@ -414,15 +415,12 @@ export default function BranchDetailsScreen() {
                       autoCapitalize="words"
                     />
                   </View>
-                  <Text style={styles.fieldHint}>
-                    Give a name to identify this branch office
-                  </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Door Number / Building Name *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={doorNumber}
                       onChangeText={setDoorNumber}
@@ -431,15 +429,12 @@ export default function BranchDetailsScreen() {
                       autoCapitalize="words"
                     />
                   </View>
-                  <Text style={styles.fieldHint}>
-                    Enter the specific door number, flat number, or building name
-                  </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine1}
                       onChangeText={setAddressLine1}
@@ -453,7 +448,7 @@ export default function BranchDetailsScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2 *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine2}
                       onChangeText={setAddressLine2}
@@ -471,7 +466,7 @@ export default function BranchDetailsScreen() {
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
                     <View style={styles.inputContainer}>
-                      <TextInput
+                      <CapitalizedTextInput
                         style={styles.input}
                         value={city}
                         onChangeText={setCity}
@@ -529,7 +524,7 @@ export default function BranchDetailsScreen() {
                     <Text style={styles.contactLabel}>Branch Manager</Text>
                     <View style={[styles.inputContainer, styles.contactInputContainer]}>
                       <User size={20} color="#fbbf24" style={styles.inputIcon} />
-                      <TextInput
+                      <CapitalizedTextInput
                         style={[styles.input, styles.contactInput]}
                         value={managerName}
                         onChangeText={setManagerName}

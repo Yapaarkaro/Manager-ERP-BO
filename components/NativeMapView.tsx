@@ -7,8 +7,25 @@ import {
   Text,
   TouchableOpacity,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
+
+// Platform-specific imports to avoid web bundling issues
+let MapView: any = null;
+let Marker: any = null;
+let PROVIDER_GOOGLE: any = null;
+let PROVIDER_DEFAULT: any = null;
+
+if (Platform.OS !== 'web') {
+  try {
+    const MapsModule = require('react-native-maps');
+    MapView = MapsModule.default;
+    Marker = MapsModule.Marker;
+    PROVIDER_GOOGLE = MapsModule.PROVIDER_GOOGLE;
+    PROVIDER_DEFAULT = MapsModule.PROVIDER_DEFAULT;
+  } catch (error) {
+    console.warn('react-native-maps not available:', error);
+  }
+}
 
 interface NativeMapViewProps {
   initialLocation?: { lat: number; lng: number };
@@ -154,6 +171,20 @@ const NativeMapView: React.FC<NativeMapViewProps> = ({
     }
   ];
 
+  // Web fallback
+  if (Platform.OS === 'web' || !MapView || !Marker) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.webFallback}>
+          <Text style={styles.webFallbackText}>Map not available on web</Text>
+          <Text style={styles.webFallbackSubtext}>
+            Location: {markerLocation.lat.toFixed(4)}, {markerLocation.lng.toFixed(4)}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <MapView
@@ -265,6 +296,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#64748b',
     fontWeight: '500',
+  },
+  webFallback: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 20,
+  },
+  webFallbackText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  webFallbackSubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
   },
 });
 

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
   TextInput,
+  StyleSheet,
   TouchableOpacity,
   Animated,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus } from 'lucide-react-native';
@@ -428,6 +429,9 @@ export default function BusinessAddressManualScreen() {
               pincode: pincode,
               stateName: selectedState?.name || '',
               stateCode: getGSTINStateCode(selectedState?.name || ''),
+              // Preserve manager and phone info for primary addresses
+              manager: addr.isPrimary ? (addr.manager || name) : addr.manager,
+              phone: addr.isPrimary ? (addr.phone || mobile) : addr.phone,
             }
           : addr
       );
@@ -446,6 +450,9 @@ export default function BusinessAddressManualScreen() {
         stateName: selectedState?.name || '',
         stateCode: selectedState?.code || '',
         isPrimary: (addressType || 'primary') === 'primary',
+        // Add manager and phone for primary addresses to show user info
+        manager: (addressType || 'primary') === 'primary' ? name : undefined,
+        phone: (addressType || 'primary') === 'primary' ? mobile : undefined,
       };
       
       console.log('🆕 Creating new address:', newAddress);
@@ -457,7 +464,6 @@ export default function BusinessAddressManualScreen() {
       
       // Save primary address to dataStore
       if ((addressType || 'primary') === 'primary') {
-        console.log('💾 Saving primary address to dataStore');
         dataStore.addAddress(newAddress);
       }
     }
@@ -544,7 +550,7 @@ export default function BusinessAddressManualScreen() {
               <View style={styles.formContainer}>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Name *</Text>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressName}
                     onChangeText={setAddressName}
@@ -559,7 +565,7 @@ export default function BusinessAddressManualScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressLine1}
                     onChangeText={setAddressLine1}
@@ -571,7 +577,7 @@ export default function BusinessAddressManualScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2</Text>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressLine2}
                     onChangeText={setAddressLine2}
@@ -592,7 +598,7 @@ export default function BusinessAddressManualScreen() {
                         <X size={16} color="#ef4444" />
                       </TouchableOpacity>
                     </View>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={line}
                       onChangeText={(text) => updateAdditionalLine(index, text)}
@@ -613,7 +619,7 @@ export default function BusinessAddressManualScreen() {
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={city}
                       onChangeText={setCity}

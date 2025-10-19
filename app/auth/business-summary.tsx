@@ -34,7 +34,9 @@ import {
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
+import { subscriptionStore } from '@/utils/subscriptionStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
+import TrialNotification from '@/components/TrialNotification';
 
 export default function BusinessSummaryScreen() {
   const { 
@@ -80,6 +82,7 @@ export default function BusinessSummaryScreen() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [showTrialNotification, setShowTrialNotification] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
 
@@ -216,9 +219,16 @@ export default function BusinessSummaryScreen() {
 
     dataStore.setSignupComplete(true);
 
+    // Create user account for login
+    const userAccount = dataStore.createUserAccount();
+    console.log('✅ User account created for login:', userAccount.mobile);
+
+    // Start the 30-day free trial
+    subscriptionStore.startTrial();
+
     setTimeout(() => {
-      router.push('/dashboard');
       setIsLoading(false);
+      setShowTrialNotification(true);
     }, 1000);
   };
 
@@ -893,6 +903,20 @@ export default function BusinessSummaryScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Trial Notification Modal */}
+      <TrialNotification
+        visible={showTrialNotification}
+        onClose={() => {
+          setShowTrialNotification(false);
+          router.push('/dashboard');
+        }}
+        onUpgrade={() => {
+          setShowTrialNotification(false);
+          router.push('/subscription');
+        }}
+        trialEndDate={subscriptionStore.getSubscription().trialEndDate!}
+      />
     </View>
   );
 }

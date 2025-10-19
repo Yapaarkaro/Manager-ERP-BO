@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
-  TextInput,
   StyleSheet,
   TouchableOpacity,
   SafeAreaView,
@@ -12,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
@@ -292,6 +292,9 @@ export default function BusinessDetailsScreen() {
               stateName: stateName,
               stateCode: getGSTINStateCode(stateName),
               isPrimary: true,
+              // Add manager and phone for primary addresses to show user info
+              manager: name,
+              phone: mobile,
             };
             
             console.log('🏢 Auto-creating primary address from GSTIN data:', primaryAddress);
@@ -351,22 +354,48 @@ export default function BusinessDetailsScreen() {
         }, 500);
       }
     } else {
-      // For PAN users, continue with normal flow (select address from map/search)
-      setTimeout(() => {
-        router.push({
-          pathname: '/auth/business-address',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType: businessType !== 'Others' ? businessType : customBusinessType,
-            customBusinessType: businessType === 'Others' ? customBusinessType : '',
-          }
-        });
-        setIsCompleting(false);
-      }, 500);
+      // For PAN users, check if primary address already exists
+      const existingAddresses = dataStore.getAddresses();
+      const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+      
+      if (hasPrimaryAddress) {
+        // Primary address exists, skip to address confirmation
+        setTimeout(() => {
+          router.push({
+            pathname: '/auth/address-confirmation',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+              mobile,
+              allAddresses: JSON.stringify(existingAddresses),
+            }
+          });
+          setIsCompleting(false);
+        }, 500);
+      } else {
+        // No primary address exists, continue with normal flow (select address from map/search)
+        setTimeout(() => {
+          router.push({
+            pathname: '/auth/business-address',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+              mobile, // Add mobile parameter for PAN users
+            }
+          });
+          setIsCompleting(false);
+        }, 500);
+      }
     }
   };
 
@@ -454,7 +483,7 @@ export default function BusinessDetailsScreen() {
             <Text style={styles.label}>Your Name *</Text>
             <View style={styles.inputContainer}>
               <User size={20} color={COLORS.gray} style={styles.inputIcon} />
-              <TextInput
+              <CapitalizedTextInput
                 style={styles.input}
                 placeholder="Enter your full name"
                 placeholderTextColor={COLORS.gray}
@@ -470,7 +499,7 @@ export default function BusinessDetailsScreen() {
             <Text style={styles.label}>Business Name *</Text>
             <View style={styles.inputContainer}>
               <Building2 size={20} color={COLORS.gray} style={styles.inputIcon} />
-              <TextInput
+              <CapitalizedTextInput
                 style={styles.input}
                 placeholder="Enter your business name"
                 placeholderTextColor={COLORS.gray}
@@ -488,7 +517,7 @@ export default function BusinessDetailsScreen() {
             </Text>
             {businessType === 'Others' ? (
               <View style={styles.inputContainer}>
-                <TextInput
+                <CapitalizedTextInput
                   style={styles.input}
                   placeholder="Enter your specific business type"
                   placeholderTextColor={COLORS.gray}

@@ -12,6 +12,7 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Warehouse, ChevronDown, Search, X, Plus, User, Phone, Package } from 'lucide-react-native';
@@ -406,7 +407,7 @@ export default function WarehouseDetailsScreen() {
                   <Text style={styles.label}>Warehouse Name *</Text>
                   <View style={styles.inputContainer}>
                     <Warehouse size={20} color="#64748b" style={styles.inputIcon} />
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={warehouseName}
                       onChangeText={setWarehouseName}
@@ -415,15 +416,12 @@ export default function WarehouseDetailsScreen() {
                       autoCapitalize="words"
                     />
                   </View>
-                  <Text style={styles.fieldHint}>
-                    Give a name to identify this warehouse
-                  </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Door Number / Building Name *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={doorNumber}
                       onChangeText={setDoorNumber}
@@ -432,15 +430,12 @@ export default function WarehouseDetailsScreen() {
                       autoCapitalize="words"
                     />
                   </View>
-                  <Text style={styles.fieldHint}>
-                    Enter the specific unit number, block, or building name
-                  </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine1}
                       onChangeText={setAddressLine1}
@@ -454,7 +449,7 @@ export default function WarehouseDetailsScreen() {
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2 *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine2}
                       onChangeText={setAddressLine2}
@@ -472,7 +467,7 @@ export default function WarehouseDetailsScreen() {
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
                     <View style={styles.inputContainer}>
-                      <TextInput
+                      <CapitalizedTextInput
                         style={styles.input}
                         value={city}
                         onChangeText={setCity}
@@ -530,7 +525,7 @@ export default function WarehouseDetailsScreen() {
                     <Text style={styles.contactLabel}>Warehouse Manager</Text>
                     <View style={[styles.inputContainer, styles.contactInputContainer]}>
                       <User size={20} color="#fbbf24" style={styles.inputIcon} />
-                      <TextInput
+                      <CapitalizedTextInput
                         style={[styles.input, styles.contactInput]}
                         value={managerName}
                         onChangeText={setManagerName}

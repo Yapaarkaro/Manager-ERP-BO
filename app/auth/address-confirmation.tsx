@@ -84,21 +84,31 @@ export default function AddressConfirmationScreen() {
       
       // Load addresses from dataStore first, then fallback to parameter
       const dataStoreAddresses = dataStore.getAddresses();
-      console.log('DataStore addresses:', dataStoreAddresses);
+      
+      // Try to parse addresses from parameters
+      let paramAddresses: Address[] = [];
+      try {
+        paramAddresses = JSON.parse(allAddresses as string);
+      } catch (error) {
+        // No addresses to parse from parameters or parse error
+      }
       
       if (dataStoreAddresses.length > 0) {
-        setAddresses(dataStoreAddresses);
-        console.log('Loaded addresses from dataStore:', dataStoreAddresses);
-      } else {
+        // Merge dataStore addresses with parameter addresses to ensure we have the latest info
+        const mergedAddresses = dataStoreAddresses.map(dataStoreAddr => {
+          const paramAddr = paramAddresses.find(addr => addr.id === dataStoreAddr.id);
+          if (paramAddr) {
+            // Use parameter address if it exists (it might have more recent data like mobile number)
+            return paramAddr;
+          }
+          return dataStoreAddr;
+        });
+        setAddresses(mergedAddresses);
+      } else if (paramAddresses.length > 0) {
         // Fallback to parsing addresses from the previous screen
-        try {
-          const parsedAddresses = JSON.parse(allAddresses as string);
-          setAddresses(parsedAddresses);
-          console.log('Loaded addresses from parameter:', parsedAddresses);
-        } catch (error) {
-          console.log('No addresses to parse or parse error');
-          setAddresses([]);
-        }
+        setAddresses(paramAddresses);
+      } else {
+        setAddresses([]);
       }
     }, [taxIdType, taxIdValue, addressType, allAddresses])
   );

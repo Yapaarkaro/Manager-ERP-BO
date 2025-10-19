@@ -114,30 +114,45 @@ export default function OTPScreen() {
     // Simulate API call
     setTimeout(async () => {
       if (otpCode === '123456') { // Demo OTP
-        // Check if user has existing signup progress
-        const existingProgress = await dataStore.getSignupProgressByMobile(mobile as string);
+        // First check if user has a completed account (returning user)
+        const userAccount = dataStore.getUserAccountByMobile(mobile as string);
         
-        if (existingProgress && existingProgress.taxIdValue && existingProgress.ownerName) {
-          console.log('✅ Found existing signup progress, resuming from business details');
-          // User has existing progress with tax ID already verified, skip to business details
-          router.replace({
-            pathname: '/auth/business-details',
-            params: {
-              type: existingProgress.taxIdType,
-              value: existingProgress.taxIdValue,
-              gstinData: '', // Will be populated if needed
-              panName: existingProgress.ownerName,
-              panDob: existingProgress.ownerDob || '',
-              mobile: mobile,
-            }
-          });
+        if (userAccount) {
+          console.log('✅ Found completed user account, logging in to dashboard');
+          console.log('Account ID:', userAccount.id);
+          console.log('Business Name:', userAccount.businessName);
+          
+          // Update last login time
+          dataStore.updateUserLastLogin(mobile as string);
+          
+          // Redirect to dashboard for returning user
+          router.replace('/dashboard');
         } else {
-          console.log('📝 No existing progress, proceeding with GSTIN/PAN verification');
-          // No existing progress, proceed with normal flow
-          router.replace({
-            pathname: '/auth/gstin-pan',
-            params: { mobile }
-          });
+          // Check if user has existing signup progress (incomplete signup)
+          const existingProgress = await dataStore.getSignupProgressByMobile(mobile as string);
+          
+          if (existingProgress && existingProgress.taxIdValue && existingProgress.ownerName) {
+            console.log('✅ Found existing signup progress, resuming from business details');
+            // User has existing progress with tax ID already verified, skip to business details
+            router.replace({
+              pathname: '/auth/business-details',
+              params: {
+                type: existingProgress.taxIdType,
+                value: existingProgress.taxIdValue,
+                gstinData: '', // Will be populated if needed
+                panName: existingProgress.ownerName,
+                panDob: existingProgress.ownerDob || '',
+                mobile: mobile,
+              }
+            });
+          } else {
+            console.log('📝 No existing progress, proceeding with GSTIN/PAN verification');
+            // No existing progress, proceed with normal flow
+            router.replace({
+              pathname: '/auth/gstin-pan',
+              params: { mobile }
+            });
+          }
         }
       } else {
         setOtp(['', '', '', '', '', '']);

@@ -12,6 +12,7 @@ import {
   ScrollView,
   Modal,
 } from 'react-native';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone, Building2, Package } from 'lucide-react-native';
@@ -406,8 +407,10 @@ export default function EditAddressSimpleScreen() {
         pincode: pincode,
         stateName: selectedState?.name || '',
         stateCode: getGSTINStateCode(selectedState?.name || ''),
-        manager: typeInfo.showContactFields ? managerName.trim() : undefined,
-        phone: typeInfo.showContactFields ? managerPhone.trim() : undefined,
+        // For primary addresses, preserve user info (name and mobile from signup)
+        // For branch/warehouse, use the manager fields if showContactFields is true
+        manager: addressType === 'primary' ? name : (typeInfo.showContactFields ? managerName.trim() : undefined),
+        phone: addressType === 'primary' ? mobile : (typeInfo.showContactFields ? managerPhone.trim() : undefined),
         isPrimary: addressType === 'primary',
         status: 'active' as const,
         updatedAt: new Date().toISOString(),
@@ -600,7 +603,7 @@ export default function EditAddressSimpleScreen() {
                    addressType === 'warehouse' ? 'Warehouse Name' : 'Address Name'} *
                 </Text>
                 <View style={styles.inputContainer}>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressName}
                     onChangeText={setAddressName}
@@ -615,7 +618,7 @@ export default function EditAddressSimpleScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Door Number / Building Name *</Text>
                 <View style={styles.inputContainer}>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={doorNumber}
                     onChangeText={setDoorNumber}
@@ -629,7 +632,7 @@ export default function EditAddressSimpleScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address Line 1 *</Text>
                 <View style={styles.inputContainer}>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressLine1}
                     onChangeText={setAddressLine1}
@@ -643,7 +646,7 @@ export default function EditAddressSimpleScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address Line 2 *</Text>
                 <View style={styles.inputContainer}>
-                  <TextInput
+                  <CapitalizedTextInput
                     style={styles.input}
                     value={addressLine2}
                     onChangeText={setAddressLine2}
@@ -658,7 +661,7 @@ export default function EditAddressSimpleScreen() {
                 <View style={[styles.inputGroup, styles.cityInput]}>
                   <Text style={styles.label}>City *</Text>
                   <View style={styles.inputContainer}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={city}
                       onChangeText={setCity}
@@ -713,7 +716,7 @@ export default function EditAddressSimpleScreen() {
                     </Text>
                     <View style={[styles.inputContainer, styles.contactInputContainer]}>
                       <User size={20} color="#fbbf24" style={styles.inputIcon} />
-                      <TextInput
+                      <CapitalizedTextInput
                         style={[styles.input, styles.contactInput]}
                         value={managerName}
                         onChangeText={setManagerName}

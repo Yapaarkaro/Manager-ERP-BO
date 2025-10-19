@@ -13,7 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, Edit3, Navigation, Search } from 'lucide-react-native';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
-import GoogleMapView from '@/components/GoogleMapView';
+import WebAddressSearch from '@/components/WebAddressSearch';
+import PlatformMapView from '@/components/PlatformMapView';
 import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
@@ -63,6 +64,7 @@ export default function BusinessAddressScreen() {
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [isMapLoading, setIsMapLoading] = useState(true);
   const [showSearchBar, setShowSearchBar] = useState(true);
+  const [isAddressFromSearch, setIsAddressFromSearch] = useState(false);
 
   // Get count for dynamic header
   const getAddressCount = () => {
@@ -105,8 +107,11 @@ export default function BusinessAddressScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       
       if (status === 'granted') {
+        // Use appropriate accuracy based on platform for better performance
         const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
+          accuracy: Platform.OS === 'android' ? Location.Accuracy.Balanced : Location.Accuracy.High,
+          maximumAge: 10000, // Use cached location if less than 10 seconds old
+          timeout: 15000, // 15 second timeout
         });
         
         const userCoords = {
@@ -116,6 +121,17 @@ export default function BusinessAddressScreen() {
         
         setUserLocation(userCoords);
       } else {
+        // Show better permission dialog for Android
+        if (Platform.OS === 'android') {
+          Alert.alert(
+            'Location Permission', 
+            'Please grant location permission to use this feature. You can enable it in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: () => Location.openAppSettingsAsync() }
+            ]
+          );
+        }
         const defaultLocation = { lat: 28.6139, lng: 77.2090 };
         setUserLocation(defaultLocation);
       }
@@ -123,6 +139,10 @@ export default function BusinessAddressScreen() {
       setIsGettingLocation(false);
     } catch (error) {
       console.error('Location error:', error);
+      const errorMessage = Platform.OS === 'android' 
+        ? 'Failed to get current location. Please check your GPS settings and try again.'
+        : 'Failed to get current location. Please try again.';
+      Alert.alert('Location Error', errorMessage);
       const defaultLocation = { lat: 28.6139, lng: 77.2090 };
       setUserLocation(defaultLocation);
       setIsGettingLocation(false);
@@ -131,6 +151,7 @@ export default function BusinessAddressScreen() {
 
   const handleMapClick = async (lat: number, lng: number) => {
     try {
+      setIsAddressFromSearch(false); // Reset flag when user clicks on map directly
       await handleMarkerDragEnd(lat, lng);
     } catch (error) {
       console.error('Map click error:', error);
@@ -139,6 +160,12 @@ export default function BusinessAddressScreen() {
 
   const handleMarkerDragEnd = async (lat: number, lng: number) => {
     try {
+      // Don't override addresses that were selected from search
+      if (isAddressFromSearch) {
+        console.log('📍 Skipping marker drag end - address was selected from search');
+        return;
+      }
+
       const results = await reverseGeocode(lat, lng);
       
       if (results && results.length > 0) {
@@ -242,6 +269,7 @@ export default function BusinessAddressScreen() {
       console.log('📍 Processed address:', processedAddress);
       
       setSelectedAddress(processedAddress);
+      setIsAddressFromSearch(true); // Mark that this address came from search
       setIsSearchExpanded(false); // Collapse search bar after selection
       
       // Log the coordinates for backend storage (not shown to user)
@@ -399,11 +427,13 @@ export default function BusinessAddressScreen() {
   const handleShowSearchAgain = () => {
     setIsSearchExpanded(true);
     setSelectedAddress(null);
+    setIsAddressFromSearch(false); // Reset flag when starting new search
   };
 
   const handleCollapsedSearchPress = () => {
     setIsSearchExpanded(true);
     setSelectedAddress(null);
+    setIsAddressFromSearch(false); // Reset flag when starting new search
   };
 
   return (
@@ -428,7 +458,7 @@ export default function BusinessAddressScreen() {
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
-          <GoogleMapView
+          <PlatformMapView
             initialLocation={userLocation || { lat: 28.6139, lng: 77.2090 }}
             selectedLocation={selectedAddress ? { lat: selectedAddress.lat!, lng: selectedAddress.lng! } : undefined}
             onMapClick={handleMapClick}
@@ -447,13 +477,21 @@ export default function BusinessAddressScreen() {
               ]}
             >
               <View style={styles.floatingSearchWrapper}>
-                <GooglePlacesSearch
-                  key={isSearchExpanded ? 'expanded' : 'collapsed'}
-                  placeholder="Search for your business address..."
-                  onAddressSelect={handleAddressSelect}
-                  hideAfterSelection={false}
-                  autoFocus={true}
-                />
+                {Platform.OS === 'web' ? (
+                  <WebAddressSearch
+                    key={isSearchExpanded ? 'expanded' : 'collapsed'}
+                    placeholder="Search for your business address..."
+                    onAddressSelect={handleAddressSelect}
+                  />
+                ) : (
+                  <GooglePlacesSearch
+                    key={isSearchExpanded ? 'expanded' : 'collapsed'}
+                    placeholder="Search for your business address..."
+                    onAddressSelect={handleAddressSelect}
+                    hideAfterSelection={false}
+                    autoFocus={true}
+                  />
+                )}
               </View>
             </Animated.View>
           ) : (
