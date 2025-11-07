@@ -67,6 +67,7 @@ export default function BusinessDetailsScreen() {
   const [showBusinessTypeModal, setShowBusinessTypeModal] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -213,6 +214,36 @@ export default function BusinessDetailsScreen() {
     setShowBusinessTypeModal(false);
     // Save progress after selecting business type
     setTimeout(() => saveProgressIfValid(), 100);
+  };
+
+  const handleNameFocus = () => {
+    setFocusedField('name');
+  };
+
+  const handleNameBlur = () => {
+    setFocusedField(null);
+    saveProgressIfValid();
+  };
+
+  const handleBusinessNameFocus = () => {
+    setFocusedField('businessName');
+  };
+
+  const handleBusinessNameBlur = () => {
+    setFocusedField(null);
+    saveProgressIfValid();
+  };
+
+  const handleCustomBusinessTypeFocus = () => {
+    setFocusedField('customBusinessType');
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  const handleCustomBusinessTypeBlur = () => {
+    setFocusedField(null);
+    saveProgressIfValid();
   };
 
   // Save signup progress only when form is valid (not on every keystroke)
@@ -459,6 +490,7 @@ export default function BusinessDetailsScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        ref={scrollViewRef}
       >
         <View style={styles.contentPadding}>
         <View style={styles.iconContainer}>
@@ -481,7 +513,12 @@ export default function BusinessDetailsScreen() {
         <View style={styles.formContainer}>
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Your Name *</Text>
-            <View style={styles.inputContainer}>
+            <View
+              style={[
+                styles.inputContainer,
+                focusedField === 'name' && styles.inputContainerFocused,
+              ]}
+            >
               <User size={20} color={COLORS.gray} style={styles.inputIcon} />
               <CapitalizedTextInput
                 style={styles.input}
@@ -489,7 +526,8 @@ export default function BusinessDetailsScreen() {
                 placeholderTextColor={COLORS.gray}
                 value={name}
                 onChangeText={setName}
-                onBlur={saveProgressIfValid}
+                onFocus={handleNameFocus}
+                onBlur={handleNameBlur}
                 autoCapitalize="words"
               />
             </View>
@@ -497,7 +535,12 @@ export default function BusinessDetailsScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Business Name *</Text>
-            <View style={styles.inputContainer}>
+            <View
+              style={[
+                styles.inputContainer,
+                focusedField === 'businessName' && styles.inputContainerFocused,
+              ]}
+            >
               <Building2 size={20} color={COLORS.gray} style={styles.inputIcon} />
               <CapitalizedTextInput
                 style={styles.input}
@@ -505,7 +548,8 @@ export default function BusinessDetailsScreen() {
                 placeholderTextColor={COLORS.gray}
                 value={businessName}
                 onChangeText={setBusinessName}
-                onBlur={saveProgressIfValid}
+                onFocus={handleBusinessNameFocus}
+                onBlur={handleBusinessNameBlur}
                 autoCapitalize="words"
               />
             </View>
@@ -516,36 +560,44 @@ export default function BusinessDetailsScreen() {
               {businessType === 'Others' ? 'Specify Business Type *' : 'Business Type *'}
             </Text>
             {businessType === 'Others' ? (
-              <View style={styles.inputContainer}>
+              <View
+                style={[
+                  styles.inputContainer,
+                  styles.customTypeContainer,
+                  focusedField === 'customBusinessType' && styles.inputContainerFocused,
+                ]}
+              >
                 <CapitalizedTextInput
-                  style={styles.input}
+                  style={[styles.input, styles.customTypeInput]}
                   placeholder="Enter your specific business type"
                   placeholderTextColor={COLORS.gray}
                   value={customBusinessType}
                   onChangeText={setCustomBusinessType}
-                  onBlur={saveProgressIfValid}
+                  onFocus={handleCustomBusinessTypeFocus}
+                  onBlur={handleCustomBusinessTypeBlur}
                   autoCapitalize="words"
-                  onFocus={() => {
-                    // Scroll to bottom when custom business type field is focused
-                    setTimeout(() => {
-                      scrollViewRef.current?.scrollToEnd({ animated: true });
-                    }, 100);
-                  }}
                 />
+                <TouchableOpacity
+                  style={styles.inlineChevronButton}
+                  onPress={() => setShowBusinessTypeModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <ChevronDown size={20} color={COLORS.gray} />
+                </TouchableOpacity>
               </View>
             ) : (
-            <TouchableOpacity
-              style={styles.selectButton}
-              onPress={() => setShowBusinessTypeModal(true)}
-            >
-              <Text style={[
-                styles.selectButtonText,
-                !businessType && styles.selectButtonPlaceholder,
-              ]}>
-                {businessType || 'Select business type'}
-              </Text>
-              <ChevronDown size={20} color={COLORS.gray} />
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.selectButton}
+                onPress={() => setShowBusinessTypeModal(true)}
+              >
+                <Text style={[
+                  styles.selectButtonText,
+                  !businessType && styles.selectButtonPlaceholder,
+                ]}>
+                  {businessType || 'Select business type'}
+                </Text>
+                <ChevronDown size={20} color={COLORS.gray} />
+              </TouchableOpacity>
             )}
           </View>
 
@@ -643,6 +695,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
   },
+  inputContainerFocused: {
+    borderColor: COLORS.primary,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  customTypeContainer: {
+    paddingRight: 0,
+  },
   inputIcon: {
     marginRight: 12,
   },
@@ -651,6 +714,25 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: COLORS.black,
+    borderWidth: 0,
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
+  },
+  customTypeInput: {
+    paddingRight: 12,
+  },
+  inlineChevronButton: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.lightGray,
   },
   selectButton: {
     flexDirection: 'row',
