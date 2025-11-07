@@ -10,6 +10,7 @@ import {
   Platform,
   Linking,
   TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { 
@@ -95,6 +96,14 @@ const Colors = {
   }
 };
 
+const DEFAULT_USER_PROFILE = {
+  name: 'John Doe',
+  position: 'Business Owner',
+  businessName: 'ABC Electronics',
+  gstin: '22AAAAA0000A1Z5',
+  profilePhoto: null as string | null,
+};
+
 // Platform-specific shadow/elevation utility for consistent appearance
 const getPlatformShadow = () => {
   if (Platform.OS === 'ios') {
@@ -120,13 +129,7 @@ const getPlatformShadow = () => {
 export default function SettingsScreen() {
   const { setStatusBarStyle } = useStatusBar();
   
-  const [userProfile, setUserProfile] = useState({
-    name: 'John Doe',
-    position: 'Business Owner',
-    businessName: 'ABC Electronics',
-    gstin: '22AAAAA0000A1Z5',
-    profilePhoto: null, // Set to actual photo URL when available
-  });
+  const [userProfile, setUserProfile] = useState({ ...DEFAULT_USER_PROFILE });
   const [subscription, setSubscription] = useState(subscriptionStore.getSubscription());
   const [trialProgress, setTrialProgress] = useState(subscriptionStore.getTrialProgress());
 
@@ -195,6 +198,8 @@ export default function SettingsScreen() {
   const [isAddingAddress, setIsAddingAddress] = useState(false);
   const [isAddingBankAccount, setIsAddingBankAccount] = useState(false);
   const [showFullBankDetails, setShowFullBankDetails] = useState<Set<string>>(new Set());
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'system'>('light');
   const [selectedLanguage, setSelectedLanguage] = useState<'english' | 'hindi' | 'tamil' | 'kannada' | 'telugu' | 'malayalam'>('english');
   const [showLanguageModal, setShowLanguageModal] = useState(false);
@@ -465,6 +470,61 @@ export default function SettingsScreen() {
       setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
       setAddressToDelete(null);
       setShowDeleteModal(false);
+    }
+  };
+
+  const handleDeleteAccountPress = () => {
+    setShowDeleteAccountModal(true);
+  };
+
+  const cancelDeleteAccount = () => {
+    if (isDeletingAccount) {
+      return;
+    }
+    setShowDeleteAccountModal(false);
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (isDeletingAccount) {
+      return;
+    }
+
+    try {
+      setIsDeletingAccount(true);
+      await dataStore.clearAllDataForTesting();
+      await subscriptionStore.clearSubscriptionData();
+
+      setAddresses([]);
+      setBankAccounts([]);
+      setExpandedCards(new Set());
+      setActiveBankAccounts(new Set());
+      setNotificationSettings({
+        pushNotifications: true,
+        emailNotifications: true,
+        weeklyReports: false,
+        lowStockAlerts: true,
+        overdueReceivables: true,
+        overduePayables: true,
+      });
+      setPaymentMethods({
+        cash: true,
+        upi: true,
+        card: true,
+        bankTransfer: true,
+        cheque: false,
+        digitalWallet: true,
+      });
+      setSubscription(subscriptionStore.getSubscription());
+      setTrialProgress(subscriptionStore.getTrialProgress());
+      setUserProfile({ ...DEFAULT_USER_PROFILE });
+
+      setShowDeleteAccountModal(false);
+      router.replace('/auth/mobile');
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      Alert.alert('Delete Account Failed', 'Something went wrong while deleting the account. Please try again.');
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
 
@@ -1388,6 +1448,28 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Danger Zone */}
+        <View style={[styles.section, styles.dangerZoneSection]}>
+          <View style={styles.dangerZoneHeader}>
+            <AlertTriangle size={20} color={Colors.error} />
+            <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+          </View>
+          <Text style={styles.dangerZoneDescription}>
+            Deleting your account will remove all business data and reset your setup. This action cannot be undone.
+          </Text>
+          <TouchableOpacity
+            style={[styles.dangerZoneButton, isDeletingAccount && styles.dangerZoneButtonDisabled]}
+            onPress={handleDeleteAccountPress}
+            activeOpacity={0.8}
+            disabled={isDeletingAccount}
+          >
+            <Trash2 size={18} color="#ffffff" />
+            <Text style={styles.dangerZoneButtonText}>
+              {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
       {/* Delete Confirmation Modal */}
@@ -1418,6 +1500,47 @@ export default function SettingsScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.deleteModalConfirmText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Account Modal */}
+      <Modal
+        visible={showDeleteAccountModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelDeleteAccount}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteAccountModal}>
+            <View style={styles.deleteAccountIconWrapper}>
+              <AlertTriangle size={32} color={Colors.error} />
+            </View>
+            <Text style={styles.deleteAccountTitle}>Delete Account &amp; Data</Text>
+            <Text style={styles.deleteAccountText}>
+              This will permanently remove all business data, addresses, bank accounts, and history linked to your account. You will need to complete the signup flow again.
+            </Text>
+
+            <View style={styles.deleteAccountActions}>
+              <TouchableOpacity
+                style={[styles.deleteAccountCancel, isDeletingAccount && styles.deleteAccountDisabled]}
+                onPress={cancelDeleteAccount}
+                activeOpacity={0.7}
+                disabled={isDeletingAccount}
+              >
+                <Text style={styles.deleteAccountCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteAccountConfirm, isDeletingAccount && styles.deleteAccountConfirmDisabled]}
+                onPress={handleConfirmDeleteAccount}
+                activeOpacity={0.7}
+                disabled={isDeletingAccount}
+              >
+                <Text style={styles.deleteAccountConfirmText}>
+                  {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2176,6 +2299,47 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     lineHeight: 18,
   },
+  dangerZoneSection: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  dangerZoneHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  dangerZoneTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.error,
+  },
+  dangerZoneDescription: {
+    fontSize: 14,
+    color: Colors.text,
+    lineHeight: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  dangerZoneButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    margin: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.error,
+  },
+  dangerZoneButtonDisabled: {
+    opacity: 0.6,
+  },
+  dangerZoneButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   paymentModal: {
     backgroundColor: Colors.background,
     borderRadius: 16,
@@ -2238,6 +2402,73 @@ const styles = StyleSheet.create({
   bankAccountModalDetails: {
     fontSize: 14,
     color: Colors.textLight,
+  },
+  deleteAccountModal: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 360,
+  },
+  deleteAccountIconWrapper: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  deleteAccountTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  deleteAccountText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  deleteAccountActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  deleteAccountCancel: {
+    flex: 1,
+    backgroundColor: Colors.grey[100],
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  deleteAccountCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  deleteAccountConfirm: {
+    flex: 1,
+    backgroundColor: Colors.error,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  deleteAccountConfirmText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  deleteAccountDisabled: {
+    opacity: 0.6,
+  },
+  deleteAccountConfirmDisabled: {
+    opacity: 0.7,
   },
   subscriptionsList: {
     padding: 16,

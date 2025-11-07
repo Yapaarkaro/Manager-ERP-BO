@@ -83,6 +83,8 @@ export default function BusinessAddressManualScreen() {
     prefilledState = '',
     prefilledPincode = '',
     prefilledFormatted = '',
+    prefilledContactName = '',
+    prefilledContactPhone = '',
   } = useLocalSearchParams();
   
   const [addressName, setAddressName] = useState(prefilledAddressName as string);
@@ -97,6 +99,11 @@ export default function BusinessAddressManualScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [contactPersonName, setContactPersonName] = useState(
+    (prefilledContactName as string) || (name as string) || ''
+  );
+  const initialContactPhone = ((prefilledContactPhone as string) || (mobile as string) || '').replace(/\D/g, '').slice(0, 10);
+  const [contactPhone, setContactPhone] = useState(initialContactPhone);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const glowAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
@@ -246,6 +253,54 @@ export default function BusinessAddressManualScreen() {
     }
   }, [prefilledStreet, prefilledArea, prefilledCity, prefilledPincode]);
 
+  useEffect(() => {
+    if ((addressType || 'primary') !== 'primary') {
+      return;
+    }
+
+    const nextContactName = (prefilledContactName as string) || (name as string) || '';
+    if (nextContactName && !contactPersonName) {
+      setContactPersonName(nextContactName);
+    }
+
+    const nextContactPhone = ((prefilledContactPhone as string) || (mobile as string) || '')
+      .replace(/\D/g, '')
+      .slice(0, 10);
+    if (nextContactPhone && !contactPhone) {
+      setContactPhone(nextContactPhone);
+    }
+  }, [prefilledContactName, prefilledContactPhone, name, mobile, addressType, contactPersonName, contactPhone]);
+
+  useEffect(() => {
+    if ((addressType || 'primary') !== 'primary' || editMode !== 'true' || !editAddressId) {
+      return;
+    }
+
+    try {
+      const existingAddressesParam = existingAddresses as string;
+      if (!existingAddressesParam || existingAddressesParam === '[]') {
+        return;
+      }
+      const parsed = JSON.parse(existingAddressesParam);
+      if (!Array.isArray(parsed)) {
+        return;
+      }
+
+      const currentAddress = parsed.find((addr: any) => addr.id === editAddressId);
+      if (currentAddress) {
+        if (currentAddress.manager) {
+          setContactPersonName(currentAddress.manager);
+        }
+        if (currentAddress.phone) {
+          const sanitizedPhone = String(currentAddress.phone).replace(/\D/g, '').slice(0, 10);
+          setContactPhone(sanitizedPhone);
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Error parsing existing addresses for contact info:', error);
+    }
+  }, [addressType, editMode, editAddressId, existingAddresses]);
+
   const filteredStates = indianStates.filter(state =>
     state.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
     state.code.includes(stateSearch)
@@ -386,6 +441,11 @@ export default function BusinessAddressManualScreen() {
     setPincode(cleaned);
   };
 
+  const handleContactPhoneChange = (text: string) => {
+    const cleaned = text.replace(/\D/g, '').slice(0, 10);
+    setContactPhone(cleaned);
+  };
+
   const isFormValid = () => {
     return (
       addressName.trim().length > 0 &&
@@ -399,6 +459,10 @@ export default function BusinessAddressManualScreen() {
 
   const handleSubmit = async () => {
     setIsLoading(true);
+    const trimmedContactName = contactPersonName.trim();
+    const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
+    const fallbackName = (name as string) || '';
+    const fallbackPhone = ((mobile as string) || '').replace(/\D/g, '').slice(0, 10);
     
     // Parse existing addresses properly
     let existingAddressList = [];
@@ -429,9 +493,13 @@ export default function BusinessAddressManualScreen() {
               pincode: pincode,
               stateName: selectedState?.name || '',
               stateCode: getGSTINStateCode(selectedState?.name || ''),
-              // Preserve manager and phone info for primary addresses
-              manager: addr.isPrimary ? (addr.manager || name) : addr.manager,
-              phone: addr.isPrimary ? (addr.phone || mobile) : addr.phone,
+              // Update manager and phone info for primary addresses
+              manager: addr.isPrimary 
+                ? (trimmedContactName || addr.manager || fallbackName)
+                : addr.manager,
+              phone: addr.isPrimary
+                ? ((sanitizedContactPhone || addr.phone || fallbackPhone) || undefined)
+                : addr.phone,
             }
           : addr
       );
@@ -451,8 +519,12 @@ export default function BusinessAddressManualScreen() {
         stateCode: selectedState?.code || '',
         isPrimary: (addressType || 'primary') === 'primary',
         // Add manager and phone for primary addresses to show user info
-        manager: (addressType || 'primary') === 'primary' ? name : undefined,
-        phone: (addressType || 'primary') === 'primary' ? mobile : undefined,
+        manager: (addressType || 'primary') === 'primary'
+          ? (trimmedContactName || fallbackName)
+          : undefined,
+        phone: (addressType || 'primary') === 'primary'
+          ? ((sanitizedContactPhone || fallbackPhone) || undefined)
+          : undefined,
       };
       
       console.log('🆕 Creating new address:', newAddress);
@@ -673,6 +745,40 @@ export default function BusinessAddressManualScreen() {
                     />
                   </TouchableOpacity>
                 </View>
+
+                {(addressType === 'primary' || !addressType) && (
+                  <View style={styles.contactSection}>
+                    <Text style={styles.sectionHeading}>Contact Person Details</Text>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Contact Person Name</Text>
+                      <CapitalizedTextInput
+                        style={styles.input}
+                        value={contactPersonName}
+                        onChangeText={setContactPersonName}
+                        placeholder="Person responsible at this location"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                      />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.label}>Contact Phone Number</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={contactPhone}
+                        onChangeText={handleContactPhoneChange}
+                        placeholder="10-digit mobile number"
+                        placeholderTextColor="#999999"
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                      />
+                      <Text style={styles.fieldHint}>
+                        We’ll reach out on this number for deliveries and support updates.
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity
@@ -886,8 +992,22 @@ const styles = StyleSheet.create({
   formContainer: {
     marginBottom: 32,
   },
+  contactSection: {
+    marginTop: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+  },
   inputGroup: {
     marginBottom: 20,
+  },
+  sectionHeading: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 12,
   },
   label: {
     fontSize: 16,

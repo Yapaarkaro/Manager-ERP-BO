@@ -65,6 +65,9 @@ export default function BusinessAddressScreen() {
   const [isMapLoading, setIsMapLoading] = useState(true);
   const [showSearchBar, setShowSearchBar] = useState(true);
   const [isAddressFromSearch, setIsAddressFromSearch] = useState(false);
+  const resolvedName = Array.isArray(name) ? name[0] : name;
+  const resolvedMobile = Array.isArray(mobile) ? mobile[0] : mobile;
+  const resolvedMobileDigits = resolvedMobile ? resolvedMobile.replace(/\D/g, '').slice(0, 10) : '';
 
   // Get count for dynamic header
   const getAddressCount = () => {
@@ -349,78 +352,96 @@ export default function BusinessAddressScreen() {
                       '/auth/business-address-manual';
     
     // Use replace to prevent going back to map screen after confirming address
+    const params: Record<string, any> = {
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      mobile,
+      addressType: addressType,
+      existingAddresses: existingAddresses,
+      editMode: 'false',
+      editAddressId: '',
+      prefilledAddressName: businessName || '',
+      prefilledDoorNumber: '',
+      prefilledStreet: selectedAddress.street,
+      prefilledArea: selectedAddress.area,
+      prefilledCity: selectedAddress.city,
+      prefilledState: selectedAddress.state,
+      prefilledPincode: selectedAddress.pincode,
+      prefilledFormatted: selectedAddress.formatted_address,
+      // Pass through business summary params
+      fromSummary,
+      allAddresses: existingAddresses,
+      allBankAccounts,
+      initialCashBalance,
+      invoicePrefix,
+      invoicePattern,
+      startingInvoiceNumber,
+      fiscalYear,
+    };
+
+    if (targetPath === '/auth/business-address-manual') {
+      params.prefilledContactName = resolvedName || '';
+      params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
+    }
+
     debouncedNavigate({
       pathname: targetPath,
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        mobile,
-        addressType: addressType,
-        existingAddresses: existingAddresses,
-        editMode: 'false',
-        editAddressId: '',
-        prefilledAddressName: businessName || '',
-        prefilledDoorNumber: '',
-        prefilledStreet: selectedAddress.street,
-        prefilledArea: selectedAddress.area,
-        prefilledCity: selectedAddress.city,
-        prefilledState: selectedAddress.state,
-        prefilledPincode: selectedAddress.pincode,
-        prefilledFormatted: selectedAddress.formatted_address,
-        // Pass through business summary params
-        fromSummary,
-        allAddresses: existingAddresses,
-        allBankAccounts,
-        initialCashBalance,
-        invoicePrefix,
-        invoicePattern,
-        startingInvoiceNumber,
-        fiscalYear,
-      }
+      params,
     }, 'replace'); // Use replace to prevent going back to map screen
   };
 
   const handleManualEntry = () => {
-    // Navigate to manual address entry without prefilled data
+    // Navigate to the same manual details screen used after selecting an address
+    const targetPath = addressType === 'branch' ? '/locations/branch-details' :
+                      addressType === 'warehouse' ? '/locations/warehouse-details' :
+                      '/auth/business-address-manual';
+
     // Use replace to prevent going back to map screen
+    const params: Record<string, any> = {
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      mobile,
+      addressType: addressType,
+      existingAddresses: existingAddresses,
+      editMode: 'false',
+      editAddressId: '',
+      prefilledAddressName: businessName || '',
+      prefilledDoorNumber: '',
+      prefilledStreet: '',
+      prefilledArea: '',
+      prefilledCity: '',
+      prefilledState: '',
+      prefilledPincode: '',
+      prefilledFormatted: '',
+      // Pass through business summary params
+      fromSummary,
+      allAddresses: existingAddresses,
+      allBankAccounts,
+      initialCashBalance,
+      invoicePrefix,
+      invoicePattern,
+      startingInvoiceNumber,
+      fiscalYear,
+    };
+
+    if (targetPath === '/auth/business-address-manual') {
+      params.prefilledContactName = resolvedName || '';
+      params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
+    }
+
     debouncedNavigate({
-      pathname: '/auth/business-address-manual',
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        mobile,
-        addressType: addressType,
-        existingAddresses: existingAddresses,
-        editMode: 'false',
-        editAddressId: '',
-        prefilledAddressName: businessName || '',
-        prefilledDoorNumber: '',
-        prefilledStreet: '',
-        prefilledArea: '',
-        prefilledCity: '',
-        prefilledState: '',
-        prefilledPincode: '',
-        prefilledFormatted: '',
-        // Pass through business summary params
-        fromSummary,
-        allAddresses: existingAddresses,
-        allBankAccounts,
-        initialCashBalance,
-        invoicePrefix,
-        invoicePattern,
-        startingInvoiceNumber,
-        fiscalYear,
-      }
+      pathname: targetPath,
+      params,
     }, 'replace'); // Use replace to prevent going back to map screen
   };
 
