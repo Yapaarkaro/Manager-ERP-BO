@@ -87,6 +87,7 @@ const WebMapView: React.FC<WebMapViewProps> = ({
         markerRef.current.setPosition(newLocation);
       }
       mapInstanceRef.current.setCenter(newLocation);
+      mapInstanceRef.current.setZoom(17); // Set zoom to 17 for better detail
       setMarkerLocation(selectedLocation);
     }
   }, [selectedLocation]);
@@ -105,13 +106,13 @@ const WebMapView: React.FC<WebMapViewProps> = ({
     try {
       const mapOptions: google.maps.MapOptions = {
         center: { lat: markerLocation.lat, lng: markerLocation.lng },
-        zoom: 15,
+        zoom: 17, // Increased from 15 to 17 for better detail
         mapTypeId: google.maps.MapTypeId.ROADMAP,
-        disableDefaultUI: false,
-        zoomControl: true,
+        disableDefaultUI: true, // Disable all default controls
+        zoomControl: false,
         streetViewControl: false,
         fullscreenControl: false,
-        mapTypeControl: true,
+        mapTypeControl: false,
         gestureHandling: 'greedy',
         backgroundColor: '#f0f0f0',
       };

@@ -586,18 +586,18 @@ export default function BusinessDetailsScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.selectButton}
-                onPress={() => setShowBusinessTypeModal(true)}
-              >
-                <Text style={[
-                  styles.selectButtonText,
-                  !businessType && styles.selectButtonPlaceholder,
-                ]}>
-                  {businessType || 'Select business type'}
-                </Text>
-                <ChevronDown size={20} color={COLORS.gray} />
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.selectButton}
+              onPress={() => setShowBusinessTypeModal(true)}
+            >
+              <Text style={[
+                styles.selectButtonText,
+                !businessType && styles.selectButtonPlaceholder,
+              ]}>
+                {businessType || 'Select business type'}
+              </Text>
+              <ChevronDown size={20} color={COLORS.gray} />
+            </TouchableOpacity>
             )}
           </View>
 

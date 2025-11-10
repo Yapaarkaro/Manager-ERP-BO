@@ -353,41 +353,41 @@ export default function BusinessAddressScreen() {
     
     // Use replace to prevent going back to map screen after confirming address
     const params: Record<string, any> = {
-      type,
-      value,
-      gstinData,
-      name,
-      businessName,
-      businessType,
-      customBusinessType,
-      mobile,
-      addressType: addressType,
-      existingAddresses: existingAddresses,
-      editMode: 'false',
-      editAddressId: '',
-      prefilledAddressName: businessName || '',
-      prefilledDoorNumber: '',
-      prefilledStreet: selectedAddress.street,
-      prefilledArea: selectedAddress.area,
-      prefilledCity: selectedAddress.city,
-      prefilledState: selectedAddress.state,
-      prefilledPincode: selectedAddress.pincode,
-      prefilledFormatted: selectedAddress.formatted_address,
-      // Pass through business summary params
-      fromSummary,
-      allAddresses: existingAddresses,
-      allBankAccounts,
-      initialCashBalance,
-      invoicePrefix,
-      invoicePattern,
-      startingInvoiceNumber,
-      fiscalYear,
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        mobile,
+        addressType: addressType,
+        existingAddresses: existingAddresses,
+        editMode: 'false',
+        editAddressId: '',
+        prefilledAddressName: businessName || '',
+        prefilledDoorNumber: '',
+        prefilledStreet: selectedAddress.street,
+        prefilledArea: selectedAddress.area,
+        prefilledCity: selectedAddress.city,
+        prefilledState: selectedAddress.state,
+        prefilledPincode: selectedAddress.pincode,
+        prefilledFormatted: selectedAddress.formatted_address,
+        // Pass through business summary params
+        fromSummary,
+        allAddresses: existingAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
     };
 
     if (targetPath === '/auth/business-address-manual') {
       params.prefilledContactName = resolvedName || '';
       params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
-    }
+      }
 
     debouncedNavigate({
       pathname: targetPath,
@@ -403,41 +403,41 @@ export default function BusinessAddressScreen() {
 
     // Use replace to prevent going back to map screen
     const params: Record<string, any> = {
-      type,
-      value,
-      gstinData,
-      name,
-      businessName,
-      businessType,
-      customBusinessType,
-      mobile,
-      addressType: addressType,
-      existingAddresses: existingAddresses,
-      editMode: 'false',
-      editAddressId: '',
-      prefilledAddressName: businessName || '',
-      prefilledDoorNumber: '',
-      prefilledStreet: '',
-      prefilledArea: '',
-      prefilledCity: '',
-      prefilledState: '',
-      prefilledPincode: '',
-      prefilledFormatted: '',
-      // Pass through business summary params
-      fromSummary,
-      allAddresses: existingAddresses,
-      allBankAccounts,
-      initialCashBalance,
-      invoicePrefix,
-      invoicePattern,
-      startingInvoiceNumber,
-      fiscalYear,
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        mobile,
+        addressType: addressType,
+        existingAddresses: existingAddresses,
+        editMode: 'false',
+        editAddressId: '',
+        prefilledAddressName: businessName || '',
+        prefilledDoorNumber: '',
+        prefilledStreet: '',
+        prefilledArea: '',
+        prefilledCity: '',
+        prefilledState: '',
+        prefilledPincode: '',
+        prefilledFormatted: '',
+        // Pass through business summary params
+        fromSummary,
+        allAddresses: existingAddresses,
+        allBankAccounts,
+        initialCashBalance,
+        invoicePrefix,
+        invoicePattern,
+        startingInvoiceNumber,
+        fiscalYear,
     };
 
     if (targetPath === '/auth/business-address-manual') {
       params.prefilledContactName = resolvedName || '';
       params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
-    }
+      }
 
     debouncedNavigate({
       pathname: targetPath,
