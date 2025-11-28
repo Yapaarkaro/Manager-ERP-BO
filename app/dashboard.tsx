@@ -235,10 +235,10 @@ export default function DashboardScreen() {
   const renderGreeting = () => (
     <View style={styles.greetingSection}>
       <Text style={styles.greeting}>
-        {getGreeting()}, {userName}
+        {getGreeting()}, <Text style={styles.greetingName}>{userName}</Text>
       </Text>
       <Text style={styles.greetingSubtext}>
-        Welcome to {businessName}
+        Welcome to <Text style={styles.greetingBusinessName}>{businessName}</Text>
       </Text>
     </View>
   );
@@ -551,7 +551,10 @@ export default function DashboardScreen() {
   // Render business overview section
   const renderBusinessOverview = () => (
     <View style={[styles.section, styles.lastSection]}>
-      <Text style={styles.sectionTitle}>Business Overview</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Business Overview</Text>
+        <Clock size={20} color={Colors.text} />
+      </View>
 
       <TouchableWithoutFeedback onPress={handleSalesOverviewPress} disabled={isNavigating}>
         <View style={styles.salesOverview}>
@@ -694,7 +697,10 @@ export default function DashboardScreen() {
           renderItem={renderSection}
           keyExtractor={(item) => item.id}
           style={styles.flatList}
-          contentContainerStyle={[styles.flatListContent, webContainerStyles.webScrollContent]}
+          contentContainerStyle={[
+            styles.flatListContent,
+            Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
+          ]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
         bounces={true}
@@ -752,7 +758,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   flatListContent: {
-    paddingBottom: 100,
+    paddingBottom: Platform.select({
+      web: 100,
+      default: 20, // Reduced bottom padding to remove unused space
+    }),
+    // No horizontal padding - sections handle their own padding/margins
+    paddingHorizontal: 0,
   },
   header: {
     backgroundColor: Colors.background,
@@ -764,12 +775,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   greetingSection: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
-    backgroundColor: Colors.grey[100],
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 24,
+      default: 20, // Unified top padding
+    }),
+    paddingBottom: Platform.select({
+      web: 20,
+      default: 16, // Reduced bottom padding for seamless flow
+    }),
+    backgroundColor: Colors.background, // Match main background for unified look
+    // Removed border to make it feel integrated
   },
   menuButton: {
     width: 40,
@@ -788,23 +807,55 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 4,
   },
+  greetingName: {
+    color: '#3F66AC', // Brand blue for owner name
+    fontWeight: '700',
+  },
   greetingSubtext: {
     fontSize: 16,
     color: Colors.textLight,
   },
+  greetingBusinessName: {
+    color: '#F5C754', // Brand yellow for business name
+    fontWeight: '600',
+  },
   kpiContainer: {
-    padding: 16,
-    gap: 16,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 8,
+      default: 4, // Minimal top padding for seamless flow from greeting
+    }),
+    paddingBottom: Platform.select({
+      web: 16,
+      default: 12, // Consistent bottom padding
+    }),
+    gap: Platform.select({
+      web: 16,
+      default: 0, // Remove gap on mobile, use marginBottom on cards instead
+    }),
     backgroundColor: Colors.background,
   },
   kpiCard: {
-    padding: 16,
+    padding: Platform.select({
+      web: 16,
+      default: 14, // Slightly reduced padding on mobile
+    }),
     borderRadius: 12,
     backgroundColor: Colors.background,
-    borderWidth: 1,
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1.5, // Slightly thicker border on mobile for better definition
+    }),
     borderColor: Colors.grey[200],
     borderLeftWidth: 4,
     ...getShadowStyle(2),
+    marginBottom: Platform.select({
+      web: 0,
+      default: 12, // Add spacing between KPI cards on mobile
+    }),
   },
   kpiHeader: {
     flexDirection: 'row',
@@ -847,27 +898,95 @@ const styles = StyleSheet.create({
     color: Colors.warning,
   },
   section: {
-    marginTop: 8,
-    padding: 16,
+    marginHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match all-invoices page padding
+    }),
+    marginTop: Platform.select({
+      web: 16,
+      default: 20, // Increased top margin for better separation
+    }),
+    padding: Platform.select({
+      web: 16,
+      default: 12, // Reduced for native mobile look
+    }),
     backgroundColor: Colors.background,
-    borderTopWidth: 8,
-    borderTopColor: Colors.grey[100],
+    ...Platform.select({
+      web: {
+        borderTopWidth: 8,
+        borderTopColor: Colors.grey[100],
+      },
+      default: {
+        // Remove grey top border on mobile for cleaner look
+        borderTopWidth: 0,
+      },
+    }),
   },
   lastSection: {
-    paddingBottom: 32,
+    paddingBottom: Platform.select({
+      web: 32,
+      default: 16, // Reduced bottom padding to remove unused space
+    }),
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
+    marginBottom: Platform.select({
+      web: 16,
+      default: 14, // Consistent margin for better separation from content
+    }),
+    marginTop: Platform.select({
+      web: 0,
+      default: 4, // Add top margin for visual separation from previous section
+    }),
+    paddingVertical: Platform.select({
+      web: 12,
+      default: 10, // Vertical padding for better definition
+    }),
+    paddingHorizontal: Platform.select({
+      web: 0,
+      default: 16, // Match all-invoices page padding
+    }),
+    backgroundColor: Platform.select({
+      web: 'transparent',
+      default: '#F8F9FA', // Slightly darker background for better distinction
+    }),
+    borderRadius: Platform.select({
+      web: 0,
+      default: 8, // Rounded corners on mobile
+    }),
+    borderLeftWidth: Platform.select({
+      web: 0,
+      default: 3, // Left border accent on mobile for clear distinction
+    }),
+    borderLeftColor: Platform.select({
+      web: 'transparent',
+      default: '#3F66AC', // Brand blue accent border
+    }),
+    ...Platform.select({
+      web: {
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.grey[200],
+      },
+      default: {
+        // Remove bottom border on mobile, use left accent instead
+        borderBottomWidth: 0,
+      },
+    }),
   },
   sectionTitle: {
     ...getFontStyles().header,
     color: Colors.text,
+    fontSize: Platform.select({
+      web: 18,
+      default: 17, // Slightly larger for better visibility
+    }),
+    fontWeight: '700',
+    letterSpacing: Platform.select({
+      web: 0,
+      default: -0.2, // Slightly tighter letter spacing on mobile
+    }),
   },
   notificationList: {
     gap: 12,

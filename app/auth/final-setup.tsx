@@ -64,6 +64,7 @@ export default function FinalSetupScreen() {
   );
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
+  const cashBalanceInputRef = useRef<TextInput>(null);
   const colors = useThemeColors();
   const debouncedNavigate = useDebounceNavigation();
 
@@ -126,12 +127,13 @@ export default function FinalSetupScreen() {
 
   const handleInitialCashBalanceChange = (text: string) => {
     // Remove all non-numeric characters except decimal point
-    const cleaned = text.replace(/[^0-9.]/g, '');
+    let cleaned = text.replace(/[^0-9.]/g, '');
     
     // Ensure only one decimal point
     const parts = cleaned.split('.');
     if (parts.length > 2) {
-      return;
+      // If more than one decimal point, keep only the first part and first decimal
+      cleaned = parts[0] + '.' + parts.slice(1).join('');
     }
     
     // Limit decimal places to 2
@@ -141,6 +143,17 @@ export default function FinalSetupScreen() {
     
     // Store the raw value for calculations
     setInitialCashBalance(cleaned);
+    
+    // Move cursor to end after formatting
+    setTimeout(() => {
+      if (cashBalanceInputRef.current) {
+        const formatted = formatIndianNumber(cleaned || '0.00');
+        const length = formatted.length || 4; // Default to "0.00" length if empty
+        cashBalanceInputRef.current.setNativeProps({
+          selection: { start: length, end: length }
+        });
+      }
+    }, 50);
   };
 
   const formatBalance = (balance: number) => {
@@ -202,7 +215,7 @@ export default function FinalSetupScreen() {
         }),
       },
     ],
-    opacity: slideAnimation,
+    // Removed opacity animation to prevent grey background flash
   };
 
   const webContainerStyles = getWebContainerStyles();
@@ -210,10 +223,12 @@ export default function FinalSetupScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
         >
           {/* Back Button */}
           <TouchableOpacity
@@ -245,7 +260,11 @@ export default function FinalSetupScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.scrollView} 
+            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            showsVerticalScrollIndicator={false}
+          >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -267,6 +286,7 @@ export default function FinalSetupScreen() {
                   <Banknote size={20} color="#64748b" style={styles.inputIcon} />
                   <Text style={styles.currencySymbol}>₹</Text>
                   <TextInput
+                    ref={cashBalanceInputRef}
                     style={[
                       styles.input,
                       Platform.select({
@@ -282,6 +302,18 @@ export default function FinalSetupScreen() {
                     placeholder="0.00"
                     placeholderTextColor="#999999"
                     keyboardType="decimal-pad"
+                    onFocus={() => {
+                      // Move cursor to end when focused
+                      setTimeout(() => {
+                        if (cashBalanceInputRef.current) {
+                          const formatted = formatIndianNumber(initialCashBalance || '0.00');
+                          const length = formatted.length || 4; // Default to "0.00" length if empty
+                          cashBalanceInputRef.current.setNativeProps({
+                            selection: { start: length, end: length }
+                          });
+                        }
+                      }, 150);
+                    }}
                   />
                 </View>
                 <Text style={styles.fieldHint}>
@@ -372,13 +404,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    paddingHorizontal: 32,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 32,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 60,
+      default: 40,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: Platform.select({
+      web: 48,
+      default: 24,
+    }),
   },
   iconWrapper: {
     width: 100,
@@ -411,29 +457,62 @@ const styles = StyleSheet.create({
   },
   cashBalanceContainer: {
     backgroundColor: '#f0fdf4',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#10b981',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20, // Reduced spacing on mobile
+    }),
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: Platform.select({
+      web: 18,
+      default: 16, // Reduced for more native feel
+    }),
     fontWeight: '700',
     color: '#047857',
-    marginBottom: 16,
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12, // Reduced spacing on mobile
+    }),
     textAlign: 'center',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#10b981',
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 4,
-    marginBottom: 8,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Smaller radius for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 20,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingVertical: Platform.select({
+      web: 4,
+      default: 2, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
   inputIcon: {
     marginRight: 12,
@@ -446,12 +525,22 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 14,
-    fontSize: 18,
+    paddingVertical: Platform.select({
+      web: 14,
+      default: 12, // Reduced padding for more compact feel
+    }),
+    fontSize: Platform.select({
+      web: 18,
+      default: 16, // Reduced for truncated text on mobile
+    }),
     color: '#047857',
     fontWeight: '600',
     textAlign: 'right',
-    
+    ...Platform.select({
+      default: {
+        minHeight: 44, // Standard native input height
+      },
+    }),
   },
   fieldHint: {
     fontSize: 12,
@@ -480,19 +569,43 @@ const styles = StyleSheet.create({
   },
   invoiceContainer: {
     backgroundColor: '#f8fafc',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#3F66AC',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20, // Reduced spacing on mobile
+    }),
   },
   fiscalContainer: {
     backgroundColor: '#f8fafc',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#10b981',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20, // Reduced spacing on mobile
+    }),
   },
   completeButton: {
     borderRadius: 16,

@@ -144,8 +144,27 @@ export default function BranchDetailsScreen() {
       console.log('⚠️ prefilledArea is undefined or null:', prefilledArea);
     }
     if (prefilledCity && prefilledCity !== '') {
-      console.log('✅ Setting city to:', prefilledCity);
-      setCity(prefilledCity as string);
+      // Clean up city name on mobile - remove administrative suffixes like "Division", "District", etc.
+      let cleanedCity = prefilledCity as string;
+      if (Platform.OS !== 'web') {
+        // Remove common administrative suffixes
+        cleanedCity = (prefilledCity as string)
+          .replace(/\s+Division\s*$/i, '')
+          .replace(/\s+District\s*$/i, '')
+          .replace(/\s+Tehsil\s*$/i, '')
+          .replace(/\s+Tahsil\s*$/i, '')
+          .replace(/\s+Taluka\s*$/i, '')
+          .trim();
+        
+        // Special case: "Bangalore Division" -> "Bengaluru"
+        if (cleanedCity.toLowerCase().includes('bangalore')) {
+          cleanedCity = 'Bengaluru';
+        }
+        
+        console.log('🧹 Cleaned city name:', prefilledCity, '->', cleanedCity);
+      }
+      console.log('✅ Setting city to:', cleanedCity);
+      setCity(cleanedCity);
     }
     if (prefilledPincode && prefilledPincode !== '') {
       console.log('✅ Setting pincode to:', prefilledPincode);
@@ -389,7 +408,7 @@ export default function BranchDetailsScreen() {
         }),
       },
     ],
-    opacity: slideAnimation,
+    // Removed opacity animation to prevent grey background flash
   };
 
   const webContainerStyles = getWebContainerStyles();
@@ -397,10 +416,12 @@ export default function BranchDetailsScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
         >
           <TouchableOpacity
             style={styles.backButton}
@@ -410,7 +431,15 @@ export default function BranchDetailsScreen() {
             <ArrowLeft size={24} color="#10b981" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.scrollView} 
+            contentContainerStyle={Platform.select({
+              web: webContainerStyles.webScrollContent,
+              default: {} // Let content style handle padding
+            })} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -475,6 +504,7 @@ export default function BranchDetailsScreen() {
                       placeholder="Street name, area, landmark"
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      editable={true}
                     />
                   </View>
                 </View>
@@ -489,12 +519,53 @@ export default function BranchDetailsScreen() {
                       placeholder="Additional address information"
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      editable={true}
                     />
                   </View>
                 </View>
 
+                {additionalLines.map((line, index) => (
+                  <View key={index} style={styles.inputGroup}>
+                    <View style={styles.additionalLineHeader}>
+                      <Text style={styles.label}>Address Line {index + 3}</Text>
+                      <TouchableOpacity
+                        style={styles.removeLineButton}
+                        onPress={() => removeAdditionalLine(index)}
+                        activeOpacity={0.7}
+                      >
+                        <X size={Platform.select({
+                          web: 16,
+                          default: 20, // Larger icon on mobile
+                        })} color="#ef4444" />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.inputContainer}>
+                      <CapitalizedTextInput
+                        style={styles.input}
+                        value={line}
+                        onChangeText={(text) => updateAdditionalLine(index, text)}
+                        placeholder="Additional address line"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                        editable={true}
+                      />
+                    </View>
+                  </View>
+                ))}
 
-
+                {additionalLines.length < 3 && (
+                  <TouchableOpacity 
+                    style={styles.addLineButton} 
+                    onPress={addAddressLine}
+                    activeOpacity={0.7}
+                  >
+                    <Plus size={Platform.select({
+                      web: 16,
+                      default: 14, // Smaller icon for cleaner look
+                    })} color="#3f66ac" />
+                    <Text style={styles.addLineText}>Add Address Line</Text>
+                  </TouchableOpacity>
+                )}
 
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
@@ -516,6 +587,7 @@ export default function BranchDetailsScreen() {
                         placeholder="City name"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
+                        editable={true}
                       />
                     </View>
                   </View>
@@ -548,13 +620,8 @@ export default function BranchDetailsScreen() {
                         styles.dropdownText,
                         { color: selectedState ? '#1a1a1a' : '#999999' }
                       ]}>
-                        {selectedState ? selectedState.name : 'Select state'}
+                        {selectedState ? `${selectedState.name} (${selectedState.code})` : 'Select state'}
                       </Text>
-                      {selectedState && (
-                        <Text style={styles.stateCodeText}>
-                          ({selectedState.code})
-                        </Text>
-                      )}
                     </View>
                     <ChevronDown size={20} color="#666666" />
                   </TouchableOpacity>
@@ -928,20 +995,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    paddingHorizontal: 32,
-    paddingTop: 120,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 32,
+      default: 8, // Reduced for more native feel on mobile
+    }),
+    paddingTop: Platform.select({
+      web: 120,
+      default: 80,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: Platform.select({
+      web: 48,
+      default: 24,
+    }),
   },
   iconWrapper: {
     width: 100,
     height: 100,
     backgroundColor: '#dcfce7',
     borderRadius: 50,
-    borderWidth: 6,
+    borderWidth: Platform.select({
+      web: 6,
+      default: 3,
+    }),
     borderColor: '#10b981',
     justifyContent: 'center',
     alignItems: 'center',
@@ -1007,27 +1091,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Slightly smaller radius for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 12, // Reduced padding for more native feel
+    }),
+    paddingVertical: Platform.select({
+      web: 4,
+      default: 2, // Reduced padding for more compact feel
+    }),
     ...Platform.select({
       web: {
         transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
       },
+      default: {
+        minHeight: 50, // Consistent height for all input containers on mobile
+      },
     }),
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: Platform.select({
+      web: 12,
+      default: 10, // Reduced spacing on mobile
+    }),
+    // Ensure icon is vertically centered
+    alignSelf: 'center',
   },
   input: {
     flex: 1,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingVertical: Platform.select({
+      web: 14,
+      default: 12, // Reduced padding for more compact feel
+    }),
+    fontSize: Platform.select({
+      web: 16,
+      default: 15, // Slightly smaller for more native feel
+    }),
     color: '#1a1a1a',
     fontWeight: '500',
-    
+    ...Platform.select({
+      default: {
+        minHeight: 44, // Standard native input height
+      },
+    }),
   },
   additionalLineHeader: {
     flexDirection: 'row',
@@ -1036,24 +1150,81 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   removeLineButton: {
-    padding: 4,
+    padding: Platform.select({
+      web: 4,
+      default: 8, // Larger touch target on mobile
+    }),
+    minWidth: Platform.select({
+      web: 'auto',
+      default: 40, // Ensure minimum touch target
+    }),
+    minHeight: Platform.select({
+      web: 'auto',
+      default: 40, // Ensure minimum touch target
+    }),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addLineButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#10b981',
-    borderRadius: 8,
+    justifyContent: 'center',
+    paddingVertical: Platform.select({
+      web: 12,
+      default: 8, // Reduced padding for smaller button
+    }),
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 12, // Reduced padding for smaller button
+    }),
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1.5, // Thinner border for cleaner look
+    }),
+    borderColor: '#3f66ac', // Blue to match background
+    borderRadius: Platform.select({
+      web: 8,
+      default: 6, // Smaller radius for cleaner look
+    }),
     borderStyle: 'dashed',
-    marginBottom: 20,
+    backgroundColor: Platform.select({
+      web: 'transparent',
+      default: 'transparent', // No background for cleaner look
+    }),
+    marginBottom: Platform.select({
+      web: 20,
+      default: 12, // Reduced spacing on mobile
+    }),
+    marginTop: Platform.select({
+      web: 0,
+      default: 8, // Reduced spacing on mobile
+    }),
+    minHeight: Platform.select({
+      web: 'auto',
+      default: 36, // Smaller height for cleaner look
+    }),
+    ...Platform.select({
+      default: {
+        // Ensure button is always visible on mobile
+        opacity: 1,
+        zIndex: 1,
+      },
+    }),
   },
   addLineText: {
-    color: '#10b981',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
+    color: '#3f66ac', // Blue to match border
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Smaller text for cleaner look
+    }),
+    fontWeight: Platform.select({
+      web: '500',
+      default: '600', // Bolder text on mobile
+    }),
+    marginLeft: Platform.select({
+      web: 8,
+      default: 10, // More spacing on mobile
+    }),
   },
   rowContainer: {
     flexDirection: 'row',
@@ -1069,22 +1240,56 @@ const styles = StyleSheet.create({
   },
   dropdown: {
     backgroundColor: '#f8f9fa',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Match inputContainer on mobile
+    }),
     borderColor: '#e9ecef',
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Match inputContainer on mobile
+    }),
+    paddingHorizontal: Platform.select({
+      web: 20,
+      default: 12, // Match inputContainer on mobile
+    }),
+    paddingVertical: Platform.select({
+      web: 18,
+      default: 0, // Remove padding to let content handle spacing
+    }),
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    ...Platform.select({
+      default: {
+        minHeight: 50, // Match inputContainer total height on mobile
+      },
+    }),
   },
   stateSelectContent: {
     flex: 1,
+    ...Platform.select({
+      default: {
+        justifyContent: 'center', // Center content vertically on mobile
+        paddingVertical: 12, // Match input paddingVertical for consistent alignment
+      },
+    }),
   },
   dropdownText: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 15, // Match input fontSize on mobile
+    }),
     fontWeight: '500',
-    flex: 1,
+    ...Platform.select({
+      web: {
+        flex: 1,
+      },
+      default: {
+        textAlignVertical: 'center', // Center text vertically on mobile (Android)
+        includeFontPadding: false, // Remove extra font padding on Android for better alignment
+      },
+    }),
   },
   stateCodeText: {
     fontSize: 12,
@@ -1223,49 +1428,112 @@ const styles = StyleSheet.create({
   },
   // Branch field group styles
   branchFieldGroup: {
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#3f66ac',
+    ...Platform.select({
+      web: {
+        backgroundColor: '#eff6ff',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 2,
+        borderColor: '#3f66ac',
+      },
+      default: {
+        // Mobile: two-toned background for better visual separation
+        backgroundColor: '#eff6ff',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 20,
+        borderWidth: 1.5,
+        borderColor: '#3f66ac',
+      },
+    }),
   },
   branchSectionTitle: {
-    color: '#3f66ac',
-    fontWeight: '800',
-    fontSize: 18,
-    marginBottom: 16,
-    textAlign: 'center',
+    ...Platform.select({
+      web: {
+        color: '#3f66ac',
+        fontWeight: '800',
+        fontSize: 18,
+        marginBottom: 16,
+        textAlign: 'center',
+      },
+      default: {
+        // Mobile: hide section title
+        display: 'none',
+      },
+    }),
   },
   // Contact field styles
   contactFieldGroup: {
-    backgroundColor: '#fffbeb',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    borderWidth: 2,
-    borderColor: '#ffc754',
+    ...Platform.select({
+      web: {
+        backgroundColor: '#fffbeb',
+        borderRadius: 12,
+        padding: 16,
+        marginVertical: 8,
+        borderWidth: 2,
+        borderColor: '#ffc754',
+      },
+      default: {
+        // Mobile: two-toned background for better visual separation
+        backgroundColor: '#fffbeb',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 20,
+        marginBottom: 0,
+        borderWidth: 1.5,
+        borderColor: '#ffc754',
+      },
+    }),
   },
   contactSectionTitle: {
-    color: '#ffc754',
-    fontWeight: '800',
-    fontSize: 18,
-    marginBottom: 16,
-    textAlign: 'center',
+    ...Platform.select({
+      web: {
+        color: '#ffc754',
+        fontWeight: '800',
+        fontSize: 18,
+        marginBottom: 16,
+        textAlign: 'center',
+      },
+      default: {
+        // Mobile: hide section title
+        display: 'none',
+      },
+    }),
   },
   contactFieldRow: {
     marginBottom: 12,
   },
   contactLabel: {
-    color: '#000000',
-    fontWeight: '700',
-    fontSize: 16,
-    marginBottom: 8,
+    ...Platform.select({
+      web: {
+        color: '#000000',
+        fontWeight: '700',
+        fontSize: 16,
+        marginBottom: 8,
+      },
+      default: {
+        // Mobile: use same style as regular labels
+        color: '#1a1a1a',
+        fontWeight: '600',
+        fontSize: 16,
+        marginBottom: 8,
+      },
+    }),
   },
   contactInputContainer: {
     backgroundColor: '#ffffff',
-    borderColor: '#ffc754',
-    borderWidth: 2,
+    ...Platform.select({
+      web: {
+        borderColor: '#ffc754',
+        borderWidth: 2,
+      },
+      default: {
+        // Mobile: use default border color like other inputs
+        borderColor: '#E5E7EB',
+        borderWidth: 2,
+      },
+    }),
   },
   contactInput: {
     color: '#000000',

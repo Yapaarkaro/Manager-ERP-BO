@@ -307,19 +307,30 @@ export default function GstinPanOTPScreen() {
 
   return (
     <ResponsiveContainer>
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        enabled={true}
       >
       <ScrollView 
         style={styles.content}
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }, webContainerStyles.webScrollContent]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { 
+              paddingTop: Platform.select({ 
+                web: 20, 
+                android: Math.max(insets.top, 16),
+                default: Math.max(insets.top, 0)
+              }) 
+            },
+            Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}
+          ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
+        <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Shield size={32} color={COLORS.primary} />
           </View>
@@ -621,15 +632,33 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 30,
-    paddingTop: 20,
-  },
+          scrollContent: {
+            flexGrow: 1,
+            paddingHorizontal: Platform.select({
+              web: 30,
+              default: 16, // Match dashboard and all-invoices page padding
+            }),
+            paddingTop: Platform.select({
+              web: 20,
+              default: 0, // SafeAreaView handles top padding on mobile
+            }),
+            paddingBottom: Platform.select({
+              web: 40,
+              ios: 20,
+              android: 12, // Consistent bottom padding on Android
+              default: 20,
+            }),
+          },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 40,
-    marginTop: 0, // Will be overridden by inline style
+    marginTop: Platform.select({
+      web: 0,
+      default: 20, // Consistent top margin on mobile (SafeAreaView handles safe area)
+    }),
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
   },
   iconCircle: {
     width: 80,
@@ -646,13 +675,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.black,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8,
+    }),
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.gray,
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
     lineHeight: 22,
   },
   otpContainer: {
@@ -799,6 +834,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
     backgroundColor: COLORS.white,
+    ...Platform.select({
+      default: {
+        position: 'relative',
+        pointerEvents: 'box-none', // Allow touches to pass through to children
+        zIndex: 1, // Ensure wrapper is below icon
+      },
+    }),
   },
   editButton: {
     paddingHorizontal: 12,
@@ -806,6 +848,15 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     borderRadius: 6,
     backgroundColor: COLORS.primary,
+    ...Platform.select({
+      default: {
+        position: 'absolute',
+        right: 16,
+        top: '50%',
+        marginTop: -12, // Half of button height to center vertically
+        marginLeft: 0, // Remove margin when absolutely positioned
+      },
+    }),
   },
   editButtonText: {
     color: COLORS.white,
@@ -814,6 +865,18 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: 12,
+    ...Platform.select({
+      default: {
+        position: 'absolute',
+        left: 16,
+        top: '50%',
+        marginTop: -10, // Half of icon size (20/2) to center vertically
+        zIndex: 10, // Much higher zIndex to ensure icon stays above input even when focused
+        elevation: 10, // On Android, elevation is needed to ensure icon renders above input with elevation
+        pointerEvents: 'none',
+        marginRight: 0, // Remove margin when absolutely positioned
+      },
+    }),
   },
   panInput: {
     flex: 1,
@@ -821,6 +884,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.black,
     fontWeight: '500',
+    ...Platform.select({
+      default: {
+        paddingLeft: 44, // Space for icon
+        paddingRight: 80, // Space for edit button on mobile
+        borderWidth: 0, // Border is on container
+        minHeight: 50,
+        zIndex: 1, // Lower than icon to ensure icon stays visible
+      },
+    }),
   },
   dateInputWrapper: {
     flexDirection: 'row',
@@ -854,8 +926,16 @@ const styles = StyleSheet.create({
   datePickerContainer: {
     backgroundColor: COLORS.white,
     borderRadius: 20,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
-    paddingTop: Platform.OS === 'android' ? 16 : 20,
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
+    paddingTop: Platform.select({
+      web: 20,
+      default: 16,
+    }),
     maxWidth: 400,
     width: '100%',
     maxHeight: '80%',
@@ -894,6 +974,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginLeft: 8,
     gap: 8,
+    ...Platform.select({
+      default: {
+        position: 'absolute',
+        right: 16,
+        top: '50%',
+        marginTop: -14, // Half of button height to center vertically
+        marginLeft: 0, // Remove margin when absolutely positioned
+      },
+    }),
   },
   saveButton: {
     paddingHorizontal: 14,

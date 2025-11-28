@@ -61,6 +61,8 @@ export default function BusinessDetailsScreen() {
     fiscalYear,
   } = useLocalSearchParams();
   
+  const insets = useSafeAreaInsets();
+  
   // Initialize with incoming data if available (returning from business summary)
   const [name, setName] = useState((incomingName as string) || '');
   const [businessName, setBusinessName] = useState((incomingBusinessName as string) || '');
@@ -483,17 +485,28 @@ export default function BusinessDetailsScreen() {
 
   return (
     <ResponsiveContainer>
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 
           style={styles.keyboardAvoidingView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
         >
         {/* Back button removed - users should not go back from business details to prevent signup abandonment */}
 
         <ScrollView 
           style={styles.content}
-          contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+            { 
+              paddingTop: Platform.select({ 
+                web: 20, 
+                android: Math.max(insets.top, 16),
+                default: Math.max(insets.top, 0)
+              }) 
+            }
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           ref={scrollViewRef}
@@ -519,15 +532,44 @@ export default function BusinessDetailsScreen() {
         <View style={styles.formContainer}>
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Your Name *</Text>
-            <View
-              style={[
-                inputFocusStyles.inputContainer,
-                focusedField === 'name' && inputFocusStyles.inputContainerFocused,
-              ]}
-            >
-              <User size={20} color={COLORS.gray} style={styles.inputIcon} />
+            <View style={styles.inputWrapper}>
+              <User size={20} color={COLORS.gray} style={styles.inputIconAbsolute} />
               <CapitalizedTextInput
-                style={inputFocusStyles.input}
+                style={[
+                  {
+                    borderWidth: 2,
+                    borderColor: focusedField === 'name' ? COLORS.primary : '#E5E7EB',
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingLeft: 44,
+                    paddingVertical: Platform.OS === 'web' ? 14 : 18,
+                    fontSize: 16,
+                    color: COLORS.black,
+                    backgroundColor: COLORS.white,
+                    ...Platform.select({
+                      web: {
+                        outlineWidth: 0,
+                        outlineColor: 'transparent',
+                        outlineStyle: 'none',
+                        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                      },
+                      default: {
+                        minHeight: 50,
+                      },
+                    }),
+                    ...(focusedField === 'name' && Platform.OS === 'web' ? {
+                      boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)',
+                    } : {}),
+                    ...(focusedField === 'name' && Platform.OS !== 'web' ? {
+                      shadowColor: COLORS.primary,
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.12,
+                      shadowRadius: 8,
+                      elevation: 2, // Reduced elevation to prevent covering icon
+                      zIndex: 1, // Lower than icon to ensure icon stays visible
+                    } : {}),
+                  },
+                ]}
                 placeholder="Enter your full name"
                 placeholderTextColor={COLORS.gray}
                 value={name}
@@ -535,21 +577,51 @@ export default function BusinessDetailsScreen() {
                 onFocus={handleNameFocus}
                 onBlur={handleNameBlur}
                 autoCapitalize="words"
+                editable={true}
               />
             </View>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Business Name *</Text>
-            <View
-              style={[
-                inputFocusStyles.inputContainer,
-                focusedField === 'businessName' && inputFocusStyles.inputContainerFocused,
-              ]}
-            >
-              <Building2 size={20} color={COLORS.gray} style={styles.inputIcon} />
+            <View style={styles.inputWrapper}>
+              <Building2 size={20} color={COLORS.gray} style={styles.inputIconAbsolute} />
               <CapitalizedTextInput
-                style={inputFocusStyles.input}
+                style={[
+                  {
+                    borderWidth: 2,
+                    borderColor: focusedField === 'businessName' ? COLORS.primary : '#E5E7EB',
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingLeft: 44,
+                    paddingVertical: Platform.OS === 'web' ? 14 : 18,
+                    fontSize: 16,
+                    color: COLORS.black,
+                    backgroundColor: COLORS.white,
+                    ...Platform.select({
+                      web: {
+                        outlineWidth: 0,
+                        outlineColor: 'transparent',
+                        outlineStyle: 'none',
+                        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                      },
+                      default: {
+                        minHeight: 50,
+                      },
+                    }),
+                    ...(focusedField === 'businessName' && Platform.OS === 'web' ? {
+                      boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)',
+                    } : {}),
+                    ...(focusedField === 'businessName' && Platform.OS !== 'web' ? {
+                      shadowColor: COLORS.primary,
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.12,
+                      shadowRadius: 8,
+                      elevation: 2, // Reduced elevation to prevent covering icon
+                      zIndex: 1, // Lower than icon to ensure icon stays visible
+                    } : {}),
+                  },
+                ]}
                 placeholder="Enter your business name"
                 placeholderTextColor={COLORS.gray}
                 value={businessName}
@@ -557,6 +629,7 @@ export default function BusinessDetailsScreen() {
                 onFocus={handleBusinessNameFocus}
                 onBlur={handleBusinessNameBlur}
                 autoCapitalize="words"
+                editable={true}
               />
             </View>
           </View>
@@ -566,15 +639,43 @@ export default function BusinessDetailsScreen() {
               {businessType === 'Others' ? 'Specify Business Type *' : 'Business Type *'}
             </Text>
             {businessType === 'Others' ? (
-              <View
-                style={[
-                  inputFocusStyles.inputContainer,
-                  styles.customTypeContainer,
-                  focusedField === 'customBusinessType' && inputFocusStyles.inputContainerFocused,
-                ]}
-              >
+              <View style={styles.customTypeWrapper}>
                 <CapitalizedTextInput
-                  style={[inputFocusStyles.input, styles.customTypeInput]}
+                  style={[
+                    {
+                      borderWidth: 2,
+                      borderColor: focusedField === 'customBusinessType' ? COLORS.primary : '#E5E7EB',
+                      borderRadius: 12,
+                      paddingHorizontal: 16,
+                      paddingRight: 44,
+                      paddingVertical: Platform.OS === 'web' ? 14 : 18,
+                      fontSize: 16,
+                      color: COLORS.black,
+                      backgroundColor: COLORS.white,
+                      flex: 1,
+                      ...Platform.select({
+                        web: {
+                          outlineWidth: 0,
+                          outlineColor: 'transparent',
+                          outlineStyle: 'none',
+                          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                        },
+                        default: {
+                          minHeight: 50,
+                        },
+                      }),
+                      ...(focusedField === 'customBusinessType' && Platform.OS === 'web' ? {
+                        boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)',
+                      } : {}),
+                      ...(focusedField === 'customBusinessType' && Platform.OS !== 'web' ? {
+                        shadowColor: COLORS.primary,
+                        shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.12,
+                        shadowRadius: 8,
+                        elevation: 4,
+                      } : {}),
+                    },
+                  ]}
                   placeholder="Enter your specific business type"
                   placeholderTextColor={COLORS.gray}
                   value={customBusinessType}
@@ -582,6 +683,7 @@ export default function BusinessDetailsScreen() {
                   onFocus={handleCustomBusinessTypeFocus}
                   onBlur={handleCustomBusinessTypeBlur}
                   autoCapitalize="words"
+                  editable={true}
                 />
                 <TouchableOpacity
                   style={styles.inlineChevronButton}
@@ -651,14 +753,29 @@ const styles = StyleSheet.create({
   contentPadding: {
     paddingHorizontal: Platform.select({
       web: 24,
-      default: 30,
+      default: 16, // Match dashboard and all-invoices page padding
     }),
-    paddingTop: 20,
-    paddingBottom: 100,
+    paddingTop: Platform.select({
+      web: 20,
+      default: 0, // SafeAreaView handles top padding on mobile
+    }),
+    paddingBottom: Platform.select({
+      web: 100,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginTop: Platform.select({
+      web: 0,
+      default: 20, // Consistent top margin on mobile (SafeAreaView handles safe area)
+    }),
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
   },
   iconCircle: {
     width: 80,
@@ -681,14 +798,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.gray,
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: Platform.select({
+      web: 40,
+      default: 20,
+    }),
     lineHeight: 22,
   },
   formContainer: {
-    marginBottom: 40,
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: Platform.select({
+      web: 24,
+      default: 16,
+    }),
   },
   label: {
     fontSize: 16,
@@ -702,6 +828,29 @@ const styles = StyleSheet.create({
   },
   inputIcon: {
     marginRight: 12,
+  },
+  inputWrapper: {
+    position: 'relative',
+    ...Platform.select({
+      default: {
+        pointerEvents: 'box-none', // Allow touches to pass through to children
+        zIndex: 1, // Ensure wrapper is below icon
+      },
+    }),
+  },
+  inputIconAbsolute: {
+    position: 'absolute',
+    left: 16,
+    top: '50%',
+    marginTop: -10, // Half of icon size (20/2) to center vertically
+    zIndex: 10, // Much higher zIndex to ensure icon stays above input even when focused
+    elevation: 10, // On Android, elevation is needed to ensure icon renders above input with elevation
+    pointerEvents: 'none',
+  },
+  customTypeWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
   },
   // input style moved to getInputFocusStyles utility
   customTypeInput: {

@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -243,10 +244,59 @@ export default function BusinessAddressScreen() {
           console.log('📍 handleMarkerDragEnd - areaParts:', areaParts);
         }
 
+        // Enhanced city extraction - matching Google Maps API priority
+        // Priority: postal_town > administrative_area_level_2 (district) > city (from extractAddressComponents) > locality (last resort)
+        // Note: extractAddressComponents now prioritizes postal_town and district, so addressData.city should be reliable
+        let cityValue = '';
+        
+        // Priority 1: postal_town (most reliable city name from Google Maps API)
+        if (addressData.postal_town) {
+          cityValue = addressData.postal_town;
+          console.log('📍 Set city from postal_town (most reliable):', cityValue);
+        } 
+        // Priority 2: administrative_area_level_2 (district) - reliable for Indian addresses
+        else if (addressData.administrative_area_level_2 || addressData.district) {
+          cityValue = addressData.administrative_area_level_2 || addressData.district;
+          console.log('📍 Set city from district:', cityValue);
+        } 
+        // Priority 3: Use city from extractAddressComponents (should already be postal_town or district)
+        else if (addressData.city) {
+          cityValue = addressData.city;
+          console.log('📍 Set city from addressData.city:', cityValue);
+        }
+        // Priority 4: Use locality only as last resort (often a neighborhood, not the city)
+        else if (addressData.locality) {
+          cityValue = addressData.locality;
+          console.log('📍 Set city from locality (last resort - may be inaccurate):', cityValue);
+        }
+        // Priority 5: Extract from formatted address as last resort
+        else if (addressData.formatted_address) {
+          const addressParts = addressData.formatted_address.split(',').map((p: string) => p.trim());
+          for (let i = addressParts.length - 2; i >= 1; i--) {
+            const part = addressParts[i];
+            if (/^\d{6}$/.test(part)) continue; // Skip pincode
+            if (addressData.state && part.toLowerCase().includes(addressData.state.toLowerCase())) continue;
+            if (addressData.administrative_area_level_1 && part.toLowerCase().includes(addressData.administrative_area_level_1.toLowerCase())) continue;
+            const commonWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'puram', 'palayam', 'patti', 'circle', 'chowk', 'market', 'plaza', 'mall', 'sector', 'phase', 'block', 'village', 'town'];
+            if (commonWords.some(word => part.toLowerCase().includes(word))) continue;
+            if (part.length > 2 && part.length < 50) {
+              cityValue = part;
+              console.log('📍 Set city from formatted address:', cityValue);
+              break;
+            }
+          }
+        }
+        
+        if (cityValue) {
+          console.log('✅ Final city set:', cityValue);
+        } else {
+          console.warn('⚠️ No city value found in address data');
+        }
+
         const processedAddress: SelectedAddress = {
           street: streetAddress,
           area: areaValue,
-          city: addressData.city || addressData.locality || '',
+          city: cityValue,
           state: addressData.state || addressData.administrative_area_level_1 || '',
           pincode: addressData.pincode || addressData.postal_code || '',
           formatted_address: addressData.formatted_address,
@@ -359,10 +409,60 @@ export default function BusinessAddressScreen() {
         console.log('📍 areaParts:', areaParts);
       }
 
+      // Enhanced city extraction - matching web implementation
+      // Priority: city > locality > postal_town > administrative_area_level_2 (district) > sublocality_level_1
+      let cityValue = '';
+      if (addressData.city) {
+        cityValue = addressData.city;
+      } else if (addressData.locality) {
+        cityValue = addressData.locality;
+      } else if (addressData.postal_town) {
+        cityValue = addressData.postal_town;
+      } else if (addressData.administrative_area_level_2 || addressData.district) {
+        cityValue = addressData.administrative_area_level_2 || addressData.district;
+      } else if (addressData.sublocality_level_1) {
+        cityValue = addressData.sublocality_level_1;
+      } else if (addressData.formatted_address) {
+        // Extract from formatted address as last resort
+        const addressParts = addressData.formatted_address.split(',').map((p: string) => p.trim());
+        for (let i = addressParts.length - 2; i >= 1; i--) {
+          const part = addressParts[i];
+          if (/^\d{6}$/.test(part)) continue; // Skip pincode
+          if (addressData.state && part.toLowerCase().includes(addressData.state.toLowerCase())) continue;
+          if (addressData.administrative_area_level_1 && part.toLowerCase().includes(addressData.administrative_area_level_1.toLowerCase())) continue;
+          const commonWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'puram', 'palayam', 'patti', 'circle', 'chowk', 'market', 'plaza', 'mall', 'sector', 'phase', 'block', 'village', 'town'];
+          if (commonWords.some(word => part.toLowerCase().includes(word))) continue;
+          if (part.length > 2 && part.length < 50) {
+            cityValue = part;
+            break;
+          }
+        }
+      }
+
+      // Clean up city name on mobile - remove administrative suffixes like "Division", "District", etc.
+      let cleanedCity = cityValue;
+      if (Platform.OS !== 'web' && cityValue) {
+        // Remove common administrative suffixes
+        cleanedCity = cityValue
+          .replace(/\s+Division\s*$/i, '')
+          .replace(/\s+District\s*$/i, '')
+          .replace(/\s+Tehsil\s*$/i, '')
+          .replace(/\s+Tahsil\s*$/i, '')
+          .replace(/\s+Taluka\s*$/i, '')
+          .trim();
+        
+        // Special case: "Bangalore Division" -> "Bengaluru"
+        if (cleanedCity.toLowerCase().includes('bangalore')) {
+          cleanedCity = 'Bengaluru';
+        }
+        
+        console.log('🧹 Cleaned city name:', cityValue, '->', cleanedCity);
+      }
+
       const processedAddress: SelectedAddress = {
         street: streetAddress,
         area: areaValue,
-        city: addressData.city || addressData.locality || '',
+        city: cleanedCity,
         state: addressData.state || addressData.administrative_area_level_1 || '',
         pincode: addressData.pincode || addressData.postal_code || '',
         formatted_address: addressData.formatted_address || '',
@@ -581,7 +681,16 @@ export default function BusinessAddressScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
+          style={styles.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
+        >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -691,6 +800,7 @@ export default function BusinessAddressScreen() {
             <Text style={styles.manualButtonText}>Enter Address Manually</Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
     </ResponsiveContainer>
@@ -703,6 +813,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   safeArea: {
+    flex: 1,
+  },
+  keyboardView: {
     flex: 1,
   },
   header: {
@@ -775,6 +888,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    paddingBottom: Platform.select({
+      web: 12,
+      ios: 12,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 12,
+    }),
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
   },

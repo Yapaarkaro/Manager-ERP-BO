@@ -375,7 +375,26 @@ export default function EditAddressSimpleScreen() {
     setAddressLine2(line2Parts.join(', '));
 
     if (components.city) {
-      setCity(components.city);
+      // Clean up city name on mobile - remove administrative suffixes like "Division", "District", etc.
+      let cleanedCity = components.city;
+      if (Platform.OS !== 'web') {
+        // Remove common administrative suffixes
+        cleanedCity = components.city
+          .replace(/\s+Division\s*$/i, '')
+          .replace(/\s+District\s*$/i, '')
+          .replace(/\s+Tehsil\s*$/i, '')
+          .replace(/\s+Tahsil\s*$/i, '')
+          .replace(/\s+Taluka\s*$/i, '')
+          .trim();
+        
+        // Special case: "Bangalore Division" -> "Bengaluru"
+        if (cleanedCity.toLowerCase().includes('bangalore')) {
+          cleanedCity = 'Bengaluru';
+        }
+        
+        console.log('🧹 Cleaned city name:', components.city, '->', cleanedCity);
+      }
+      setCity(cleanedCity);
     }
     if (components.pincode) {
       setPincode(components.pincode);
@@ -657,7 +676,7 @@ export default function EditAddressSimpleScreen() {
         }),
       },
     ],
-    opacity: slideAnimation,
+    // Removed opacity animation to prevent grey background flash
   };
 
   const filteredStates = indianStates.filter(state =>
@@ -671,10 +690,12 @@ export default function EditAddressSimpleScreen() {
 
   return (
     <ResponsiveContainer>
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        enabled={true}
       >
         {/* Back Button */}
         <TouchableOpacity
@@ -685,7 +706,15 @@ export default function EditAddressSimpleScreen() {
           <ArrowLeft size={24} color="#1a1a1a" />
         </TouchableOpacity>
 
-        <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          style={styles.scrollView} 
+          contentContainerStyle={Platform.select({
+            web: webContainerStyles.webScrollContent,
+            default: {} // Let content style handle padding
+          })} 
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={[styles.iconWrapper, { backgroundColor: `${typeInfo.color}20` }]}>
@@ -1139,9 +1168,20 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 60,
+      default: 60,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
     overflow: 'visible',
   },
   iconContainer: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // TODO: REMOVE TEST BYPASS BEFORE PRODUCTION DEPLOYMENT
 // Test bypass: Mobile number '1234567890' automatically redirects to dashboard
@@ -41,6 +41,7 @@ export default function MobileScreen() {
   const [isReturningUser, setIsReturningUser] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const mobileInputRef = useRef<TextInput>(null);
 
   // Set status bar to dark for white background
   useEffect(() => {
@@ -129,19 +130,30 @@ export default function MobileScreen() {
 
   return (
     <ResponsiveContainer>
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 
           style={styles.keyboardAvoidingView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
         >
           <ScrollView 
             style={styles.content}
-            contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent, { paddingTop: 20 }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+              { 
+                paddingTop: Platform.select({ 
+                  web: 20, 
+                  android: Math.max(insets.top, 16),
+                  default: Math.max(insets.top, 0)
+                }) 
+              }
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-        <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
+        <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Phone size={32} color={COLORS.primary} />
           </View>
@@ -157,33 +169,74 @@ export default function MobileScreen() {
           💡 Test mode: Use 1234567890 to skip authentication
         </Text>
 
-        <View style={styles.inputContainer}>
-          <View
-            style={[
-              inputFocusStyles.inputContainer,
-              isFocused && inputFocusStyles.inputContainerFocused,
-              isValid && styles.validInputContainer,
-              mobileNumber.length > 0 && mobileNumber.length < 10 && styles.invalidInputContainer,
-            ]}
-          >
-            <TextInput
-              style={[
-                inputFocusStyles.input,
-                styles.input,
-                { textAlign: 'center' },
-              ]}
-              placeholder="Enter mobile number"
-              placeholderTextColor={COLORS.gray}
-              value={mobileNumber}
-              onChangeText={handleMobileChange}
-              keyboardType="numeric"
-              maxLength={10}
-              autoFocus
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-            />
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => mobileInputRef.current?.focus()}
+          style={[
+            styles.inputContainer,
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              borderWidth: 2,
+              borderColor: isFocused 
+                ? COLORS.primary 
+                : (isValid 
+                  ? '#10B981' 
+                  : (mobileNumber.length > 0 && mobileNumber.length < 10 
+                    ? COLORS.error 
+                    : '#E5E7EB')),
+              borderRadius: 12,
+              paddingHorizontal: 0,
+              backgroundColor: COLORS.white,
+              ...Platform.select({
+                web: {
+                  transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                },
+                default: {
+                  minHeight: 50,
+                },
+              }),
+              ...(isFocused && Platform.OS === 'web' ? {
+                boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)',
+              } : {}),
+              ...(isFocused && Platform.OS !== 'web' ? {
+                shadowColor: COLORS.primary,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.12,
+                shadowRadius: 8,
+                elevation: 4,
+              } : {}),
+            },
+          ]}
+        >
+          <View style={styles.prefixContainer}>
+            <Text style={styles.prefixText}>+91</Text>
           </View>
-        </View>
+          <TextInput
+            ref={mobileInputRef}
+            style={[
+              styles.mobileInput,
+              Platform.select({
+                web: {
+                  outlineWidth: 0,
+                  outlineColor: 'transparent',
+                  outlineStyle: 'none',
+                },
+              }),
+            ]}
+            placeholder="Enter mobile number"
+            placeholderTextColor={COLORS.gray}
+            value={mobileNumber}
+            onChangeText={handleMobileChange}
+            keyboardType="numeric"
+            maxLength={10}
+            autoFocus={Platform.OS !== 'web'}
+            textAlign="left"
+            editable={true}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+          />
+        </TouchableOpacity>
 
         {isReturningUser && mobileNumber.length === 10 && (
           <View style={styles.returningUserContainer}>
@@ -228,13 +281,29 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: Platform.select({
       web: 24,
-      default: 30,
+      default: 16, // Match dashboard and all-invoices page padding
     }),
-    paddingTop: 20,
+    paddingTop: Platform.select({
+      web: 20,
+      default: 16,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginTop: Platform.select({
+      web: 0,
+      default: 20, // Consistent top margin on mobile (SafeAreaView handles safe area)
+    }),
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
   },
   iconCircle: {
     width: 80,
@@ -251,25 +320,65 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.black,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8,
+    }),
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.gray,
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12,
+    }),
     lineHeight: 22,
   },
   testInfo: {
     fontSize: 14,
     color: COLORS.primary,
     textAlign: 'center',
-    marginBottom: 32,
-    paddingHorizontal: 20,
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20,
+    }),
+            paddingHorizontal: Platform.select({
+              web: 20,
+              default: 16, // Match dashboard and all-invoices page padding
+            }),
     fontStyle: 'italic',
   },
   inputContainer: {
     marginBottom: 16,
+  },
+  prefixContainer: {
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingVertical: Platform.OS === 'web' ? 14 : 18,
+    borderRightWidth: 1,
+    borderRightColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none', // Make prefix non-interactive
+  },
+  prefixText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.black,
+  },
+  mobileInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'web' ? 14 : 18,
+    fontSize: 16,
+    color: COLORS.black,
+    backgroundColor: 'transparent',
+    ...Platform.select({
+      default: {
+        minHeight: 50,
+      },
+    }),
   },
   input: {
     // Base input styles are in inputFocusStyles.input

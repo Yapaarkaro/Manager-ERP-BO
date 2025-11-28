@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Animated,
   Modal,
+  Platform,
 } from 'react-native';
 import { CheckCircle, Crown, Calendar, X } from 'lucide-react-native';
 
@@ -185,9 +186,15 @@ const styles = StyleSheet.create({
   modalContainer: {
     backgroundColor: '#ffffff',
     borderRadius: 24,
-    marginHorizontal: 24,
+    marginHorizontal: Platform.select({
+      web: 24,
+      default: 20, // Add side padding so it feels like a popup, not a new screen
+    }),
     maxWidth: 400,
-    width: '100%',
+    width: Platform.select({
+      web: '100%',
+      default: '90%', // Ensure it doesn't span full width on mobile
+    }),
     shadowColor: '#000',
     shadowOffset: {
       width: 0,

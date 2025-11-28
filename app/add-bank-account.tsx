@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { 
@@ -119,9 +120,11 @@ export default function AddBankAccount() {
   ];
 
   const handleBankSelect = (bank: IndianBank) => {
+    // Immediately close modal first to prevent double-tap
+    setShowBankModal(false);
+    // Then update state
     setSelectedBank(bank);
     setBankSearch('');
-    setShowBankModal(false);
     
     // Auto-fill IFSC prefix only for preset banks (not Others)
     if (bank.id !== 'others') {
@@ -144,10 +147,15 @@ export default function AddBankAccount() {
   };
 
   const handleBankModalOpen = () => {
-    setShowBankModal(true);
+    // Dismiss keyboard first to prevent double-tap issue on Android
+    Keyboard.dismiss();
+    // Small delay to ensure keyboard is dismissed before opening modal
     setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 300);
+      setShowBankModal(true);
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 300);
+    }, Platform.OS === 'android' ? 100 : 0);
   };
 
   const handleIFSCChange = (text: string) => {
@@ -429,6 +437,10 @@ export default function AddBankAccount() {
               <Text style={styles.label}>Select Bank *</Text>
               <TouchableOpacity
                 style={styles.bankSelector}
+                onPressIn={() => {
+                  // Dismiss keyboard immediately on press start
+                  Keyboard.dismiss();
+                }}
                 onPress={handleBankModalOpen}
                 activeOpacity={0.7}
               >
@@ -634,12 +646,14 @@ export default function AddBankAccount() {
             <View style={styles.searchContainer}>
               <Search size={20} color={Colors.textSecondary} />
               <TextInput
+                ref={searchInputRef}
                 style={styles.searchInput}
-                placeholder="Search banks..."
+                placeholder="Search banks by name or IFSC prefix..."
                 value={bankSearch}
                 onChangeText={setBankSearch}
                 placeholderTextColor={Colors.textSecondary}
-                ref={searchInputRef}
+                autoFocus={true}
+                autoCapitalize="none"
               />
             </View>
             
@@ -648,7 +662,11 @@ export default function AddBankAccount() {
                 <TouchableOpacity
                   key={bank.id}
                   style={styles.bankOption}
-                  onPress={() => handleBankSelect(bank)}
+                  onPress={() => {
+                    // Immediately select bank without delay
+                    handleBankSelect(bank);
+                  }}
+                  delayPressIn={0}
                 >
                   <Text style={styles.bankOptionText}>{bank.name}</Text>
                   {selectedBank?.id === bank.id && (

@@ -647,7 +647,7 @@ export default function AddressConfirmationScreen() {
         }),
       },
     ],
-    opacity: slideAnimation,
+    // Removed opacity animation to prevent grey background flash
   };
 
   const webContainerStyles = getWebContainerStyles();
@@ -655,11 +655,12 @@ export default function AddressConfirmationScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 
           style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS === 'ios'}
         >
           {/* Back Button */}
           <TouchableOpacity
@@ -690,7 +691,11 @@ export default function AddressConfirmationScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.scrollView} 
+            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            showsVerticalScrollIndicator={false}
+          >
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -851,13 +856,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 60,
+      default: 40,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20,
+    }),
   },
   iconWrapper: {
     width: 100,
@@ -958,17 +977,32 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   addressCard: {
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12, // Reduced spacing on mobile
+    }),
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1, // Keep consistent
+    }),
     borderColor: '#e2e8f0',
   },
   addressHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8, // Reduced spacing on mobile
+    }),
   },
   addressTypeContainer: {
     flexDirection: 'row',
@@ -976,23 +1010,44 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   addressTypeIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: Platform.select({
+      web: 40,
+      default: 36, // Smaller icon for more native feel
+    }),
+    height: Platform.select({
+      web: 40,
+      default: 36, // Smaller icon for more native feel
+    }),
+    borderRadius: Platform.select({
+      web: 20,
+      default: 18, // Smaller radius for more native feel
+    }),
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Platform.select({
+      web: 12,
+      default: 10, // Reduced spacing on mobile
+    }),
   },
   addressTypeText: {
     flex: 1,
   },
   addressTypeLabel: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 14, // Reduced for more native feel
+    }),
     fontWeight: '600',
-    marginBottom: 2,
+    marginBottom: Platform.select({
+      web: 2,
+      default: 2,
+    }),
   },
   addressTypeBadge: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text
+    }),
     color: '#64748b',
     fontWeight: '500',
   },
@@ -1020,28 +1075,52 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   addressName: {
-    fontSize: 18,
+    fontSize: Platform.select({
+      web: 18,
+      default: 15, // Reduced for more native feel
+    }),
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 8,
+    marginBottom: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
   addressText: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
-    lineHeight: 20,
-    marginBottom: 12,
+    lineHeight: Platform.select({
+      web: 20,
+      default: 16, // Reduced line height for compact text
+    }),
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8, // Reduced spacing on mobile
+    }),
   },
   stateCodeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   stateCodeLabel: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
-    marginRight: 8,
+    marginRight: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
   stateCodeValue: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text on mobile
+    }),
     fontWeight: '600',
   },
   emptySection: {
@@ -1062,13 +1141,28 @@ const styles = StyleSheet.create({
   addFirstButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    gap: 8,
+    paddingVertical: Platform.select({
+      web: 12,
+      default: 10, // Reduced for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 20,
+      default: 16, // Reduced for more native feel
+    }),
+    borderRadius: Platform.select({
+      web: 8,
+      default: 10, // Consistent with other buttons
+    }),
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced gap on mobile
+    }),
   },
   addFirstButtonText: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 13, // Reduced for more native feel
+    }),
     fontWeight: '600',
     color: '#ffffff',
   },
@@ -1077,15 +1171,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderStyle: 'dashed',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    gap: 8,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Consistent with other buttons
+    }),
+    paddingVertical: Platform.select({
+      web: 16,
+      default: 12, // Reduced for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Reduced for more native feel
+    }),
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced gap on mobile
+    }),
   },
   addMoreText: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 13, // Reduced for more native feel
+    }),
     fontWeight: '600',
   },
   quickAddContainer: {
@@ -1230,8 +1342,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   contactText: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
     fontWeight: '500',
-    marginRight: 8,
+    marginRight: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
 });

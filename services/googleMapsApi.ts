@@ -251,17 +251,27 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
       extracted.establishment = component.long_name;
     }
     
-    // City: locality OR postal_town OR sublocality_level_1 (priority order)
-    if (types.includes('locality')) {
-      if (!extracted.city) extracted.city = component.long_name;
-      extracted.locality = component.long_name;
-    }
+    // City: postal_town OR administrative_area_level_2 (district) - NEVER use locality or sublocality as city
+    // Priority: postal_town > administrative_area_level_2 > (locality only as absolute last resort)
+    // Note: locality is often a neighborhood/area (like Kasavanahalli), not the actual city name (like Bengaluru)
+    
+    // Capture postal_town first (most reliable city name)
     if (types.includes('postal_town')) {
-      if (!extracted.city) extracted.city = component.long_name;
       extracted.postal_town = component.long_name;
+      // Set as city immediately - this is the most reliable
+      if (!extracted.city) {
+        extracted.city = component.long_name;
+      }
     }
+    
+    // Capture locality but DON'T set as city yet - wait for administrative_area_level_2
+    if (types.includes('locality')) {
+      extracted.locality = component.long_name;
+      // Do NOT set as city here - wait to check administrative_area_level_2 first
+    }
+    
+    // Capture sublocality levels but NEVER use as city
     if (types.includes('sublocality_level_1')) {
-      if (!extracted.city) extracted.city = component.long_name;
       extracted.sublocality_level_1 = component.long_name;
     }
     
@@ -285,6 +295,11 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
     if (types.includes('administrative_area_level_2')) {
       extracted.district = component.long_name;
       extracted.administrative_area_level_2 = component.long_name;
+      // Use administrative_area_level_2 (district) as city if postal_town is not available
+      // This is more reliable than locality for Indian addresses (e.g., Bengaluru vs Kasavanahalli)
+      if (!extracted.city) {
+        extracted.city = component.long_name;
+      }
     }
     
     // State: administrative_area_level_1
@@ -342,6 +357,64 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
           extracted.street = firstPart;
         }
       }
+    }
+  }
+
+  // Enhanced city extraction with better fallback logic
+  // If city is still not set, try to extract from formatted address
+  if (!extracted.city && extracted.formatted_address) {
+    const addressParts = extracted.formatted_address.split(',').map(p => p.trim());
+    
+    // Try to find city by looking for parts that are not states, pincodes, or country
+    for (let i = addressParts.length - 1; i >= 0; i--) {
+      const part = addressParts[i];
+      
+      // Skip if it's a pincode, state, or country
+      if (/^\d{6}$/.test(part)) continue; // Pincode
+      if (part === extracted.state) continue; // State
+      if (part === extracted.country || part === 'India') continue; // Country
+      
+      // Skip if it matches state name
+      if (extracted.state && part.toLowerCase().includes(extracted.state.toLowerCase())) continue;
+      
+      // Check if this part looks like a city (not a common address word)
+      const commonAddressWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'puram', 'palayam', 'patti', 'circle', 'chowk', 'market', 'plaza', 'mall', 'sector', 'phase', 'block', 'nagar', 'village', 'town'];
+      const isAddressWord = commonAddressWords.some(word => part.toLowerCase().includes(word));
+      
+      // If it's not an address word and has reasonable length, it might be a city
+      if (!isAddressWord && part.length > 2 && part.length < 50) {
+        // Additional check: if it's before state and after street parts, it's likely city
+        const stateIndex = addressParts.findIndex(p => p === extracted.state || (extracted.state && p.toLowerCase().includes(extracted.state.toLowerCase())));
+        if (stateIndex > 0 && i < stateIndex && i > 0) {
+          extracted.city = part;
+          console.log('🔍 Enhanced city extraction - found city from formatted address:', part);
+          break;
+        }
+      }
+    }
+    
+    // Final fallback: use administrative_area_level_2 (district) if available
+    // This should already be set above, but keep as safety check
+    if (!extracted.city && extracted.district) {
+      extracted.city = extracted.district;
+      console.log('🔍 Enhanced city extraction - using district as city (fallback):', extracted.district);
+    }
+    
+    // Last resort: use locality only if postal_town and administrative_area_level_2 are not available
+    // This ensures we use the actual city (Bengaluru) instead of locality (Kasavanahalli)
+    if (!extracted.city && extracted.locality) {
+      extracted.city = extracted.locality;
+      console.log('🔍 City extraction - using locality as absolute last resort:', extracted.locality);
+    }
+    
+    // Log the final city value for debugging
+    if (extracted.city) {
+      console.log('✅ Final city extracted:', extracted.city, {
+        postal_town: extracted.postal_town,
+        district: extracted.district,
+        locality: extracted.locality,
+        sublocality_level_1: extracted.sublocality_level_1
+      });
     }
   }
 

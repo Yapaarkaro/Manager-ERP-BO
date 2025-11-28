@@ -258,19 +258,29 @@ export default function GstinPanScreen() {
 
   return (
     <ResponsiveContainer>
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        enabled={true}
       >
         <ScrollView 
           style={styles.content}
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
+          contentContainerStyle={[
+            styles.scrollContent, 
+            { 
+              paddingTop: Platform.select({ 
+                web: 20, 
+                android: Math.max(insets.top, 16),
+                default: Math.max(insets.top, 0)
+              }) 
+            }
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-        <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
+        <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             {selectedType === 'GSTIN' ? (
               <FileText size={32} color={COLORS.primary} />
@@ -404,12 +414,31 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 30,
-    paddingTop: 20,
+    paddingHorizontal: Platform.select({
+      web: 30,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 20,
+      default: 0, // SafeAreaView handles top padding on mobile
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginTop: Platform.select({
+      web: 0,
+      default: 20, // Consistent top margin on mobile (SafeAreaView handles safe area)
+    }),
+    marginBottom: Platform.select({
+      web: 40,
+      default: 24,
+    }),
   },
   iconCircle: {
     width: 80,
@@ -426,13 +455,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.black,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8,
+    }),
   },
   subtitle: {
     fontSize: 16,
     color: COLORS.gray,
     textAlign: 'center',
-    marginBottom: 30,
+    marginBottom: Platform.select({
+      web: 30,
+      default: 20,
+    }),
     lineHeight: 22,
   },
   typeSelector: {

@@ -15,7 +15,7 @@ import {
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus } from 'lucide-react-native';
+import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
@@ -256,8 +256,27 @@ export default function BusinessAddressManualScreen() {
     }
     
     if (prefilledCity && prefilledCity !== '') {
-      console.log('🏠 Setting prefilled city:', prefilledCity);
-      setCity(prefilledCity as string);
+      // Clean up city name on mobile - remove administrative suffixes like "Division", "District", etc.
+      let cleanedCity = prefilledCity as string;
+      if (Platform.OS !== 'web') {
+        // Remove common administrative suffixes
+        cleanedCity = (prefilledCity as string)
+          .replace(/\s+Division\s*$/i, '')
+          .replace(/\s+District\s*$/i, '')
+          .replace(/\s+Tehsil\s*$/i, '')
+          .replace(/\s+Tahsil\s*$/i, '')
+          .replace(/\s+Taluka\s*$/i, '')
+          .trim();
+        
+        // Special case: "Bangalore Division" -> "Bengaluru"
+        if (cleanedCity.toLowerCase().includes('bangalore')) {
+          cleanedCity = 'Bengaluru';
+        }
+        
+        console.log('🧹 Cleaned city name:', prefilledCity, '->', cleanedCity);
+      }
+      console.log('🏠 Setting prefilled city:', cleanedCity);
+      setCity(cleanedCity);
     }
     
     if (prefilledPincode && prefilledPincode !== '') {
@@ -414,9 +433,56 @@ export default function BusinessAddressManualScreen() {
       console.log('📍 Set addressLine2 from locality:', components.locality);
     }
     
-    if (components.city) {
-      setCity(components.city);
-      console.log('📍 Set city:', components.city);
+    // Enhanced city extraction - matching Google Maps API priority
+    // Priority: postal_town > administrative_area_level_2 (district) > city (from extractAddressComponents) > locality (last resort)
+    // Note: extractAddressComponents now prioritizes postal_town and district, so components.city should be reliable
+    let cityValue = '';
+    
+    // Priority 1: postal_town (most reliable city name from Google Maps API)
+    if (components.postal_town) {
+      cityValue = components.postal_town;
+      console.log('📍 Set city from postal_town (most reliable):', cityValue);
+    } 
+    // Priority 2: administrative_area_level_2 (district) - reliable for Indian addresses
+    else if (components.administrative_area_level_2 || components.district) {
+      cityValue = components.administrative_area_level_2 || components.district;
+      console.log('📍 Set city from district:', cityValue);
+    } 
+    // Priority 3: Use city from extractAddressComponents (should already be postal_town or district)
+    else if (components.city) {
+      cityValue = components.city;
+      console.log('📍 Set city from components.city:', cityValue);
+    }
+    // Priority 4: Use locality only as last resort (often a neighborhood, not the city)
+    else if (components.locality) {
+      cityValue = components.locality;
+      console.log('📍 Set city from locality (last resort - may be inaccurate):', cityValue);
+    }
+    // Priority 5: Extract from formatted address (same logic as web)
+    else if (components.formatted_address) {
+      const addressParts = components.formatted_address.split(',').map((p: string) => p.trim());
+      // Look for city before state and after street parts
+      for (let i = addressParts.length - 2; i >= 1; i--) {
+        const part = addressParts[i];
+        // Skip if it's a pincode, state, or common address word
+        if (/^\d{6}$/.test(part)) continue;
+        if (components.state && part.toLowerCase().includes(components.state.toLowerCase())) continue;
+        if (components.administrative_area_level_1 && part.toLowerCase().includes(components.administrative_area_level_1.toLowerCase())) continue;
+        const commonWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'puram', 'palayam', 'patti', 'circle', 'chowk', 'market', 'plaza', 'mall', 'sector', 'phase', 'block', 'village', 'town'];
+        if (commonWords.some(word => part.toLowerCase().includes(word))) continue;
+        if (part.length > 2 && part.length < 50) {
+          cityValue = part;
+          console.log('📍 Set city from formatted address:', cityValue);
+          break;
+        }
+      }
+    }
+    
+    if (cityValue) {
+      setCity(cityValue);
+      console.log('✅ Final city set:', cityValue);
+    } else {
+      console.warn('⚠️ No city value found in address components');
     }
     if (components.pincode) {
       setPincode(components.pincode);
@@ -654,7 +720,7 @@ export default function BusinessAddressManualScreen() {
         }),
       },
     ],
-    opacity: slideAnimation,
+    // Removed opacity animation to prevent grey background flash
   };
 
   const webContainerStyles = getWebContainerStyles();
@@ -662,10 +728,14 @@ export default function BusinessAddressManualScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          enabled={true}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled={Platform.OS === 'ios'}
         >
           <TouchableOpacity
             style={styles.backButton}
@@ -675,7 +745,14 @@ export default function BusinessAddressManualScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.scrollView} 
+            contentContainerStyle={Platform.select({
+              web: webContainerStyles.webScrollContent,
+              default: {} // Let content style handle padding
+            })} 
+            showsVerticalScrollIndicator={false}
+          >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -720,6 +797,7 @@ export default function BusinessAddressManualScreen() {
                       placeholder="e.g., Head Office, Main Branch"
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      editable={true}
                     />
                   </View>
                   <Text style={styles.fieldHint}>
@@ -737,6 +815,7 @@ export default function BusinessAddressManualScreen() {
                       placeholder="Building, Street, Area"
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      editable={true}
                     />
                   </View>
                 </View>
@@ -751,6 +830,7 @@ export default function BusinessAddressManualScreen() {
                       placeholder="Landmark, Near (optional)"
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      editable={true}
                     />
                   </View>
                 </View>
@@ -762,8 +842,12 @@ export default function BusinessAddressManualScreen() {
                       <TouchableOpacity
                         style={styles.removeLineButton}
                         onPress={() => removeAdditionalLine(index)}
+                        activeOpacity={0.7}
                       >
-                        <X size={16} color="#ef4444" />
+                        <X size={Platform.select({
+                          web: 16,
+                          default: 20, // Larger icon on mobile
+                        })} color="#ef4444" />
                       </TouchableOpacity>
                     </View>
                     <View style={styles.inputContainer}>
@@ -774,14 +858,22 @@ export default function BusinessAddressManualScreen() {
                         placeholder="Additional address line"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
+                        editable={true}
                       />
                     </View>
                   </View>
                 ))}
 
                 {additionalLines.length < 3 && (
-                  <TouchableOpacity style={styles.addLineButton} onPress={addAddressLine}>
-                    <Plus size={16} color="#3f66ac" />
+                  <TouchableOpacity 
+                    style={styles.addLineButton} 
+                    onPress={addAddressLine}
+                    activeOpacity={0.7}
+                  >
+                    <Plus size={Platform.select({
+                      web: 16,
+                      default: 14, // Smaller icon for cleaner look
+                    })} color="#3f66ac" />
                     <Text style={styles.addLineText}>Add Address Line</Text>
                   </TouchableOpacity>
                 )}
@@ -797,6 +889,7 @@ export default function BusinessAddressManualScreen() {
                         placeholder="City name"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
+                        editable={true}
                       />
                     </View>
                   </View>
@@ -812,6 +905,7 @@ export default function BusinessAddressManualScreen() {
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={6}
+                        editable={true}
                       />
                     </View>
                   </View>
@@ -829,13 +923,8 @@ export default function BusinessAddressManualScreen() {
                         styles.dropdownText,
                         { color: selectedState ? '#1a1a1a' : '#999999' }
                       ]}>
-                        {selectedState ? selectedState.name : 'Select state'}
+                        {selectedState ? `${selectedState.name} (${selectedState.code})` : 'Select state'}
                       </Text>
-                      {selectedState && (
-                        <Text style={styles.stateCodeText}>
-                          ({selectedState.code})
-                        </Text>
-                      )}
                     </View>
                     <ChevronDown 
                       size={20} 
@@ -856,6 +945,7 @@ export default function BusinessAddressManualScreen() {
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Person Name</Text>
                       <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                        <User size={20} color="#ffc754" style={styles.inputIcon} />
                         <CapitalizedTextInput
                           style={[styles.input, styles.contactInput]}
                           value={contactPersonName}
@@ -863,6 +953,7 @@ export default function BusinessAddressManualScreen() {
                           placeholder="Person responsible at this location"
                           placeholderTextColor="#999999"
                           autoCapitalize="words"
+                          editable={true}
                         />
                       </View>
                     </View>
@@ -870,12 +961,14 @@ export default function BusinessAddressManualScreen() {
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Phone Number</Text>
                       <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                        <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                         <TextInput
                           style={[styles.input, styles.contactInput]}
                           value={contactPhone}
                           onChangeText={handleContactPhoneChange}
                           placeholder="10-digit mobile number"
                           placeholderTextColor="#999999"
+                          editable={true}
                           keyboardType="phone-pad"
                           maxLength={10}
                         />
@@ -1208,7 +1301,10 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: 'absolute',
-    top: 60,
+    top: Platform.select({
+      web: 60,
+      default: 20, // SafeAreaView handles top safe area, so we start from 20
+    }),
     left: 24,
     zIndex: 1,
     width: 44,
@@ -1221,34 +1317,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    paddingHorizontal: 32,
-    paddingTop: 120,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 32,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 120,
+      default: 0, // SafeAreaView handles top padding, back button is absolutely positioned
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: Platform.select({
+      web: 48,
+      default: 24,
+    }),
   },
   iconWrapper: {
     width: 100,
     height: 100,
     backgroundColor: '#ffc754',
     borderRadius: 50,
-    borderWidth: 6,
+    borderWidth: Platform.select({
+      web: 6,
+      default: 3,
+    }),
     borderColor: '#3f66ac',
     justifyContent: 'center',
     alignItems: 'center',
   },
   textContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20,
+    }),
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
     color: '#1a1a1a',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8,
+    }),
     lineHeight: 34,
   },
   subtitle: {
@@ -1256,8 +1375,14 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     lineHeight: 22,
-    paddingHorizontal: 16,
-    marginBottom: 16,
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12,
+    }),
   },
   primaryNotice: {
     backgroundColor: '#e0f2fe',
@@ -1301,48 +1426,112 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   formContainer: {
-    marginBottom: 32,
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20,
+    }),
   },
   // Address field group styles
   addressFieldGroup: {
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#3f66ac',
+    ...Platform.select({
+      web: {
+        backgroundColor: '#eff6ff',
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 2,
+        borderColor: '#3f66ac',
+      },
+      default: {
+        // Mobile: two-toned background for better visual separation
+        backgroundColor: '#eff6ff',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 20,
+        borderWidth: 1.5,
+        borderColor: '#3f66ac',
+        overflow: 'visible',
+      },
+    }),
   },
   addressSectionTitle: {
-    color: '#3f66ac',
-    fontWeight: '800',
-    fontSize: 18,
-    marginBottom: 16,
-    textAlign: 'center',
+    ...Platform.select({
+      web: {
+        color: '#3f66ac',
+        fontWeight: '800',
+        fontSize: 18,
+        marginBottom: 16,
+        textAlign: 'center',
+      },
+      default: {
+        // Mobile: hide section title
+        display: 'none',
+      },
+    }),
   },
   // Contact field group styles
   contactFieldGroup: {
-    backgroundColor: '#fffbeb',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    borderWidth: 2,
-    borderColor: '#ffc754',
+    ...Platform.select({
+      web: {
+        backgroundColor: '#fffbeb',
+        borderRadius: 12,
+        padding: 16,
+        marginVertical: 8,
+        borderWidth: 2,
+        borderColor: '#ffc754',
+      },
+      default: {
+        // Mobile: two-toned background for better visual separation
+        backgroundColor: '#fffbeb',
+        borderRadius: 10,
+        padding: 12,
+        marginTop: 20,
+        marginBottom: 0,
+        borderWidth: 1.5,
+        borderColor: '#ffc754',
+      },
+    }),
   },
   contactSectionTitle: {
-    color: '#ffc754',
-    fontWeight: '800',
-    fontSize: 18,
-    marginBottom: 16,
-    textAlign: 'center',
+    ...Platform.select({
+      web: {
+        color: '#ffc754',
+        fontWeight: '800',
+        fontSize: 18,
+        marginBottom: 16,
+        textAlign: 'center',
+      },
+      default: {
+        // Mobile: hide section title
+        display: 'none',
+      },
+    }),
   },
   contactInputContainer: {
     backgroundColor: '#ffffff',
-    borderColor: '#ffc754',
-    borderWidth: 2,
+    ...Platform.select({
+      web: {
+        borderColor: '#ffc754',
+        borderWidth: 2,
+      },
+      default: {
+        // Mobile: use default border color like other inputs
+        borderColor: '#E5E7EB',
+        borderWidth: 2,
+      },
+    }),
   },
   contactInput: {
     color: '#000000',
     fontWeight: '500',
+  },
+  inputIcon: {
+    marginRight: Platform.select({
+      web: 12,
+      default: 10, // Reduced spacing on mobile
+    }),
+    // Ensure icon is vertically centered
+    alignSelf: 'center',
   },
   contactSection: {
     marginTop: 8,
@@ -1374,22 +1563,48 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   inputContainer: {
-    borderWidth: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Slightly smaller radius for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingVertical: Platform.select({
+      web: 4,
+      default: 2, // Reduced padding for more compact feel
+    }),
     backgroundColor: '#ffffff',
     ...Platform.select({
       web: {
         transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
       },
+      default: {
+        // Ensure inputs are selectable on mobile
+        pointerEvents: 'box-none', // Allow touches to pass through to children
+        minHeight: 50, // Consistent height for all input containers on mobile
+      },
     }),
   },
   input: {
+    flex: 1,
     borderWidth: 0,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingVertical: Platform.select({
+      web: 14,
+      default: 12, // Reduced padding for more compact feel
+    }),
+    fontSize: Platform.select({
+      web: 16,
+      default: 15, // Slightly smaller for more native feel
+    }),
     color: '#1a1a1a',
     fontWeight: '500',
     ...Platform.select({
@@ -1397,6 +1612,9 @@ const styles = StyleSheet.create({
         outlineWidth: 0,
         outlineColor: 'transparent',
         outlineStyle: 'none',
+      },
+      default: {
+        minHeight: 44, // Standard native input height
       },
     }),
   },
@@ -1407,24 +1625,82 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   removeLineButton: {
-    padding: 4,
+    padding: Platform.select({
+      web: 4,
+      default: 8, // Larger touch target on mobile
+    }),
+    minWidth: Platform.select({
+      web: 'auto',
+      default: 40, // Ensure minimum touch target
+    }),
+    minHeight: Platform.select({
+      web: 'auto',
+      default: 40, // Ensure minimum touch target
+    }),
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addLineButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#3f66ac',
-    borderRadius: 8,
+    justifyContent: 'center',
+    paddingVertical: Platform.select({
+      web: 12,
+      default: 8, // Reduced padding for smaller button
+    }),
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1.5, // Thinner border for cleaner look
+    }),
+    borderColor: '#3f66ac', // Blue to match background
+    borderRadius: Platform.select({
+      web: 8,
+      default: 6, // Smaller radius for cleaner look
+    }),
     borderStyle: 'dashed',
-    marginBottom: 20,
+    backgroundColor: Platform.select({
+      web: 'transparent',
+      default: 'transparent', // No background for cleaner look
+    }),
+    marginBottom: Platform.select({
+      web: 20,
+      default: 12, // Reduced spacing on mobile
+    }),
+    marginTop: Platform.select({
+      web: 0,
+      default: 8, // Reduced spacing on mobile
+    }),
+    marginHorizontal: Platform.select({
+      web: 0,
+      default: 0, // No horizontal margin
+    }),
+    minHeight: Platform.select({
+      web: 'auto',
+      default: 36, // Smaller height for cleaner look
+    }),
+    ...Platform.select({
+      default: {
+        // Ensure button is always visible on mobile
+        opacity: 1,
+        zIndex: 1,
+      },
+    }),
   },
   addLineText: {
     color: '#3f66ac',
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 13, // Slightly smaller for more native feel
+    }),
     fontWeight: '500',
-    marginLeft: 8,
+    marginLeft: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
   rowContainer: {
     flexDirection: 'row',
@@ -1440,22 +1716,56 @@ const styles = StyleSheet.create({
   },
   dropdown: {
     backgroundColor: '#f8f9fa',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Match inputContainer on mobile
+    }),
     borderColor: '#e9ecef',
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Match inputContainer on mobile
+    }),
+    paddingHorizontal: Platform.select({
+      web: 20,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingVertical: Platform.select({
+      web: 18,
+      default: 0, // Remove padding to let content handle spacing
+    }),
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    ...Platform.select({
+      default: {
+        minHeight: 50, // Match inputContainer total height on mobile
+      },
+    }),
   },
   stateSelectContent: {
     flex: 1,
+    ...Platform.select({
+      default: {
+        justifyContent: 'center', // Center content vertically on mobile
+        paddingVertical: 12, // Match input paddingVertical for consistent alignment
+      },
+    }),
   },
   dropdownText: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 15, // Match input fontSize on mobile
+    }),
     fontWeight: '500',
-    flex: 1,
+    ...Platform.select({
+      web: {
+        flex: 1,
+      },
+      default: {
+        textAlignVertical: 'center', // Center text vertically on mobile (Android)
+        includeFontPadding: false, // Remove extra font padding on Android for better alignment
+      },
+    }),
   },
   stateCodeText: {
     fontSize: 12,

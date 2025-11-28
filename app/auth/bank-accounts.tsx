@@ -470,11 +470,12 @@ export default function BankAccountsScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 
           style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS === 'ios'}
         >
           {/* Back Button */}
           <TouchableOpacity
@@ -506,7 +507,11 @@ export default function BankAccountsScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.scrollView} 
+            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            showsVerticalScrollIndicator={false}
+          >
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -547,7 +552,10 @@ export default function BankAccountsScreen() {
                 onPress={handleAddBankAccount}
                 activeOpacity={0.7}
               >
-                <CreditCard size={24} color="#10b981" />
+                <CreditCard size={Platform.select({
+                  web: 24,
+                  default: 20, // Smaller icon for consistency
+                })} color="#3f66ac" />
                 <Text style={styles.quickAddButtonText}>
                   Add Bank Account
                 </Text>
@@ -669,13 +677,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    paddingTop: Platform.select({
+      web: 60,
+      default: 40,
+    }),
+    paddingBottom: Platform.select({
+      web: 40,
+      ios: 20,
+      android: 12, // Consistent bottom padding on Android for cleaner look
+      default: 20,
+    }),
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20,
+    }),
   },
   iconWrapper: {
     width: 100,
@@ -809,17 +831,32 @@ const styles = StyleSheet.create({
   },
   accountCard: {
     backgroundColor: '#f8fafc',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12, // Reduced spacing on mobile
+    }),
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1,
+    }),
     borderColor: '#e2e8f0',
   },
   accountHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: Platform.select({
+      web: 16,
+      default: 12, // Reduced spacing on mobile
+    }),
   },
   accountTypeContainer: {
     flexDirection: 'row',
@@ -827,23 +864,44 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   accountTypeIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: Platform.select({
+      web: 40,
+      default: 36, // Smaller icon for more native feel
+    }),
+    height: Platform.select({
+      web: 40,
+      default: 36, // Smaller icon for more native feel
+    }),
+    borderRadius: Platform.select({
+      web: 20,
+      default: 18, // Smaller radius for more native feel
+    }),
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Platform.select({
+      web: 12,
+      default: 10, // Reduced spacing on mobile
+    }),
   },
   accountTypeText: {
     flex: 1,
   },
   accountTypeLabel: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 14, // Reduced for truncated text on mobile
+    }),
     fontWeight: '600',
-    marginBottom: 2,
+    marginBottom: Platform.select({
+      web: 2,
+      default: 2,
+    }),
   },
   accountTypeBadge: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
     fontWeight: '500',
   },
@@ -871,18 +929,33 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   bankName: {
-    fontSize: 18,
+    fontSize: Platform.select({
+      web: 18,
+      default: 15, // Reduced for truncated text on mobile
+    }),
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 4,
+    marginBottom: Platform.select({
+      web: 4,
+      default: 3, // Reduced spacing on mobile
+    }),
   },
   accountHolderName: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
-    marginBottom: 12,
+    marginBottom: Platform.select({
+      web: 12,
+      default: 8, // Reduced spacing on mobile
+    }),
   },
   accountDetails: {
-    gap: 8,
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced spacing on mobile
+    }),
   },
   accountDetailRow: {
     flexDirection: 'row',
@@ -890,12 +963,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   accountDetailLabel: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
     flex: 1,
   },
   accountDetailValue: {
-    fontSize: 12,
+    fontSize: Platform.select({
+      web: 12,
+      default: 11, // Reduced for truncated text on mobile
+    }),
     fontWeight: '600',
     color: '#1a1a1a',
     flex: 1,
@@ -903,7 +982,10 @@ const styles = StyleSheet.create({
   },
   balanceValue: {
     color: '#10b981',
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
   },
   emptySection: {
     alignItems: 'center',
@@ -923,13 +1005,28 @@ const styles = StyleSheet.create({
   addFirstButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    gap: 8,
+    paddingVertical: Platform.select({
+      web: 12,
+      default: 10, // Reduced for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 20,
+      default: 16, // Reduced for more native feel
+    }),
+    borderRadius: Platform.select({
+      web: 8,
+      default: 10, // Consistent with other buttons
+    }),
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced gap on mobile
+    }),
   },
   addFirstButtonText: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 13, // Reduced for more native feel
+    }),
     fontWeight: '600',
     color: '#ffffff',
   },
@@ -938,15 +1035,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#ffffff',
-    borderWidth: 2,
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for more native feel
+    }),
     borderStyle: 'dashed',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    gap: 8,
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Consistent with other buttons
+    }),
+    paddingVertical: Platform.select({
+      web: 16,
+      default: 12, // Reduced for more native feel
+    }),
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 16, // Reduced for more native feel
+    }),
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced gap on mobile
+    }),
   },
   addMoreText: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 13, // Reduced for more native feel
+    }),
     fontWeight: '600',
   },
   quickAddContainer: {
@@ -963,25 +1078,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f0fdf4',
-    borderWidth: 2,
-    borderColor: '#10b981',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    gap: 8,
+    backgroundColor: Platform.select({
+      web: '#f0fdf4',
+      default: '#ffffff', // White background for consistency
+    }),
+    borderWidth: Platform.select({
+      web: 2,
+      default: 1.5, // Thinner border for consistency
+    }),
+    borderColor: '#3f66ac', // Blue to match other buttons
+    borderRadius: Platform.select({
+      web: 12,
+      default: 10, // Consistent radius
+    }),
+    paddingVertical: Platform.select({
+      web: 16,
+      default: 12, // Reduced padding for consistency
+    }),
+    paddingHorizontal: Platform.select({
+      web: 16,
+      default: 16, // Match dashboard and all-invoices page padding
+    }),
+    gap: Platform.select({
+      web: 8,
+      default: 6, // Reduced gap for consistency
+    }),
   },
   quickAddButtonText: {
-    fontSize: 16,
+    fontSize: Platform.select({
+      web: 16,
+      default: 13, // Smaller text for consistency
+    }),
     fontWeight: '600',
-    color: '#10b981',
+    color: '#3f66ac', // Blue to match border
   },
   summaryContainer: {
     backgroundColor: '#f8fafc',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
-    borderWidth: 1,
+    borderRadius: Platform.select({
+      web: 16,
+      default: 12, // Smaller radius for more native feel
+    }),
+    padding: Platform.select({
+      web: 20,
+      default: 14, // Reduced padding for more compact feel
+    }),
+    marginBottom: Platform.select({
+      web: 32,
+      default: 20, // Reduced spacing on mobile
+    }),
+    borderWidth: Platform.select({
+      web: 1,
+      default: 1,
+    }),
     borderColor: '#e2e8f0',
   },
   summaryTitle: {
@@ -997,12 +1145,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   summaryLabel: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
     color: '#64748b',
     flex: 1,
   },
   summaryValue: {
-    fontSize: 14,
+    fontSize: Platform.select({
+      web: 14,
+      default: 12, // Reduced for truncated text on mobile
+    }),
     fontWeight: '600',
     color: '#1a1a1a',
     flex: 1,
