@@ -6,9 +6,9 @@ import {
   FlatList,
   Text,
   StyleSheet,
+  Platform,
 } from 'react-native';
-// Use simple text icons for web compatibility
-// import { Search, MapPin } from 'lucide-react-native';
+import { Search, MapPin } from 'lucide-react-native';
 
 interface WebAddressSearchProps {
   onAddressSelect: (addressData: any) => void;
@@ -195,12 +195,18 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
     };
   };
 
-  const renderSuggestion = ({ item }: { item: AddressSuggestion }) => (
+  const renderSuggestion = ({ item, index }: { item: AddressSuggestion; index: number }) => (
     <TouchableOpacity
-      style={styles.suggestionItem}
+      style={[
+        styles.suggestionItem,
+        index === suggestions.length - 1 && styles.suggestionItemLast
+      ]}
       onPress={() => handleAddressSelect(item.place_id)}
+      activeOpacity={0.7}
     >
-      <Text style={styles.suggestionIcon}>📍</Text>
+      <View style={styles.suggestionIconContainer}>
+        <MapPin size={18} color="#3f66ac" />
+      </View>
       <View style={styles.suggestionContent}>
         <Text style={styles.suggestionMainText}>
           {item.structured_formatting.main_text}
@@ -215,9 +221,18 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Search size={20} color="#64748b" style={styles.searchIcon} />
         <TextInput
-          style={styles.searchInput}
+          style={[
+            styles.searchInput,
+            Platform.select({
+              web: {
+                outlineWidth: 0,
+                outlineColor: 'transparent',
+                outlineStyle: 'none',
+              },
+            }),
+          ]}
           value={query}
           onChangeText={setQuery}
           placeholder={placeholder}
@@ -240,7 +255,7 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
         <View style={styles.suggestionsContainer}>
           <FlatList
             data={suggestions}
-            renderItem={renderSuggestion}
+            renderItem={({ item, index }) => renderSuggestion({ item, index })}
             keyExtractor={(item) => item.place_id}
             style={styles.suggestionsList}
             keyboardShouldPersistTaps="handled"
@@ -260,29 +275,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    ...Platform.select({
+      web: {
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+      },
+    }),
   },
   searchIcon: {
-    marginRight: 8,
-    fontSize: 18,
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: '#1f2937',
-    paddingVertical: 4,
+    paddingVertical: 14,
   },
   loadingIndicator: {
     marginLeft: 8,
@@ -296,48 +307,61 @@ const styles = StyleSheet.create({
     top: '100%',
     left: 0,
     right: 0,
-    backgroundColor: 'white',
-    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    marginTop: 8,
     borderWidth: 1,
     borderColor: '#e5e7eb',
-    shadowColor: '#000',
+    shadowColor: '#3f66ac',
     shadowOffset: {
       width: 0,
       height: 4,
     },
     shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 5,
-    maxHeight: 200,
+    elevation: 4,
+    overflow: 'hidden',
+    maxHeight: 300,
     zIndex: 1001,
   },
   suggestionsList: {
-    maxHeight: 200,
+    maxHeight: 300,
   },
   suggestionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
+    backgroundColor: '#ffffff',
   },
-  suggestionIcon: {
+  suggestionItemLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
-    fontSize: 16,
   },
   suggestionContent: {
     flex: 1,
   },
   suggestionMainText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1f2937',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1a1a1a',
     marginBottom: 2,
+    lineHeight: 18,
   },
   suggestionSecondaryText: {
-    fontSize: 12,
-    color: '#64748b',
+    fontSize: 13,
+    color: '#6b7280',
+    lineHeight: 16,
   },
 });
 

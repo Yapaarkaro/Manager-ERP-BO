@@ -33,6 +33,8 @@ import {
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -551,9 +553,11 @@ export default function SalesInvoicesScreen() {
   const totalSalesAmount = filteredInvoices.reduce((sum, inv) => sum + inv.amount, 0);
   const paidInvoices = filteredInvoices.filter(inv => inv.paymentStatus === 'paid');
   const pendingInvoices = filteredInvoices.filter(inv => inv.paymentStatus === 'pending' || inv.paymentStatus === 'partially_paid');
+  const webContainerStyles = getWebContainerStyles();
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -650,7 +654,7 @@ export default function SalesInvoicesScreen() {
       {/* Sales Invoices List */}
       <ScrollView 
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
         showsVerticalScrollIndicator={false}
       >
         {filteredInvoices.length === 0 ? (
@@ -870,6 +874,7 @@ export default function SalesInvoicesScreen() {
       </Modal>
 
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 

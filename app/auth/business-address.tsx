@@ -20,6 +20,8 @@ import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsA
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const { width, height } = Dimensions.get('window');
 
@@ -191,9 +193,59 @@ export default function BusinessAddressScreen() {
           streetAddress = parts[0]?.trim() || '';
         }
 
+        // Build area for Address Line 2 with better fallback logic
+        let areaValue = '';
+        if (addressData.area && addressData.area.trim()) {
+          areaValue = addressData.area;
+          console.log('📍 handleMarkerDragEnd - Using addressData.area:', areaValue);
+        } else {
+          // Fallback chain: sublocality levels > neighborhood > sublocality > district
+          const areaParts: string[] = [];
+          if (addressData.sublocality_level_2) areaParts.push(addressData.sublocality_level_2);
+          if (addressData.sublocality_level_3 && !areaParts.includes(addressData.sublocality_level_3)) {
+            areaParts.push(addressData.sublocality_level_3);
+          }
+          if (addressData.neighborhood && !areaParts.includes(addressData.neighborhood)) {
+            areaParts.push(addressData.neighborhood);
+          }
+          if (addressData.sublocality && !areaParts.includes(addressData.sublocality)) {
+            areaParts.push(addressData.sublocality);
+          }
+          if (areaParts.length === 0 && addressData.district) {
+            areaParts.push(addressData.district);
+          }
+          
+          // If still no area, try to extract from formatted address
+          if (areaParts.length === 0 && addressData.formatted_address) {
+            const addressParts = addressData.formatted_address.split(',').map(p => p.trim());
+            // Skip first part (street), last part (country), and parts that are city/state/pincode
+            for (let i = 1; i < addressParts.length - 1; i++) {
+              const part = addressParts[i];
+              // Skip if it's the city, state, pincode, or country
+              if (part !== addressData.city && 
+                  part !== addressData.locality &&
+                  part !== addressData.state && 
+                  part !== addressData.administrative_area_level_1 &&
+                  part !== addressData.pincode && 
+                  part !== addressData.postal_code &&
+                  part !== addressData.country &&
+                  !/^\d{6}$/.test(part) && // Not a pincode
+                  part.length > 0 &&
+                  !part.toLowerCase().includes('india')) {
+                areaParts.push(part);
+                break; // Take the first valid part
+              }
+            }
+          }
+          
+          areaValue = areaParts.join(', ');
+          console.log('📍 handleMarkerDragEnd - Extracted areaValue from fallback:', areaValue);
+          console.log('📍 handleMarkerDragEnd - areaParts:', areaParts);
+        }
+
         const processedAddress: SelectedAddress = {
           street: streetAddress,
-          area: addressData.area || addressData.sublocality || addressData.district || '',
+          area: areaValue,
           city: addressData.city || addressData.locality || '',
           state: addressData.state || addressData.administrative_area_level_1 || '',
           pincode: addressData.pincode || addressData.postal_code || '',
@@ -257,9 +309,59 @@ export default function BusinessAddressScreen() {
         streetAddress = parts[0]?.trim() || '';
       }
 
+      // Build area for Address Line 2 with better fallback logic
+      let areaValue = '';
+      if (addressData.area && addressData.area.trim()) {
+        areaValue = addressData.area;
+        console.log('📍 Using addressData.area:', areaValue);
+      } else {
+        // Fallback chain: sublocality levels > neighborhood > sublocality > district
+        const areaParts: string[] = [];
+        if (addressData.sublocality_level_2) areaParts.push(addressData.sublocality_level_2);
+        if (addressData.sublocality_level_3 && !areaParts.includes(addressData.sublocality_level_3)) {
+          areaParts.push(addressData.sublocality_level_3);
+        }
+        if (addressData.neighborhood && !areaParts.includes(addressData.neighborhood)) {
+          areaParts.push(addressData.neighborhood);
+        }
+        if (addressData.sublocality && !areaParts.includes(addressData.sublocality)) {
+          areaParts.push(addressData.sublocality);
+        }
+        if (areaParts.length === 0 && addressData.district) {
+          areaParts.push(addressData.district);
+        }
+        
+        // If still no area, try to extract from formatted address
+        if (areaParts.length === 0 && addressData.formatted_address) {
+          const addressParts = addressData.formatted_address.split(',').map(p => p.trim());
+          // Skip first part (street), last part (country), and parts that are city/state/pincode
+          for (let i = 1; i < addressParts.length - 1; i++) {
+            const part = addressParts[i];
+            // Skip if it's the city, state, pincode, or country
+            if (part !== addressData.city && 
+                part !== addressData.locality &&
+                part !== addressData.state && 
+                part !== addressData.administrative_area_level_1 &&
+                part !== addressData.pincode && 
+                part !== addressData.postal_code &&
+                part !== addressData.country &&
+                !/^\d{6}$/.test(part) && // Not a pincode
+                part.length > 0 &&
+                !part.toLowerCase().includes('india')) {
+              areaParts.push(part);
+              break; // Take the first valid part
+            }
+          }
+        }
+        
+        areaValue = areaParts.join(', ');
+        console.log('📍 Extracted areaValue from fallback:', areaValue);
+        console.log('📍 areaParts:', areaParts);
+      }
+
       const processedAddress: SelectedAddress = {
         street: streetAddress,
-        area: addressData.area || addressData.sublocality || addressData.district || '',
+        area: areaValue,
         city: addressData.city || addressData.locality || '',
         state: addressData.state || addressData.administrative_area_level_1 || '',
         pincode: addressData.pincode || addressData.postal_code || '',
@@ -269,7 +371,13 @@ export default function BusinessAddressScreen() {
         lng: addressData.lng,
       };
       
-      console.log('📍 Processed address:', processedAddress);
+      console.log('📍 handleAddressSelect - processedAddress:', processedAddress);
+      console.log('📍 handleAddressSelect - areaValue:', areaValue);
+      console.log('📍 handleAddressSelect - addressData.area:', addressData.area);
+      console.log('📍 handleAddressSelect - addressData.sublocality_level_2:', addressData.sublocality_level_2);
+      console.log('📍 handleAddressSelect - addressData.sublocality:', addressData.sublocality);
+      console.log('📍 handleAddressSelect - addressData.neighborhood:', addressData.neighborhood);
+      console.log('📍 handleAddressSelect - addressData.district:', addressData.district);
       
       setSelectedAddress(processedAddress);
       setIsAddressFromSearch(true); // Mark that this address came from search
@@ -346,10 +454,19 @@ export default function BusinessAddressScreen() {
       return;
     }
 
+    // Debug logging
+    console.log('📍 handleConfirmAddress - selectedAddress:', selectedAddress);
+    console.log('📍 selectedAddress.area:', selectedAddress.area);
+    console.log('📍 selectedAddress.area type:', typeof selectedAddress.area);
+    console.log('📍 selectedAddress.area length:', selectedAddress.area?.length);
+
     // Navigate to the correct form based on address type
     const targetPath = addressType === 'branch' ? '/locations/branch-details' : 
                       addressType === 'warehouse' ? '/locations/warehouse-details' : 
                       '/auth/business-address-manual';
+    
+    // Ensure area is always a string (not undefined or null)
+    const areaValue = selectedAddress.area || '';
     
     // Use replace to prevent going back to map screen after confirming address
     const params: Record<string, any> = {
@@ -367,12 +484,12 @@ export default function BusinessAddressScreen() {
         editAddressId: '',
         prefilledAddressName: businessName || '',
         prefilledDoorNumber: '',
-        prefilledStreet: selectedAddress.street,
-        prefilledArea: selectedAddress.area,
-        prefilledCity: selectedAddress.city,
-        prefilledState: selectedAddress.state,
-        prefilledPincode: selectedAddress.pincode,
-        prefilledFormatted: selectedAddress.formatted_address,
+        prefilledStreet: selectedAddress.street || '',
+        prefilledArea: areaValue,
+        prefilledCity: selectedAddress.city || '',
+        prefilledState: selectedAddress.state || '',
+        prefilledPincode: selectedAddress.pincode || '',
+        prefilledFormatted: selectedAddress.formatted_address || '',
         // Pass through business summary params
         fromSummary,
         allAddresses: existingAddresses,
@@ -383,6 +500,8 @@ export default function BusinessAddressScreen() {
         startingInvoiceNumber,
         fiscalYear,
     };
+    
+    console.log('📍 Passing params with prefilledArea:', params.prefilledArea);
 
     if (targetPath === '/auth/business-address-manual') {
       params.prefilledContactName = resolvedName || '';
@@ -457,9 +576,12 @@ export default function BusinessAddressScreen() {
     setIsAddressFromSearch(false); // Reset flag when starting new search
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -571,6 +693,7 @@ export default function BusinessAddressScreen() {
         </View>
       </SafeAreaView>
     </View>
+    </ResponsiveContainer>
   );
 }
 

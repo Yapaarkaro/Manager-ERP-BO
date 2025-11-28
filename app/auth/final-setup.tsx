@@ -18,6 +18,8 @@ import { dataStore } from '@/utils/dataStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import FiscalYearSelector from '@/components/FiscalYearSelector';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 export default function FinalSetupScreen() {
   const { 
@@ -203,8 +205,11 @@ export default function FinalSetupScreen() {
     opacity: slideAnimation,
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
@@ -240,7 +245,7 @@ export default function FinalSetupScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -262,7 +267,16 @@ export default function FinalSetupScreen() {
                   <Banknote size={20} color="#64748b" style={styles.inputIcon} />
                   <Text style={styles.currencySymbol}>₹</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      Platform.select({
+                        web: {
+                          outlineWidth: 0,
+                          outlineColor: 'transparent',
+                          outlineStyle: 'none',
+                        },
+                      }),
+                    ]}
                     value={formatIndianNumber(initialCashBalance)}
                     onChangeText={handleInitialCashBalanceChange}
                     placeholder="0.00"
@@ -325,6 +339,7 @@ export default function FinalSetupScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+    </ResponsiveContainer>
   );
 }
 

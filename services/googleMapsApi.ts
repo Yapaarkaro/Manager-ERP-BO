@@ -276,6 +276,11 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
       extracted.sublocality_level_3 = component.long_name;
     }
     
+    // Neighborhood (for Address Line 2)
+    if (types.includes('neighborhood')) {
+      extracted.neighborhood = component.long_name;
+    }
+    
     // Administrative levels
     if (types.includes('administrative_area_level_2')) {
       extracted.district = component.long_name;
@@ -341,27 +346,65 @@ export const extractAddressComponents = (result: GoogleGeocodeResult | GoogleRev
   }
 
   // Create area for Address Line 2 from available components
-  // Priority: establishment/premise (building name) > sublocality levels > district
-  if (!extracted.area || extracted.area === '') {
-    // First priority: Use establishment or premise for Address Line 2 (e.g., "WeWork", "Salarpuria Symphony")
+  // Priority: sublocality levels > neighborhood > establishment > premise > district > formatted address fallback
+  // Build area from multiple components if available
+  const areaParts: string[] = [];
+  
+  // Priority 1: Use sublocality levels (most specific neighborhood/area names)
+  if (extracted.sublocality_level_2) {
+    areaParts.push(extracted.sublocality_level_2);
+  }
+  if (extracted.sublocality_level_3 && !areaParts.includes(extracted.sublocality_level_3)) {
+    areaParts.push(extracted.sublocality_level_3);
+  }
+  if (extracted.sublocality && !areaParts.includes(extracted.sublocality)) {
+    areaParts.push(extracted.sublocality);
+  }
+  
+  // Priority 2: Use neighborhood if available and not already included
+  if (extracted.neighborhood && !areaParts.includes(extracted.neighborhood)) {
+    areaParts.push(extracted.neighborhood);
+  }
+  
+  // Priority 3: Use establishment or premise (building name) if no sublocality found
+  if (areaParts.length === 0) {
     if (extracted.establishment) {
-      extracted.area = extracted.establishment;
-    } else if (extracted.premise) {
-      extracted.area = extracted.premise;
-    }
-    // Second priority: Use sublocality levels (neighborhood/area names)
-    else if (extracted.sublocality_level_2) {
-      extracted.area = extracted.sublocality_level_2;
-    } else if (extracted.sublocality_level_3) {
-      extracted.area = extracted.sublocality_level_3;
-    } else if (extracted.sublocality) {
-      extracted.area = extracted.sublocality;
-    }
-    // Third priority: Use district as fallback
-    else if (extracted.district) {
-      extracted.area = extracted.district;
+      areaParts.push(extracted.establishment);
+    } else if (extracted.premise && extracted.premise !== extracted.street) {
+      // Only use premise if it's different from street (to avoid duplication)
+      areaParts.push(extracted.premise);
     }
   }
+  
+  // Priority 4: Use district as fallback if still no area
+  if (areaParts.length === 0 && extracted.district) {
+    areaParts.push(extracted.district);
+  }
+  
+  // Priority 5: Extract from formatted address if still no area
+  if (areaParts.length === 0 && extracted.formatted_address) {
+    const addressParts = extracted.formatted_address.split(',').map(p => p.trim());
+    // Skip first part (usually street), last part (usually country), and parts that are city/state/pincode
+    for (let i = 1; i < addressParts.length - 1; i++) {
+      const part = addressParts[i];
+      // Skip if it's the city, state, pincode, or country
+      if (part !== extracted.city && 
+          part !== extracted.state && 
+          part !== extracted.pincode && 
+          part !== extracted.country &&
+          !/^\d{6}$/.test(part) && // Not a pincode
+          part.length > 0) {
+        areaParts.push(part);
+        break; // Take the first valid part
+      }
+    }
+  }
+  
+  // Set the area field
+  extracted.area = areaParts.join(', ');
+  
+  console.log('🔍 extractAddressComponents - Final area:', extracted.area);
+  console.log('🔍 extractAddressComponents - areaParts:', areaParts);
 
   console.log('🔍 Extracted address components:', extracted);
   return extracted;

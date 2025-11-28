@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  Platform,
 } from 'react-native';
 import { Calendar, Hash, Type, ChevronUp, ChevronDown } from 'lucide-react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -555,7 +556,16 @@ const InvoicePatternConfig: React.FC<InvoicePatternConfigProps> = ({
         <View style={styles.inputContainer}>
           <Type size={20} color="#64748b" style={styles.inputIcon} />
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              Platform.select({
+                web: {
+                  outlineWidth: 0,
+                  outlineColor: 'transparent',
+                  outlineStyle: 'none',
+                },
+              }),
+            ]}
             value={prefix}
             onChangeText={handlePrefixChange}
             placeholder="INV"
@@ -572,7 +582,16 @@ const InvoicePatternConfig: React.FC<InvoicePatternConfigProps> = ({
         <View style={styles.inputContainer}>
           <Hash size={20} color="#64748b" style={styles.inputIcon} />
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              Platform.select({
+                web: {
+                  outlineWidth: 0,
+                  outlineColor: 'transparent',
+                  outlineStyle: 'none',
+                },
+              }),
+            ]}
             value={startingNumber}
             onChangeText={handleStartingNumberChange}
             placeholder="1"

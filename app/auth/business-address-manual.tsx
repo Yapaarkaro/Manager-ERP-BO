@@ -21,6 +21,8 @@ import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
 import { extractAddressComponents } from '@/services/googleMapsApi';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -99,6 +101,8 @@ export default function BusinessAddressManualScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateAddressInfo, setDuplicateAddressInfo] = useState<any>(null);
   const [contactPersonName, setContactPersonName] = useState(
     (prefilledContactName as string) || (name as string) || ''
   );
@@ -232,22 +236,31 @@ export default function BusinessAddressManualScreen() {
 
   // Handle prefilled address data
   useEffect(() => {
-    if (prefilledStreet) {
+    console.log('🏠 useEffect - Prefilled values check:');
+    console.log('  - prefilledStreet:', prefilledStreet, typeof prefilledStreet);
+    console.log('  - prefilledArea:', prefilledArea, typeof prefilledArea);
+    console.log('  - prefilledCity:', prefilledCity, typeof prefilledCity);
+    console.log('  - prefilledPincode:', prefilledPincode, typeof prefilledPincode);
+    
+    if (prefilledStreet && prefilledStreet !== '') {
       console.log('🏠 Setting prefilled street:', prefilledStreet);
       setAddressLine1(prefilledStreet as string);
     }
     
-    if (prefilledArea) {
+    // Check for prefilledArea - it can be an empty string, so check for undefined/null
+    if (prefilledArea !== undefined && prefilledArea !== null) {
       console.log('🏠 Setting prefilled area:', prefilledArea);
       setAddressLine2(prefilledArea as string);
+    } else {
+      console.log('⚠️ prefilledArea is undefined or null, not setting addressLine2');
     }
     
-    if (prefilledCity) {
+    if (prefilledCity && prefilledCity !== '') {
       console.log('🏠 Setting prefilled city:', prefilledCity);
       setCity(prefilledCity as string);
     }
     
-    if (prefilledPincode) {
+    if (prefilledPincode && prefilledPincode !== '') {
       console.log('🏠 Setting prefilled pincode:', prefilledPincode);
       setPincode(prefilledPincode as string);
     }
@@ -458,6 +471,77 @@ export default function BusinessAddressManualScreen() {
   };
 
   const handleSubmit = async () => {
+    if (!isFormValid()) {
+      Alert.alert('Incomplete Details', 'Please fill in all required fields');
+      return;
+    }
+
+    // Check for duplicate addresses (only for new addresses, not when editing)
+    if (editMode !== 'true') {
+      const allAddresses = dataStore.getAddresses();
+      const trimmedContactName = contactPersonName.trim();
+      const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
+      const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
+      
+      console.log('🔍 Checking for duplicates among', allAddresses.length, 'existing addresses');
+      console.log('📍 New address to check:', {
+        addressLine1: addressLine1.trim(),
+        city: city.trim(),
+        pincode: pincode,
+        stateName: selectedState?.name,
+        doorNumber: newDoorNumber,
+        managerName: trimmedContactName,
+        managerPhone: sanitizedContactPhone
+      });
+      
+      // Check for same location (addressLine1, city, pincode, state)
+      const sameLocationAddress = allAddresses.find(addr => {
+        return addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
+               addr.city.toLowerCase() === city.trim().toLowerCase() &&
+               addr.pincode === pincode &&
+               addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
+      });
+
+      if (sameLocationAddress) {
+        // Check if door number, manager name, and manager phone are also the same (exact duplicate)
+        const existingDoorNumber = sameLocationAddress.doorNumber || '';
+        const existingManager = sameLocationAddress.manager || '';
+        const existingPhone = sameLocationAddress.phone || '';
+        
+        const isExactDuplicate = existingDoorNumber.toLowerCase() === newDoorNumber.toLowerCase() &&
+                                 existingManager.toLowerCase() === trimmedContactName.toLowerCase() &&
+                                 existingPhone === sanitizedContactPhone;
+        
+        console.log('⚠️ Found same location address:', {
+          existingId: sameLocationAddress.id,
+          existingName: sameLocationAddress.name,
+          existingType: sameLocationAddress.type,
+          existingDoorNumber,
+          existingManager,
+          existingPhone,
+          newDoorNumber,
+          newManager: trimmedContactName,
+          newPhone: sanitizedContactPhone,
+          isExactDuplicate
+        });
+
+        if (isExactDuplicate) {
+          console.log('❌ Exact duplicate detected - showing modal');
+          setDuplicateAddressInfo(sameLocationAddress);
+          setShowDuplicateModal(true);
+          return;
+        } else {
+          // Same location but different door number/manager - show modal with "Use Same Address" option
+          console.log('⚠️ Same location but different door/manager - showing modal with use option');
+          setDuplicateAddressInfo(sameLocationAddress);
+          setShowDuplicateModal(true);
+          return;
+        }
+      }
+      
+      console.log('✅ No duplicate found - proceeding with address creation');
+    }
+
     setIsLoading(true);
     const trimmedContactName = contactPersonName.trim();
     const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
@@ -573,9 +657,12 @@ export default function BusinessAddressManualScreen() {
     opacity: slideAnimation,
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -588,7 +675,7 @@ export default function BusinessAddressManualScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -620,16 +707,21 @@ export default function BusinessAddressManualScreen() {
               ) : null}
 
               <View style={styles.formContainer}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Address Name *</Text>
-                  <CapitalizedTextInput
-                    style={styles.input}
-                    value={addressName}
-                    onChangeText={setAddressName}
-                    placeholder="e.g., Head Office, Main Branch"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
+                <View style={styles.addressFieldGroup}>
+                  <Text style={styles.addressSectionTitle}>Address Details</Text>
+                  
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Address Name *</Text>
+                  <View style={styles.inputContainer}>
+                    <CapitalizedTextInput
+                      style={styles.input}
+                      value={addressName}
+                      onChangeText={setAddressName}
+                      placeholder="e.g., Head Office, Main Branch"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
                   <Text style={styles.fieldHint}>
                     Give a name to identify this business location
                   </Text>
@@ -637,26 +729,30 @@ export default function BusinessAddressManualScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
-                  <CapitalizedTextInput
-                    style={styles.input}
-                    value={addressLine1}
-                    onChangeText={setAddressLine1}
-                    placeholder="Building, Street, Area"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
+                  <View style={styles.inputContainer}>
+                    <CapitalizedTextInput
+                      style={styles.input}
+                      value={addressLine1}
+                      onChangeText={setAddressLine1}
+                      placeholder="Building, Street, Area"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2</Text>
-                  <CapitalizedTextInput
-                    style={styles.input}
-                    value={addressLine2}
-                    onChangeText={setAddressLine2}
-                    placeholder="Landmark, Near (optional)"
-                    placeholderTextColor="#999999"
-                    autoCapitalize="words"
-                  />
+                  <View style={styles.inputContainer}>
+                    <CapitalizedTextInput
+                      style={styles.input}
+                      value={addressLine2}
+                      onChangeText={setAddressLine2}
+                      placeholder="Landmark, Near (optional)"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
                 </View>
 
                 {additionalLines.map((line, index) => (
@@ -670,14 +766,16 @@ export default function BusinessAddressManualScreen() {
                         <X size={16} color="#ef4444" />
                       </TouchableOpacity>
                     </View>
-                    <CapitalizedTextInput
-                      style={styles.input}
-                      value={line}
-                      onChangeText={(text) => updateAdditionalLine(index, text)}
-                      placeholder="Additional address line"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                    />
+                    <View style={styles.inputContainer}>
+                      <CapitalizedTextInput
+                        style={styles.input}
+                        value={line}
+                        onChangeText={(text) => updateAdditionalLine(index, text)}
+                        placeholder="Additional address line"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                      />
+                    </View>
                   </View>
                 ))}
 
@@ -691,27 +789,31 @@ export default function BusinessAddressManualScreen() {
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
-                    <CapitalizedTextInput
-                      style={styles.input}
-                      value={city}
-                      onChangeText={setCity}
-                      placeholder="City name"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                    />
+                    <View style={styles.inputContainer}>
+                      <CapitalizedTextInput
+                        style={styles.input}
+                        value={city}
+                        onChangeText={setCity}
+                        placeholder="City name"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="words"
+                      />
+                    </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.pincodeInput]}>
                     <Text style={styles.label}>Pincode *</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={pincode}
-                      onChangeText={handlePincodeChange}
-                      placeholder="000000"
-                      placeholderTextColor="#999999"
-                      keyboardType="numeric"
-                      maxLength={6}
-                    />
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={styles.input}
+                        value={pincode}
+                        onChangeText={handlePincodeChange}
+                        placeholder="000000"
+                        placeholderTextColor="#999999"
+                        keyboardType="numeric"
+                        maxLength={6}
+                      />
+                    </View>
                   </View>
                 </View>
 
@@ -745,36 +847,41 @@ export default function BusinessAddressManualScreen() {
                     />
                   </TouchableOpacity>
                 </View>
+                </View>
 
                 {(addressType === 'primary' || !addressType) && (
-                  <View style={styles.contactSection}>
-                    <Text style={styles.sectionHeading}>Contact Person Details</Text>
+                  <View style={styles.contactFieldGroup}>
+                    <Text style={styles.contactSectionTitle}>Contact Person Details</Text>
 
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Person Name</Text>
-                      <CapitalizedTextInput
-                        style={styles.input}
-                        value={contactPersonName}
-                        onChangeText={setContactPersonName}
-                        placeholder="Person responsible at this location"
-                        placeholderTextColor="#999999"
-                        autoCapitalize="words"
-                      />
+                      <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                        <CapitalizedTextInput
+                          style={[styles.input, styles.contactInput]}
+                          value={contactPersonName}
+                          onChangeText={setContactPersonName}
+                          placeholder="Person responsible at this location"
+                          placeholderTextColor="#999999"
+                          autoCapitalize="words"
+                        />
+                      </View>
                     </View>
 
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Phone Number</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={contactPhone}
-                        onChangeText={handleContactPhoneChange}
-                        placeholder="10-digit mobile number"
-                        placeholderTextColor="#999999"
-                        keyboardType="phone-pad"
-                        maxLength={10}
-                      />
+                      <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                        <TextInput
+                          style={[styles.input, styles.contactInput]}
+                          value={contactPhone}
+                          onChangeText={handleContactPhoneChange}
+                          placeholder="10-digit mobile number"
+                          placeholderTextColor="#999999"
+                          keyboardType="phone-pad"
+                          maxLength={10}
+                        />
+                      </View>
                       <Text style={styles.fieldHint}>
-                        We’ll reach out on this number for deliveries and support updates.
+                        We'll reach out on this number for deliveries and support updates.
                       </Text>
                     </View>
                   </View>
@@ -784,7 +891,7 @@ export default function BusinessAddressManualScreen() {
               <TouchableOpacity
                 style={[
                   styles.submitButton,
-                  isFormValid() ? { backgroundColor: typeInfo.color } : styles.disabledButton,
+                  isFormValid() ? styles.enabledButton : styles.disabledButton,
                 ]}
                 onPress={handleSubmit}
                 disabled={!isFormValid() || isLoading}
@@ -792,7 +899,7 @@ export default function BusinessAddressManualScreen() {
               >
                 <Text style={[
                   styles.submitButtonText,
-                  isFormValid() ? { color: '#ffffff' } : styles.disabledButtonText,
+                  isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
                 ]}>
                   {isLoading ? 'Saving Address...' : 'Save Address'}
                 </Text>
@@ -830,12 +937,21 @@ export default function BusinessAddressManualScreen() {
                   <Search size={18} color="#64748b" />
                   <TextInput
                     ref={stateSearchInputRef}
-                    style={styles.searchInput}
+                    style={[
+                      styles.searchInput,
+                      Platform.select({
+                        web: {
+                          outlineWidth: 0,
+                          outlineColor: 'transparent',
+                          outlineStyle: 'none',
+                        },
+                      }),
+                    ]}
                     value={stateSearch}
                     onChangeText={setStateSearch}
                     placeholder="Search states..."
                     placeholderTextColor="#94a3b8"
-                    autoFocus={true}
+                    autoFocus={false}
                   />
                 </View>
                 
@@ -875,9 +991,204 @@ export default function BusinessAddressManualScreen() {
               </View>
             </View>
           </Modal>
+
+          {/* Duplicate Address Modal */}
+          <Modal
+            visible={showDuplicateModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => {
+              setShowDuplicateModal(false);
+              setDuplicateAddressInfo(null);
+            }}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.duplicateModal}>
+                <Text style={styles.duplicateModalTitle}>Address Already Exists</Text>
+                {duplicateAddressInfo && (() => {
+                  const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
+                  const existingManager = duplicateAddressInfo.manager || '';
+                  const existingPhone = duplicateAddressInfo.phone || '';
+                  const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
+                  const newManager = contactPersonName.trim();
+                  const newPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
+                  
+                  const isExactDuplicate = existingDoorNumber.toLowerCase() === newDoorNumber.toLowerCase() &&
+                                           existingManager.toLowerCase() === newManager.toLowerCase() &&
+                                           existingPhone === newPhone;
+                  
+                  return (
+                    <>
+                      {isExactDuplicate && (
+                        <View style={styles.warningBox}>
+                          <Text style={styles.warningText}>
+                            ⚠️ Having two identical addresses will create confusion in your system. Please choose an option below.
+                          </Text>
+                        </View>
+                      )}
+                      {!isExactDuplicate && (
+                        <View style={styles.infoBox}>
+                          <Text style={styles.infoText}>
+                            ℹ️ An address at this location already exists, but with different door number or manager details. You can use the same address if needed.
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.duplicateModalText}>
+                        Existing address details:
+                      </Text>
+                      <View style={styles.duplicateAddressInfo}>
+                        <Text style={styles.duplicateAddressName}>{duplicateAddressInfo.name}</Text>
+                        <Text style={styles.duplicateAddressText}>
+                          {[duplicateAddressInfo.doorNumber, duplicateAddressInfo.addressLine1, duplicateAddressInfo.addressLine2, duplicateAddressInfo.city, duplicateAddressInfo.stateName, duplicateAddressInfo.pincode].filter(Boolean).join(', ')}
+                        </Text>
+                        <Text style={styles.duplicateAddressType}>
+                          Type: {duplicateAddressInfo.type === 'primary' ? 'Primary Address' : duplicateAddressInfo.type === 'branch' ? 'Branch Office' : 'Warehouse'}
+                        </Text>
+                        {existingManager && (
+                          <Text style={styles.duplicateManagerInfo}>
+                            Manager: {existingManager} {existingPhone ? `(${existingPhone})` : ''}
+                          </Text>
+                        )}
+                      </View>
+                    </>
+                  );
+                })()}
+
+                <View style={styles.duplicateModalActions}>
+                  <TouchableOpacity
+                    style={styles.duplicateModalSecondaryButton}
+                    onPress={() => {
+                      setShowDuplicateModal(false);
+                      setDuplicateAddressInfo(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.duplicateModalSecondaryButtonText}>Add Different Address</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.duplicateModalTertiaryButton}
+                    onPress={() => {
+                      setShowDuplicateModal(false);
+                      // Navigate to edit the existing address
+                      if (duplicateAddressInfo) {
+                        router.push({
+                          pathname: '/edit-address-simple',
+                          params: {
+                            editAddressId: duplicateAddressInfo.id,
+                            addressType: duplicateAddressInfo.type,
+                            type,
+                            value,
+                            name,
+                            businessName,
+                            businessType,
+                            customBusinessType,
+                            existingAddresses: existingAddresses,
+                            fromSummary: 'false',
+                          }
+                        });
+                      }
+                      setDuplicateAddressInfo(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.duplicateModalTertiaryButtonText}>Edit Existing Address</Text>
+                  </TouchableOpacity>
+                  {duplicateAddressInfo && (() => {
+                    const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
+                    const existingManager = duplicateAddressInfo.manager || '';
+                    const existingPhone = duplicateAddressInfo.phone || '';
+                    const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
+                    const newManager = contactPersonName.trim();
+                    const newPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
+                    
+                    const isExactDuplicate = existingDoorNumber.toLowerCase() === newDoorNumber.toLowerCase() &&
+                                             existingManager.toLowerCase() === newManager.toLowerCase() &&
+                                             existingPhone === newPhone;
+                    
+                    if (!isExactDuplicate) {
+                      return (
+                        <TouchableOpacity
+                          style={styles.duplicateModalPrimaryButton}
+                          onPress={async () => {
+                            setShowDuplicateModal(false);
+                            // Allow saving with same address but different door/manager
+                            setIsLoading(true);
+                            const trimmedContactName = contactPersonName.trim();
+                            const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
+                            const fallbackName = (name as string) || '';
+                            const fallbackPhone = ((mobile as string) || '').replace(/\D/g, '').slice(0, 10);
+                            
+                            let existingAddressList = [];
+                            try {
+                              const existingAddressesParam = existingAddresses as string;
+                              if (existingAddressesParam && existingAddressesParam !== '[]') {
+                                existingAddressList = JSON.parse(existingAddressesParam);
+                              }
+                            } catch (error) {
+                              existingAddressList = [];
+                            }
+                            
+                            const newAddress = {
+                              id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                              name: addressName.trim(),
+                              type: addressType || 'primary',
+                              doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+                              addressLine1: addressLine1.trim(),
+                              addressLine2: addressLine2.trim(),
+                              city: city.trim(),
+                              pincode: pincode,
+                              stateName: selectedState?.name || '',
+                              stateCode: selectedState?.code || '',
+                              isPrimary: (addressType || 'primary') === 'primary',
+                              manager: (addressType || 'primary') === 'primary'
+                                ? (trimmedContactName || fallbackName)
+                                : undefined,
+                              phone: (addressType || 'primary') === 'primary'
+                                ? ((sanitizedContactPhone || fallbackPhone) || undefined)
+                                : undefined,
+                            };
+                            
+                            const allAddresses = [...existingAddressList, newAddress];
+                            
+                            if ((addressType || 'primary') === 'primary') {
+                              dataStore.addAddress(newAddress);
+                            }
+                            
+                            setTimeout(() => {
+                              debouncedNavigate({
+                                pathname: '/auth/address-confirmation',
+                                params: {
+                                  type,
+                                  value,
+                                  gstinData,
+                                  name,
+                                  businessName,
+                                  businessType,
+                                  customBusinessType,
+                                  mobile,
+                                  allAddresses: JSON.stringify(allAddresses),
+                                }
+                              }, 'replace');
+                              setIsLoading(false);
+                              setDuplicateAddressInfo(null);
+                            }, 500);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.duplicateModalPrimaryButtonText}>Use Same Address</Text>
+                        </TouchableOpacity>
+                      );
+                    }
+                    return null;
+                  })()}
+                </View>
+              </View>
+            </View>
+          </Modal>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+    </ResponsiveContainer>
   );
 }
 
@@ -992,6 +1303,47 @@ const styles = StyleSheet.create({
   formContainer: {
     marginBottom: 32,
   },
+  // Address field group styles
+  addressFieldGroup: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#3f66ac',
+  },
+  addressSectionTitle: {
+    color: '#3f66ac',
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  // Contact field group styles
+  contactFieldGroup: {
+    backgroundColor: '#fffbeb',
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 8,
+    borderWidth: 2,
+    borderColor: '#ffc754',
+  },
+  contactSectionTitle: {
+    color: '#ffc754',
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  contactInputContainer: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffc754',
+    borderWidth: 2,
+  },
+  contactInput: {
+    color: '#000000',
+    fontWeight: '500',
+  },
   contactSection: {
     marginTop: 8,
     padding: 16,
@@ -1021,16 +1373,32 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontStyle: 'italic',
   },
-  input: {
-    backgroundColor: '#f8f9fa',
+  inputContainer: {
     borderWidth: 2,
-    borderColor: '#e9ecef',
+    borderColor: '#E5E7EB',
     borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    backgroundColor: '#ffffff',
+    ...Platform.select({
+      web: {
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+      },
+    }),
+  },
+  input: {
+    borderWidth: 0,
+    paddingVertical: 14,
     fontSize: 16,
     color: '#1a1a1a',
     fontWeight: '500',
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
   },
   additionalLineHeader: {
     flexDirection: 'row',
@@ -1117,7 +1485,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   enabledButtonText: {
-    color: '#3f66ac',
+    color: '#ffffff',
   },
   disabledButtonText: {
     color: '#6b7280',
@@ -1177,11 +1545,9 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    marginLeft: 12,
+    paddingVertical: 12,
     fontSize: 16,
     color: '#334155',
-    paddingVertical: 8,
-    
   },
   modalContent: {
     maxHeight: 350,
@@ -1226,7 +1592,27 @@ const styles = StyleSheet.create({
   },
   // Search bar styles
   searchContainer: {
-    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+    backgroundColor: '#ffffff',
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#334155',
+    paddingVertical: 8,
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
   },
   searchButton: {
     borderRadius: 12,
@@ -1261,5 +1647,127 @@ const styles = StyleSheet.create({
     backgroundColor: '#f1f5f9',
     borderRadius: 20,
     padding: 8,
+  },
+  duplicateModal: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 350,
+  },
+  duplicateModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  duplicateModalText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  duplicateAddressInfo: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateAddressName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  duplicateAddressText: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  duplicateAddressType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#3f66ac',
+    marginTop: 4,
+  },
+  duplicateModalActions: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  duplicateModalPrimaryButton: {
+    backgroundColor: '#3f66ac',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  duplicateModalPrimaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  duplicateModalSecondaryButton: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateModalSecondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  duplicateModalTertiaryButton: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateModalTertiaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  warningBox: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#92400e',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  infoBox: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#1e40af',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  duplicateManagerInfo: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
 });

@@ -17,6 +17,8 @@ import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, H
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 interface Address {
   id: string;
@@ -648,8 +650,11 @@ export default function AddressConfirmationScreen() {
     opacity: slideAnimation,
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView 
           style={styles.keyboardAvoidingView}
@@ -685,7 +690,7 @@ export default function AddressConfirmationScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -813,6 +818,7 @@ export default function AddressConfirmationScreen() {
         </Modal>
       </SafeAreaView>
     </View>
+    </ResponsiveContainer>
   );
 }
 

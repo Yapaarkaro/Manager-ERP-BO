@@ -12,10 +12,12 @@ import {
   Platform
 } from 'react-native';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
 import { dataStore, getGSTINStateCode, toTitleCase } from '@/utils/dataStore';
+import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -476,23 +478,27 @@ export default function BusinessDetailsScreen() {
     </Modal>
   );
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
-      {/* Back button removed - users should not go back from business details to prevent signup abandonment */}
+  const inputFocusStyles = getInputFocusStyles();
+  const webContainerStyles = getWebContainerStyles();
 
-      <ScrollView 
-        style={styles.content}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        ref={scrollViewRef}
-      >
-        <View style={styles.contentPadding}>
+  return (
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+        >
+        {/* Back button removed - users should not go back from business details to prevent signup abandonment */}
+
+        <ScrollView 
+          style={styles.content}
+          contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          ref={scrollViewRef}
+        >
+          <View style={styles.contentPadding}>
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Building2 size={32} color={COLORS.primary} />
@@ -515,13 +521,13 @@ export default function BusinessDetailsScreen() {
             <Text style={styles.label}>Your Name *</Text>
             <View
               style={[
-                styles.inputContainer,
-                focusedField === 'name' && styles.inputContainerFocused,
+                inputFocusStyles.inputContainer,
+                focusedField === 'name' && inputFocusStyles.inputContainerFocused,
               ]}
             >
               <User size={20} color={COLORS.gray} style={styles.inputIcon} />
               <CapitalizedTextInput
-                style={styles.input}
+                style={inputFocusStyles.input}
                 placeholder="Enter your full name"
                 placeholderTextColor={COLORS.gray}
                 value={name}
@@ -537,13 +543,13 @@ export default function BusinessDetailsScreen() {
             <Text style={styles.label}>Business Name *</Text>
             <View
               style={[
-                styles.inputContainer,
-                focusedField === 'businessName' && styles.inputContainerFocused,
+                inputFocusStyles.inputContainer,
+                focusedField === 'businessName' && inputFocusStyles.inputContainerFocused,
               ]}
             >
               <Building2 size={20} color={COLORS.gray} style={styles.inputIcon} />
               <CapitalizedTextInput
-                style={styles.input}
+                style={inputFocusStyles.input}
                 placeholder="Enter your business name"
                 placeholderTextColor={COLORS.gray}
                 value={businessName}
@@ -562,13 +568,13 @@ export default function BusinessDetailsScreen() {
             {businessType === 'Others' ? (
               <View
                 style={[
-                  styles.inputContainer,
+                  inputFocusStyles.inputContainer,
                   styles.customTypeContainer,
-                  focusedField === 'customBusinessType' && styles.inputContainerFocused,
+                  focusedField === 'customBusinessType' && inputFocusStyles.inputContainerFocused,
                 ]}
               >
                 <CapitalizedTextInput
-                  style={[styles.input, styles.customTypeInput]}
+                  style={[inputFocusStyles.input, styles.customTypeInput]}
                   placeholder="Enter your specific business type"
                   placeholderTextColor={COLORS.gray}
                   value={customBusinessType}
@@ -624,6 +630,7 @@ export default function BusinessDetailsScreen() {
 
       {renderBusinessTypeModal()}
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 
@@ -642,7 +649,10 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   contentPadding: {
-    paddingHorizontal: 30,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 30,
+    }),
     paddingTop: 20,
     paddingBottom: 100,
   },
@@ -686,43 +696,14 @@ const styles = StyleSheet.create({
     color: COLORS.black,
     marginBottom: 8,
   },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.lightGray,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-  },
-  inputContainerFocused: {
-    borderColor: COLORS.primary,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 4,
-  },
+  // inputContainer and inputContainerFocused moved to getInputFocusStyles utility
   customTypeContainer: {
     paddingRight: 0,
   },
   inputIcon: {
     marginRight: 12,
   },
-  input: {
-    flex: 1,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: COLORS.black,
-    borderWidth: 0,
-    ...Platform.select({
-      web: {
-        outlineWidth: 0,
-        outlineColor: 'transparent',
-        outlineStyle: 'none',
-      },
-    }),
-  },
+  // input style moved to getInputFocusStyles utility
   customTypeInput: {
     paddingRight: 12,
   },
@@ -785,6 +766,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxHeight: '80%',
+    ...Platform.select({
+      web: {
+        maxWidth: 500,
+        width: '90%',
+      },
+    }),
   },
   modalHeader: {
     flexDirection: 'row',

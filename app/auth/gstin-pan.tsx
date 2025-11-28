@@ -17,6 +17,8 @@ import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
 import { verifyGSTIN } from '../../services/gstinApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -252,8 +254,11 @@ export default function GstinPanScreen() {
     handleTypeSwitch(otherType);
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+    <ResponsiveContainer>
+      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -313,14 +318,23 @@ export default function GstinPanScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.inputContainer}>
+        <View style={[
+          styles.inputContainer,
+          isValid && styles.validInput,
+          (inputValue.length > 0 && !isValid) || verificationError ? styles.invalidInput : {},
+          isVerifying && styles.verifyingInput,
+        ]}>
           <TextInput
             ref={inputRef}
             style={[
               styles.input,
-              isValid && styles.validInput,
-              (inputValue.length > 0 && !isValid) || verificationError ? styles.invalidInput : {},
-              isVerifying && styles.verifyingInput,
+              Platform.select({
+                web: {
+                  outlineWidth: 0,
+                  outlineColor: 'transparent',
+                  outlineStyle: 'none',
+                },
+              }),
             ]}
             placeholder={selectedType === 'GSTIN' ? '15AAAAA0000A1Z5' : 'AAAAA0000A'}
             placeholderTextColor={COLORS.gray}
@@ -373,6 +387,7 @@ export default function GstinPanScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 
@@ -447,17 +462,27 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 16,
-  },
-  input: {
     borderWidth: 2,
-    borderColor: COLORS.lightGray,
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 18,
+    paddingVertical: 4,
+    backgroundColor: COLORS.white,
+  },
+  input: {
+    borderWidth: 0,
+    paddingVertical: 14,
     fontSize: 16,
     color: COLORS.black,
     fontFamily: 'monospace',
     letterSpacing: 1,
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
   },
   validInput: {
     borderColor: COLORS.success,

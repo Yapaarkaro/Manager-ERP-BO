@@ -19,6 +19,8 @@ import { Shield, User, CreditCard, Calendar } from 'lucide-react-native';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import CustomDatePicker from '@/components/CustomDatePicker';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -55,6 +57,11 @@ export default function GstinPanOTPScreen() {
   const [hasSelectedDate, setHasSelectedDate] = useState(false);
   const panNameInputRef = useRef<TextInput>(null);
   const dobInputRef = useRef<TextInput>(null);
+  
+  // PAN number edit state
+  const [isEditingPan, setIsEditingPan] = useState(false);
+  const [editablePanValue, setEditablePanValue] = useState(value as string);
+  const panNumberInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     // Auto-focus first input on mount for GSTIN
@@ -126,7 +133,19 @@ export default function GstinPanOTPScreen() {
       return;
     }
     
+    // If PAN is being edited, validate it before proceeding
+    if (isEditingPan) {
+      const trimmedValue = editablePanValue.trim().toUpperCase();
+      if (trimmedValue.length !== 10 || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(trimmedValue)) {
+        Alert.alert('Invalid PAN', 'Please enter a valid 10-character PAN number (e.g., ABCDE1234F)');
+        return;
+      }
+    }
+    
     setIsVerifying(true);
+    
+    // Use the editable PAN value if it was edited, otherwise use the original value
+    const panValue = isEditingPan ? editablePanValue.trim().toUpperCase() : (value as string);
     
     // PAN verification using Name and DOB (no OTP needed)
     setTimeout(() => {
@@ -135,7 +154,7 @@ export default function GstinPanOTPScreen() {
         pathname: '/auth/business-details',
         params: { 
           type: type,
-          value: value,
+          value: panValue,
           panName: panName.trim(),
           panDob: dateOfBirth?.toISOString() || '',
           mobile: mobile,
@@ -284,8 +303,11 @@ export default function GstinPanOTPScreen() {
       `${String(value).slice(0, 3)}*******`) : 
     '';
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+    <ResponsiveContainer>
+      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -293,7 +315,7 @@ export default function GstinPanOTPScreen() {
       >
       <ScrollView 
         style={styles.content}
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }, webContainerStyles.webScrollContent]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -318,11 +340,69 @@ export default function GstinPanOTPScreen() {
               <View style={styles.inputContainer}>
                 <CreditCard size={20} color={COLORS.gray} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.panInput}
-                  value={value as string}
-                  editable={false}
+                  ref={panNumberInputRef}
+                  style={[
+                    styles.panInput,
+                    Platform.select({
+                      web: {
+                        outlineWidth: 0,
+                        outlineColor: 'transparent',
+                        outlineStyle: 'none',
+                      },
+                    }),
+                  ]}
+                  value={isEditingPan ? editablePanValue : (value as string)}
+                  onChangeText={setEditablePanValue}
+                  editable={isEditingPan}
                   placeholderTextColor={COLORS.gray}
+                  autoCapitalize="characters"
+                  maxLength={10}
                 />
+                {!isEditingPan ? (
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() => {
+                      setIsEditingPan(true);
+                      setEditablePanValue(value as string);
+                      setTimeout(() => {
+                        panNumberInputRef.current?.focus();
+                      }, 100);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.editButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.editActions}>
+                    <TouchableOpacity
+                      style={styles.saveButton}
+                      onPress={() => {
+                        const trimmedValue = editablePanValue.trim().toUpperCase();
+                        if (trimmedValue.length === 10 && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(trimmedValue)) {
+                          // Update the value and exit edit mode
+                          setEditablePanValue(trimmedValue);
+                          setIsEditingPan(false);
+                          // The value will be used when continuing to business details
+                        } else {
+                          Alert.alert('Invalid PAN', 'Please enter a valid 10-character PAN number (e.g., ABCDE1234F)');
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.saveButtonText}>Save</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.cancelEditButton}
+                      onPress={() => {
+                        setIsEditingPan(false);
+                        setEditablePanValue(value as string);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.cancelEditButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -332,7 +412,16 @@ export default function GstinPanOTPScreen() {
                 <User size={20} color={COLORS.gray} style={styles.inputIcon} />
                 <CapitalizedTextInput
                   ref={panNameInputRef}
-                  style={styles.panInput}
+                  style={[
+                    styles.panInput,
+                    Platform.select({
+                      web: {
+                        outlineWidth: 0,
+                        outlineColor: 'transparent',
+                        outlineStyle: 'none',
+                      },
+                    }),
+                  ]}
                   placeholder="Enter your full name"
                   value={panName}
                   onChangeText={setPanName}
@@ -347,7 +436,16 @@ export default function GstinPanOTPScreen() {
               <View style={styles.dateInputWrapper}>
                 <TextInput
                   ref={dobInputRef}
-                  style={styles.dateInput}
+                  style={[
+                    styles.dateInput,
+                    Platform.select({
+                      web: {
+                        outlineWidth: 0,
+                        outlineColor: 'transparent',
+                        outlineStyle: 'none',
+                      },
+                    }),
+                  ]}
                   value={dobText}
                   onChangeText={handleDobTextChange}
                   placeholder="DD/MM/YYYY"
@@ -508,6 +606,7 @@ export default function GstinPanOTPScreen() {
         </Modal>
       )}
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 
@@ -695,17 +794,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.lightGray,
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 4,
     backgroundColor: COLORS.white,
+  },
+  editButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 8,
+    borderRadius: 6,
+    backgroundColor: COLORS.primary,
+  },
+  editButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '600',
   },
   inputIcon: {
     marginRight: 12,
   },
   panInput: {
     flex: 1,
+    paddingVertical: 14,
     fontSize: 16,
     color: COLORS.black,
     fontWeight: '500',
@@ -714,7 +826,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.lightGray,
+    borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 4,
@@ -725,7 +837,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.black,
     fontWeight: '500',
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   calendarButton: {
     padding: 8,
@@ -777,5 +889,44 @@ const styles = StyleSheet.create({
     width: '100%',
     height: Platform.OS === 'android' ? 200 : 216,
     backgroundColor: COLORS.white,
+  },
+  editActions: {
+    flexDirection: 'row',
+    marginLeft: 8,
+    gap: 8,
+  },
+  saveButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.success,
+    ...Platform.select({
+      web: {
+        transition: 'background-color 0.2s ease',
+      },
+    }),
+  },
+  saveButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cancelEditButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: COLORS.lightGray,
+    borderWidth: 1,
+    borderColor: COLORS.gray,
+    ...Platform.select({
+      web: {
+        transition: 'background-color 0.2s ease',
+      },
+    }),
+  },
+  cancelEditButtonText: {
+    color: COLORS.gray,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

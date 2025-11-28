@@ -18,6 +18,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
 import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -115,6 +117,8 @@ export default function BranchDetailsScreen() {
   const [managerName, setManagerName] = useState('');
   const [managerPhone, setManagerPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateAddressInfo, setDuplicateAddressInfo] = useState<any>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
 
@@ -132,11 +136,12 @@ export default function BranchDetailsScreen() {
       console.log('✅ Setting addressLine1 to:', prefilledStreet);
       setAddressLine1(prefilledStreet as string);
     }
-    if (prefilledArea && prefilledArea !== '') {
+    // Check for prefilledArea - it can be an empty string, so check for undefined/null
+    if (prefilledArea !== undefined && prefilledArea !== null) {
       console.log('✅ Setting addressLine2 to:', prefilledArea);
       setAddressLine2(prefilledArea as string);
     } else {
-      console.log('⚠️ prefilledArea is empty or undefined:', prefilledArea);
+      console.log('⚠️ prefilledArea is undefined or null:', prefilledArea);
     }
     if (prefilledCity && prefilledCity !== '') {
       console.log('✅ Setting city to:', prefilledCity);
@@ -175,7 +180,8 @@ export default function BranchDetailsScreen() {
   }, [prefilledState]);
 
   const filteredStates = indianStates.filter(state =>
-    state.name.toLowerCase().includes(stateSearchQuery.toLowerCase())
+    state.name.toLowerCase().includes(stateSearchQuery.toLowerCase()) ||
+    state.code.toLowerCase().includes(stateSearchQuery.toLowerCase())
   );
 
   const handleStateSelect = (state: { name: string; code: string }) => {
@@ -244,35 +250,57 @@ export default function BranchDetailsScreen() {
       addressLine1: addressLine1.trim(),
       city: city.trim(),
       pincode: pincode,
-      stateName: selectedState?.name
+      stateName: selectedState?.name,
+      doorNumber: doorNumber.trim(),
+      managerName: managerName.trim(),
+      managerPhone: managerPhone
     });
     
-    const isDuplicate = allAddresses.some(addr => {
-      const matches = addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
-                     addr.city.toLowerCase() === city.trim().toLowerCase() &&
-                     addr.pincode === pincode &&
-                     addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
-      
-      if (matches) {
-        console.log('⚠️ Found duplicate:', {
-          existingId: addr.id,
-          existingName: addr.name,
-          existingType: addr.type
-        });
-      }
-      
-      return matches;
+    // Check for same location (addressLine1, city, pincode, state)
+    const sameLocationAddress = allAddresses.find(addr => {
+      return addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
+             addr.city.toLowerCase() === city.trim().toLowerCase() &&
+             addr.pincode === pincode &&
+             addr.stateName.toLowerCase() === (selectedState?.name || '').toLowerCase();
     });
 
-    if (isDuplicate) {
-      console.log('❌ Duplicate branch detected - blocking creation');
-      Alert.alert(
-        'Duplicate Address', 
-        'An address with these details already exists. Please use a different location or edit the existing one.',
-        [{ text: 'OK' }]
-      );
-      setIsLoading(false);
-      return;
+    if (sameLocationAddress) {
+      // Check if door number, manager name, and manager phone are also the same (exact duplicate)
+      const existingDoorNumber = sameLocationAddress.doorNumber || '';
+      const existingManager = sameLocationAddress.manager || '';
+      const existingPhone = sameLocationAddress.phone || '';
+      
+      const isExactDuplicate = existingDoorNumber.toLowerCase() === doorNumber.trim().toLowerCase() &&
+                               existingManager.toLowerCase() === managerName.trim().toLowerCase() &&
+                               existingPhone === managerPhone;
+      
+      console.log('⚠️ Found same location address:', {
+        existingId: sameLocationAddress.id,
+        existingName: sameLocationAddress.name,
+        existingType: sameLocationAddress.type,
+        existingDoorNumber,
+        existingManager,
+        existingPhone,
+        newDoorNumber: doorNumber.trim(),
+        newManager: managerName.trim(),
+        newPhone: managerPhone,
+        isExactDuplicate
+      });
+
+      if (isExactDuplicate) {
+        console.log('❌ Exact duplicate detected - showing modal');
+        setDuplicateAddressInfo(sameLocationAddress);
+        setShowDuplicateModal(true);
+        setIsLoading(false);
+        return;
+      } else {
+        // Same location but different door number/manager - show modal with "Use Same Address" option
+        console.log('⚠️ Same location but different door/manager - showing modal with use option');
+        setDuplicateAddressInfo(sameLocationAddress);
+        setShowDuplicateModal(true);
+        setIsLoading(false);
+        return;
+      }
     }
     
     console.log('✅ No duplicate found - proceeding with branch creation');
@@ -364,9 +392,12 @@ export default function BranchDetailsScreen() {
     opacity: slideAnimation,
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -379,7 +410,7 @@ export default function BranchDetailsScreen() {
             <ArrowLeft size={24} color="#10b981" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -402,8 +433,11 @@ export default function BranchDetailsScreen() {
               ) : null}
 
               <View style={styles.formContainer}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Branch Name *</Text>
+                <View style={styles.branchFieldGroup}>
+                  <Text style={styles.branchSectionTitle}>Branch Office Details</Text>
+                  
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Branch Name *</Text>
                   <View style={styles.inputContainer}>
                     <Building2 size={20} color="#64748b" style={styles.inputIcon} />
                     <CapitalizedTextInput
@@ -467,7 +501,16 @@ export default function BranchDetailsScreen() {
                     <Text style={styles.label}>City *</Text>
                     <View style={styles.inputContainer}>
                       <CapitalizedTextInput
-                        style={styles.input}
+                        style={[
+                          styles.input,
+                          Platform.select({
+                            web: {
+                              outlineWidth: 0,
+                              outlineColor: 'transparent',
+                              outlineStyle: 'none',
+                            },
+                          }),
+                        ]}
                         value={city}
                         onChangeText={setCity}
                         placeholder="City name"
@@ -516,6 +559,7 @@ export default function BranchDetailsScreen() {
                     <ChevronDown size={20} color="#666666" />
                   </TouchableOpacity>
                 </View>
+                </View>
 
                 <View style={styles.contactFieldGroup}>
                   <Text style={styles.contactSectionTitle}>Contact Person Details</Text>
@@ -523,7 +567,7 @@ export default function BranchDetailsScreen() {
                   <View style={styles.contactFieldRow}>
                     <Text style={styles.contactLabel}>Branch Manager</Text>
                     <View style={[styles.inputContainer, styles.contactInputContainer]}>
-                      <User size={20} color="#fbbf24" style={styles.inputIcon} />
+                      <User size={20} color="#ffc754" style={styles.inputIcon} />
                       <CapitalizedTextInput
                         style={[styles.input, styles.contactInput]}
                         value={managerName}
@@ -537,10 +581,23 @@ export default function BranchDetailsScreen() {
 
                   <View style={styles.contactFieldRow}>
                     <Text style={styles.contactLabel}>Manager Phone</Text>
-                    <View style={[styles.inputContainer, styles.contactInputContainer]}>
-                      <Phone size={20} color="#fbbf24" style={styles.inputIcon} />
+                    <View style={[
+                      styles.inputContainer,
+                      styles.contactInputContainer
+                    ]}>
+                      <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                       <TextInput
-                        style={[styles.input, styles.contactInput]}
+                        style={[
+                          styles.input,
+                          styles.contactInput,
+                          Platform.select({
+                            web: {
+                              outlineWidth: 0,
+                              outlineColor: 'transparent',
+                              outlineStyle: 'none',
+                            },
+                          }),
+                        ]}
                         value={managerPhone}
                         onChangeText={handleManagerPhoneChange}
                         placeholder="Manager phone (optional)"
@@ -641,9 +698,204 @@ export default function BranchDetailsScreen() {
               </View>
             </View>
           </Modal>
+
+          {/* Duplicate Address Modal */}
+          <Modal
+            visible={showDuplicateModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => {
+              setShowDuplicateModal(false);
+              setDuplicateAddressInfo(null);
+            }}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.duplicateModal}>
+                <Text style={styles.duplicateModalTitle}>Address Already Exists</Text>
+                {duplicateAddressInfo && (() => {
+                  const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
+                  const existingManager = duplicateAddressInfo.manager || '';
+                  const existingPhone = duplicateAddressInfo.phone || '';
+                  
+                  const isExactDuplicate = existingDoorNumber.toLowerCase() === doorNumber.trim().toLowerCase() &&
+                                           existingManager.toLowerCase() === managerName.trim().toLowerCase() &&
+                                           existingPhone === managerPhone;
+                  
+                  return (
+                    <>
+                      {isExactDuplicate && (
+                        <View style={styles.warningBox}>
+                          <Text style={styles.warningText}>
+                            ⚠️ Having two identical addresses will create confusion in your system. Please choose an option below.
+                          </Text>
+                        </View>
+                      )}
+                      {!isExactDuplicate && (
+                        <View style={styles.infoBox}>
+                          <Text style={styles.infoText}>
+                            ℹ️ An address at this location already exists, but with different door number or manager details. You can use the same address if needed.
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={styles.duplicateModalText}>
+                        Existing address details:
+                      </Text>
+                      <View style={styles.duplicateAddressInfo}>
+                        <Text style={styles.duplicateAddressName}>{duplicateAddressInfo.name}</Text>
+                        <Text style={styles.duplicateAddressText}>
+                          {[duplicateAddressInfo.doorNumber, duplicateAddressInfo.addressLine1, duplicateAddressInfo.addressLine2, duplicateAddressInfo.city, duplicateAddressInfo.stateName, duplicateAddressInfo.pincode].filter(Boolean).join(', ')}
+                        </Text>
+                        <Text style={styles.duplicateAddressType}>
+                          Type: {duplicateAddressInfo.type === 'primary' ? 'Primary Address' : duplicateAddressInfo.type === 'branch' ? 'Branch Office' : 'Warehouse'}
+                        </Text>
+                        {existingManager && (
+                          <Text style={styles.duplicateManagerInfo}>
+                            Manager: {existingManager} {existingPhone ? `(${existingPhone})` : ''}
+                          </Text>
+                        )}
+                      </View>
+                    </>
+                  );
+                })()}
+
+                <View style={styles.duplicateModalActions}>
+                  <TouchableOpacity
+                    style={styles.duplicateModalSecondaryButton}
+                    onPress={() => {
+                      setShowDuplicateModal(false);
+                      setDuplicateAddressInfo(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.duplicateModalSecondaryButtonText}>Add Different Address</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.duplicateModalTertiaryButton}
+                    onPress={() => {
+                      setShowDuplicateModal(false);
+                      // Navigate to edit the existing address
+                      if (duplicateAddressInfo) {
+                        router.push({
+                          pathname: '/edit-address-simple',
+                          params: {
+                            editAddressId: duplicateAddressInfo.id,
+                            addressType: duplicateAddressInfo.type,
+                            type,
+                            value,
+                            name,
+                            businessName,
+                            businessType,
+                            customBusinessType,
+                            existingAddresses: existingAddresses,
+                            fromSummary: fromSummary || 'false',
+                          }
+                        });
+                      }
+                      setDuplicateAddressInfo(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.duplicateModalTertiaryButtonText}>Edit Existing Address</Text>
+                  </TouchableOpacity>
+                  {duplicateAddressInfo && (() => {
+                    const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
+                    const existingManager = duplicateAddressInfo.manager || '';
+                    const existingPhone = duplicateAddressInfo.phone || '';
+                    
+                    const isExactDuplicate = existingDoorNumber.toLowerCase() === doorNumber.trim().toLowerCase() &&
+                                             existingManager.toLowerCase() === managerName.trim().toLowerCase() &&
+                                             existingPhone === managerPhone;
+                    
+                    if (!isExactDuplicate) {
+                      return (
+                        <TouchableOpacity
+                          style={styles.duplicateModalPrimaryButton}
+                          onPress={async () => {
+                            setShowDuplicateModal(false);
+                            // Allow saving with same address but different door/manager
+                            setIsLoading(true);
+                            
+                            const newBranch: BusinessAddress = {
+                              id: `branch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                              name: branchName.trim(),
+                              type: 'branch',
+                              doorNumber: doorNumber.trim(),
+                              addressLine1: addressLine1.trim(),
+                              addressLine2: addressLine2.trim(),
+                              additionalLines: additionalLines.filter(line => line.trim().length > 0),
+                              city: city.trim(),
+                              pincode: pincode,
+                              stateName: selectedState?.name || '',
+                              stateCode: getGSTINStateCode(selectedState?.name || ''),
+                              isPrimary: false,
+                              manager: managerName.trim() || undefined,
+                              phone: managerPhone || undefined,
+                              status: 'active',
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
+                            };
+
+                            dataStore.addAddress(newBranch);
+                            
+                            setTimeout(() => {
+                              if (fromSummary === 'true') {
+                                router.replace({
+                                  pathname: '/auth/business-summary',
+                                  params: {
+                                    type,
+                                    value,
+                                    gstinData,
+                                    name,
+                                    businessName,
+                                    businessType,
+                                    customBusinessType,
+                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                                    allBankAccounts,
+                                    initialCashBalance,
+                                    invoicePrefix,
+                                    invoicePattern,
+                                    startingInvoiceNumber,
+                                    fiscalYear,
+                                  }
+                                });
+                              } else if (type && value) {
+                                router.replace({
+                                  pathname: '/auth/address-confirmation',
+                                  params: {
+                                    type,
+                                    value,
+                                    gstinData,
+                                    name,
+                                    businessName,
+                                    businessType,
+                                    customBusinessType,
+                                    mobile,
+                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                                  }
+                                });
+                              } else {
+                                router.push('/settings');
+                              }
+                              setIsLoading(false);
+                              setDuplicateAddressInfo(null);
+                            }, 500);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.duplicateModalPrimaryButtonText}>Use Same Address</Text>
+                        </TouchableOpacity>
+                      );
+                    }
+                    return null;
+                  })()}
+                </View>
+              </View>
+            </View>
+          </Modal>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+    </ResponsiveContainer>
   );
 }
 
@@ -754,12 +1006,17 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#ffffff',
     borderWidth: 2,
-    borderColor: '#e9ecef',
+    borderColor: '#E5E7EB',
     borderRadius: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 4,
+    ...Platform.select({
+      web: {
+        transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+      },
+    }),
   },
   inputIcon: {
     marginRight: 12,
@@ -841,7 +1098,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   enabledButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#ffc754',
   },
   disabledButton: {
     backgroundColor: '#f3f4f6',
@@ -915,7 +1172,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#334155',
     paddingVertical: 8,
-    
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
   },
   modalContent: {
     maxHeight: 350,
@@ -958,17 +1221,33 @@ const styles = StyleSheet.create({
   stateCodeTextSelected: {
     color: '#ffffff',
   },
+  // Branch field group styles
+  branchFieldGroup: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#3f66ac',
+  },
+  branchSectionTitle: {
+    color: '#3f66ac',
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
   // Contact field styles
   contactFieldGroup: {
-    backgroundColor: '#fefce8',
+    backgroundColor: '#fffbeb',
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
     borderWidth: 2,
-    borderColor: '#fbbf24',
+    borderColor: '#ffc754',
   },
   contactSectionTitle: {
-    color: '#fbbf24',
+    color: '#ffc754',
     fontWeight: '800',
     fontSize: 18,
     marginBottom: 16,
@@ -985,11 +1264,133 @@ const styles = StyleSheet.create({
   },
   contactInputContainer: {
     backgroundColor: '#ffffff',
-    borderColor: '#fbbf24',
+    borderColor: '#ffc754',
     borderWidth: 2,
   },
   contactInput: {
     color: '#000000',
     fontWeight: '500',
+  },
+  duplicateModal: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 350,
+  },
+  duplicateModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  duplicateModalText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  duplicateAddressInfo: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateAddressName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  duplicateAddressText: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  duplicateAddressType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#3f66ac',
+    marginTop: 4,
+  },
+  duplicateModalActions: {
+    flexDirection: 'column',
+    gap: 12,
+  },
+  duplicateModalPrimaryButton: {
+    backgroundColor: '#3f66ac',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  duplicateModalPrimaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  duplicateModalSecondaryButton: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateModalSecondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  duplicateModalTertiaryButton: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  duplicateModalTertiaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  warningBox: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#92400e',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  infoBox: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#1e40af',
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  duplicateManagerInfo: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
 });

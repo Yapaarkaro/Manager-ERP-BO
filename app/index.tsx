@@ -21,6 +21,7 @@ import {
   Gift
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
 
 const { width, height } = Dimensions.get('window');
 
@@ -150,7 +151,8 @@ export default function OnboardingScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ResponsiveContainer fullWidth>
+      <View style={styles.container}>
       <View style={styles.contentArea}>
         {renderContent()}
       </View>
@@ -188,6 +190,7 @@ export default function OnboardingScreen() {
         )}
       </View>
     </View>
+    </ResponsiveContainer>
   );
 }
 

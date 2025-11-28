@@ -21,6 +21,8 @@ import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import { extractAddressComponents, reverseGeocode } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import PlatformMapView from '@/components/PlatformMapView';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 // Import web-specific API for better CORS handling on web
 const getPlacePredictions = Platform.OS === 'web' 
@@ -111,6 +113,7 @@ export default function EditAddressSimpleScreen() {
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const glowAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
+  const stateSearchInputRef = useRef<TextInput>(null);
   const colors = useThemeColors();
   const defaultLocation = { lat: 28.6139, lng: 77.209 };
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number }>(defaultLocation);
@@ -118,6 +121,8 @@ export default function EditAddressSimpleScreen() {
   // Contact person fields (for branch/warehouse)
   const [managerName, setManagerName] = useState('');
   const [managerPhone, setManagerPhone] = useState('');
+  const [originalAddress, setOriginalAddress] = useState<any>(null);
+  const [originalPhone, setOriginalPhone] = useState<string>('');
 
   useEffect(() => {
     setStatusBarStyle('dark-content');
@@ -138,7 +143,24 @@ export default function EditAddressSimpleScreen() {
       if (!editAddressId) return;
 
       const existingAddress = dataStore.getAddressById(editAddressId as string);
-      if (!existingAddress) return;
+      if (!existingAddress) {
+        console.error('❌ Address not found with ID:', editAddressId);
+        Alert.alert('Error', 'Address not found. Please go back and try again.');
+        return;
+      }
+
+      // Store original address for change detection
+      setOriginalAddress({
+        name: existingAddress.name,
+        doorNumber: existingAddress.doorNumber || '',
+        addressLine1: existingAddress.addressLine1,
+        addressLine2: existingAddress.addressLine2,
+        city: existingAddress.city,
+        pincode: existingAddress.pincode,
+        stateCode: existingAddress.stateCode,
+        manager: existingAddress.manager || '',
+        phone: existingAddress.phone || '',
+      });
 
       setAddressName(existingAddress.name);
       setDoorNumber(existingAddress.doorNumber || '');
@@ -148,13 +170,16 @@ export default function EditAddressSimpleScreen() {
       setPincode(existingAddress.pincode);
       setManagerName(existingAddress.manager || '');
       setManagerPhone(existingAddress.phone || '');
+      setOriginalPhone(existingAddress.phone || '');
 
       const matchingState = indianStates.find(state => state.code === existingAddress.stateCode);
       if (matchingState) {
         setSelectedState(matchingState);
       }
 
+      // Geocode the existing address to show on map
       const addressParts = [
+        existingAddress.doorNumber,
         existingAddress.addressLine1,
         existingAddress.addressLine2,
         existingAddress.city,
@@ -176,8 +201,33 @@ export default function EditAddressSimpleScreen() {
               const lng = typeof geometry.lng === 'function' ? geometry.lng() : geometry.lng;
               if (lat && lng) {
                 console.log('✅ Setting existing address location on map:', { lat, lng });
-                setSelectedLocation({ lat, lng });
+                // Use setTimeout to ensure map is ready
+                setTimeout(() => {
+                  setSelectedLocation({ lat, lng });
+                }, 500);
               }
+            }
+          } else {
+            // Fallback: try reverse geocoding with city and state
+            console.log('⚠️ No predictions found, trying fallback geocoding');
+            try {
+              const fallbackText = `${existingAddress.city}, ${matchingState?.name || ''}`;
+              const fallbackPredictions = await getPlacePredictions(fallbackText);
+              if (fallbackPredictions && fallbackPredictions.length > 0) {
+                const placeDetails = await getPlaceDetails(fallbackPredictions[0].place_id);
+                const geometry = placeDetails?.geometry?.location;
+                if (geometry) {
+                  const lat = typeof geometry.lat === 'function' ? geometry.lat() : geometry.lat;
+                  const lng = typeof geometry.lng === 'function' ? geometry.lng() : geometry.lng;
+                  if (lat && lng) {
+                    setTimeout(() => {
+                      setSelectedLocation({ lat, lng });
+                    }, 500);
+                  }
+                }
+              }
+            } catch (fallbackError) {
+              console.log('⚠️ Fallback geocoding also failed:', fallbackError);
             }
           }
         } catch (error) {
@@ -456,6 +506,64 @@ export default function EditAddressSimpleScreen() {
     );
   };
 
+  // Check if any changes have been made
+  const hasChanges = () => {
+    if (!originalAddress) return false;
+    
+    return (
+      addressName.trim() !== originalAddress.name ||
+      doorNumber.trim() !== originalAddress.doorNumber ||
+      addressLine1.trim() !== originalAddress.addressLine1 ||
+      addressLine2.trim() !== originalAddress.addressLine2 ||
+      city.trim() !== originalAddress.city ||
+      pincode.trim() !== originalAddress.pincode ||
+      selectedState?.code !== originalAddress.stateCode ||
+      managerName.trim() !== originalAddress.manager ||
+      managerPhone.trim() !== originalAddress.phone
+    );
+  };
+
+  const handleCancel = () => {
+    // Navigate back to address confirmation screen
+    if (fromSummary === 'true') {
+      router.replace({
+        pathname: '/auth/business-summary',
+        params: {
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          allBankAccounts: '[]',
+          initialCashBalance: '0',
+          invoicePrefix: 'INV',
+          invoicePattern: '',
+          startingInvoiceNumber: '1',
+          fiscalYear: 'APR-MAR',
+        }
+      });
+    } else if (type && value) {
+      router.replace({
+        pathname: '/auth/address-confirmation',
+        params: {
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          allAddresses: JSON.stringify(dataStore.getAddresses()),
+        }
+      });
+    } else {
+      router.back();
+    }
+  };
+
   const handleSubmit = async () => {
     if (!isFormValid()) {
       Alert.alert('Invalid Form', 'Please fill all required fields correctly');
@@ -477,10 +585,10 @@ export default function EditAddressSimpleScreen() {
         pincode: pincode,
         stateName: selectedState?.name || '',
         stateCode: getGSTINStateCode(selectedState?.name || ''),
-        // For primary addresses, preserve user info (name and mobile from signup)
+        // For primary addresses, preserve user info (name from signup, phone from existing address)
         // For branch/warehouse, use the manager fields if showContactFields is true
-        manager: addressType === 'primary' ? name : (typeInfo.showContactFields ? managerName.trim() : undefined),
-        phone: addressType === 'primary' ? mobile : (typeInfo.showContactFields ? managerPhone.trim() : undefined),
+        manager: addressType === 'primary' ? (name || managerName.trim()) : (typeInfo.showContactFields ? managerName.trim() : undefined),
+        phone: addressType === 'primary' ? (managerPhone.trim() || originalPhone) : (typeInfo.showContactFields ? managerPhone.trim() : undefined),
         isPrimary: addressType === 'primary',
         status: 'active' as const,
         updatedAt: new Date().toISOString(),
@@ -489,56 +597,50 @@ export default function EditAddressSimpleScreen() {
       console.log('🔄 Updating address:', updatedAddress);
       dataStore.updateAddress(editAddressId as string, updatedAddress);
       
+      // Navigate back immediately without alert for better UX
       setTimeout(() => {
-        Alert.alert('Success', 'Address updated successfully', [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Check if we came from business summary page
-              if (fromSummary === 'true') {
-                // Return to business summary page
-                router.replace({
-                  pathname: '/auth/business-summary',
-                  params: {
-                    type,
-                    value,
-                    gstinData,
-                    name,
-                    businessName,
-                    businessType,
-                    customBusinessType,
-                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                    allBankAccounts: '[]', // Will be updated from summary
-                    initialCashBalance: '0',
-                    invoicePrefix: 'INV',
-                    invoicePattern: '',
-                    startingInvoiceNumber: '1',
-                    fiscalYear: 'APR-MAR',
-                  }
-                });
-              } else if (type && value) {
-                // Navigate back to address confirmation screen with signup parameters
-                router.push({
-                  pathname: '/auth/address-confirmation',
-                  params: {
-                    type,
-                    value,
-                    gstinData,
-                    name,
-                    businessName,
-                    businessType,
-                    customBusinessType,
-                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                  }
-                });
-              } else {
-                router.push('/settings');
-              }
-            }
-          }
-        ]);
         setIsLoading(false);
-      }, 500);
+        // Check if we came from business summary page
+        if (fromSummary === 'true') {
+          // Return to business summary page
+          router.replace({
+            pathname: '/auth/business-summary',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType,
+              customBusinessType,
+              allAddresses: JSON.stringify(dataStore.getAddresses()),
+              allBankAccounts: '[]', // Will be updated from summary
+              initialCashBalance: '0',
+              invoicePrefix: 'INV',
+              invoicePattern: '',
+              startingInvoiceNumber: '1',
+              fiscalYear: 'APR-MAR',
+            }
+          });
+        } else if (type && value) {
+          // Navigate back to address confirmation screen with signup parameters
+          router.replace({
+            pathname: '/auth/address-confirmation',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType,
+              customBusinessType,
+              allAddresses: JSON.stringify(dataStore.getAddresses()),
+            }
+          });
+        } else {
+          router.back();
+        }
+      }, 300);
     } catch (error) {
       console.error('Error updating address:', error);
       Alert.alert('Error', 'Failed to update address. Please try again.');
@@ -565,17 +667,25 @@ export default function EditAddressSimpleScreen() {
 
   const IconComponent = typeInfo.icon;
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.header}>
-          {/* Back button removed for edit forms to prevent navigation back */}
-        </View>
+        {/* Back Button */}
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={handleCancel}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={24} color="#1a1a1a" />
+        </TouchableOpacity>
 
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.content, slideTransform]}>
             <View style={styles.iconContainer}>
               <View style={[styles.iconWrapper, { backgroundColor: `${typeInfo.color}20` }]}>
@@ -591,118 +701,6 @@ export default function EditAddressSimpleScreen() {
             </View>
 
             <View style={styles.formContainer}>
-              {/* Integrated Glowing Search Bar */}
-              <View style={styles.searchContainer}>
-                <Animated.View
-                  style={[
-                    styles.searchButtonInner,
-                    {
-                      shadowColor: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['#3f66ac', '#ffc754'],
-                      }),
-                      shadowOpacity: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0.2, 0.4],
-                      }),
-                      shadowRadius: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [4, 8],
-                      }),
-                      shadowOffset: {
-                        width: 0,
-                        height: 0,
-                      },
-                      elevation: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [2, 4],
-                      }),
-                      borderColor: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['#3f66ac', '#ffc754'],
-                      }),
-                      borderWidth: glowAnimation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [1, 2],
-                      }),
-                    },
-                  ]}
-                >
-                  <Search size={20} color="#3f66ac" />
-                  <TextInput
-                    ref={searchInputRef}
-                    style={styles.searchInput}
-                    placeholder="Search for an address..."
-                    placeholderTextColor="#999999"
-                    value={searchQuery}
-                    onChangeText={handleSearchQuery}
-                    onFocus={() => setIsSearchActive(true)}
-                    onBlur={() => {
-                      // Don't hide suggestions immediately to allow clicking on them
-                      setTimeout(() => {
-                        if (!searchQuery) {
-                          setIsSearchActive(false);
-                        }
-                      }, 300);
-                    }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  {isLoadingSuggestions ? (
-                    <View style={styles.loadingIndicator}>
-                      <Text style={styles.loadingText}>Searching...</Text>
-                    </View>
-                  ) : searchQuery.length > 0 ? (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setSearchQuery('');
-                        setSuggestions([]);
-                        setShowSuggestions(false);
-                        setIsSearchActive(false);
-                      }}
-                      style={styles.clearButton}
-                    >
-                      <X size={16} color="#666666" />
-                    </TouchableOpacity>
-                  ) : null}
-                </Animated.View>
-              </View>
-
-              {/* Search Results - Show between search bar and map */}
-              {(() => {
-                console.log('🎨 Render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
-                return showSuggestions && suggestions.length > 0 ? (
-                  <View style={styles.searchResultsContainer}>
-                    {suggestions.slice(0, 3).map((suggestion, index) => {
-                      console.log('🎨 Rendering suggestion:', index, suggestion.description);
-                      return (
-                        <TouchableOpacity
-                          key={suggestion.place_id || index}
-                          style={[
-                            styles.searchResultItem,
-                            index === suggestions.slice(0, 3).length - 1 && styles.searchResultItemLast
-                          ]}
-                          onPress={() => handleAddressSelect(suggestion)}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.searchResultIcon}>
-                            <MapPin size={16} color="#3f66ac" />
-                          </View>
-                          <View style={styles.searchResultText}>
-                            <Text style={styles.searchResultMainText} numberOfLines={1}>
-                              {suggestion.structured_formatting?.main_text || suggestion.description?.split(',')[0]}
-                            </Text>
-                            <Text style={styles.searchResultSecondaryText} numberOfLines={1}>
-                              {suggestion.structured_formatting?.secondary_text || suggestion.description}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                ) : null;
-              })()}
-
               <View style={styles.mapWrapper}>
                 <PlatformMapView
                   initialLocation={selectedLocation}
@@ -710,6 +708,127 @@ export default function EditAddressSimpleScreen() {
                   onMapClick={handleMapLocationSelect}
                   onMarkerDragEnd={handleMapLocationSelect}
                 />
+                
+                {/* Floating Search Bar over Map */}
+                <View style={styles.floatingSearchContainer}>
+                  <Animated.View
+                    style={[
+                      styles.searchButtonInner,
+                      {
+                        shadowColor: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['#3f66ac', '#ffc754'],
+                        }),
+                        shadowOpacity: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.2, 0.4],
+                        }),
+                        shadowRadius: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [4, 8],
+                        }),
+                        shadowOffset: {
+                          width: 0,
+                          height: 0,
+                        },
+                        elevation: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [2, 4],
+                        }),
+                        borderColor: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['#3f66ac', '#ffc754'],
+                        }),
+                        borderWidth: glowAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 2],
+                        }),
+                      },
+                    ]}
+                  >
+                    <Search size={20} color="#3f66ac" />
+                    <TextInput
+                      ref={searchInputRef}
+                      style={[
+                        styles.mapSearchInput,
+                        Platform.select({
+                          web: {
+                            outlineWidth: 0,
+                            outlineColor: 'transparent',
+                            outlineStyle: 'none',
+                          },
+                        }),
+                      ]}
+                      placeholder="Search for an address..."
+                      placeholderTextColor="#999999"
+                      value={searchQuery}
+                      onChangeText={handleSearchQuery}
+                      onFocus={() => setIsSearchActive(true)}
+                      onBlur={() => {
+                        // Don't hide suggestions immediately to allow clicking on them
+                        setTimeout(() => {
+                          if (!searchQuery) {
+                            setIsSearchActive(false);
+                          }
+                        }, 300);
+                      }}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {isLoadingSuggestions ? (
+                      <View style={styles.loadingIndicator}>
+                        <Text style={styles.loadingText}>Searching...</Text>
+                      </View>
+                    ) : searchQuery.length > 0 ? (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSearchQuery('');
+                          setSuggestions([]);
+                          setShowSuggestions(false);
+                          setIsSearchActive(false);
+                        }}
+                        style={styles.clearButton}
+                      >
+                        <X size={16} color="#666666" />
+                      </TouchableOpacity>
+                    ) : null}
+                  </Animated.View>
+                </View>
+
+                {/* Search Results - Show below search bar */}
+                {(() => {
+                  console.log('🎨 Render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
+                  return showSuggestions && suggestions.length > 0 ? (
+                    <View style={styles.floatingSearchResultsContainer}>
+                      {suggestions.slice(0, 3).map((suggestion, index) => {
+                        console.log('🎨 Rendering suggestion:', index, suggestion.description);
+                        return (
+                          <TouchableOpacity
+                            key={suggestion.place_id || index}
+                            style={[
+                              styles.searchResultItem,
+                              index === suggestions.slice(0, 3).length - 1 && styles.searchResultItemLast
+                            ]}
+                            onPress={() => handleAddressSelect(suggestion)}
+                            activeOpacity={0.7}
+                          >
+                            <View style={styles.searchResultIcon}>
+                              <MapPin size={16} color="#3f66ac" />
+                            </View>
+                            <View style={styles.searchResultText}>
+                              <Text style={styles.searchResultMainText} numberOfLines={1}>
+                                {suggestion.structured_formatting?.main_text || suggestion.description?.split(',')[0]}
+                              </Text>
+                              <Text style={styles.searchResultSecondaryText} numberOfLines={1}>
+                                {suggestion.structured_formatting?.secondary_text || suggestion.description}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : null;
+                })()}
               </View>
 
 
@@ -874,22 +993,32 @@ export default function EditAddressSimpleScreen() {
               )}
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                isFormValid() ? styles.enabledButton : styles.disabledButton
-              ]}
-              onPress={handleSubmit}
-              disabled={!isFormValid() || isLoading}
-              activeOpacity={0.8}
-            >
-              <Text style={[
-                styles.submitButtonText,
-                isFormValid() ? styles.enabledButtonText : styles.disabledButtonText
-              ]}>
-                {isLoading ? 'Updating...' : 'Save Changes'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancel}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  (isFormValid() && hasChanges()) ? styles.enabledButton : styles.disabledButton
+                ]}
+                onPress={handleSubmit}
+                disabled={!isFormValid() || !hasChanges() || isLoading}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  styles.submitButtonText,
+                  (isFormValid() && hasChanges()) ? styles.enabledButtonText : styles.disabledButtonText
+                ]}>
+                  {isLoading ? 'Saving...' : 'Save Changes'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         </ScrollView>
 
@@ -897,32 +1026,48 @@ export default function EditAddressSimpleScreen() {
         <Modal
           visible={showStates}
           transparent={true}
-          animationType="slide"
+          animationType="fade"
           onRequestClose={() => setShowStates(false)}
         >
-          <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalOverlay} 
+            activeOpacity={1} 
+            onPressOut={() => {
+              setShowStates(false);
+              // Delay to allow keyboard to dismiss
+              setTimeout(() => stateSearchInputRef.current?.blur(), 100);
+            }}
+          >
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select State</Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
-                  onPress={() => setShowStates(false)}
+                  onPress={() => {
+                    setShowStates(false);
+                    // Delay to allow keyboard to dismiss
+                    setTimeout(() => stateSearchInputRef.current?.blur(), 100);
+                  }}
+                  activeOpacity={0.7}
                 >
                   <X size={24} color="#666666" />
                 </TouchableOpacity>
               </View>
               
-              <View style={styles.modalSearchContainer}>
+              <View style={styles.searchContainer}>
+                <Search size={18} color="#64748b" style={styles.searchIcon} />
                 <TextInput
-                  style={styles.modalSearchInput}
-                  placeholder="Search states..."
+                  ref={stateSearchInputRef}
+                  style={styles.searchInput}
                   value={stateSearch}
                   onChangeText={setStateSearch}
-                  placeholderTextColor="#999999"
+                  placeholder="Search states..."
+                  placeholderTextColor="#94a3b8"
+                  autoFocus={true}
                 />
               </View>
               
-              <ScrollView style={styles.modalContent}>
+              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
                 {filteredStates.map((state) => (
                   <TouchableOpacity
                     key={state.code}
@@ -959,10 +1104,11 @@ export default function EditAddressSimpleScreen() {
                 ))}
               </ScrollView>
             </View>
-          </View>
+          </TouchableOpacity>
         </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 
@@ -974,28 +1120,27 @@ const styles = StyleSheet.create({
   keyboardAvoidingView: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8fafc',
-    alignItems: 'center',
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    zIndex: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollView: {
     flex: 1,
     overflow: 'visible',
   },
   content: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
+    paddingTop: 60,
     paddingBottom: 40,
     overflow: 'visible',
   },
@@ -1033,9 +1178,13 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     overflow: 'visible',
   },
-  // Search bar styles
-  searchContainer: {
-    marginBottom: 20,
+  // Floating search bar over map
+  floatingSearchContainer: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    zIndex: 10,
   },
   searchButton: {
     borderRadius: 12,
@@ -1052,7 +1201,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#d1d5db',
   },
-  searchInput: {
+  mapSearchInput: {
     flex: 1,
     fontSize: 16,
     color: '#1a1a1a',
@@ -1072,7 +1221,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  // Search Results Container (between search bar and map)
+  // Floating search results container
+  floatingSearchResultsContainer: {
+    position: 'absolute',
+    top: 80, // Below the search bar
+    left: 16,
+    right: 16,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#3f66ac',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    zIndex: 9,
+    maxHeight: 200,
+    overflow: 'hidden',
+  },
+  // Search Results Container (between search bar and map) - kept for backward compatibility
   searchResultsContainer: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
@@ -1133,6 +1301,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 8,
+    position: 'relative',
   },
   inputGroup: {
     marginBottom: 20,
@@ -1240,7 +1409,28 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  cancelButton: {
+    flex: 1,
+    borderRadius: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+  },
+  cancelButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
   submitButton: {
+    flex: 1,
     borderRadius: 16,
     paddingVertical: 18,
     alignItems: 'center',
@@ -1306,19 +1496,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalSearchContainer: {
-    padding: 20,
-    paddingBottom: 10,
-  },
-  modalSearchInput: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#1a1a1a',
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
     backgroundColor: '#ffffff',
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#334155',
+    paddingVertical: 8,
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
   },
   modalContent: {
     maxHeight: 350,

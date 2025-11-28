@@ -16,6 +16,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, RotateCcw } from 'lucide-react-native';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -177,8 +179,11 @@ export default function OTPScreen() {
     router.back();
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -186,7 +191,7 @@ export default function OTPScreen() {
       >
         <ScrollView 
           style={styles.content}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -212,6 +217,13 @@ export default function OTPScreen() {
                 styles.otpInput,
                 digit && styles.filledInput,
                 isVerifying && styles.verifyingInput,
+                Platform.select({
+                  web: {
+                    outlineWidth: 0,
+                    outlineColor: 'transparent',
+                    outlineStyle: 'none',
+                  },
+                }),
               ]}
               value={digit}
               onChangeText={(text) => handleOtpChange(text.slice(-1), index)}
@@ -252,6 +264,7 @@ export default function OTPScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 

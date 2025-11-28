@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
 import { dataStore, BusinessAddress } from '../../utils/dataStore';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -463,8 +465,11 @@ export default function WarehousesScreen() {
     );
   };
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -490,7 +495,16 @@ export default function WarehousesScreen() {
             <View style={styles.searchBar}>
               <Search size={20} color={Colors.primary} />
               <TextInput
-                style={styles.searchInput}
+                style={[
+                  styles.searchInput,
+                  Platform.select({
+                    web: {
+                      outlineWidth: 0,
+                      outlineColor: 'transparent',
+                      outlineStyle: 'none',
+                    },
+                  }),
+                ]}
                 placeholder="Search warehouses..."
                 placeholderTextColor={Colors.textLight}
                 value={searchQuery}
@@ -503,7 +517,7 @@ export default function WarehousesScreen() {
       {/* Warehouses List */}
       <ScrollView 
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
         showsVerticalScrollIndicator={false}
       >
         {filteredWarehouses.length === 0 ? (
@@ -823,6 +837,7 @@ export default function WarehousesScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 

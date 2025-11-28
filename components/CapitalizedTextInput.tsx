@@ -1,11 +1,24 @@
 import React, { useState, useEffect, forwardRef } from 'react';
-import { TextInput, TextInputProps, Platform } from 'react-native';
+import { TextInput, TextInputProps, Platform, StyleSheet } from 'react-native';
 
 interface CapitalizedTextInputProps extends TextInputProps {
   value?: string;
   onChangeText?: (text: string) => void;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }
+
+// Consistent input styles for web focus
+const inputStyles = StyleSheet.create({
+  baseInput: {
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none',
+      },
+    }),
+  },
+});
 
 const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
   value = '',
@@ -104,6 +117,7 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
       <TextInput
         ref={ref}
         {...props}
+        style={[inputStyles.baseInput, props.style]}
         value={internalValue}
         onChangeText={handleTextChange}
         autoCapitalize={autoCapitalize}
@@ -116,6 +130,7 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
     <TextInput
       ref={ref}
       {...props}
+      style={[inputStyles.baseInput, props.style]}
       value={internalValue}
       onChangeText={handleTextChange}
       autoCapitalize="none"

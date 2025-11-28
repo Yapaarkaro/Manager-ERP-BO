@@ -1,6 +1,11 @@
-import { Dimensions, Platform } from 'react-native';
+import { Dimensions, Platform, StyleSheet } from 'react-native';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+// Web-specific responsive constants
+const WEB_MAX_CONTENT_WIDTH = 1400; // Maximum width for content on web (increased for better desktop experience)
+const WEB_CONTENT_PADDING = Platform.OS === 'web' ? 32 : 24; // Horizontal padding for web content
+const WEB_SIDEBAR_WIDTH = 0; // Sidebar width (if needed in future)
 
 // Platform-specific responsive calculations
 export const getResponsiveValues = () => {
@@ -22,6 +27,9 @@ export const getResponsiveValues = () => {
     containerPaddingTop: Platform.OS === 'android' ? 4 : 0,
     headerBorderRadius: Platform.OS === 'ios' ? 0 : 0,
     headerElevation: Platform.OS === 'android' ? 2 : 0,
+    // Web-specific values
+    webMaxContentWidth: WEB_MAX_CONTENT_WIDTH,
+    webContentPadding: WEB_CONTENT_PADDING,
   };
 };
 
@@ -98,4 +106,96 @@ export const getContainerStyles = () => {
       paddingTop: Platform.OS === 'android' ? 8 : 20,
     },
   };
+};
+
+// Web-responsive container styles
+export const getWebContainerStyles = () => {
+  const colors = getPlatformColors();
+  const values = getResponsiveValues();
+  
+  return StyleSheet.create({
+    webContainer: {
+      flex: 1,
+      backgroundColor: colors.background,
+      ...Platform.select({
+        web: {
+          alignItems: 'center',
+        },
+      }),
+    },
+    webContentWrapper: {
+      flex: 1,
+      width: '100%',
+      ...Platform.select({
+        web: {
+          maxWidth: values.webMaxContentWidth,
+          marginHorizontal: 'auto',
+          paddingHorizontal: values.webContentPadding,
+        },
+      }),
+    },
+    webScrollContent: {
+      ...Platform.select({
+        web: {
+          paddingHorizontal: values.webContentPadding,
+        },
+        default: {
+          paddingHorizontal: 16,
+        },
+      }),
+    },
+  });
+};
+
+// Consistent input focus styles across all platforms
+export const getInputFocusStyles = () => {
+  const colors = getPlatformColors();
+  
+  return StyleSheet.create({
+    inputContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: colors.grey[200],
+      borderRadius: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 4,
+      ...Platform.select({
+        web: {
+          transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+        },
+      }),
+    },
+    inputContainerFocused: {
+      borderColor: colors.primary,
+      ...Platform.select({
+        web: {
+          // Use rgba for proper opacity on web
+          boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)', // primary color with 12% opacity
+          outline: 'none',
+        },
+        default: {
+          shadowColor: colors.primary,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.12,
+          shadowRadius: 8,
+          elevation: 4,
+        },
+      }),
+    },
+    input: {
+      flex: 1,
+      paddingVertical: 14,
+      fontSize: 16,
+      color: colors.text,
+      borderWidth: 0,
+      ...Platform.select({
+        web: {
+          outlineWidth: 0,
+          outlineColor: 'transparent',
+          outlineStyle: 'none',
+        },
+      }),
+    },
+  });
 }; 

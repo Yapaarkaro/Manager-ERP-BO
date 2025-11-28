@@ -49,6 +49,8 @@ import {
 import { dataStore } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -1019,8 +1021,11 @@ export default function SettingsScreen() {
     }, [])
   );
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={styles.container}>
+    <ResponsiveContainer>
+      <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -1034,7 +1039,7 @@ export default function SettingsScreen() {
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <View style={styles.profileHeader}>
@@ -1701,6 +1706,7 @@ export default function SettingsScreen() {
 
 
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 

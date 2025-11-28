@@ -18,8 +18,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Phone } from 'lucide-react-native';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
+import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -37,7 +39,7 @@ export default function MobileScreen() {
   const [mobileNumber, setMobileNumber] = useState('');
   const [isValid, setIsValid] = useState(false);
   const [isReturningUser, setIsReturningUser] = useState(false);
-
+  const [isFocused, setIsFocused] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
 
   // Set status bar to dark for white background
@@ -122,19 +124,23 @@ export default function MobileScreen() {
   };
 
 
+  const inputFocusStyles = getInputFocusStyles();
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-      <KeyboardAvoidingView 
-        style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
-        <ScrollView 
-          style={styles.content}
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 20 }]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+    <ResponsiveContainer>
+      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardAvoidingView}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
+          <ScrollView 
+            style={styles.content}
+            contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent, { paddingTop: 20 }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
         <View style={[styles.iconContainer, { marginTop: Math.max(insets.top - 44, 20) }]}>
           <View style={styles.iconCircle}>
             <Phone size={32} color={COLORS.primary} />
@@ -152,21 +158,31 @@ export default function MobileScreen() {
         </Text>
 
         <View style={styles.inputContainer}>
-          <TextInput
+          <View
             style={[
-              styles.input,
-              isValid && styles.validInput,
-              mobileNumber.length > 0 && mobileNumber.length < 10 && styles.invalidInput,
+              inputFocusStyles.inputContainer,
+              isFocused && inputFocusStyles.inputContainerFocused,
+              isValid && styles.validInputContainer,
+              mobileNumber.length > 0 && mobileNumber.length < 10 && styles.invalidInputContainer,
             ]}
-            placeholder="Enter mobile number"
-            placeholderTextColor={COLORS.gray}
-            value={mobileNumber}
-            onChangeText={handleMobileChange}
-            keyboardType="numeric"
-            maxLength={10}
-            autoFocus
-            textAlign="center"
-          />
+          >
+            <TextInput
+              style={[
+                inputFocusStyles.input,
+                styles.input,
+                { textAlign: 'center' },
+              ]}
+              placeholder="Enter mobile number"
+              placeholderTextColor={COLORS.gray}
+              value={mobileNumber}
+              onChangeText={handleMobileChange}
+              keyboardType="numeric"
+              maxLength={10}
+              autoFocus
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+            />
+          </View>
         </View>
 
         {isReturningUser && mobileNumber.length === 10 && (
@@ -193,6 +209,7 @@ export default function MobileScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </ResponsiveContainer>
   );
 }
 
@@ -209,7 +226,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: 30,
+    paddingHorizontal: Platform.select({
+      web: 24,
+      default: 30,
+    }),
     paddingTop: 20,
   },
   iconContainer: {
@@ -252,19 +272,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    borderWidth: 2,
-    borderColor: COLORS.lightGray,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    fontSize: 16,
-    color: COLORS.black,
-    backgroundColor: COLORS.white,
+    // Base input styles are in inputFocusStyles.input
   },
-  validInput: {
+  validInputContainer: {
     borderColor: '#10B981',
   },
-  invalidInput: {
+  invalidInputContainer: {
     borderColor: COLORS.error,
   },
   errorText: {

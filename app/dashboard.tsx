@@ -10,8 +10,10 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 import { 
   Menu, 
   TrendingUp, 
@@ -34,8 +36,10 @@ import {
   PackagePlus
 } from 'lucide-react-native';
 import HamburgerMenu from '@/components/HamburgerMenu';
+import Sidebar from '@/components/Sidebar';
 import FAB from '@/components/FAB';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { usePathname } from 'expo-router';
 
 const Colors = {
   background: '#FFFFFF',
@@ -110,6 +114,7 @@ export default function DashboardScreen() {
   
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
+  const pathname = usePathname();
 
   // Set status bar to dark for white header
   useEffect(() => {
@@ -655,25 +660,41 @@ export default function DashboardScreen() {
     return item.render();
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableWithoutFeedback onPress={handleMenuPress}>
-          <View style={styles.menuButton}>
-            <Menu size={24} color={Colors.text} />
-          </View>
-        </TouchableWithoutFeedback>
-        
-        <Text style={styles.headerTitle}>Dashboard</Text>
-      </View>
+  const webContainerStyles = getWebContainerStyles();
 
-      <FlatList
-        data={dashboardSections}
-        renderItem={renderSection}
-        keyExtractor={(item) => item.id}
-        style={styles.flatList}
-        contentContainerStyle={styles.flatListContent}
+  return (
+    <View style={styles.mainContainer}>
+      {/* Sidebar - Only on web */}
+      {Platform.OS === 'web' && (
+        <Sidebar 
+          onNavigate={handleMenuNavigation} 
+          currentRoute={pathname}
+        />
+      )}
+      
+      <View style={styles.contentWrapper}>
+        <ResponsiveContainer>
+          <SafeAreaView style={styles.safeArea}>
+          {/* Header */}
+          <View style={styles.header}>
+            {/* Hamburger Menu - Only on mobile */}
+            {Platform.OS !== 'web' && (
+              <TouchableWithoutFeedback onPress={handleMenuPress}>
+                <View style={styles.menuButton}>
+                  <Menu size={24} color={Colors.text} />
+                </View>
+              </TouchableWithoutFeedback>
+            )}
+            
+            <Text style={styles.headerTitle}>Dashboard</Text>
+          </View>
+
+        <FlatList
+          data={dashboardSections}
+          renderItem={renderSection}
+          keyExtractor={(item) => item.id}
+          style={styles.flatList}
+          contentContainerStyle={[styles.flatListContent, webContainerStyles.webScrollContent]}
         showsVerticalScrollIndicator={false}
         showsHorizontalScrollIndicator={false}
         bounces={true}
@@ -689,20 +710,39 @@ export default function DashboardScreen() {
         indicatorStyle="white"
       />
 
-      {/* Hamburger Menu */}
-      <HamburgerMenu
-        visible={showHamburgerMenu}
-        onClose={() => setShowHamburgerMenu(false)}
-        onNavigate={handleMenuNavigation}
-      />
+      {/* Hamburger Menu - Only on mobile */}
+      {Platform.OS !== 'web' && (
+        <HamburgerMenu
+          visible={showHamburgerMenu}
+          onClose={() => setShowHamburgerMenu(false)}
+          onNavigate={handleMenuNavigation}
+        />
+      )}
 
       {/* FAB */}
       <FAB onAction={handleFABAction} />
     </SafeAreaView>
+    </ResponsiveContainer>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    ...Platform.select({
+      web: {
+        marginLeft: 280, // Sidebar width when expanded - will be adjusted by sidebar animation
+        transition: 'margin-left 0.3s ease',
+      },
+    }),
+  },
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,

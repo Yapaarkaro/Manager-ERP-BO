@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -31,12 +32,16 @@ import {
   Home,
   Warehouse,
   Phone,
+  Trash2,
+  Eye,
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import TrialNotification from '@/components/TrialNotification';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { getWebContainerStyles } from '@/utils/platformUtils';
 
 export default function BusinessSummaryScreen() {
   const { 
@@ -83,6 +88,12 @@ export default function BusinessSummaryScreen() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [showTrialNotification, setShowTrialNotification] = useState(false);
+  const [showDeleteAddressModal, setShowDeleteAddressModal] = useState(false);
+  const [showDeleteBankModal, setShowDeleteBankModal] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
+  const [bankAccountToDelete, setBankAccountToDelete] = useState<string | null>(null);
+  const [showViewBankModal, setShowViewBankModal] = useState(false);
+  const [bankAccountToView, setBankAccountToView] = useState<any | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
 
@@ -186,6 +197,47 @@ export default function BusinessSummaryScreen() {
       ...prev,
       [section]: !prev[section as keyof typeof prev],
     }));
+  };
+
+  const handleDeleteAddress = (addressId: string) => {
+    setAddressToDelete(addressId);
+    setShowDeleteAddressModal(true);
+  };
+
+  const confirmDeleteAddress = () => {
+    if (addressToDelete) {
+      // Update local state
+      setEditableAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
+      
+      // Update dataStore
+      dataStore.deleteAddress(addressToDelete);
+      
+      setAddressToDelete(null);
+      setShowDeleteAddressModal(false);
+    }
+  };
+
+  const handleDeleteBankAccount = (accountId: string) => {
+    setBankAccountToDelete(accountId);
+    setShowDeleteBankModal(true);
+  };
+
+  const confirmDeleteBankAccount = () => {
+    if (bankAccountToDelete) {
+      // Update local state
+      setEditableBankAccounts(prev => prev.filter(acc => acc.id !== bankAccountToDelete));
+      
+      // Update dataStore
+      dataStore.deleteBankAccount(bankAccountToDelete);
+      
+      setBankAccountToDelete(null);
+      setShowDeleteBankModal(false);
+    }
+  };
+
+  const handleViewBankAccount = (account: any) => {
+    setBankAccountToView(account);
+    setShowViewBankModal(true);
   };
 
   const handleCompleteSetup = async () => {
@@ -333,9 +385,12 @@ export default function BusinessSummaryScreen() {
     </TouchableOpacity>
   );
 
+  const webContainerStyles = getWebContainerStyles();
+
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -370,7 +425,7 @@ export default function BusinessSummaryScreen() {
             <ArrowLeft size={24} color="#3f66ac" />
           </TouchableOpacity>
 
-          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
                 <View style={styles.iconWrapper}>
@@ -400,7 +455,16 @@ export default function BusinessSummaryScreen() {
                         <View style={styles.editField}>
                           <Text style={styles.editLabel}>Business Owner Name</Text>
                           <TextInput
-                            style={styles.editInput}
+                            style={[
+                              styles.editInput,
+                              Platform.select({
+                                web: {
+                                  outlineWidth: 0,
+                                  outlineColor: 'transparent',
+                                  outlineStyle: 'none',
+                                },
+                              }),
+                            ]}
                             value={editableName}
                             onChangeText={setEditableName}
                             placeholder="Enter owner name"
@@ -409,7 +473,16 @@ export default function BusinessSummaryScreen() {
                         <View style={styles.editField}>
                           <Text style={styles.editLabel}>Business Type</Text>
                           <TextInput
-                            style={styles.editInput}
+                            style={[
+                              styles.editInput,
+                              Platform.select({
+                                web: {
+                                  outlineWidth: 0,
+                                  outlineColor: 'transparent',
+                                  outlineStyle: 'none',
+                                },
+                              }),
+                            ]}
                             value={editableBusinessType}
                             onChangeText={setEditableBusinessType}
                             placeholder="Enter business type"
@@ -523,23 +596,34 @@ export default function BusinessSummaryScreen() {
                               </>
                             )}
                           </View>
-                          <EditButton onPress={() => {
-                            // Navigate to edit-address-simple with the actual address data
-                            router.push({
-                              pathname: '/edit-address-simple',
-                              params: { 
-                                editAddressId: address.id,
-                                addressType: address.type,
-                                type: type,
-                                value: value,
-                                name: editableName,
-                                businessName: editableBusinessName,
-                                businessType: editableBusinessType,
-                                existingAddresses: JSON.stringify(editableAddresses),
-                                fromSummary: 'true',
-                              }
-                            });
-                          }} />
+                          <View style={styles.addressActions}>
+                            <EditButton onPress={() => {
+                              // Navigate to edit-address-simple with the actual address data
+                              router.push({
+                                pathname: '/edit-address-simple',
+                                params: { 
+                                  editAddressId: address.id,
+                                  addressType: address.type,
+                                  type: type,
+                                  value: value,
+                                  name: editableName,
+                                  businessName: editableBusinessName,
+                                  businessType: editableBusinessType,
+                                  existingAddresses: JSON.stringify(editableAddresses),
+                                  fromSummary: 'true',
+                                }
+                              });
+                            }} />
+                            {!address.isPrimary && (
+                              <TouchableOpacity
+                                style={styles.deleteButton}
+                                onPress={() => handleDeleteAddress(address.id)}
+                                activeOpacity={0.7}
+                              >
+                                <Trash2 size={16} color="#ef4444" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
                         </View>
                         <Text style={styles.addressName}>{address.name}</Text>
                         <Text style={styles.addressText}>
@@ -669,14 +753,56 @@ export default function BusinessSummaryScreen() {
                               </View>
                             )}
                           </View>
-                          <EditButton onPress={() => {
-                            router.push({
-                              pathname: '/bank-details',
-                              params: { 
-                                bankAccountId: account.id,
-                              }
-                            });
-                          }} />
+                          <View style={styles.bankActions}>
+                            <TouchableOpacity
+                              style={styles.viewButton}
+                              onPress={() => handleViewBankAccount(account)}
+                              activeOpacity={0.7}
+                            >
+                              <Eye size={16} color="#3f66ac" />
+                            </TouchableOpacity>
+                            <EditButton onPress={() => {
+                              router.push({
+                                pathname: '/auth/banking-details',
+                                params: {
+                                  fromSummary: 'true',
+                                  editMode: 'true',
+                                  editAccountId: account.id,
+                                  type,
+                                  value,
+                                  gstinData,
+                                  name: editableName,
+                                  businessName: editableBusinessName,
+                                  businessType: editableBusinessType,
+                                  customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                                  allAddresses: JSON.stringify(editableAddresses),
+                                  allBankAccounts: JSON.stringify(editableBankAccounts),
+                                  prefilledBankId: account.bankId,
+                                  prefilledAccountHolderName: account.accountHolderName,
+                                  prefilledAccountNumber: account.accountNumber,
+                                  prefilledIFSC: account.ifscCode,
+                                  prefilledAccountType: account.accountType,
+                                  prefilledInitialBalance: account.initialBalance.toString(),
+                                  prefilledUpiId: account.upiId || '',
+                                  prefilledIsPrimary: account.isPrimary.toString(),
+                                  currentCashBalance: editableCashBalance,
+                                  currentInvoicePrefix: editableInvoicePrefix,
+                                  currentInvoicePattern: editableInvoicePattern,
+                                  currentStartingNumber: editableStartingNumber,
+                                  currentFiscalYear: editableFiscalYear,
+                                }
+                              });
+                            }} />
+                            {!account.isPrimary && (
+                              <TouchableOpacity
+                                style={styles.deleteButton}
+                                onPress={() => handleDeleteBankAccount(account.id)}
+                                activeOpacity={0.7}
+                              >
+                                <Trash2 size={16} color="#ef4444" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
                         </View>
                         <View style={styles.bankDetails}>
                           <Text style={styles.bankDetail}>Account Holder: {account.accountHolderName}</Text>
@@ -750,7 +876,16 @@ export default function BusinessSummaryScreen() {
                           <View style={styles.cashInputContainer}>
                             <Text style={styles.currencySymbol}>₹</Text>
                             <TextInput
-                              style={styles.cashInput}
+                              style={[
+                                styles.cashInput,
+                                Platform.select({
+                                  web: {
+                                    outlineWidth: 0,
+                                    outlineColor: 'transparent',
+                                    outlineStyle: 'none',
+                                  },
+                                }),
+                              ]}
                               value={formatIndianNumber(editableCashBalance)}
                               onChangeText={(text) => {
                                 const cleaned = text.replace(/[^0-9.]/g, '');
@@ -917,7 +1052,140 @@ export default function BusinessSummaryScreen() {
         }}
         trialEndDate={subscriptionStore.getSubscription().trialEndDate!}
       />
+
+      {/* Delete Address Confirmation Modal */}
+      <Modal
+        visible={showDeleteAddressModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteAddressModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModal}>
+            <Text style={styles.deleteModalTitle}>Delete Address</Text>
+            <Text style={styles.deleteModalText}>
+              Are you sure you want to delete this address? This action cannot be undone.
+            </Text>
+
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                style={styles.deleteModalCancel}
+                onPress={() => setShowDeleteAddressModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteModalConfirm}
+                onPress={confirmDeleteAddress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalConfirmText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Bank Account Confirmation Modal */}
+      <Modal
+        visible={showDeleteBankModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteBankModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModal}>
+            <Text style={styles.deleteModalTitle}>Delete Bank Account</Text>
+            <Text style={styles.deleteModalText}>
+              Are you sure you want to delete this bank account? This action cannot be undone.
+            </Text>
+
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                style={styles.deleteModalCancel}
+                onPress={() => setShowDeleteBankModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteModalConfirm}
+                onPress={confirmDeleteBankAccount}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalConfirmText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* View Bank Account Modal */}
+      <Modal
+        visible={showViewBankModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowViewBankModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.viewModal}>
+            <View style={styles.viewModalHeader}>
+              <Text style={styles.viewModalTitle}>Bank Account Details</Text>
+              <TouchableOpacity
+                style={styles.viewModalClose}
+                onPress={() => setShowViewBankModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewModalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {bankAccountToView && (
+              <ScrollView style={styles.viewModalContent} showsVerticalScrollIndicator={false}>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Bank Name:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.bankName}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Account Holder:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.accountHolderName}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Account Number:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.accountNumber}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>IFSC Code:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.ifscCode}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Account Type:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.accountType}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>UPI ID:</Text>
+                  <Text style={styles.viewModalValue}>{bankAccountToView.upiId || 'N/A'}</Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Initial Balance:</Text>
+                  <Text style={styles.viewModalValue}>
+                    {formatBalanceWithSymbol(parseFloat(bankAccountToView.initialBalance) || 0)}
+                  </Text>
+                </View>
+                <View style={styles.viewModalRow}>
+                  <Text style={styles.viewModalLabel}>Status:</Text>
+                  <Text style={styles.viewModalValue}>
+                    {bankAccountToView.isPrimary ? 'Primary Account' : 'Secondary Account'}
+                  </Text>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
+    </ResponsiveContainer>
   );
 }
 
@@ -1276,6 +1544,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  addressActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bankActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  viewButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   addressType: {
     fontSize: 12,
     fontWeight: '700',
@@ -1400,5 +1694,118 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#1e40af',
     lineHeight: 18,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  deleteModal: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 350,
+  },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  deleteModalText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  deleteModalCancel: {
+    flex: 1,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  deleteModalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  deleteModalConfirm: {
+    flex: 1,
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  deleteModalConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  viewModal: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+  },
+  viewModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  viewModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  viewModalClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewModalCloseText: {
+    fontSize: 18,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  viewModalContent: {
+    maxHeight: 400,
+  },
+  viewModalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  viewModalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+    flex: 1,
+  },
+  viewModalValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'right',
   },
 });
