@@ -48,7 +48,7 @@ const WebMapView: React.FC<WebMapViewProps> = ({
       const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]');
       existingScripts.forEach(script => script.remove());
       
-      // Create and load the script
+      // Create and load the script with async loading
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&v=3.54`;
       script.async = true;
@@ -69,7 +69,10 @@ const WebMapView: React.FC<WebMapViewProps> = ({
       
       script.onerror = (error) => {
         console.error('Failed to load Google Maps API:', error);
-        Alert.alert('Map Error', 'Failed to load Google Maps. Please check your internet connection and try refreshing the page.');
+        Alert.alert(
+          'Map Error', 
+          'Failed to load Google Maps. Please check your internet connection and try refreshing the page. If the problem persists, verify your API key is valid and has the necessary permissions.'
+        );
       };
       
       document.head.appendChild(script);
@@ -122,7 +125,8 @@ const WebMapView: React.FC<WebMapViewProps> = ({
       // Wait a moment for map to initialize, then add marker
       setTimeout(() => {
         if (mapInstanceRef.current) {
-          // Create marker
+          // Use regular Marker (AdvancedMarkerElement requires Map ID which we don't have)
+          // This avoids the "map is initialised without a valid Map ID" error
           markerRef.current = new google.maps.Marker({
             position: { lat: markerLocation.lat, lng: markerLocation.lng },
             map: mapInstanceRef.current,
@@ -147,17 +151,19 @@ const WebMapView: React.FC<WebMapViewProps> = ({
           });
 
           // Handle marker drag end
-          markerRef.current.addListener('dragend', () => {
-            if (markerRef.current) {
-              const position = markerRef.current.getPosition();
-              if (position) {
-                const lat = position.lat();
-                const lng = position.lng();
-                setMarkerLocation({ lat, lng });
-                onMarkerDragEnd?.(lat, lng);
+          if (markerRef.current) {
+            markerRef.current.addListener('dragend', () => {
+              if (markerRef.current) {
+                const position = markerRef.current.getPosition();
+                if (position) {
+                  const lat = position.lat();
+                  const lng = position.lng();
+                  setMarkerLocation({ lat, lng });
+                  onMarkerDragEnd?.(lat, lng);
+                }
               }
-            }
-          });
+            });
+          }
 
           setIsMapLoaded(true);
           onMapLoad?.();

@@ -1,6 +1,8 @@
 // Web-specific Google Maps API service using the JavaScript API to avoid CORS issues
 // This uses the google.maps library loaded via script tag in WebMapView
 
+import { parseGooglePlace, createAutocompleteService, createPlacesService, loadGoogleMapsScript } from '@/utils/googleMaps';
+
 export interface GooglePlacePrediction {
   place_id: string;
   description: string;
@@ -15,14 +17,24 @@ export const getPlacePredictions = async (input: string): Promise<GooglePlacePre
   try {
     console.log('🔍 Web API Call - Searching for:', input);
     
-    // Check if Google Maps API is loaded
+    // Ensure Google Maps API is loaded
     if (typeof window === 'undefined' || !window.google || !window.google.maps || !window.google.maps.places) {
-      console.error('❌ Google Maps JavaScript API not loaded');
-      return [];
+      console.log('⏳ Google Maps API not loaded, attempting to load...');
+      const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+      try {
+        await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
+      } catch (error) {
+        console.error('❌ Failed to load Google Maps API:', error);
+        return [];
+      }
     }
 
-    // Create AutocompleteService instance
-    const service = new google.maps.places.AutocompleteService();
+    // Create AutocompleteService instance using utility
+    const service = createAutocompleteService();
+    if (!service) {
+      console.error('❌ Failed to create AutocompleteService');
+      return [];
+    }
     
     // Create request
     const request = {
@@ -69,16 +81,24 @@ export const getPlaceDetails = async (placeId: string): Promise<any> => {
   try {
     console.log('🔍 Web API - Getting place details for:', placeId);
     
-    // Check if Google Maps API is loaded
+    // Ensure Google Maps API is loaded
     if (typeof window === 'undefined' || !window.google || !window.google.maps || !window.google.maps.places) {
-      console.error('❌ Google Maps JavaScript API not loaded');
-      return null;
+      console.log('⏳ Google Maps API not loaded, attempting to load...');
+      const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+      try {
+        await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
+      } catch (error) {
+        console.error('❌ Failed to load Google Maps API:', error);
+        return null;
+      }
     }
 
-    // We need a map instance to use PlacesService
-    // Create a temporary div for the service
-    const tempDiv = document.createElement('div');
-    const service = new google.maps.places.PlacesService(tempDiv);
+    // Create PlacesService using utility
+    const service = createPlacesService();
+    if (!service) {
+      console.error('❌ Failed to create PlacesService');
+      return null;
+    }
     
     const request = {
       placeId,
@@ -91,7 +111,15 @@ export const getPlaceDetails = async (placeId: string): Promise<any> => {
         
         if (status === google.maps.places.PlacesServiceStatus.OK && place) {
           console.log('✅ Place details received');
-          resolve(place);
+          // Use parseGooglePlace for better address parsing
+          const parsedPlace = parseGooglePlace(place);
+          // Merge with original place data for compatibility
+          resolve({
+            ...place,
+            ...parsedPlace,
+            // Keep original geometry for compatibility
+            geometry: place.geometry,
+          });
         } else {
           console.log('⚠️ No place details returned, status:', status);
           resolve(null);

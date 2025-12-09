@@ -11,15 +11,18 @@ import {
   Alert,
   ScrollView,
   Modal,
+  Keyboard,
+  Dimensions,
 } from 'react-native';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
 import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { createAddress } from '@/services/backendApi';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -71,6 +74,8 @@ export default function BranchDetailsScreen() {
     prefilledState = '',
     prefilledPincode = '',
     prefilledFormatted = '',
+    prefilledLat = '',
+    prefilledLng = '',
     // Signup flow parameters
     type,
     value,
@@ -103,6 +108,8 @@ export default function BranchDetailsScreen() {
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
+
+  // No need to track keyboard height - we'll use fixed padding and auto-scroll
   
   const [branchName, setBranchName] = useState('');
   const [doorNumber, setDoorNumber] = useState(''); // Door number - user should enter this
@@ -112,6 +119,10 @@ export default function BranchDetailsScreen() {
   const [city, setCity] = useState('');
   const [pincode, setPincode] = useState('');
   const [selectedState, setSelectedState] = useState<{ name: string; code: string } | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  const inputLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
+  const submitButtonLayout = useRef<{ y: number; height: number } | null>(null);
   const [showStateModal, setShowStateModal] = useState(false);
   const [stateSearchQuery, setStateSearchQuery] = useState('');
   const [managerName, setManagerName] = useState('');
@@ -243,6 +254,67 @@ export default function BranchDetailsScreen() {
     setManagerPhone(cleaned);
   };
 
+  // Helper function to handle input layout measurement
+  const handleInputLayout = (inputName: string) => (event: any) => {
+    const { y, height } = event.nativeEvent.layout;
+    inputLayouts.current.set(inputName, { y, height });
+  };
+
+  // Helper function to handle submit button layout
+  const handleSubmitButtonLayout = (event: any) => {
+    const { y, height } = event.nativeEvent.layout;
+    submitButtonLayout.current = { y, height };
+  };
+
+  // Helper function to scroll to input when focused - smart scroll that keeps button visible
+  const handleInputFocus = (inputName: string) => {
+    if (Platform.OS !== 'web' && scrollViewRef.current) {
+      // Small delay to ensure keyboard is shown and layout is measured
+      setTimeout(() => {
+        const inputLayout = inputLayouts.current.get(inputName);
+        const buttonLayout = submitButtonLayout.current;
+        
+        if (inputLayout && buttonLayout) {
+          // Estimate keyboard height (typically 300-400px on mobile, numeric is usually smaller ~250px)
+          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
+          const screenHeight = Dimensions.get('window').height;
+          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
+          
+          // Calculate scroll position to show input above keyboard with some padding
+          const inputBottom = inputLayout.y + inputLayout.height;
+          const targetScrollY = inputBottom - visibleAreaHeight + 100; // 100px padding from top
+          
+          // Ensure button stays visible above keyboard
+          const buttonTop = buttonLayout.y;
+          const maxScrollY = buttonTop - visibleAreaHeight + buttonLayout.height + 20; // Keep button visible with 20px padding
+          
+          // Scroll to the minimum of target (to show input) and max (to keep button visible)
+          const finalScrollY = Math.min(Math.max(0, targetScrollY), Math.max(0, maxScrollY));
+          
+          scrollViewRef.current?.scrollTo({
+            y: finalScrollY,
+            animated: true,
+          });
+        } else if (inputLayout) {
+          // If button layout not measured, just scroll to show input
+          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
+          const screenHeight = Dimensions.get('window').height;
+          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
+          const inputBottom = inputLayout.y + inputLayout.height;
+          const targetScrollY = inputBottom - visibleAreaHeight + 100;
+          
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(0, targetScrollY),
+            animated: true,
+          });
+        } else {
+          // Fallback: scroll to end if layout not measured yet
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 300);
+    }
+  };
+
   const isFormValid = () => {
     return (
       branchName.trim().length > 0 &&
@@ -348,10 +420,73 @@ export default function BranchDetailsScreen() {
 
     console.log('Creating new branch:', newBranch);
     
-    // Save to data store
+    // ✅ Save to local dataStore IMMEDIATELY so it shows up in UI
     dataStore.addAddress(newBranch);
     
-    // Navigate immediately without success alert for cleaner UX
+    try {
+      // Prepare address JSON for backend
+      const addressJson = {
+        doorNumber: doorNumber.trim(),
+        addressLine1: addressLine1.trim(),
+        addressLine2: addressLine2.trim(),
+        city: city.trim(),
+        pincode: pincode,
+        stateName: selectedState?.name || '',
+        stateCode: getGSTINStateCode(selectedState?.name || ''),
+      };
+
+      // ✅ Get latitude/longitude from prefilled values or geocode if not available
+      let addressLatitude: number | undefined = prefilledLat ? parseFloat(prefilledLat as string) : undefined;
+      let addressLongitude: number | undefined = prefilledLng ? parseFloat(prefilledLng as string) : undefined;
+      
+      // If lat/long not available, try to geocode the address (non-blocking)
+      if (!addressLatitude || !addressLongitude) {
+        const geocodePromise = (async () => {
+          try {
+            const { geocodeAddress } = await import('@/services/googleMapsApi');
+            const formattedAddress = `${addressLine1.trim()}, ${addressLine2.trim()}, ${city.trim()}, ${selectedState?.name || ''} - ${pincode}`;
+            const geocodeResults = await geocodeAddress(formattedAddress);
+            if (geocodeResults && geocodeResults.length > 0) {
+              addressLatitude = geocodeResults[0].geometry.location.lat;
+              addressLongitude = geocodeResults[0].geometry.location.lng;
+              console.log('✅ Geocoded branch address:', { addressLatitude, addressLongitude });
+            }
+          } catch (geocodeError) {
+            console.warn('⚠️ Failed to geocode branch address, continuing without lat/long:', geocodeError);
+          }
+        })();
+        
+        // Wait for geocoding to complete before creating address
+        await geocodePromise;
+      }
+
+      // Save to backend (async, update local dataStore when complete)
+      createAddress({
+        name: branchName.trim(),
+        addressJson,
+        type: 'branch',
+        managerName: managerName.trim() || undefined,
+        managerMobileNumber: managerPhone || undefined,
+        isPrimary: false,
+        latitude: addressLatitude,
+        longitude: addressLongitude,
+      }).then((result) => {
+        if (result.success && result.address) {
+          console.log('✅ Branch created in backend:', result.address);
+          // Update local address with backend ID
+          const updatedAddress = { ...newBranch, backendId: result.address.id };
+          dataStore.updateAddress(newBranch.id, updatedAddress);
+        } else {
+          console.warn('⚠️ Backend create failed:', result.error);
+        }
+      }).catch((error) => {
+        console.error('Error creating branch in backend:', error);
+      });
+    } catch (error) {
+      console.error('Error preparing branch for backend:', error);
+    }
+    
+    // Navigate immediately without waiting for backend (optimize performance)
     setTimeout(() => {
       if (fromSummary === 'true') {
         // User came from business summary, navigate back with all data
@@ -416,12 +551,12 @@ export default function BranchDetailsScreen() {
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          enabled={true}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS === 'ios'}
         >
           <TouchableOpacity
             style={styles.backButton}
@@ -432,13 +567,21 @@ export default function BranchDetailsScreen() {
           </TouchableOpacity>
 
           <ScrollView 
+            ref={scrollViewRef}
             style={styles.scrollView} 
-            contentContainerStyle={Platform.select({
-              web: webContainerStyles.webScrollContent,
-              default: {} // Let content style handle padding
-            })} 
+            contentContainerStyle={[
+              Platform.select({
+                web: webContainerStyles.webScrollContent,
+                default: {} // Let content style handle padding
+              }),
+              // Add bottom safe area inset for consistent padding
+              Platform.OS !== 'web' ? { 
+                paddingBottom: 20 + insets.bottom 
+              } : {}
+            ]} 
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -473,30 +616,44 @@ export default function BranchDetailsScreen() {
                       style={styles.input}
                       value={branchName}
                       onChangeText={setBranchName}
-                      placeholder="e.g., Mumbai Branch, Regional Office"
+                      placeholder={Platform.select({
+                        web: "e.g., Mumbai Branch, Regional Office",
+                        default: "Branch name"
+                      })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      onFocus={handleInputFocus}
                     />
                   </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Door Number / Building Name *</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    style={styles.inputContainer}
+                    onLayout={handleInputLayout('doorNumber')}
+                  >
                     <CapitalizedTextInput
                       style={styles.input}
                       value={doorNumber}
                       onChangeText={setDoorNumber}
-                      placeholder="e.g., Flat 101, Shop No. 5, Building A"
+                      placeholder={Platform.select({
+                        web: "e.g., Flat 101, Shop No. 5, Building A",
+                        default: "Door number / Building"
+                      })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
+                      onFocus={() => handleInputFocus('doorNumber')}
                     />
                   </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    style={styles.inputContainer}
+                    onLayout={handleInputLayout('addressLine1')}
+                  >
                     <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine1}
@@ -505,13 +662,17 @@ export default function BranchDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
+                      onFocus={() => handleInputFocus('addressLine1')}
                     />
                   </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2 *</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    style={styles.inputContainer}
+                    onLayout={handleInputLayout('addressLine2')}
+                  >
                     <CapitalizedTextInput
                       style={styles.input}
                       value={addressLine2}
@@ -520,6 +681,7 @@ export default function BranchDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
+                      onFocus={() => handleInputFocus('addressLine2')}
                     />
                   </View>
                 </View>
@@ -539,7 +701,10 @@ export default function BranchDetailsScreen() {
                         })} color="#ef4444" />
                       </TouchableOpacity>
                     </View>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      style={styles.inputContainer}
+                      onLayout={handleInputLayout(`additionalLine${index}`)}
+                    >
                       <CapitalizedTextInput
                         style={styles.input}
                         value={line}
@@ -548,6 +713,7 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
+                        onFocus={() => handleInputFocus(`additionalLine${index}`)}
                       />
                     </View>
                   </View>
@@ -570,7 +736,10 @@ export default function BranchDetailsScreen() {
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      style={styles.inputContainer}
+                      onLayout={handleInputLayout('city')}
+                    >
                       <CapitalizedTextInput
                         style={[
                           styles.input,
@@ -588,13 +757,17 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
+                        onFocus={() => handleInputFocus('city')}
                       />
                     </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.pincodeInput]}>
                     <Text style={styles.label}>Pincode *</Text>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      style={styles.inputContainer}
+                      onLayout={handleInputLayout('pincode')}
+                    >
                       <TextInput
                         style={styles.input}
                         value={pincode}
@@ -603,6 +776,7 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={6}
+                        onFocus={() => handleInputFocus('pincode')}
                       />
                     </View>
                   </View>
@@ -633,7 +807,10 @@ export default function BranchDetailsScreen() {
                   
                   <View style={styles.contactFieldRow}>
                     <Text style={styles.contactLabel}>Branch Manager</Text>
-                    <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                    <View 
+                      style={[styles.inputContainer, styles.contactInputContainer]}
+                      onLayout={handleInputLayout('managerName')}
+                    >
                       <User size={20} color="#ffc754" style={styles.inputIcon} />
                       <CapitalizedTextInput
                         style={[styles.input, styles.contactInput]}
@@ -642,16 +819,20 @@ export default function BranchDetailsScreen() {
                         placeholder="Manager name (optional)"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
+                        onFocus={() => handleInputFocus('managerName')}
                       />
                     </View>
                   </View>
 
                   <View style={styles.contactFieldRow}>
                     <Text style={styles.contactLabel}>Manager Phone</Text>
-                    <View style={[
-                      styles.inputContainer,
-                      styles.contactInputContainer
-                    ]}>
+                    <View 
+                      style={[
+                        styles.inputContainer,
+                        styles.contactInputContainer
+                      ]}
+                      onLayout={handleInputLayout('managerPhone')}
+                    >
                       <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                       <TextInput
                         style={[
@@ -668,6 +849,7 @@ export default function BranchDetailsScreen() {
                         value={managerPhone}
                         onChangeText={handleManagerPhoneChange}
                         placeholder="Manager phone (optional)"
+                        onFocus={() => handleInputFocus('managerPhone')}
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={10}
@@ -685,6 +867,7 @@ export default function BranchDetailsScreen() {
                 onPress={handleSubmit}
                 disabled={!isFormValid() || isLoading}
                 activeOpacity={0.8}
+                onLayout={handleSubmitButtonLayout}
               >
                 <Text style={[
                   styles.submitButtonText,
@@ -1005,9 +1188,9 @@ const styles = StyleSheet.create({
     }),
     paddingBottom: Platform.select({
       web: 40,
-      ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
-      default: 20,
+      ios: 0, // Handled via ScrollView contentContainerStyle with safe area insets
+      android: 0, // Handled via ScrollView contentContainerStyle with safe area insets
+      default: 0,
     }),
   },
   iconContainer: {

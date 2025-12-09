@@ -9,6 +9,7 @@ import {
   Platform,
   Animated,
   KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -68,6 +69,7 @@ export default function BusinessAddressScreen() {
   const [isMapLoading, setIsMapLoading] = useState(true);
   const [showSearchBar, setShowSearchBar] = useState(true);
   const [isAddressFromSearch, setIsAddressFromSearch] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0); // Track keyboard height
   const resolvedName = Array.isArray(name) ? name[0] : name;
   const resolvedMobile = Array.isArray(mobile) ? mobile[0] : mobile;
   const resolvedMobileDigits = resolvedMobile ? resolvedMobile.replace(/\D/g, '').slice(0, 10) : '';
@@ -96,6 +98,23 @@ export default function BusinessAddressScreen() {
       setIsMapLoading(false);
     }
   }, [userLocation]);
+
+  // Handle keyboard show/hide for Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const keyboardWillShow = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardWillHide = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+
+      return () => {
+        keyboardWillShow.remove();
+        keyboardWillHide.remove();
+      };
+    }
+  }, []);
 
   // Animate search bar collapse/expand
   useEffect(() => {
@@ -590,6 +609,8 @@ export default function BusinessAddressScreen() {
         prefilledState: selectedAddress.state || '',
         prefilledPincode: selectedAddress.pincode || '',
         prefilledFormatted: selectedAddress.formatted_address || '',
+        prefilledLat: selectedAddress.lat?.toString() || '',
+        prefilledLng: selectedAddress.lng?.toString() || '',
         // Pass through business summary params
         fromSummary,
         allAddresses: existingAddresses,
@@ -684,12 +705,9 @@ export default function BusinessAddressScreen() {
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          enabled={true}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          enabled={true}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS === 'ios'}
         >
         {/* Header */}
         <View style={styles.header}>
@@ -776,7 +794,10 @@ export default function BusinessAddressScreen() {
         )}
 
         {/* Bottom Action Buttons */}
-        <View style={styles.bottomContainer}>
+        <View style={[
+          styles.bottomContainer,
+          Platform.OS === 'android' && { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 20 : 20 }
+        ]}>
           <TouchableOpacity
             style={[
               styles.confirmButton,
@@ -890,9 +911,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: Platform.select({
       web: 12,
-      ios: 12,
-      android: 12, // Consistent bottom padding on Android for cleaner look
-      default: 12,
+      ios: 20,
+      android: 20, // Consistent bottom padding across all platforms
+      default: 20,
     }),
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
@@ -929,7 +950,13 @@ const styles = StyleSheet.create({
   bottomContainer: {
     backgroundColor: '#ffffff',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.select({
+      web: 16,
+      ios: 20,
+      android: 20, // Will be overridden dynamically when keyboard is visible
+      default: 20,
+    }),
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     gap: 12,

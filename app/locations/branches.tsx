@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -16,6 +17,7 @@ import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lu
 import { dataStore, BusinessAddress } from '../../utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 const Colors = {
   background: '#FFFFFF',
@@ -188,31 +190,33 @@ export default function BranchesScreen() {
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
-  // Load branches from dataStore
+  // ✅ Use unified business data hook (fast, cached, parallel)
+  const { data: businessData, refetch } = useBusinessData();
+
+  // ✅ Update branches from cached data (instant display)
   useEffect(() => {
-    const loadBranches = () => {
-      const allAddresses = dataStore.getAddresses();
-      const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
+    if (businessData.addresses) {
+      // Filter only branch addresses
+      const branchAddresses = businessData.addresses.filter((addr: any) => addr.type === 'branch');
       
-      // Convert BusinessAddress to Branch format
-      const branchData: Branch[] = branchAddresses.map(addr => ({
+      // Convert backend format to Branch format
+      const branchData: Branch[] = branchAddresses.map((addr: any) => ({
         id: addr.id,
         name: addr.name,
         type: 'branch' as const,
-        doorNumber: addr.doorNumber || '',
-        addressLine1: addr.addressLine1,
-        addressLine2: addr.addressLine2,
-        city: addr.city,
-        pincode: addr.pincode,
-        stateName: addr.stateName,
-        stateCode: addr.stateCode,
-        isPrimary: addr.isPrimary,
-        createdAt: addr.createdAt,
-        manager: addr.manager,
-        phone: addr.phone,
-        status: addr.status,
-        // Default business performance data (can be enhanced later)
-        usesManager: !!addr.manager,
+        doorNumber: addr.door_number || '',
+        addressLine1: addr.address_line1 || '',
+        addressLine2: addr.address_line2 || '',
+        city: addr.city || '',
+        pincode: addr.pincode || '',
+        stateName: addr.state || '',
+        stateCode: '',
+        isPrimary: addr.is_primary || false,
+        createdAt: addr.created_at || new Date().toISOString(),
+        manager: addr.manager_name || '',
+        phone: addr.manager_mobile_number || '',
+        status: 'active' as const,
+        usesManager: !!addr.manager_name,
         staffCount: 0,
         staffAttendance: 0,
         dailySales: 0,
@@ -233,10 +237,15 @@ export default function BranchesScreen() {
       
       setBranches(branchData);
       setFilteredBranches(branchData);
-    };
-    
-    loadBranches();
-  }, []);
+    }
+  }, [businessData]);
+
+  // ✅ Reload branches when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch(); // Refresh cached data
+    }, [refetch])
+  );
 
   useEffect(() => {
     // Filter branches based on search query

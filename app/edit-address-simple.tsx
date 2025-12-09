@@ -203,7 +203,7 @@ export default function EditAddressSimpleScreen() {
                 console.log('✅ Setting existing address location on map:', { lat, lng });
                 // Use setTimeout to ensure map is ready
                 setTimeout(() => {
-                  setSelectedLocation({ lat, lng });
+                setSelectedLocation({ lat, lng });
                 }, 500);
               }
             }
@@ -619,46 +619,46 @@ export default function EditAddressSimpleScreen() {
       // Navigate back immediately without alert for better UX
       setTimeout(() => {
         setIsLoading(false);
-        // Check if we came from business summary page
-        if (fromSummary === 'true') {
-          // Return to business summary page
+              // Check if we came from business summary page
+              if (fromSummary === 'true') {
+                // Return to business summary page
+                router.replace({
+                  pathname: '/auth/business-summary',
+                  params: {
+                    type,
+                    value,
+                    gstinData,
+                    name,
+                    businessName,
+                    businessType,
+                    customBusinessType,
+                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                    allBankAccounts: '[]', // Will be updated from summary
+                    initialCashBalance: '0',
+                    invoicePrefix: 'INV',
+                    invoicePattern: '',
+                    startingInvoiceNumber: '1',
+                    fiscalYear: 'APR-MAR',
+                  }
+                });
+              } else if (type && value) {
+                // Navigate back to address confirmation screen with signup parameters
           router.replace({
-            pathname: '/auth/business-summary',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType,
-              customBusinessType,
-              allAddresses: JSON.stringify(dataStore.getAddresses()),
-              allBankAccounts: '[]', // Will be updated from summary
-              initialCashBalance: '0',
-              invoicePrefix: 'INV',
-              invoicePattern: '',
-              startingInvoiceNumber: '1',
-              fiscalYear: 'APR-MAR',
-            }
-          });
-        } else if (type && value) {
-          // Navigate back to address confirmation screen with signup parameters
-          router.replace({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType,
-              customBusinessType,
-              allAddresses: JSON.stringify(dataStore.getAddresses()),
-            }
-          });
-        } else {
+                  pathname: '/auth/address-confirmation',
+                  params: {
+                    type,
+                    value,
+                    gstinData,
+                    name,
+                    businessName,
+                    businessType,
+                    customBusinessType,
+                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                  }
+                });
+              } else {
           router.back();
-        }
+              }
       }, 300);
     } catch (error) {
       console.error('Error updating address:', error);
@@ -740,44 +740,44 @@ export default function EditAddressSimpleScreen() {
                 
                 {/* Floating Search Bar over Map */}
                 <View style={styles.floatingSearchContainer}>
-                  <Animated.View
-                    style={[
-                      styles.searchButtonInner,
-                      {
-                        shadowColor: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['#3f66ac', '#ffc754'],
-                        }),
-                        shadowOpacity: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0.2, 0.4],
-                        }),
-                        shadowRadius: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [4, 8],
-                        }),
-                        shadowOffset: {
-                          width: 0,
-                          height: 0,
-                        },
-                        elevation: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [2, 4],
-                        }),
-                        borderColor: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['#3f66ac', '#ffc754'],
-                        }),
-                        borderWidth: glowAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [1, 2],
-                        }),
+                <Animated.View
+                  style={[
+                    styles.searchButtonInner,
+                    {
+                      shadowColor: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['#3f66ac', '#ffc754'],
+                      }),
+                      shadowOpacity: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.2, 0.4],
+                      }),
+                      shadowRadius: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [4, 8],
+                      }),
+                      shadowOffset: {
+                        width: 0,
+                        height: 0,
                       },
-                    ]}
-                  >
-                    <Search size={20} color="#3f66ac" />
-                    <TextInput
-                      ref={searchInputRef}
+                      elevation: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [2, 4],
+                      }),
+                      borderColor: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['#3f66ac', '#ffc754'],
+                      }),
+                      borderWidth: glowAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [1, 2],
+                      }),
+                    },
+                  ]}
+                >
+                  <Search size={20} color="#3f66ac" />
+                  <TextInput
+                    ref={searchInputRef}
                       style={[
                         styles.mapSearchInput,
                         Platform.select({
@@ -788,76 +788,76 @@ export default function EditAddressSimpleScreen() {
                           },
                         }),
                       ]}
-                      placeholder="Search for an address..."
-                      placeholderTextColor="#999999"
-                      value={searchQuery}
-                      onChangeText={handleSearchQuery}
-                      onFocus={() => setIsSearchActive(true)}
-                      onBlur={() => {
-                        // Don't hide suggestions immediately to allow clicking on them
-                        setTimeout(() => {
-                          if (!searchQuery) {
-                            setIsSearchActive(false);
-                          }
-                        }, 300);
-                      }}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    {isLoadingSuggestions ? (
-                      <View style={styles.loadingIndicator}>
-                        <Text style={styles.loadingText}>Searching...</Text>
-                      </View>
-                    ) : searchQuery.length > 0 ? (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setSearchQuery('');
-                          setSuggestions([]);
-                          setShowSuggestions(false);
+                    placeholder="Search for an address..."
+                    placeholderTextColor="#999999"
+                    value={searchQuery}
+                    onChangeText={handleSearchQuery}
+                    onFocus={() => setIsSearchActive(true)}
+                    onBlur={() => {
+                      // Don't hide suggestions immediately to allow clicking on them
+                      setTimeout(() => {
+                        if (!searchQuery) {
                           setIsSearchActive(false);
-                        }}
-                        style={styles.clearButton}
-                      >
-                        <X size={16} color="#666666" />
-                      </TouchableOpacity>
-                    ) : null}
-                  </Animated.View>
-                </View>
+                        }
+                      }, 300);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  {isLoadingSuggestions ? (
+                    <View style={styles.loadingIndicator}>
+                      <Text style={styles.loadingText}>Searching...</Text>
+                    </View>
+                  ) : searchQuery.length > 0 ? (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSearchQuery('');
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                        setIsSearchActive(false);
+                      }}
+                      style={styles.clearButton}
+                    >
+                      <X size={16} color="#666666" />
+                    </TouchableOpacity>
+                  ) : null}
+                </Animated.View>
+              </View>
 
                 {/* Search Results - Show below search bar */}
-                {(() => {
-                  console.log('🎨 Render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
-                  return showSuggestions && suggestions.length > 0 ? (
+              {(() => {
+                console.log('🎨 Render check - showSuggestions:', showSuggestions, 'suggestions.length:', suggestions.length);
+                return showSuggestions && suggestions.length > 0 ? (
                     <View style={styles.floatingSearchResultsContainer}>
-                      {suggestions.slice(0, 3).map((suggestion, index) => {
-                        console.log('🎨 Rendering suggestion:', index, suggestion.description);
-                        return (
-                          <TouchableOpacity
-                            key={suggestion.place_id || index}
-                            style={[
-                              styles.searchResultItem,
-                              index === suggestions.slice(0, 3).length - 1 && styles.searchResultItemLast
-                            ]}
-                            onPress={() => handleAddressSelect(suggestion)}
-                            activeOpacity={0.7}
-                          >
-                            <View style={styles.searchResultIcon}>
-                              <MapPin size={16} color="#3f66ac" />
-                            </View>
-                            <View style={styles.searchResultText}>
-                              <Text style={styles.searchResultMainText} numberOfLines={1}>
-                                {suggestion.structured_formatting?.main_text || suggestion.description?.split(',')[0]}
-                              </Text>
-                              <Text style={styles.searchResultSecondaryText} numberOfLines={1}>
-                                {suggestion.structured_formatting?.secondary_text || suggestion.description}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  ) : null;
-                })()}
+                    {suggestions.slice(0, 3).map((suggestion, index) => {
+                      console.log('🎨 Rendering suggestion:', index, suggestion.description);
+                      return (
+                        <TouchableOpacity
+                          key={suggestion.place_id || index}
+                          style={[
+                            styles.searchResultItem,
+                            index === suggestions.slice(0, 3).length - 1 && styles.searchResultItemLast
+                          ]}
+                          onPress={() => handleAddressSelect(suggestion)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.searchResultIcon}>
+                            <MapPin size={16} color="#3f66ac" />
+                          </View>
+                          <View style={styles.searchResultText}>
+                            <Text style={styles.searchResultMainText} numberOfLines={1}>
+                              {suggestion.structured_formatting?.main_text || suggestion.description?.split(',')[0]}
+                            </Text>
+                            <Text style={styles.searchResultSecondaryText} numberOfLines={1}>
+                              {suggestion.structured_formatting?.secondary_text || suggestion.description}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null;
+              })()}
               </View>
 
 
@@ -1030,23 +1030,23 @@ export default function EditAddressSimpleScreen() {
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[
-                  styles.submitButton,
+
+            <TouchableOpacity
+              style={[
+                styles.submitButton,
                   (isFormValid() && hasChanges()) ? styles.enabledButton : styles.disabledButton
-                ]}
-                onPress={handleSubmit}
+              ]}
+              onPress={handleSubmit}
                 disabled={!isFormValid() || !hasChanges() || isLoading}
-                activeOpacity={0.8}
-              >
-                <Text style={[
-                  styles.submitButtonText,
+              activeOpacity={0.8}
+            >
+              <Text style={[
+                styles.submitButtonText,
                   (isFormValid() && hasChanges()) ? styles.enabledButtonText : styles.disabledButtonText
-                ]}>
+              ]}>
                   {isLoading ? 'Saving...' : 'Save Changes'}
-                </Text>
-              </TouchableOpacity>
+              </Text>
+            </TouchableOpacity>
             </View>
           </Animated.View>
         </ScrollView>

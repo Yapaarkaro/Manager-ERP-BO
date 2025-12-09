@@ -7,16 +7,21 @@ import {
   Dimensions,
   Alert,
   Platform,
+  Animated,
+  KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Navigation, CreditCard as Edit, MapPin, Building2 } from 'lucide-react-native';
-import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
+import { ArrowLeft, Edit3, Search } from 'lucide-react-native';
+import GooglePlacesSearch from '@/components/GooglePlacesSearch';
+import WebAddressSearch from '@/components/WebAddressSearch';
 import PlatformMapView from '@/components/PlatformMapView';
 import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
 import { dataStore } from '../../utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -34,11 +39,9 @@ interface SelectedAddress {
   lng?: number;
 }
 
-// Google Maps API configuration
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
-
 export default function AddBranchScreen() {
   const { setStatusBarStyle } = useStatusBar();
+  const debouncedNavigate = useDebounceNavigation();
   const { 
     editMode, 
     editAddress,
@@ -59,7 +62,6 @@ export default function AddBranchScreen() {
     startingInvoiceNumber,
     fiscalYear,
   } = useLocalSearchParams();
-  const [searchQuery, setSearchQuery] = useState('');
   
   // Get branch count for dynamic header
   const getBranchCount = () => {
@@ -76,10 +78,16 @@ export default function AddBranchScreen() {
   useEffect(() => {
     setStatusBarStyle('light-content');
   }, [setStatusBarStyle]);
+  
   const [selectedAddress, setSelectedAddress] = useState<SelectedAddress | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [isMapLoading, setIsMapLoading] = useState(true);
+  const [showSearchBar, setShowSearchBar] = useState(true);
+  const [isAddressFromSearch, setIsAddressFromSearch] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0); // Track keyboard height
+  const [isSearchExpanded, setIsSearchExpanded] = useState(true);
+  const searchAnimation = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     getCurrentLocationAndInitMap();
@@ -91,6 +99,32 @@ export default function AddBranchScreen() {
     }
   }, [userLocation]);
 
+  // Handle keyboard show/hide for Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const keyboardWillShow = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardWillHide = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+
+      return () => {
+        keyboardWillShow.remove();
+        keyboardWillHide.remove();
+      };
+    }
+  }, []);
+
+  // Animate search bar collapse/expand
+  useEffect(() => {
+    Animated.timing(searchAnimation, {
+      toValue: isSearchExpanded ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [isSearchExpanded]);
+
   const getCurrentLocationAndInitMap = async () => {
     setIsGettingLocation(true);
     
@@ -98,8 +132,11 @@ export default function AddBranchScreen() {
       const { status } = await Location.requestForegroundPermissionsAsync();
       
       if (status === 'granted') {
+        // Use appropriate accuracy based on platform for better performance
         const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
+          accuracy: Platform.OS === 'android' ? Location.Accuracy.Balanced : Location.Accuracy.High,
+          maximumAge: 10000, // Use cached location if less than 10 seconds old
+          timeout: 15000, // 15 second timeout
         });
         
         const userCoords = {
@@ -109,6 +146,17 @@ export default function AddBranchScreen() {
         
         setUserLocation(userCoords);
       } else {
+        // Show better permission dialog for Android
+        if (Platform.OS === 'android') {
+          Alert.alert(
+            'Location Permission', 
+            'Please grant location permission to use this feature. You can enable it in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: () => Location.openAppSettingsAsync() }
+            ]
+          );
+        }
         const defaultLocation = { lat: 28.6139, lng: 77.2090 };
         setUserLocation(defaultLocation);
       }
@@ -116,6 +164,10 @@ export default function AddBranchScreen() {
       setIsGettingLocation(false);
     } catch (error) {
       console.error('Location error:', error);
+      const errorMessage = Platform.OS === 'android' 
+        ? 'Failed to get current location. Please check your GPS settings and try again.'
+        : 'Failed to get current location. Please try again.';
+      Alert.alert('Location Error', errorMessage);
       const defaultLocation = { lat: 28.6139, lng: 77.2090 };
       setUserLocation(defaultLocation);
       setIsGettingLocation(false);
@@ -124,6 +176,7 @@ export default function AddBranchScreen() {
 
   const handleMapClick = async (lat: number, lng: number) => {
     try {
+      setIsAddressFromSearch(false); // Reset flag when user clicks on map directly
       await handleMarkerDragEnd(lat, lng);
     } catch (error) {
       console.error('Map click error:', error);
@@ -132,16 +185,39 @@ export default function AddBranchScreen() {
 
   const handleMarkerDragEnd = async (lat: number, lng: number) => {
     try {
+      // Don't override addresses that were selected from search
+      if (isAddressFromSearch) {
+        console.log('📍 Skipping marker drag end - address was selected from search');
+        return;
+      }
+
       const results = await reverseGeocode(lat, lng);
       
       if (results && results.length > 0) {
         const result = results[0];
         const addressData = extractAddressComponents(result);
         
+        // Extract street address from formatted address if not available
+        let streetAddress = '';
+        if (addressData.street) {
+          streetAddress = addressData.street;
+        } else if (addressData.street_number && addressData.route) {
+          streetAddress = `${addressData.street_number} ${addressData.route}`;
+        } else if (addressData.route) {
+          streetAddress = addressData.route;
+        } else if (addressData.premise) {
+          streetAddress = addressData.premise;
+        } else if (addressData.formatted_address) {
+          // Extract from formatted address
+          const parts = addressData.formatted_address.split(',');
+          streetAddress = parts[0]?.trim() || '';
+        }
+
         // Build area for Address Line 2 with better fallback logic
         let areaValue = '';
         if (addressData.area && addressData.area.trim()) {
           areaValue = addressData.area;
+          console.log('📍 handleMarkerDragEnd - Using addressData.area:', areaValue);
         } else {
           // Fallback chain: sublocality levels > neighborhood > sublocality > district
           const areaParts: string[] = [];
@@ -158,12 +234,36 @@ export default function AddBranchScreen() {
           if (areaParts.length === 0 && addressData.district) {
             areaParts.push(addressData.district);
           }
+          
+          // If still no area, try to extract from formatted address
+          if (areaParts.length === 0 && addressData.formatted_address) {
+            const addressParts = addressData.formatted_address.split(',').map(p => p.trim());
+            // Skip first part (street), last part (country), and parts that are city/state/pincode
+            for (let i = 1; i < addressParts.length - 1; i++) {
+              const part = addressParts[i];
+              // Skip if it's the city, state, pincode, or country
+              if (part !== addressData.city && 
+                  part !== addressData.locality &&
+                  part !== addressData.state && 
+                  part !== addressData.administrative_area_level_1 &&
+                  part !== addressData.pincode && 
+                  part !== addressData.postal_code &&
+                  part !== addressData.country &&
+                  !/^\d{6}$/.test(part) && // Not a pincode
+                  part.length > 0 &&
+                  !part.toLowerCase().includes('india')) {
+                areaParts.push(part);
+                break; // Take the first valid part
+              }
+            }
+          }
+          
           areaValue = areaParts.join(', ');
+          console.log('📍 handleMarkerDragEnd - Extracted areaValue from fallback:', areaValue);
+          console.log('📍 handleMarkerDragEnd - areaParts:', areaParts);
         }
-        
+
         // Enhanced city extraction - matching Google Maps API priority
-        // Priority: postal_town > administrative_area_level_2 (district) > city (from extractAddressComponents) > locality (last resort)
-        // Note: extractAddressComponents now prioritizes postal_town and district, so addressData.city should be reliable
         let cityValue = '';
         
         // Priority 1: postal_town (most reliable city name from Google Maps API)
@@ -176,12 +276,12 @@ export default function AddBranchScreen() {
           cityValue = addressData.administrative_area_level_2 || addressData.district;
           console.log('📍 Set city from district:', cityValue);
         } 
-        // Priority 3: Use city from extractAddressComponents (should already be postal_town or district)
+        // Priority 3: Use city from extractAddressComponents
         else if (addressData.city) {
           cityValue = addressData.city;
           console.log('📍 Set city from addressData.city:', cityValue);
         }
-        // Priority 4: Use locality only as last resort (often a neighborhood, not the city)
+        // Priority 4: Use locality only as last resort
         else if (addressData.locality) {
           cityValue = addressData.locality;
           console.log('📍 Set city from locality (last resort - may be inaccurate):', cityValue);
@@ -211,13 +311,11 @@ export default function AddBranchScreen() {
         }
 
         const processedAddress: SelectedAddress = {
-          street: addressData.street_number && addressData.route 
-            ? `${addressData.street_number} ${addressData.route}` 
-            : addressData.route || '',
+          street: streetAddress,
           area: areaValue,
           city: cityValue,
-          state: addressData.state || '',
-          pincode: addressData.pincode || '',
+          state: addressData.state || addressData.administrative_area_level_1 || '',
+          pincode: addressData.pincode || addressData.postal_code || '',
           formatted_address: addressData.formatted_address,
           stateCode: addressData.state ? getGSTStateCode(addressData.state) : '',
           lat,
@@ -225,7 +323,14 @@ export default function AddBranchScreen() {
         };
         
         setSelectedAddress(processedAddress);
-        setSearchQuery(processedAddress.formatted_address);
+        setIsSearchExpanded(false); // Collapse search bar after selection
+        
+        // Log the coordinates for backend storage (not shown to user)
+        console.log('📍 Selected Address Coordinates:', {
+          latitude: lat,
+          longitude: lng,
+          formatted_address: processedAddress.formatted_address
+        });
       }
     } catch (error) {
       console.error('Reverse geocoding error:', error);
@@ -233,121 +338,50 @@ export default function AddBranchScreen() {
   };
 
 
-  const parseAddressText = (addressText: string) => {
-    const parts = addressText.split(',').map(part => part.trim()).filter(part => part.length > 0);
-    
-    let street = '';
-    let area = '';
-    let city = '';
-    let state = '';
-    let pincode = '';
-    
-    const pincodeRegex = /\b\d{6}\b/;
-    for (let i = 0; i < parts.length; i++) {
-      const pincodeMatch = parts[i].match(pincodeRegex);
-      if (pincodeMatch) {
-        pincode = pincodeMatch[0];
-        parts[i] = parts[i].replace(pincodeRegex, '').trim();
-        if (parts[i] === '') {
-          parts.splice(i, 1);
-          i--;
-        }
-      }
-    }
-    
-    const indianStates = [
-      'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
-      'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
-      'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
-      'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh',
-      'Uttarakhand', 'West Bengal', 'Delhi', 'Chandigarh', 'Puducherry'
-    ];
-    
-    for (let i = parts.length - 1; i >= 0; i--) {
-      const part = parts[i];
-      const matchedState = indianStates.find(stateName => 
-        stateName.toLowerCase() === part.toLowerCase() ||
-        part.toLowerCase().includes(stateName.toLowerCase()) ||
-        stateName.toLowerCase().includes(part.toLowerCase())
-      );
-      
-      if (matchedState) {
-        state = matchedState;
-        parts.splice(i, 1);
-        break;
-      }
-    }
-    
-    if (parts.length > 0) {
-      city = parts[parts.length - 1];
-      parts.splice(parts.length - 1, 1);
-    }
-    
-    if (parts.length >= 2) {
-      street = parts[0];
-      area = parts.slice(1).join(', ');
-    } else if (parts.length === 1) {
-      street = parts[0];
-    }
-    
-    if (street.length > 50 && street.includes(' ')) {
-      const words = street.split(' ');
-      const midPoint = Math.ceil(words.length / 2);
-      const firstHalf = words.slice(0, midPoint).join(' ');
-      const secondHalf = words.slice(midPoint).join(' ');
-      
-      street = firstHalf;
-      area = area ? `${secondHalf}, ${area}` : secondHalf;
-    }
-    
-    return {
-      street: street || '',
-      area: area || '',
-      city: city || '',
-      state: state || '',
-      pincode: pincode || '',
-      formatted_address: addressText,
-    };
-  };
-
   const handleAddressSelect = (addressData: any) => {
     try {
-      setSearchQuery('');
+      console.log('📍 Raw address data:', addressData);
       
       // Build street address with premise name priority
-      let street = '';
+      let streetAddress = '';
       
       // Priority 1: Use place name from search suggestion
       if (addressData.placeName && addressData.placeName.trim()) {
-        street = addressData.placeName;
-        console.log('📍 Branch - Using place name from search:', addressData.placeName);
+        streetAddress = addressData.placeName;
+        console.log('📍 Using place name from search:', addressData.placeName);
         // Add route if available and different
-        if (addressData.route && !street.includes(addressData.route)) {
-          street += `, ${addressData.route}`;
+        if (addressData.route && !streetAddress.includes(addressData.route)) {
+          streetAddress += `, ${addressData.route}`;
         }
       } 
       // Priority 2: Use premise/subpremise
       else if (addressData.premise || addressData.subpremise) {
-        street = [addressData.subpremise, addressData.premise].filter(Boolean).join(', ');
-        console.log('📍 Branch - Using premise:', street);
+        streetAddress = [addressData.subpremise, addressData.premise].filter(Boolean).join(', ');
+        console.log('📍 Using premise:', streetAddress);
         if (addressData.route) {
-          street += `, ${addressData.route}`;
+          streetAddress += `, ${addressData.route}`;
         }
       }
-      // Priority 3: Build from street components
+      // Priority 3: Use street from extracted components
+      else if (addressData.street) {
+        streetAddress = addressData.street;
+      } 
+      // Priority 4: Build from street components
       else if (addressData.street_number && addressData.route) {
-        street = `${addressData.street_number} ${addressData.route}`;
+        streetAddress = `${addressData.street_number} ${addressData.route}`;
       } else if (addressData.route) {
-        street = addressData.route;
-      } else if (addressData.street) {
-        street = addressData.street;
+        streetAddress = addressData.route;
+      } else if (addressData.formatted_address) {
+        // Extract from formatted address
+        const parts = addressData.formatted_address.split(',');
+        streetAddress = parts[0]?.trim() || '';
       }
-      
+
       // Build area for Address Line 2 with better fallback logic
       let areaValue = '';
       if (addressData.area && addressData.area.trim()) {
         areaValue = addressData.area;
-        console.log('📍 Branch - Using addressData.area:', areaValue);
+        console.log('📍 Using addressData.area:', areaValue);
       } else {
         // Fallback chain: sublocality levels > neighborhood > sublocality > district
         const areaParts: string[] = [];
@@ -389,27 +423,85 @@ export default function AddBranchScreen() {
         }
         
         areaValue = areaParts.join(', ');
-        console.log('📍 Branch - Extracted areaValue from fallback:', areaValue);
-        console.log('📍 Branch - areaParts:', areaParts);
+        console.log('📍 Extracted areaValue from fallback:', areaValue);
+        console.log('📍 areaParts:', areaParts);
+      }
+
+      // Enhanced city extraction - matching web implementation
+      let cityValue = '';
+      if (addressData.city) {
+        cityValue = addressData.city;
+      } else if (addressData.locality) {
+        cityValue = addressData.locality;
+      } else if (addressData.postal_town) {
+        cityValue = addressData.postal_town;
+      } else if (addressData.administrative_area_level_2 || addressData.district) {
+        cityValue = addressData.administrative_area_level_2 || addressData.district;
+      } else if (addressData.sublocality_level_1) {
+        cityValue = addressData.sublocality_level_1;
+      } else if (addressData.formatted_address) {
+        // Extract from formatted address as last resort
+        const addressParts = addressData.formatted_address.split(',').map((p: string) => p.trim());
+        for (let i = addressParts.length - 2; i >= 1; i--) {
+          const part = addressParts[i];
+          if (/^\d{6}$/.test(part)) continue; // Skip pincode
+          if (addressData.state && part.toLowerCase().includes(addressData.state.toLowerCase())) continue;
+          if (addressData.administrative_area_level_1 && part.toLowerCase().includes(addressData.administrative_area_level_1.toLowerCase())) continue;
+          const commonWords = ['road', 'street', 'avenue', 'lane', 'colony', 'nagar', 'area', 'puram', 'palayam', 'patti', 'circle', 'chowk', 'market', 'plaza', 'mall', 'sector', 'phase', 'block', 'village', 'town'];
+          if (commonWords.some(word => part.toLowerCase().includes(word))) continue;
+          if (part.length > 2 && part.length < 50) {
+            cityValue = part;
+            break;
+          }
+        }
+      }
+
+      // Clean up city name on mobile - remove administrative suffixes like "Division", "District", etc.
+      let cleanedCity = cityValue;
+      if (Platform.OS !== 'web' && cityValue) {
+        // Remove common administrative suffixes
+        cleanedCity = cityValue
+          .replace(/\s+Division\s*$/i, '')
+          .replace(/\s+District\s*$/i, '')
+          .replace(/\s+Tehsil\s*$/i, '')
+          .replace(/\s+Tahsil\s*$/i, '')
+          .replace(/\s+Taluka\s*$/i, '')
+          .trim();
+        
+        // Special case: "Bangalore Division" -> "Bengaluru"
+        if (cleanedCity.toLowerCase().includes('bangalore')) {
+          cleanedCity = 'Bengaluru';
+        }
+        
+        console.log('🧹 Cleaned city name:', cityValue, '->', cleanedCity);
       }
 
       const processedAddress: SelectedAddress = {
-        street: street,
+        street: streetAddress,
         area: areaValue,
-        city: addressData.city || '',
-        state: addressData.state || '',
-        pincode: addressData.pincode || '',
-        formatted_address: addressData.formatted_address,
+        city: cleanedCity,
+        state: addressData.state || addressData.administrative_area_level_1 || '',
+        pincode: addressData.pincode || addressData.postal_code || '',
+        formatted_address: addressData.formatted_address || '',
         stateCode: addressData.state ? getGSTStateCode(addressData.state) : '',
         lat: addressData.lat,
         lng: addressData.lng,
       };
       
-      console.log('📍 Branch - Processed address:', processedAddress);
+      console.log('📍 handleAddressSelect - processedAddress:', processedAddress);
+      
       setSelectedAddress(processedAddress);
+      setIsAddressFromSearch(true); // Mark that this address came from search
+      setIsSearchExpanded(false); // Collapse search bar after selection
+      
+      // Log the coordinates for backend storage (not shown to user)
+      console.log('📍 Selected Address Coordinates:', {
+        latitude: addressData.lat,
+        longitude: addressData.lng,
+        formatted_address: addressData.formatted_address
+      });
     } catch (error) {
       console.error('Error processing selected address:', error);
-      setSearchQuery('');
     }
   };
 
@@ -474,97 +566,59 @@ export default function AddBranchScreen() {
       return;
     }
 
-    const indianStates = [
-      { name: 'Andhra Pradesh', code: '37' },
-      { name: 'Arunachal Pradesh', code: '12' },
-      { name: 'Assam', code: '18' },
-      { name: 'Bihar', code: '10' },
-      { name: 'Chhattisgarh', code: '22' },
-      { name: 'Goa', code: '30' },
-      { name: 'Gujarat', code: '24' },
-      { name: 'Haryana', code: '06' },
-      { name: 'Himachal Pradesh', code: '02' },
-      { name: 'Jharkhand', code: '20' },
-      { name: 'Karnataka', code: '29' },
-      { name: 'Kerala', code: '32' },
-      { name: 'Madhya Pradesh', code: '23' },
-      { name: 'Maharashtra', code: '27' },
-      { name: 'Manipur', code: '14' },
-      { name: 'Meghalaya', code: '17' },
-      { name: 'Mizoram', code: '15' },
-      { name: 'Nagaland', code: '13' },
-      { name: 'Odisha', code: '21' },
-      { name: 'Punjab', code: '03' },
-      { name: 'Rajasthan', code: '08' },
-      { name: 'Sikkim', code: '11' },
-      { name: 'Tamil Nadu', code: '33' },
-      { name: 'Telangana', code: '36' },
-      { name: 'Tripura', code: '16' },
-      { name: 'Uttar Pradesh', code: '09' },
-      { name: 'Uttarakhand', code: '05' },
-      { name: 'West Bengal', code: '19' },
-      { name: 'Andaman and Nicobar Islands', code: '35' },
-      { name: 'Chandigarh', code: '04' },
-      { name: 'Dadra and Nagar Haveli and Daman and Diu', code: '26' },
-      { name: 'Delhi', code: '07' },
-      { name: 'Jammu and Kashmir', code: '01' },
-      { name: 'Ladakh', code: '38' },
-      { name: 'Lakshadweep', code: '31' },
-      { name: 'Puducherry', code: '34' },
-    ];
-
-    const matchingState = indianStates.find(state => 
-      state.name.toLowerCase() === selectedAddress.state.toLowerCase() ||
-      state.name.toLowerCase().includes(selectedAddress.state.toLowerCase()) ||
-      selectedAddress.state.toLowerCase().includes(state.name.toLowerCase())
-    );
-
     // Debug logging
-    console.log('📍 Branch - handleConfirmAddress - selectedAddress:', selectedAddress);
-    console.log('📍 Branch - selectedAddress.area:', selectedAddress.area);
-    
+    console.log('📍 handleConfirmAddress - selectedAddress:', selectedAddress);
+    console.log('📍 selectedAddress.area:', selectedAddress.area);
+    console.log('📍 selectedAddress.area type:', typeof selectedAddress.area);
+    console.log('📍 selectedAddress.area length:', selectedAddress.area?.length);
+
     // Ensure area is always a string (not undefined or null)
     const areaValue = selectedAddress.area || '';
     
-    router.push({
-      pathname: '/locations/branch-details',
-      params: {
+    // Use replace to prevent going back to map screen after confirming address
+    const params: Record<string, any> = {
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
         addressType: 'branch',
+        editMode: 'false',
+        editAddressId: '',
         prefilledAddressName: 'Branch Office',
+        prefilledDoorNumber: '',
         prefilledStreet: selectedAddress.street || '',
         prefilledArea: areaValue,
         prefilledCity: selectedAddress.city || '',
-        prefilledState: matchingState ? matchingState.name : selectedAddress.state || '',
+        prefilledState: selectedAddress.state || '',
         prefilledPincode: selectedAddress.pincode || '',
         prefilledFormatted: selectedAddress.formatted_address || '',
+        prefilledLat: selectedAddress.lat?.toString() || '',
+        prefilledLng: selectedAddress.lng?.toString() || '',
         // Pass through business summary params
         fromSummary,
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses,
+        allAddresses: allAddresses,
         allBankAccounts,
         initialCashBalance,
         invoicePrefix,
         invoicePattern,
         startingInvoiceNumber,
         fiscalYear,
-      }
-    });
+    };
+    
+    console.log('📍 Passing params with prefilledArea:', params.prefilledArea);
+
+    debouncedNavigate({
+      pathname: '/locations/branch-details',
+      params,
+    }, 'replace'); // Use replace to prevent going back to map screen
   };
 
   const handleManualEntry = () => {
-    router.push({
-      pathname: '/locations/branch-details',
-      params: { 
-        addressType: 'branch',
-        prefilledAddressName: 'Branch Office',
-        // Pass through business summary params
-        fromSummary,
+    // Use replace to prevent going back to map screen
+    const params: Record<string, any> = {
         type,
         value,
         gstinData,
@@ -572,23 +626,56 @@ export default function AddBranchScreen() {
         businessName,
         businessType,
         customBusinessType,
-        allAddresses,
+        addressType: 'branch',
+        editMode: 'false',
+        editAddressId: '',
+        prefilledAddressName: 'Branch Office',
+        prefilledDoorNumber: '',
+        prefilledStreet: '',
+        prefilledArea: '',
+        prefilledCity: '',
+        prefilledState: '',
+        prefilledPincode: '',
+        prefilledFormatted: '',
+        // Pass through business summary params
+        fromSummary,
+        allAddresses: allAddresses,
         allBankAccounts,
         initialCashBalance,
         invoicePrefix,
         invoicePattern,
         startingInvoiceNumber,
         fiscalYear,
-      }
-    });
+    };
+
+    debouncedNavigate({
+      pathname: '/locations/branch-details',
+      params,
+    }, 'replace'); // Use replace to prevent going back to map screen
   };
 
-  const webContainerStyles = getWebContainerStyles();
+  const handleShowSearchAgain = () => {
+    setIsSearchExpanded(true);
+    setSelectedAddress(null);
+    setIsAddressFromSearch(false); // Reset flag when starting new search
+  };
+
+  const handleCollapsedSearchPress = () => {
+    setIsSearchExpanded(true);
+    setSelectedAddress(null);
+    setIsAddressFromSearch(false); // Reset flag when starting new search
+  };
 
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
+          style={styles.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS === 'ios'}
+        >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -599,17 +686,9 @@ export default function AddBranchScreen() {
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Branch Address{getBranchCount()}</Text>
-        </View>
-
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchWrapper}>
-            <GoogleAddressAutocomplete
-              placeholder="Search for branch address..."
-              onAddressSelect={handleAddressSelect}
-            />
-          </View>
+          <Text style={styles.headerTitle}>
+            Branch Address{getBranchCount()}
+          </Text>
         </View>
 
         {/* Map Container */}
@@ -622,20 +701,68 @@ export default function AddBranchScreen() {
             onMapLoad={() => setIsMapLoading(false)}
           />
           
-          {selectedAddress && (
-            <View style={styles.selectedAddressIndicator}>
-              <Text style={styles.selectedAddressText} numberOfLines={2}>
-                🏢 {selectedAddress.formatted_address}
-              </Text>
-              <Text style={styles.dragHintText}>
-                💡 Tap on map or drag the pin to fine-tune the location
-              </Text>
-            </View>
+          {/* Floating Search Bar */}
+          {isSearchExpanded ? (
+            <Animated.View 
+              style={[
+                styles.floatingSearchContainer,
+                {
+                  opacity: searchAnimation,
+                }
+              ]}
+            >
+              <View style={styles.floatingSearchWrapper}>
+                {Platform.OS === 'web' ? (
+                  <WebAddressSearch
+                    key={isSearchExpanded ? 'expanded' : 'collapsed'}
+                    placeholder="Search for branch address..."
+                    onAddressSelect={handleAddressSelect}
+                  />
+                ) : (
+                  <GooglePlacesSearch
+                    key={isSearchExpanded ? 'expanded' : 'collapsed'}
+                    placeholder="Search for branch address..."
+                    onAddressSelect={handleAddressSelect}
+                    hideAfterSelection={false}
+                    autoFocus={true}
+                  />
+                )}
+              </View>
+            </Animated.View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.floatingSearchIcon}
+              onPress={handleCollapsedSearchPress}
+              activeOpacity={0.8}
+            >
+              <Search size={24} color="#3f66ac" />
+            </TouchableOpacity>
           )}
         </View>
 
+        {/* Selected Address Display */}
+        {selectedAddress && !isSearchExpanded && (
+          <View style={styles.selectedAddressContainer}>
+            <View style={styles.selectedAddressHeader}>
+              <Text style={styles.selectedAddressTitle}>Selected Address</Text>
+              <TouchableOpacity 
+                style={styles.changeAddressButton}
+                onPress={handleShowSearchAgain}
+              >
+                <Text style={styles.changeAddressText}>Change</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.selectedAddressText} numberOfLines={2}>
+              {selectedAddress.formatted_address}
+            </Text>
+          </View>
+        )}
+
         {/* Bottom Action Buttons */}
-        <View style={styles.bottomContainer}>
+        <View style={[
+          styles.bottomContainer,
+          Platform.OS === 'android' && { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 20 : 20 }
+        ]}>
           <TouchableOpacity
             style={[
               styles.confirmButton,
@@ -646,7 +773,7 @@ export default function AddBranchScreen() {
             activeOpacity={0.8}
           >
             <Text style={styles.confirmButtonText}>
-              Confirm Address
+              Use This Address
             </Text>
           </TouchableOpacity>
 
@@ -655,10 +782,11 @@ export default function AddBranchScreen() {
             onPress={handleManualEntry}
             activeOpacity={0.7}
           >
-            <Edit size={20} color="#10b981" />
-            <Text style={styles.manualButtonText}>Fill Address Manually</Text>
+            <Edit3 size={20} color="#3f66ac" />
+            <Text style={styles.manualButtonText}>Enter Address Manually</Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
     </ResponsiveContainer>
@@ -673,10 +801,13 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  keyboardView: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#10b981',
+    backgroundColor: '#3f66ac',
     paddingHorizontal: 16,
     paddingVertical: 12,
     zIndex: 1000,
@@ -696,102 +827,16 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     flex: 1,
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-    zIndex: 999,
-    gap: 8,
-  },
-  searchWrapper: {
-    flex: 1,
-  },
-  mapContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    paddingHorizontal: 32,
-  },
-  mapPlaceholderText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#64748b',
-    textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  mapPlaceholderSubtext: {
-    fontSize: 14,
-    color: '#94a3b8',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  floatingLocationButton: {
+  floatingSearchContainer: {
     position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#dcfce7',
-    borderWidth: 2,
-    borderColor: '#10b981',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-    zIndex: 100,
-  },
-  mapOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(248, 250, 252, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  mapOverlayText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#64748b',
-  },
-  mapOverlaySubtext: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginTop: 4,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  selectedAddressIndicator: {
-    position: 'absolute',
-    top: 16,
     left: 16,
     right: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    top: 16, // Add spacing from header
+    zIndex: 1000,
+  },
+  floatingSearchWrapper: {
+    backgroundColor: '#ffffff',
     borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -799,30 +844,90 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 5,
+  },
+  floatingSearchIcon: {
+    position: 'absolute',
+    right: 16, // Right corner of map
+    top: 16, // Same position as expanded search bar
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ffc754', // Brand yellow
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1000,
+  },
+  mapContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  selectedAddressContainer: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingBottom: Platform.select({
+      web: 12,
+      ios: 20,
+      android: 20, // Consistent bottom padding across all platforms
+      default: 20,
+    }),
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+  },
+  selectedAddressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  selectedAddressTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+  },
+  changeAddressButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f0f7ff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#3f66ac',
+  },
+  changeAddressText: {
+    fontSize: 12,
+    color: '#3f66ac',
+    fontWeight: '500',
   },
   selectedAddressText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#1e293b',
-    lineHeight: 18,
-    marginBottom: 4,
-  },
-  dragHintText: {
-    fontSize: 12,
     color: '#64748b',
-    fontStyle: 'italic',
+    lineHeight: 20,
   },
   bottomContainer: {
     backgroundColor: '#ffffff',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.select({
+      web: 16,
+      ios: 20,
+      android: 20, // Will be overridden dynamically when keyboard is visible
+      default: 20,
+    }),
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
     gap: 12,
   },
   confirmButton: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#3f66ac',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -840,7 +945,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ffffff',
     borderWidth: 2,
-    borderColor: '#10b981',
+    borderColor: '#3f66ac',
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 24,
@@ -850,6 +955,6 @@ const styles = StyleSheet.create({
   manualButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#10b981',
+    color: '#3f66ac',
   },
 });

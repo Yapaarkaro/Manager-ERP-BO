@@ -11,9 +11,11 @@ import {
   Alert,
   ScrollView,
   Modal,
+  Keyboard,
+  Dimensions,
 } from 'react-native';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
@@ -23,6 +25,7 @@ import { extractAddressComponents } from '@/services/googleMapsApi';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { createAddress, updateAddress } from '@/services/backendApi';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -87,8 +90,11 @@ export default function BusinessAddressManualScreen() {
     prefilledFormatted = '',
     prefilledContactName = '',
     prefilledContactPhone = '',
+    prefilledLat = '',
+    prefilledLng = '',
   } = useLocalSearchParams();
   
+  const insets = useSafeAreaInsets();
   const [addressName, setAddressName] = useState(prefilledAddressName as string);
   const [addressLine1, setAddressLine1] = useState(prefilledStreet as string);
   const [addressLine2, setAddressLine2] = useState(prefilledArea as string);
@@ -101,6 +107,7 @@ export default function BusinessAddressManualScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSearchBar, setShowSearchBar] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isNavigating, setIsNavigating] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateAddressInfo, setDuplicateAddressInfo] = useState<any>(null);
   const [contactPersonName, setContactPersonName] = useState(
@@ -108,10 +115,20 @@ export default function BusinessAddressManualScreen() {
   );
   const initialContactPhone = ((prefilledContactPhone as string) || (mobile as string) || '').replace(/\D/g, '').slice(0, 10);
   const [contactPhone, setContactPhone] = useState(initialContactPhone);
+  const [latitude, setLatitude] = useState<number | null>(prefilledLat ? parseFloat(prefilledLat as string) : null);
+  const [longitude, setLongitude] = useState<number | null>(prefilledLng ? parseFloat(prefilledLng as string) : null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const glowAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
   const stateSearchInputRef = useRef<TextInput>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const inputRefs = useRef<{ [key: string]: TextInput | null }>({});
+  const inputContainerRefs = useRef<{ [key: string]: View | null }>({});
+  const inputPositionsRef = useRef<{ [key: string]: number }>({});
+  const saveButtonRef = useRef<View | null>(null);
+  const keyboardHeightRef = useRef<number>(0);
+  const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
+  const scrollCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colors = useThemeColors();
   const debouncedNavigate = useDebounceNavigation();
 
@@ -230,7 +247,7 @@ export default function BusinessAddressManualScreen() {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
   }, [businessName, prefilledState, addressType]);
 
@@ -332,6 +349,123 @@ export default function BusinessAddressManualScreen() {
       console.log('⚠️ Error parsing existing addresses for contact info:', error);
     }
   }, [addressType, editMode, editAddressId, existingAddresses]);
+
+  // Track which input is currently focused
+  const [focusedInputKey, setFocusedInputKey] = useState<string | null>(null);
+
+  // Continuous checking to keep focused input above keyboard while typing
+  useEffect(() => {
+    if (Platform.OS === 'web' || !focusedInputKey || keyboardHeight === 0) return;
+
+    // Check every 300ms while input is focused and keyboard is visible
+    const interval = setInterval(() => {
+      checkAndScrollToFocusedInput();
+    }, 300);
+
+    return () => clearInterval(interval);
+  }, [focusedInputKey, keyboardHeight]);
+
+  // Track keyboard height
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    const keyboardWillShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => {
+        keyboardHeightRef.current = e.endCoordinates.height;
+        setKeyboardHeight(e.endCoordinates.height);
+        
+        // Scroll focused input above keyboard when keyboard appears
+        setTimeout(() => {
+          checkAndScrollToFocusedInput();
+        }, Platform.OS === 'ios' ? 250 : 150);
+      }
+    );
+
+    const keyboardWillHideListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => {
+        keyboardHeightRef.current = 0;
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      keyboardWillShowListener.remove();
+      keyboardWillHideListener.remove();
+    };
+  }, []);
+
+  // Store input container position on layout
+  const handleInputLayout = (key: string, event: any) => {
+    if (Platform.OS === 'web') return;
+    const { y } = event.nativeEvent.layout;
+    inputPositionsRef.current[key] = y;
+  };
+
+  // Handle input focus - track which input is focused and start continuous checking
+  const handleInputFocus = (key: string) => {
+    setFocusedInputKey(key);
+    // Start continuous checking to keep input above keyboard
+    if (Platform.OS !== 'web') {
+      // Check immediately
+      setTimeout(() => checkAndScrollToFocusedInput(), 100);
+    }
+  };
+
+  // Handle input blur - stop tracking
+  const handleInputBlur = () => {
+    setFocusedInputKey(null);
+  };
+
+  // Check if focused input is hidden and scroll it into view
+  const checkAndScrollToFocusedInput = () => {
+    if (Platform.OS === 'web' || !scrollViewRef.current || keyboardHeightRef.current === 0) return;
+
+    const currentFocusedKey = focusedInputKey || Object.keys(inputRefs.current).find(key => {
+      const input = inputRefs.current[key];
+      return input && input.isFocused();
+    });
+
+    if (currentFocusedKey) {
+      const container = inputContainerRefs.current[currentFocusedKey];
+      if (container && scrollViewRef.current) {
+        container.measureInWindow((windowX: number, windowY: number, width: number, height: number) => {
+          const screenHeight = Dimensions.get('window').height;
+          const keyboardHeight = keyboardHeightRef.current;
+          const visibleAreaBottom = screenHeight - keyboardHeight;
+          
+          const inputTop = windowY;
+          const inputBottom = windowY + height;
+          
+          // Check if input is hidden behind keyboard
+          if (inputBottom > visibleAreaBottom && scrollViewRef.current) {
+            // Input is hidden - calculate scroll needed to bring it above keyboard
+            const padding = 20; // Minimal padding above input
+            const hiddenAmount = inputBottom - visibleAreaBottom;
+            
+            // Calculate scroll offset: we need to scroll enough to bring input above keyboard
+            // Use the stored input position to calculate relative scroll
+            const inputY = inputPositionsRef.current[currentFocusedKey];
+            
+            if (inputY !== undefined) {
+              // Scroll by the hidden amount plus padding to position input correctly
+              scrollViewRef.current.scrollTo({
+                y: hiddenAmount + padding,
+                animated: true,
+              });
+            } else {
+              // Fallback: scroll by hidden amount + padding
+              scrollViewRef.current.scrollTo({
+                y: hiddenAmount + padding,
+                animated: true,
+              });
+            }
+          }
+        });
+      }
+    }
+  };
 
   const filteredStates = indianStates.filter(state =>
     state.name.toLowerCase().includes(stateSearch.toLowerCase()) ||
@@ -537,6 +671,12 @@ export default function BusinessAddressManualScreen() {
   };
 
   const handleSubmit = async () => {
+    // Prevent double navigation
+    if (isNavigating || isLoading) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (!isFormValid()) {
       Alert.alert('Incomplete Details', 'Please fill in all required fields');
       return;
@@ -627,39 +767,11 @@ export default function BusinessAddressManualScreen() {
       existingAddressList = [];
     }
     
-    let allAddresses;
-    
-    if (editMode === 'true' && editAddressId) {
-      // Edit existing address
-      allAddresses = existingAddressList.map((addr: any) => 
-        addr.id === editAddressId 
-          ? {
-              ...addr,
-              name: addressName.trim(),
-              doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
-              addressLine1: addressLine1.trim(),
-              addressLine2: addressLine2.trim(),
-              city: city.trim(),
-              pincode: pincode,
-              stateName: selectedState?.name || '',
-              stateCode: getGSTINStateCode(selectedState?.name || ''),
-              // Update manager and phone info for primary addresses
-              manager: addr.isPrimary 
-                ? (trimmedContactName || addr.manager || fallbackName)
-                : addr.manager,
-              phone: addr.isPrimary
-                ? ((sanitizedContactPhone || addr.phone || fallbackPhone) || undefined)
-                : addr.phone,
-            }
-          : addr
-      );
-      console.log('✏️ Edited address in list:', allAddresses);
-    } else {
-      // Create new address object
-      const newAddress = {
-        id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: addressName.trim(),
-        type: addressType || 'primary',
+    try {
+      const addressTypeValue = (Array.isArray(addressType) ? addressType[0] : addressType) || 'primary';
+      
+      // Prepare address JSON for backend
+      const addressJson = {
         doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
@@ -667,32 +779,144 @@ export default function BusinessAddressManualScreen() {
         pincode: pincode,
         stateName: selectedState?.name || '',
         stateCode: selectedState?.code || '',
-        isPrimary: (addressType || 'primary') === 'primary',
-        // Add manager and phone for primary addresses to show user info
-        manager: (addressType || 'primary') === 'primary'
-          ? (trimmedContactName || fallbackName)
-          : undefined,
-        phone: (addressType || 'primary') === 'primary'
-          ? ((sanitizedContactPhone || fallbackPhone) || undefined)
-          : undefined,
       };
+
+      // Use latitude and longitude from state (captured from Google Maps selection)
+      const addressLatitude = latitude;
+      const addressLongitude = longitude;
+
+      let backendAddress: any = null;
       
-      console.log('🆕 Creating new address:', newAddress);
-      console.log('📝 Adding to existing addresses:', existingAddressList);
-      
-      // Add new address to existing addresses
-      allAddresses = [...existingAddressList, newAddress];
-      console.log('📦 Final address list:', allAddresses);
-      
-      // Save primary address to dataStore
-      if ((addressType || 'primary') === 'primary') {
-        dataStore.addAddress(newAddress);
+      if (editMode === 'true' && editAddressId) {
+        // Update existing address in backend (non-blocking)
+        const existingAddress = existingAddressList.find((addr: any) => addr.id === editAddressId);
+        if (existingAddress?.backendId) {
+          updateAddress({
+            addressId: existingAddress.backendId,
+            name: addressName.trim(),
+            addressJson,
+            type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
+            managerName: addressTypeValue === 'primary' 
+              ? (trimmedContactName || existingAddress.manager || fallbackName)
+              : undefined,
+            managerMobileNumber: addressTypeValue === 'primary'
+              ? ((sanitizedContactPhone || existingAddress.phone || fallbackPhone) || undefined)
+              : undefined,
+            isPrimary: addressTypeValue === 'primary',
+            latitude: addressLatitude || undefined,
+            longitude: addressLongitude || undefined,
+          }).then((updateResult) => {
+            if (updateResult.success && updateResult.address) {
+              backendAddress = updateResult.address;
+              console.log('✅ Address updated in backend:', backendAddress);
+            } else {
+              console.warn('⚠️ Backend update failed, continuing with local save:', updateResult.error);
+            }
+          }).catch((error) => {
+            console.error('Error updating address in backend:', error);
+          });
+        }
+      } else {
+        // Create new address in backend (non-blocking for better performance)
+        createAddress({
+          name: addressName.trim(),
+          addressJson,
+          type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
+          managerName: addressTypeValue === 'primary'
+            ? (trimmedContactName || fallbackName)
+            : (addressTypeValue === 'branch' || addressTypeValue === 'warehouse')
+            ? (trimmedContactName || undefined)
+            : undefined,
+          managerMobileNumber: addressTypeValue === 'primary'
+            ? ((sanitizedContactPhone || fallbackPhone) || undefined)
+            : (addressTypeValue === 'branch' || addressTypeValue === 'warehouse')
+            ? (sanitizedContactPhone || undefined)
+            : undefined,
+          isPrimary: addressTypeValue === 'primary',
+          latitude: addressLatitude || undefined,
+          longitude: addressLongitude || undefined,
+        }).then((createResult) => {
+          if (createResult.success && createResult.address) {
+            backendAddress = createResult.address;
+            console.log('✅ Address created in backend:', backendAddress);
+          } else {
+            console.warn('⚠️ Backend create failed, continuing with local save:', createResult.error);
+          }
+        }).catch((error) => {
+          console.error('Error creating address in backend:', error);
+        });
       }
-    }
-    
-    setTimeout(() => {
+
+      // Update local address list
+      let allAddresses;
+      
+      if (editMode === 'true' && editAddressId) {
+        // Edit existing address
+        allAddresses = existingAddressList.map((addr: any) => 
+          addr.id === editAddressId 
+            ? {
+                ...addr,
+                name: addressName.trim(),
+                doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+                addressLine1: addressLine1.trim(),
+                addressLine2: addressLine2.trim(),
+                city: city.trim(),
+                pincode: pincode,
+                stateName: selectedState?.name || '',
+                stateCode: getGSTINStateCode(selectedState?.name || ''),
+                // Update manager and phone info for primary addresses
+                manager: addr.isPrimary 
+                  ? (trimmedContactName || addr.manager || fallbackName)
+                  : addr.manager,
+                phone: addr.isPrimary
+                  ? ((sanitizedContactPhone || addr.phone || fallbackPhone) || undefined)
+                  : addr.phone,
+                backendId: backendAddress?.id || addr.backendId,
+              }
+            : addr
+        );
+        console.log('✏️ Edited address in list:', allAddresses);
+      } else {
+        // Create new address object
+        const newAddress = {
+          id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: addressName.trim(),
+          type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
+          doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+          addressLine1: addressLine1.trim(),
+          addressLine2: addressLine2.trim(),
+          city: city.trim(),
+          pincode: pincode,
+          stateName: selectedState?.name || '',
+          stateCode: selectedState?.code || '',
+          isPrimary: addressTypeValue === 'primary',
+          // Add manager and phone for primary addresses to show user info
+          manager: addressTypeValue === 'primary'
+            ? (trimmedContactName || fallbackName)
+            : undefined,
+          phone: addressTypeValue === 'primary'
+            ? ((sanitizedContactPhone || fallbackPhone) || undefined)
+            : undefined,
+          status: 'active' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          backendId: backendAddress?.id,
+        };
+        
+        console.log('🆕 Creating new address:', newAddress);
+        console.log('📝 Adding to existing addresses:', existingAddressList);
+        
+        // Add new address to existing addresses
+        allAddresses = [...existingAddressList, newAddress];
+        console.log('📦 Final address list:', allAddresses);
+        
+        // Save primary address to dataStore
+        if ((addressType || 'primary') === 'primary') {
+          dataStore.addAddress(newAddress);
+        }
+      }
+      
       // Navigate to address confirmation with all addresses
-      // Use replace to prevent going back to address form after submission
       debouncedNavigate({
         pathname: '/auth/address-confirmation',
         params: {
@@ -707,8 +931,19 @@ export default function BusinessAddressManualScreen() {
           allAddresses: JSON.stringify(allAddresses),
         }
       }, 'replace');
+      
+      // Reset navigation flags after a delay
+      setTimeout(() => {
+        setIsNavigating(false);
+      }, 1000);
+      
       setIsLoading(false);
-    }, 500);
+    } catch (error: any) {
+      console.error('Error saving address:', error);
+      Alert.alert('Error', error.message || 'Failed to save address. Please try again.');
+      setIsNavigating(false);
+      setIsLoading(false);
+    }
   };
 
   const slideTransform = {
@@ -731,11 +966,9 @@ export default function BusinessAddressManualScreen() {
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          enabled={true}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          enabled={Platform.OS === 'ios'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          enabled={Platform.OS !== 'web'}
         >
           <TouchableOpacity
             style={styles.backButton}
@@ -746,12 +979,31 @@ export default function BusinessAddressManualScreen() {
           </TouchableOpacity>
 
           <ScrollView 
+            ref={scrollViewRef}
             style={styles.scrollView} 
-            contentContainerStyle={Platform.select({
-              web: webContainerStyles.webScrollContent,
-              default: {} // Let content style handle padding
-            })} 
+            contentContainerStyle={[
+              Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+              // Add bottom safe area inset + minimal padding to ensure save button can scroll above keyboard
+              Platform.OS !== 'web' ? { 
+                paddingBottom: keyboardHeight > 0 ? keyboardHeight + 30 : 20 + insets.bottom
+              } : {}
+            ]} 
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="none"
+            nestedScrollEnabled={true}
+            onScrollEndDrag={checkAndScrollToFocusedInput}
+            onMomentumScrollEnd={checkAndScrollToFocusedInput}
+            scrollEventThrottle={16}
+            onScroll={(e) => {
+              // Debounce scroll checking to avoid too many checks
+              if (scrollCheckTimeoutRef.current) {
+                clearTimeout(scrollCheckTimeoutRef.current);
+              }
+              scrollCheckTimeoutRef.current = setTimeout(() => {
+                checkAndScrollToFocusedInput();
+              }, 100);
+            }}
           >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -789,8 +1041,17 @@ export default function BusinessAddressManualScreen() {
                   
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>Address Name *</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    ref={(ref) => {
+                      inputContainerRefs.current['addressName'] = ref;
+                    }}
+                    style={styles.inputContainer}
+                    onLayout={(e) => handleInputLayout('addressName', e)}
+                  >
                     <CapitalizedTextInput
+                      ref={(ref) => {
+                        inputRefs.current['addressName'] = ref;
+                      }}
                       style={styles.input}
                       value={addressName}
                       onChangeText={setAddressName}
@@ -798,6 +1059,9 @@ export default function BusinessAddressManualScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
+                      returnKeyType="next"
+                      onFocus={() => handleInputFocus('addressName')}
+                      onBlur={handleInputBlur}
                     />
                   </View>
                   <Text style={styles.fieldHint}>
@@ -807,8 +1071,17 @@ export default function BusinessAddressManualScreen() {
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 1 *</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    ref={(ref) => {
+                      inputContainerRefs.current['addressLine1'] = ref;
+                    }}
+                    style={styles.inputContainer}
+                    onLayout={(e) => handleInputLayout('addressLine1', e)}
+                  >
                     <CapitalizedTextInput
+                      ref={(ref) => {
+                        inputRefs.current['addressLine1'] = ref;
+                      }}
                       style={styles.input}
                       value={addressLine1}
                       onChangeText={setAddressLine1}
@@ -816,14 +1089,26 @@ export default function BusinessAddressManualScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
+                      returnKeyType="next"
+                      onFocus={() => handleInputFocus('addressLine1')}
+                      onBlur={handleInputBlur}
                     />
                   </View>
                 </View>
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Address Line 2</Text>
-                  <View style={styles.inputContainer}>
+                  <View 
+                    ref={(ref) => {
+                      inputContainerRefs.current['addressLine2'] = ref;
+                    }}
+                    style={styles.inputContainer}
+                    onLayout={(e) => handleInputLayout('addressLine2', e)}
+                  >
                     <CapitalizedTextInput
+                      ref={(ref) => {
+                        inputRefs.current['addressLine2'] = ref;
+                      }}
                       style={styles.input}
                       value={addressLine2}
                       onChangeText={setAddressLine2}
@@ -831,6 +1116,9 @@ export default function BusinessAddressManualScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
+                      returnKeyType="next"
+                      onFocus={() => handleInputFocus('addressLine2')}
+                      onBlur={handleInputBlur}
                     />
                   </View>
                 </View>
@@ -850,8 +1138,17 @@ export default function BusinessAddressManualScreen() {
                         })} color="#ef4444" />
                       </TouchableOpacity>
                     </View>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      ref={(ref) => {
+                        inputContainerRefs.current[`addressLine${index + 3}`] = ref;
+                      }}
+                      style={styles.inputContainer}
+                      onLayout={(e) => handleInputLayout(`addressLine${index + 3}`, e)}
+                    >
                       <CapitalizedTextInput
+                        ref={(ref) => {
+                          inputRefs.current[`addressLine${index + 3}`] = ref;
+                        }}
                         style={styles.input}
                         value={line}
                         onChangeText={(text) => updateAdditionalLine(index, text)}
@@ -859,6 +1156,9 @@ export default function BusinessAddressManualScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
+                        returnKeyType="next"
+                        onFocus={() => handleInputFocus(`addressLine${index + 3}`)}
+                        onBlur={handleInputBlur}
                       />
                     </View>
                   </View>
@@ -881,8 +1181,17 @@ export default function BusinessAddressManualScreen() {
                 <View style={styles.rowContainer}>
                   <View style={[styles.inputGroup, styles.cityInput]}>
                     <Text style={styles.label}>City *</Text>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      ref={(ref) => {
+                        inputContainerRefs.current['city'] = ref;
+                      }}
+                      style={styles.inputContainer}
+                      onLayout={(e) => handleInputLayout('city', e)}
+                    >
                       <CapitalizedTextInput
+                        ref={(ref) => {
+                          inputRefs.current['city'] = ref;
+                        }}
                         style={styles.input}
                         value={city}
                         onChangeText={setCity}
@@ -890,14 +1199,26 @@ export default function BusinessAddressManualScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
+                        returnKeyType="next"
+                        onFocus={() => handleInputFocus('city')}
+                        onBlur={handleInputBlur}
                       />
                     </View>
                   </View>
 
                   <View style={[styles.inputGroup, styles.pincodeInput]}>
                     <Text style={styles.label}>Pincode *</Text>
-                    <View style={styles.inputContainer}>
+                    <View 
+                      ref={(ref) => {
+                        inputContainerRefs.current['pincode'] = ref;
+                      }}
+                      style={styles.inputContainer}
+                      onLayout={(e) => handleInputLayout('pincode', e)}
+                    >
                       <TextInput
+                        ref={(ref) => {
+                          inputRefs.current['pincode'] = ref;
+                        }}
                         style={styles.input}
                         value={pincode}
                         onChangeText={handlePincodeChange}
@@ -906,6 +1227,9 @@ export default function BusinessAddressManualScreen() {
                         keyboardType="numeric"
                         maxLength={6}
                         editable={true}
+                        returnKeyType="done"
+                        onFocus={() => handleInputFocus('pincode')}
+                        onBlur={handleInputBlur}
                       />
                     </View>
                   </View>
@@ -944,9 +1268,18 @@ export default function BusinessAddressManualScreen() {
 
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Person Name</Text>
-                      <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                      <View 
+                        ref={(ref) => {
+                          inputContainerRefs.current['contactPersonName'] = ref;
+                        }}
+                        style={[styles.inputContainer, styles.contactInputContainer]}
+                        onLayout={(e) => handleInputLayout('contactPersonName', e)}
+                      >
                         <User size={20} color="#ffc754" style={styles.inputIcon} />
                         <CapitalizedTextInput
+                          ref={(ref) => {
+                            inputRefs.current['contactPersonName'] = ref;
+                          }}
                           style={[styles.input, styles.contactInput]}
                           value={contactPersonName}
                           onChangeText={setContactPersonName}
@@ -954,15 +1287,27 @@ export default function BusinessAddressManualScreen() {
                           placeholderTextColor="#999999"
                           autoCapitalize="words"
                           editable={true}
+                          returnKeyType="next"
+                          onFocus={() => handleInputFocus('contactPersonName')}
+                          onBlur={handleInputBlur}
                         />
                       </View>
                     </View>
 
                     <View style={styles.inputGroup}>
                       <Text style={styles.label}>Contact Phone Number</Text>
-                      <View style={[styles.inputContainer, styles.contactInputContainer]}>
+                      <View 
+                        ref={(ref) => {
+                          inputContainerRefs.current['contactPhone'] = ref;
+                        }}
+                        style={[styles.inputContainer, styles.contactInputContainer]}
+                        onLayout={(e) => handleInputLayout('contactPhone', e)}
+                      >
                         <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                         <TextInput
+                          ref={(ref) => {
+                            inputRefs.current['contactPhone'] = ref;
+                          }}
                           style={[styles.input, styles.contactInput]}
                           value={contactPhone}
                           onChangeText={handleContactPhoneChange}
@@ -971,6 +1316,11 @@ export default function BusinessAddressManualScreen() {
                           editable={true}
                           keyboardType="phone-pad"
                           maxLength={10}
+                          returnKeyType="done"
+                          onFocus={() => {
+                            handleInputFocus('contactPhone');
+                          }}
+                          onBlur={handleInputBlur}
                         />
                       </View>
                       <Text style={styles.fieldHint}>
@@ -982,6 +1332,9 @@ export default function BusinessAddressManualScreen() {
               </View>
 
               <TouchableOpacity
+                ref={(ref) => {
+                  saveButtonRef.current = ref;
+                }}
                 style={[
                   styles.submitButton,
                   isFormValid() ? styles.enabledButton : styles.disabledButton,
@@ -1036,7 +1389,6 @@ export default function BusinessAddressManualScreen() {
                         web: {
                           outlineWidth: 0,
                           outlineColor: 'transparent',
-                          outlineStyle: 'none',
                         },
                       }),
                     ]}
@@ -1221,10 +1573,11 @@ export default function BusinessAddressManualScreen() {
                               existingAddressList = [];
                             }
                             
+                            const addressTypeValue = (Array.isArray(addressType) ? addressType[0] : addressType) || 'primary';
                             const newAddress = {
                               id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                               name: addressName.trim(),
-                              type: addressType || 'primary',
+                              type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
                               doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
                               addressLine1: addressLine1.trim(),
                               addressLine2: addressLine2.trim(),
@@ -1232,13 +1585,16 @@ export default function BusinessAddressManualScreen() {
                               pincode: pincode,
                               stateName: selectedState?.name || '',
                               stateCode: selectedState?.code || '',
-                              isPrimary: (addressType || 'primary') === 'primary',
-                              manager: (addressType || 'primary') === 'primary'
+                              isPrimary: addressTypeValue === 'primary',
+                              manager: addressTypeValue === 'primary'
                                 ? (trimmedContactName || fallbackName)
                                 : undefined,
-                              phone: (addressType || 'primary') === 'primary'
+                              phone: addressTypeValue === 'primary'
                                 ? ((sanitizedContactPhone || fallbackPhone) || undefined)
                                 : undefined,
+                              status: 'active' as const,
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
                             };
                             
                             const allAddresses = [...existingAddressList, newAddress];
@@ -1327,9 +1683,9 @@ const styles = StyleSheet.create({
     }),
     paddingBottom: Platform.select({
       web: 40,
-      ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
-      default: 20,
+      ios: 0, // Handled via ScrollView contentContainerStyle with safe area insets
+      android: 0, // Handled via ScrollView contentContainerStyle with safe area insets
+      default: 0,
     }),
   },
   iconContainer: {
@@ -1611,7 +1967,6 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
       },
       default: {
         minHeight: 44, // Standard native input height
@@ -1629,13 +1984,10 @@ const styles = StyleSheet.create({
       web: 4,
       default: 8, // Larger touch target on mobile
     }),
-    minWidth: Platform.select({
-      web: 'auto',
-      default: 40, // Ensure minimum touch target
-    }),
-    minHeight: Platform.select({
-      web: 'auto',
-      default: 40, // Ensure minimum touch target
+    ...Platform.select({
+      web: {},
+      ios: { minWidth: 40, minHeight: 40 },
+      android: { minWidth: 40, minHeight: 40 },
     }),
     justifyContent: 'center',
     alignItems: 'center',
@@ -1678,9 +2030,10 @@ const styles = StyleSheet.create({
       web: 0,
       default: 0, // No horizontal margin
     }),
-    minHeight: Platform.select({
-      web: 'auto',
-      default: 36, // Smaller height for cleaner look
+    ...Platform.select({
+      web: {},
+      ios: { minHeight: 36 },
+      android: { minHeight: 36 },
     }),
     ...Platform.select({
       default: {
@@ -1844,21 +2197,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
-    backgroundColor: '#ffffff',
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#334155',
-  },
   modalContent: {
     maxHeight: 350,
   },
@@ -1920,7 +2258,6 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
       },
     }),
   },

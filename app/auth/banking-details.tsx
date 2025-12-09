@@ -13,7 +13,7 @@ import {
   Animated,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { 
   ArrowLeft, 
@@ -30,9 +30,12 @@ import { useThemeColors } from '@/hooks/useColorScheme';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
-import { dataStore } from '@/utils/dataStore';
+import { dataStore, BankAccount } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { createBankAccount, updateBankAccount, saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
+import { numberToWords } from '@/utils/numberToWords';
 
 export default function BankingDetailsScreen() {
   const { 
@@ -43,6 +46,7 @@ export default function BankingDetailsScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     allAddresses,
     allBankAccounts = '[]',
     isAddingSecondary = 'false',
@@ -86,13 +90,19 @@ export default function BankingDetailsScreen() {
   const [accountType, setAccountType] = useState<'Savings' | 'Current'>(
     (prefilledAccountType as 'Savings' | 'Current') || (isPrimaryAccount ? 'Current' : 'Savings')
   );
-  const [initialBalance, setInitialBalance] = useState(prefilledInitialBalance as string || '');
+  const [initialBalance, setInitialBalance] = useState(
+    prefilledInitialBalance && prefilledInitialBalance !== '0' && prefilledInitialBalance !== '0.00' && prefilledInitialBalance !== '0.' 
+      ? (prefilledInitialBalance as string) 
+      : ''
+  );
   const [upiId, setUpiId] = useState(prefilledUpiId as string || '');
   const [ifscSelection, setIfscSelection] = useState<{start: number, end: number} | undefined>();
   const [showBankModal, setShowBankModal] = useState(false);
   const [bankSearch, setBankSearch] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [originalAccount, setOriginalAccount] = useState<any>(null);
+  const debouncedNavigate = useDebounceNavigation(500);
   
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
@@ -100,10 +110,22 @@ export default function BankingDetailsScreen() {
   const accountHolderNameRef = useRef<TextInput>(null);
   const accountNumberRef = useRef<TextInput>(null);
   const initialBalanceInputRef = useRef<TextInput>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0); // Track keyboard height
+  const insets = useSafeAreaInsets();
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation();
   const inputFocusStyles = getInputFocusStyles();
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  
+  // Calculate amount in words for display
+  const getAmountInWords = () => {
+    if (!initialBalance || initialBalance === '0' || initialBalance === '0.' || initialBalance === '0.00') {
+      return null;
+    }
+    return numberToWords(initialBalance);
+  };
+  
+  const amountInWords = getAmountInWords();
+  const isLongAmountText = amountInWords && amountInWords.length > 60;
 
   useEffect(() => {
     // Pre-fill bank if editing and store original account
@@ -143,8 +165,25 @@ export default function BankingDetailsScreen() {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: false, // Disable for web to avoid warning
     }).start();
+  }, []);
+
+  // Handle keyboard show/hide for Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const keyboardWillShow = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardWillHide = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+
+      return () => {
+        keyboardWillShow.remove();
+        keyboardWillHide.remove();
+      };
+    }
   }, []);
 
   const filteredBanks = allBanksWithOthers.filter(bank =>
@@ -184,7 +223,7 @@ export default function BankingDetailsScreen() {
             accountHolderNameRef.current.focus();
             return true;
           }
-        } else {
+      } else {
           // If account holder name exists, focus on account number field
           if (accountNumberRef.current) {
             accountNumberRef.current.focus();
@@ -199,7 +238,7 @@ export default function BankingDetailsScreen() {
         // If focus failed, try again after a short delay
         setTimeout(() => {
           focusField();
-        }, 100);
+    }, 100);
       }
     }, 500);
   };
@@ -210,9 +249,7 @@ export default function BankingDetailsScreen() {
     // Small delay to ensure keyboard is dismissed before opening modal
     setTimeout(() => {
       setShowBankModal(true);
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 300);
+      // Don't auto-focus - let user click search bar if they want to search
     }, Platform.OS === 'android' ? 100 : 0);
   };
 
@@ -284,6 +321,19 @@ export default function BankingDetailsScreen() {
     // Remove all non-numeric characters except decimal point
     let cleaned = text.replace(/[^0-9.]/g, '');
     
+    // If user deletes everything, ensure it's truly empty
+    if (cleaned === '' || cleaned === '0' || cleaned === '0.' || cleaned === '0.00') {
+      setInitialBalance('');
+      setTimeout(() => {
+        if (initialBalanceInputRef.current && Platform.OS !== 'web') {
+          initialBalanceInputRef.current.setNativeProps({
+            selection: { start: 0, end: 0 }
+          });
+        }
+      }, 10);
+      return;
+    }
+    
     // Ensure only one decimal point
     const parts = cleaned.split('.');
     if (parts.length > 2) {
@@ -301,9 +351,9 @@ export default function BankingDetailsScreen() {
     
     // Move cursor to end after formatting
     setTimeout(() => {
-      if (initialBalanceInputRef.current) {
-        const formatted = formatIndianNumber(cleaned || '0.00');
-        const length = formatted.length || 4; // Default to "0.00" length if empty
+      if (initialBalanceInputRef.current && Platform.OS !== 'web') {
+        const formatted = formatIndianNumber(cleaned);
+        const length = formatted.length;
         initialBalanceInputRef.current.setNativeProps({
           selection: { start: length, end: length }
         });
@@ -423,12 +473,19 @@ export default function BankingDetailsScreen() {
   };
 
   const handleContinue = async () => {
+    // Prevent double navigation
+    if (isNavigating || isLoading) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (!isFormValid()) {
       Alert.alert('Incomplete Details', getValidationMessage());
       return;
     }
 
     setIsLoading(true);
+    setIsNavigating(true);
 
     // Parse existing bank accounts
     let existingBankAccounts = [];
@@ -449,31 +506,115 @@ export default function BankingDetailsScreen() {
       upiId: upiId.trim(),
       accountType: accountType,
       initialBalance: parseFloat(initialBalance),
-      isPrimary: editMode === 'true' ? (prefilledIsPrimary === 'true') : (isAddingSecondary === 'false'),
+      isPrimary: editMode === 'true' ? (prefilledIsPrimary === 'true') : (isAddingSecondary === 'false'), // Boolean: true if primary, false if secondary
       createdAt: editMode === 'true' ? existingBankAccounts.find((acc: any) => acc.id === editAccountId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
     };
 
-    let allBankAccountsList;
     try {
+      let backendAccount: { id?: string } | undefined; // ✅ Explicitly type backendAccount
+      
+      if (editMode === 'true') {
+        // Update existing account in backend (non-blocking)
+        const existingAccount = existingBankAccounts.find((acc: any) => acc.id === editAccountId);
+        if (existingAccount?.backendId) {
+          updateBankAccount({
+            accountId: existingAccount.backendId,
+            bankName: bankAccount.bankName,
+            bankShortName: bankAccount.bankShortName,
+            accountHolderName: bankAccount.accountHolderName,
+            accountNumber: bankAccount.accountNumber,
+            ifscCode: bankAccount.ifscCode,
+            upiId: bankAccount.upiId,
+            accountType: bankAccount.accountType as 'Savings' | 'Current',
+            initialBalance: bankAccount.initialBalance,
+            isPrimary: bankAccount.isPrimary,
+          }).then((updateResult) => {
+            if (updateResult.success && updateResult.account) {
+              backendAccount = updateResult.account;
+              console.log('✅ Bank account updated in backend:', backendAccount);
+            } else {
+              console.warn('⚠️ Backend update failed, continuing with local save:', updateResult.error);
+            }
+          }).catch((error) => {
+            console.error('Error updating bank account in backend:', error);
+          });
+        }
+      } else {
+        // Create new account in backend (non-blocking for better performance)
+        createBankAccount({
+          bankName: bankAccount.bankName,
+          bankShortName: bankAccount.bankShortName,
+          bankId: bankAccount.bankId,
+          accountHolderName: bankAccount.accountHolderName,
+          accountNumber: bankAccount.accountNumber,
+          ifscCode: bankAccount.ifscCode,
+          upiId: bankAccount.upiId,
+          accountType: bankAccount.accountType as 'Savings' | 'Current',
+          initialBalance: bankAccount.initialBalance,
+          isPrimary: bankAccount.isPrimary,
+        }).then((createResult) => {
+          if (createResult.success && createResult.account) {
+            backendAccount = createResult.account;
+            console.log('✅ Bank account created in backend:', backendAccount);
+          } else {
+            console.warn('⚠️ Backend create failed, continuing with local save:', createResult.error);
+          }
+        }).catch((error) => {
+          console.error('Error creating bank account in backend:', error);
+        });
+      }
+
+      // Update local bank accounts list
+      let allBankAccountsList;
       if (editMode === 'true') {
         // Edit existing account
         allBankAccountsList = existingBankAccounts.map((acc: any) => 
-          acc.id === editAccountId ? bankAccount : acc
+          acc.id === editAccountId ? { ...bankAccount, backendId: backendAccount?.id || acc.backendId } : acc
         );
         // Update in dataStore
         console.log('💾 Updating bank account in dataStore:', editAccountId);
-        dataStore.updateBankAccount(editAccountId as string, bankAccount);
+        const backendId = backendAccount?.id;
+        dataStore.updateBankAccount(editAccountId as string, { ...bankAccount, ...(backendId ? { backendId } : {}) } as Partial<BankAccount>);
       } else {
         // Add new account
-        allBankAccountsList = [...existingBankAccounts, bankAccount];
+        const backendId = backendAccount?.id;
+        allBankAccountsList = [...existingBankAccounts, { ...bankAccount, ...(backendId ? { backendId } : {}) }];
         // Add to dataStore
         console.log('💾 Adding bank account to dataStore:', bankAccount.id);
-        dataStore.addBankAccount(bankAccount);
+        dataStore.addBankAccount({ ...bankAccount, ...(backendId ? { backendId } : {}) } as BankAccount);
       }
       
       console.log('✅ Bank account saved, navigating to bank-accounts screen');
       console.log('📊 Total bank accounts:', allBankAccountsList.length);
 
+      // ✅ Save signup progress to backend (banking step complete, moving to summary)
+      // Do this before setTimeout to avoid async issues
+      (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            // Get mobile from params or from user's phone metadata
+            const mobileNumber = mobile as string || session.user.phone || session.user.user_metadata?.phone;
+            if (mobileNumber) {
+              await saveSignupProgress({
+                mobile: mobileNumber,
+                mobileVerified: true,
+                taxIdType: type as 'GSTIN' | 'PAN',
+                taxIdValue: value as string,
+                taxIdVerified: true,
+                ownerName: name as string,
+                businessName: businessName as string,
+                businessType: businessType as string,
+                gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
+                currentStep: 'primaryBank',
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error saving signup progress:', error);
+        }
+      })();
+      
       setTimeout(() => {
         setIsLoading(false);
         // Get latest data from dataStore to ensure we have the most up-to-date information
@@ -483,7 +624,7 @@ export default function BankingDetailsScreen() {
         // Check if we came from business summary page
         if (fromSummary === 'true') {
           // Return to business summary page with preserved values
-          router.replace({
+          debouncedNavigate({
             pathname: '/auth/business-summary',
             params: {
               type,
@@ -501,10 +642,10 @@ export default function BankingDetailsScreen() {
               startingInvoiceNumber: currentStartingNumber,
               fiscalYear: currentFiscalYear,
             }
-          });
+          }, 'replace');
         } else {
           // Navigate back to bank accounts management screen
-          router.replace({
+          debouncedNavigate({
             pathname: '/auth/bank-accounts',
             params: {
               type,
@@ -517,8 +658,13 @@ export default function BankingDetailsScreen() {
               allAddresses: JSON.stringify(latestAddresses),
               allBankAccounts: JSON.stringify(latestBankAccounts),
             }
-          });
+          }, 'replace');
         }
+        
+        // Reset navigation flags after a delay
+        setTimeout(() => {
+          setIsNavigating(false);
+        }, 1000);
       }, 300);
     } catch (error) {
       console.error('❌ Error saving bank account:', error);
@@ -565,25 +711,29 @@ export default function BankingDetailsScreen() {
 
   return (
     <ResponsiveContainer>
-      <View style={styles.container}>
+    <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           enabled={true}
         >
-          <TouchableOpacity
-            style={styles.backButton}
+            <TouchableOpacity
+              style={styles.backButton}
             onPress={editMode === 'true' ? handleCancel : () => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color="#3f66ac" />
-          </TouchableOpacity>
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color="#3f66ac" />
+            </TouchableOpacity>
 
           <ScrollView 
             style={styles.scrollView} 
-            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            contentContainerStyle={[
+              Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+              Platform.OS === 'android' ? { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 20 : 20 } : {},
+              Platform.OS === 'ios' ? { paddingBottom: 20 } : {}
+            ]} 
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
@@ -604,17 +754,16 @@ export default function BankingDetailsScreen() {
                    editMode === 'true' ? 'Edit your bank account details' :
                    'Add your primary business bank account for transactions and payments'}
                 </Text>
-                
-                {isAddingSecondary === 'false' && editMode === 'false' && (
-                <View style={styles.primaryNotice}>
-                  <Text style={styles.primaryNoticeText}>
-                    🏦 This is your <Text style={styles.primaryBold}>Primary Bank Account</Text>
-                  </Text>
-                  <Text style={styles.primaryNoticeSubtext}>
-                    You can add more bank accounts later
-                  </Text>
-                </View>
-                )}
+                {(isAddingSecondary === 'false' && editMode === 'false') ? (
+                  <View style={styles.primaryNotice}>
+                    <Text style={styles.primaryNoticeText}>
+                      🏦 This is your <Text style={styles.primaryBold}>Primary Bank Account</Text>
+                    </Text>
+                    <Text style={styles.primaryNoticeSubtext}>
+                      You can add more bank accounts later
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               <View style={styles.formContainer}>
@@ -636,7 +785,7 @@ export default function BankingDetailsScreen() {
                             {selectedBank.id === 'others' ? (customBankName || 'Others - Enter bank name') : selectedBank.name}
                           </Text>
                           <View style={styles.bankMetaInfo}>
-                            {selectedBank.id !== 'others' && (
+                            {(selectedBank.id !== 'others') ? (
                               <>
                                 <Text style={styles.bankShortName}>({selectedBank.shortName})</Text>
                                 <View style={[
@@ -648,7 +797,7 @@ export default function BankingDetailsScreen() {
                                   </Text>
                                 </View>
                               </>
-                            )}
+                            ) : null}
                           </View>
                         </View>
                       ) : (
@@ -657,34 +806,77 @@ export default function BankingDetailsScreen() {
                     </View>
                     <ChevronDown size={20} color="#666666" />
                   </TouchableOpacity>
-                  {selectedBank && selectedBank.id !== 'others' && (
+                  {(selectedBank && selectedBank.id !== 'others') ? (
                     <Text style={styles.fieldHint}>
                       Account number format: {selectedBank.accountNumberFormat}
                     </Text>
-                  )}
+                  ) : null}
                 </View>
-
-                {selectedBank && selectedBank.id === 'others' && (
+                {(selectedBank && selectedBank.id === 'others') ? (
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>Bank Name *</Text>
                     <View style={Platform.select({
                       web: [
                         inputFocusStyles.inputContainer,
                         focusedField === 'customBankName' && inputFocusStyles.inputContainerFocused,
-                      ],
+                      ].filter(Boolean) as any, // ✅ Filter false values and type assert
                       default: styles.inputWrapper,
-                    })}>
-                      <Building2 size={20} color="#64748b" style={Platform.select({
-                        web: styles.inputIcon,
-                        default: styles.inputIconAbsolute,
-                      })} />
+                    }) as any}> {/* ✅ Type assertion for Platform.select with arrays */}
+                      <Building2 size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                       <TextInput
-                        style={Platform.select({
-                          web: inputFocusStyles.input,
-                          default: [
+                        style={Platform.OS === 'web' 
+                          ? inputFocusStyles.input 
+                          : [
+                              {
+                                borderWidth: 2,
+                                borderColor: focusedField === 'customBankName' ? '#3f66ac' : '#E5E7EB',
+                                borderRadius: 12,
+                                paddingHorizontal: 16,
+                                paddingLeft: 44,
+                                paddingVertical: 18,
+                                fontSize: 16,
+                                color: '#1a1a1a',
+                                backgroundColor: '#ffffff',
+                                minHeight: 50,
+                                ...(focusedField === 'customBankName' ? {
+                                  shadowColor: '#3f66ac',
+                                  shadowOffset: { width: 0, height: 4 },
+                                  shadowOpacity: 0.12,
+                                  shadowRadius: 8,
+                                  elevation: 4,
+                                } : {}),
+                              },
+                            ] as any} // ✅ Use Platform.OS directly for arrays
+                        value={customBankName}
+                        onChangeText={setCustomBankName}
+                        placeholder="Enter your bank name"
+                        placeholderTextColor="#999999"
+                        autoCapitalize={Platform.OS === 'web' ? 'characters' : 'words'}
+                        editable={true}
+                        onFocus={() => setFocusedField('customBankName')}
+                        onBlur={() => setFocusedField(null)}
+                      />
+                    </View>
+                  </View>
+                ) : null}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Account Holder Name *</Text>
+                  <View style={Platform.select({
+                    web: [
+                      inputFocusStyles.inputContainer,
+                      focusedField === 'accountHolderName' && inputFocusStyles.inputContainerFocused,
+                    ].filter(Boolean) as any, // ✅ Filter false values
+                    default: styles.inputWrapper,
+                  }) as any}> {/* ✅ Type assertion */}
+                    <User size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
+                    <CapitalizedTextInput
+                      ref={accountHolderNameRef}
+                      style={Platform.OS === 'web' 
+                        ? inputFocusStyles.input 
+                        : [
                             {
                               borderWidth: 2,
-                              borderColor: focusedField === 'customBankName' ? '#3f66ac' : '#E5E7EB',
+                              borderColor: focusedField === 'accountHolderName' ? '#3f66ac' : '#E5E7EB',
                               borderRadius: 12,
                               paddingHorizontal: 16,
                               paddingLeft: 44,
@@ -693,70 +885,17 @@ export default function BankingDetailsScreen() {
                               color: '#1a1a1a',
                               backgroundColor: '#ffffff',
                               minHeight: 50,
-                              ...(focusedField === 'customBankName' ? {
+                              pointerEvents: 'auto', // Ensure input is interactive on Android
+                              zIndex: 1, // Lower than icon to ensure icon stays visible
+                              ...(focusedField === 'accountHolderName' ? {
                                 shadowColor: '#3f66ac',
                                 shadowOffset: { width: 0, height: 4 },
                                 shadowOpacity: 0.12,
                                 shadowRadius: 8,
-                                elevation: 4,
+                                elevation: 2, // Reduced elevation to prevent covering icon
                               } : {}),
                             },
-                          ],
-                        })}
-                        value={customBankName}
-                        onChangeText={setCustomBankName}
-                        placeholder="Enter your bank name"
-                        placeholderTextColor="#999999"
-                        autoCapitalize="words"
-                        editable={true}
-                        onFocus={() => setFocusedField('customBankName')}
-                        onBlur={() => setFocusedField(null)}
-                      />
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Account Holder Name *</Text>
-                  <View style={Platform.select({
-                    web: [
-                      inputFocusStyles.inputContainer,
-                      focusedField === 'accountHolderName' && inputFocusStyles.inputContainerFocused,
-                    ],
-                    default: styles.inputWrapper,
-                  })}>
-                    <User size={20} color="#64748b" style={Platform.select({
-                      web: styles.inputIcon,
-                      default: styles.inputIconAbsolute,
-                    })} />
-                    <CapitalizedTextInput
-                      ref={accountHolderNameRef}
-                      style={Platform.select({
-                        web: inputFocusStyles.input,
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: focusedField === 'accountHolderName' ? '#3f66ac' : '#E5E7EB',
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            pointerEvents: 'auto', // Ensure input is interactive on Android
-                            zIndex: 1, // Lower than icon to ensure icon stays visible
-                            ...(focusedField === 'accountHolderName' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 2, // Reduced elevation to prevent covering icon
-                            } : {}),
-                          },
-                        ],
-                      })}
+                          ] as any} // ✅ Use Platform.OS directly for arrays
                       value={accountHolderName}
                       onChangeText={setAccountHolderName}
                       placeholder="Enter account holder name"
@@ -776,42 +915,38 @@ export default function BankingDetailsScreen() {
                       inputFocusStyles.inputContainer,
                       focusedField === 'accountNumber' && inputFocusStyles.inputContainerFocused,
                       confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber && styles.errorInputContainer,
-                    ],
+                    ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  })}>
-                    <Hash size={20} color="#64748b" style={Platform.select({
-                      web: styles.inputIcon,
-                      default: styles.inputIconAbsolute,
-                    })} />
+                  }) as any}> {/* ✅ Type assertion */}
+                    <Hash size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
                       ref={accountNumberRef}
-                      style={Platform.select({
-                        web: inputFocusStyles.input,
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: (confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber) 
-                              ? '#ef4444' 
-                              : (focusedField === 'accountNumber' ? '#3f66ac' : '#E5E7EB'),
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            zIndex: 1, // Lower than icon to ensure icon stays visible
-                            ...(focusedField === 'accountNumber' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 2, // Reduced elevation to prevent covering icon
-                            } : {}),
-                          },
-                        ],
-                      })}
+                      style={Platform.OS === 'web' 
+                        ? inputFocusStyles.input 
+                        : [
+                            {
+                              borderWidth: 2,
+                              borderColor: (confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber) 
+                                ? '#ef4444' 
+                                : (focusedField === 'accountNumber' ? '#3f66ac' : '#E5E7EB'),
+                              borderRadius: 12,
+                              paddingHorizontal: 16,
+                              paddingLeft: 44,
+                              paddingVertical: 18,
+                              fontSize: 16,
+                              color: '#1a1a1a',
+                              backgroundColor: '#ffffff',
+                              minHeight: 50,
+                              zIndex: 1, // Lower than icon to ensure icon stays visible
+                              ...(focusedField === 'accountNumber' ? {
+                                shadowColor: '#3f66ac',
+                                shadowOffset: { width: 0, height: 4 },
+                                shadowOpacity: 0.12,
+                                shadowRadius: 8,
+                                elevation: 2, // Reduced elevation to prevent covering icon
+                              } : {}),
+                            },
+                          ] as any} // ✅ Use Platform.OS directly for arrays
                       value={accountNumber}
                       onChangeText={handleAccountNumberChange}
                       placeholder="Enter account number"
@@ -831,41 +966,37 @@ export default function BankingDetailsScreen() {
                       inputFocusStyles.inputContainer,
                       focusedField === 'confirmAccountNumber' && inputFocusStyles.inputContainerFocused,
                       confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber && styles.errorInputContainer,
-                    ],
+                    ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  })}>
-                    <Hash size={20} color="#64748b" style={Platform.select({
-                      web: styles.inputIcon,
-                      default: styles.inputIconAbsolute,
-                    })} />
+                  }) as any}> {/* ✅ Type assertion */}
+                    <Hash size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
-                      style={Platform.select({
-                        web: inputFocusStyles.input,
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: (confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber) 
-                              ? '#ef4444' 
-                              : (focusedField === 'confirmAccountNumber' ? '#3f66ac' : '#E5E7EB'),
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            zIndex: 1, // Lower than icon to ensure icon stays visible
-                            ...(focusedField === 'confirmAccountNumber' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 2, // Reduced elevation to prevent covering icon
-                            } : {}),
-                          },
-                        ],
-                      })}
+                      style={Platform.OS === 'web' 
+                        ? inputFocusStyles.input 
+                        : [
+                            {
+                              borderWidth: 2,
+                              borderColor: (confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber) 
+                                ? '#ef4444' 
+                                : (focusedField === 'confirmAccountNumber' ? '#3f66ac' : '#E5E7EB'),
+                              borderRadius: 12,
+                              paddingHorizontal: 16,
+                              paddingLeft: 44,
+                              paddingVertical: 18,
+                              fontSize: 16,
+                              color: '#1a1a1a',
+                              backgroundColor: '#ffffff',
+                              minHeight: 50,
+                              zIndex: 1, // Lower than icon to ensure icon stays visible
+                              ...(focusedField === 'confirmAccountNumber' ? {
+                                shadowColor: '#3f66ac',
+                                shadowOffset: { width: 0, height: 4 },
+                                shadowOpacity: 0.12,
+                                shadowRadius: 8,
+                                elevation: 2, // Reduced elevation to prevent covering icon
+                              } : {}),
+                            },
+                          ] as any} // ✅ Use Platform.OS directly for arrays
                       value={confirmAccountNumber}
                       onChangeText={handleConfirmAccountNumberChange}
                       placeholder="Re-enter account number"
@@ -876,9 +1007,9 @@ export default function BankingDetailsScreen() {
                       onBlur={() => setFocusedField(null)}
                     />
                   </View>
-                  {confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber && (
+                  {(confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber) ? (
                     <Text style={styles.errorText}>Account numbers do not match</Text>
-                  )}
+                  ) : null}
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -887,40 +1018,36 @@ export default function BankingDetailsScreen() {
                     web: [
                       inputFocusStyles.inputContainer,
                       focusedField === 'ifscCode' && inputFocusStyles.inputContainerFocused,
-                    ],
+                    ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  })}>
-                    <Building2 size={20} color="#64748b" style={Platform.select({
-                      web: styles.inputIcon,
-                      default: styles.inputIconAbsolute,
-                    })} />
+                  }) as any}> {/* ✅ Type assertion */}
+                    <Building2 size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
                       ref={ifscInputRef}
-                      style={Platform.select({
-                        web: inputFocusStyles.input,
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: focusedField === 'ifscCode' ? '#3f66ac' : '#E5E7EB',
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            zIndex: 1, // Lower than icon to ensure icon stays visible
-                            ...(focusedField === 'ifscCode' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 2, // Reduced elevation to prevent covering icon
-                            } : {}),
-                          },
-                        ],
-                      })}
+                      style={Platform.OS === 'web' 
+                        ? inputFocusStyles.input 
+                        : [
+                            {
+                              borderWidth: 2,
+                              borderColor: focusedField === 'ifscCode' ? '#3f66ac' : '#E5E7EB',
+                              borderRadius: 12,
+                              paddingHorizontal: 16,
+                              paddingLeft: 44,
+                              paddingVertical: 18,
+                              fontSize: 16,
+                              color: '#1a1a1a',
+                              backgroundColor: '#ffffff',
+                              minHeight: 50,
+                              zIndex: 1, // Lower than icon to ensure icon stays visible
+                              ...(focusedField === 'ifscCode' ? {
+                                shadowColor: '#3f66ac',
+                                shadowOffset: { width: 0, height: 4 },
+                                shadowOpacity: 0.12,
+                                shadowRadius: 8,
+                                elevation: 2, // Reduced elevation to prevent covering icon
+                              } : {}),
+                            },
+                          ] as any} // ✅ Use Platform.OS directly for arrays
                       value={ifscCode}
                       onChangeText={handleIFSCChange}
                       placeholder="Enter IFSC code"
@@ -944,49 +1071,45 @@ export default function BankingDetailsScreen() {
                       focusedField === 'upiId' && inputFocusStyles.inputContainerFocused,
                       upiId.length === 0 && styles.requiredInputContainer,
                       upiId.length > 0 && !validateUPI(upiId) && styles.errorInputContainer,
-                    ],
+                    ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  })}>
-                    <CreditCard size={20} color="#D97706" style={Platform.select({
-                      web: styles.inputIcon,
-                      default: styles.inputIconAbsolute,
-                    })} />
+                  }) as any}> {/* ✅ Type assertion */}
+                    <CreditCard size={20} color="#D97706" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
-                      style={Platform.select({
-                        web: [
-                          inputFocusStyles.input,
-                          upiId.length === 0 && styles.requiredInput,
-                        ],
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: (upiId.length > 0 && !validateUPI(upiId)) 
-                              ? '#ef4444' 
-                              : (focusedField === 'upiId' ? '#3f66ac' : '#E5E7EB'),
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            zIndex: 1, // Lower than icon to ensure icon stays visible
-                            ...(focusedField === 'upiId' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 2, // Reduced elevation to prevent covering icon
-                            } : {}),
-                          },
-                        ],
-                      })}
+                      style={Platform.OS === 'web' 
+                        ? [
+                            inputFocusStyles.input,
+                            upiId.length === 0 && styles.requiredInput,
+                          ].filter(Boolean) as any // ✅ Filter false values
+                        : [
+                            {
+                              borderWidth: 2,
+                              borderColor: (upiId.length > 0 && !validateUPI(upiId)) 
+                                ? '#ef4444' 
+                                : (focusedField === 'upiId' ? '#3f66ac' : '#E5E7EB'),
+                              borderRadius: 12,
+                              paddingHorizontal: 16,
+                              paddingLeft: 44,
+                              paddingVertical: 18,
+                              fontSize: 16,
+                              color: '#1a1a1a',
+                              backgroundColor: '#ffffff',
+                              minHeight: 50,
+                              zIndex: 1, // Lower than icon to ensure icon stays visible
+                              ...(focusedField === 'upiId' ? {
+                                shadowColor: '#3f66ac',
+                                shadowOffset: { width: 0, height: 4 },
+                                shadowOpacity: 0.12,
+                                shadowRadius: 8,
+                                elevation: 2, // Reduced elevation to prevent covering icon
+                              } : {}),
+                            },
+                          ] as any} // ✅ Use Platform.OS directly for arrays
                       value={upiId}
                       onChangeText={handleUPIChange}
                       placeholder="username@bankname"
                       placeholderTextColor="#D97706"
-                      autoCapitalize="none"
+                      autoCapitalize="words"
                       autoCorrect={false}
                       editable={true}
                       onFocus={() => setFocusedField('upiId')}
@@ -996,12 +1119,12 @@ export default function BankingDetailsScreen() {
                   <Text style={styles.requiredFieldHint}>
                     This UPI ID will be used for all UPI-related payments
                   </Text>
-                  {upiId.length === 0 && (
+                  {upiId.length === 0 ? (
                     <Text style={styles.requiredErrorText}>UPI ID is required for all UPI payments</Text>
-                  )}
-                  {upiId.length > 0 && !validateUPI(upiId) && (
+                  ) : null}
+                  {(upiId.length > 0 && !validateUPI(upiId)) ? (
                     <Text style={styles.errorText}>Please enter a valid UPI ID (e.g., username@bankname)</Text>
-                  )}
+                  ) : null}
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -1049,47 +1172,47 @@ export default function BankingDetailsScreen() {
                     web: [
                       inputFocusStyles.inputContainer,
                       focusedField === 'initialBalance' && inputFocusStyles.inputContainerFocused,
-                    ],
+                    ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  })}>
-                    <Text style={Platform.select({
-                      web: styles.currencySymbol,
-                      default: [styles.currencySymbol, { 
-                        position: 'absolute', 
+                  }) as any}> {/* ✅ Type assertion */}
+                    {Platform.OS === 'web' ? (
+                      <Text style={styles.currencySymbol}>₹</Text>
+                    ) : (
+                      <Text style={[styles.currencySymbol, { 
+                        position: 'absolute' as const, 
                         left: 16, 
                         zIndex: 1,
-                        top: '50%',
+                        top: '50%' as const,
                         marginTop: -10,
-                      }],
-                    })}>₹</Text>
+                      }]}>₹</Text>
+                    )}
                     <TextInput
                       ref={initialBalanceInputRef}
-                      style={Platform.select({
-                        web: [inputFocusStyles.input, styles.balanceInput],
-                        default: [
-                          {
-                            borderWidth: 2,
-                            borderColor: focusedField === 'initialBalance' ? '#3f66ac' : '#E5E7EB',
-                            borderRadius: 12,
-                            paddingHorizontal: 16,
-                            paddingLeft: 44,
-                            paddingVertical: 18,
-                            fontSize: 16,
-                            color: '#1a1a1a',
-                            backgroundColor: '#ffffff',
-                            minHeight: 50,
-                            ...(focusedField === 'initialBalance' ? {
-                              shadowColor: '#3f66ac',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.12,
-                              shadowRadius: 8,
-                              elevation: 4,
-                            } : {}),
-                          },
-                          styles.balanceInput,
-                        ],
-                      })}
-                      value={formatIndianNumber(initialBalance)}
+                      style={Platform.OS === 'web' 
+                        ? [inputFocusStyles.input, styles.balanceInput]
+                        : [
+                            {
+                              borderWidth: 2,
+                              borderColor: focusedField === 'initialBalance' ? '#3f66ac' : '#E5E7EB',
+                              borderRadius: 12,
+                              paddingHorizontal: 16,
+                              paddingLeft: 44,
+                              paddingVertical: 18,
+                              fontSize: 16,
+                              color: '#1a1a1a',
+                              backgroundColor: '#ffffff',
+                              minHeight: 50,
+                              ...(focusedField === 'initialBalance' ? {
+                                shadowColor: '#3f66ac',
+                                shadowOffset: { width: 0, height: 4 },
+                                shadowOpacity: 0.12,
+                                shadowRadius: 8,
+                                elevation: 4,
+                              } : {}),
+                            },
+                            styles.balanceInput,
+                          ] as any} // ✅ Use Platform.OS directly for arrays
+                      value={initialBalance && initialBalance !== '0' && initialBalance !== '0.' && initialBalance !== '0.00' ? formatIndianNumber(initialBalance) : ''}
                       onChangeText={handleInitialBalanceChange}
                       placeholder="0.00"
                       placeholderTextColor="#999999"
@@ -1097,16 +1220,24 @@ export default function BankingDetailsScreen() {
                       editable={true}
                       onFocus={() => {
                         setFocusedField('initialBalance');
-                        // Move cursor to end when focused
+                        // Move cursor to end when focused, or start if empty
                         setTimeout(() => {
-                          if (initialBalanceInputRef.current) {
-                            const formatted = formatIndianNumber(initialBalance || '0.00');
-                            const length = formatted.length || 4; // Default to "0.00" length if empty
-                            initialBalanceInputRef.current.setNativeProps({
-                              selection: { start: length, end: length }
-                            });
+                          if (initialBalanceInputRef.current && Platform.OS !== 'web') {
+                            // If empty or just "0", clear and position at start
+                            if (!initialBalance || initialBalance === '0' || initialBalance === '0.' || initialBalance === '0.00') {
+                              setInitialBalance('');
+                              initialBalanceInputRef.current.setNativeProps({
+                                selection: { start: 0, end: 0 }
+                              });
+                            } else {
+                              const formatted = formatIndianNumber(initialBalance);
+                              const length = formatted.length;
+                              initialBalanceInputRef.current.setNativeProps({
+                                selection: { start: length, end: length }
+                              });
+                            }
                           }
-                        }, 150);
+                        }, 100);
                       }}
                       onBlur={() => setFocusedField(null)}
                     />
@@ -1114,11 +1245,20 @@ export default function BankingDetailsScreen() {
                   <Text style={styles.fieldHint}>
                     Enter the current balance in this account
                   </Text>
+                  {amountInWords && (
+                    <View style={styles.amountInWordsContainer}>
+                      <Text style={[
+                        styles.amountInWordsText,
+                        isLongAmountText && styles.amountInWordsTextCenter
+                      ]}>
+                        {amountInWords}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
-
-              <View style={editMode === 'true' ? styles.buttonContainer : undefined}>
-                {editMode === 'true' && (
+              <View style={editMode === 'true' ? styles.buttonContainer : {}}>
+                {(editMode === 'true') ? (
                   <TouchableOpacity
                     style={styles.cancelButton}
                     onPress={handleCancel}
@@ -1126,8 +1266,7 @@ export default function BankingDetailsScreen() {
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                )}
-                
+                ) : null}
                 <TouchableOpacity
                   style={[
                     styles.continueButton,
@@ -1135,7 +1274,7 @@ export default function BankingDetailsScreen() {
                     (isFormValid() && (editMode !== 'true' || hasChanges())) ? styles.enabledButton : styles.disabledButton,
                   ]}
                   onPress={handleContinue}
-                  disabled={!isFormValid() || (editMode === 'true' && !hasChanges()) || isLoading}
+                  disabled={!isFormValid() || (editMode === 'true' && !hasChanges()) || isLoading || isNavigating}
                   activeOpacity={0.8}
                 >
                   <Text style={[
@@ -1147,12 +1286,11 @@ export default function BankingDetailsScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
-
-              {!isFormValid() && (
+              {!isFormValid() ? (
                 <Text style={styles.validationMessage}>
                   {getValidationMessage()}
                 </Text>
-              )}
+              ) : null}
             </Animated.View>
           </ScrollView>
 
@@ -1185,7 +1323,7 @@ export default function BankingDetailsScreen() {
                     onChangeText={setBankSearch}
                     placeholder="Search banks by name or IFSC prefix..."
                     placeholderTextColor="#94a3b8"
-                    autoFocus={true}
+                    autoFocus={false}
                     autoCapitalize="none"
                   />
                 </View>
@@ -1230,9 +1368,9 @@ export default function BankingDetailsScreen() {
                 </ScrollView>
               </View>
             </View>
-        </Modal>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </Modal>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </View>
     </ResponsiveContainer>
   );
@@ -1281,7 +1419,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },
@@ -1411,13 +1549,13 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        // outlineStyle removed - React Native doesn't support 'none', use undefined instead
       },
       default: {
         // Ensure inputs are fully interactive on mobile
         minHeight: 50, // Better touch target
       },
-    }),
+    }) as any, // ✅ Type assertion for web-specific styles
   },
   // errorInput style removed - using errorInputContainer instead
   errorText: {
@@ -1573,14 +1711,21 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.15)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: {
+          width: 0,
+          height: 4,
+        },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 8,
+      },
+    }),
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1619,13 +1764,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#334155',
     paddingVertical: 8,
-    ...Platform.select({
+    ...(Platform.select({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        // outlineStyle removed - React Native doesn't support 'none'
       },
-    }),
+    }) as any), // ✅ Type assertion for web-specific styles
   },
   modalContent: {
     maxHeight: 400,
@@ -1696,5 +1841,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     fontWeight: '600',
+  },
+  amountInWordsContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    width: '100%',
+  },
+  amountInWordsText: {
+    fontSize: Platform.select({
+      web: 12,
+      default: 11,
+    }),
+    color: '#64748b',
+    fontStyle: 'italic',
+    textAlign: 'right',
+    lineHeight: Platform.select({
+      web: 16,
+      default: 15,
+    }),
+  },
+  amountInWordsTextCenter: {
+    textAlign: 'center',
   },
 });

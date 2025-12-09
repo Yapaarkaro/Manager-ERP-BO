@@ -10,6 +10,7 @@ import {
   Platform,
   TextInput,
   Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -42,6 +43,8 @@ import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import TrialNotification from '@/components/TrialNotification';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { completeOnboarding, deleteSignupProgress, saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 
 export default function BusinessSummaryScreen() {
   const { 
@@ -88,6 +91,7 @@ export default function BusinessSummaryScreen() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [showTrialNotification, setShowTrialNotification] = useState(false);
   const [showDeleteAddressModal, setShowDeleteAddressModal] = useState(false);
   const [showDeleteBankModal, setShowDeleteBankModal] = useState(false);
@@ -107,7 +111,7 @@ export default function BusinessSummaryScreen() {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: false, // Disable for web to avoid warning
     }).start();
   }, []);
 
@@ -208,7 +212,7 @@ export default function BusinessSummaryScreen() {
   const confirmDeleteAddress = () => {
     if (addressToDelete) {
       // Update local state
-      setEditableAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
+      setEditableAddresses((prev: typeof editableAddresses) => prev.filter((addr: typeof editableAddresses[0]) => addr.id !== addressToDelete));
       
       // Update dataStore
       dataStore.deleteAddress(addressToDelete);
@@ -226,7 +230,7 @@ export default function BusinessSummaryScreen() {
   const confirmDeleteBankAccount = () => {
     if (bankAccountToDelete) {
       // Update local state
-      setEditableBankAccounts(prev => prev.filter(acc => acc.id !== bankAccountToDelete));
+      setEditableBankAccounts((prev: typeof editableBankAccounts) => prev.filter((acc: typeof editableBankAccounts[0]) => acc.id !== bankAccountToDelete));
       
       // Update dataStore
       dataStore.deleteBankAccount(bankAccountToDelete);
@@ -242,47 +246,148 @@ export default function BusinessSummaryScreen() {
   };
 
   const handleCompleteSetup = async () => {
+    // Prevent double navigation
+    if (isNavigating || isLoading) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     setIsLoading(true);
+    setIsNavigating(true);
 
-    const businessData = {
-      personalInfo: {
-        name: editableName,
-        businessName: editableBusinessName,
-        businessType: editableBusinessType,
-      },
-      verification: {
-        type,
-        value,
-        gstinData: gstinData ? JSON.parse(gstinData as string) : null,
-      },
-      addresses: editableAddresses,
-      bankAccounts: editableBankAccounts,
-      initialCashBalance: totalCashBalance,
-      totalBalance: grandTotal,
-      invoiceConfig: {
-        prefix: editableInvoicePrefix,
-        pattern: editableInvoicePattern,
-        startingNumber: editableStartingNumber,
-        fiscalYear: editableFiscalYear,
-      },
-      setupCompletedAt: new Date().toISOString(),
-    };
+    try {
+      // Complete onboarding in backend
+      // Get mobile from params or from user's phone metadata
+      const { data: { session } } = await supabase.auth.getSession();
+      const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+      
+      if (!mobileNumber) {
+        console.warn('⚠️ Mobile number not available for completing onboarding');
+        Alert.alert('Error', 'Mobile number is required to complete setup. Please try again.');
+        setIsLoading(false);
+        setIsNavigating(false);
+        return;
+      }
+      
+      const invoicePatternValue = editableInvoicePattern || `${editableInvoicePrefix}-YYYY-####`;
+      
+      // ✅ Save signup progress at summary step (before completing)
+      try {
+        const progressResult = await saveSignupProgress({
+          mobile: mobileNumber,
+          mobileVerified: true,
+          currentStep: 'businessSummary',
+        });
+        if (progressResult.success) {
+          console.log('✅ Signup progress saved: businessSummary');
+        } else {
+          console.error('❌ Failed to save signup progress:', progressResult.error);
+        }
+      } catch (error) {
+        console.error('Error saving signup progress:', error);
+        // Don't fail onboarding if progress save fails
+      }
 
-    console.log('Complete business setup data:', businessData);
+      // Complete onboarding - AWAIT to ensure it completes before navigation
+      const onboardingResult = await completeOnboarding({
+        initialCashBalance: totalCashBalance,
+        invoicePrefix: editableInvoicePrefix,
+        invoicePattern: JSON.stringify({ pattern: invoicePatternValue }),
+        startingInvoiceNumber: editableStartingNumber || '1',
+        fiscalYear: editableFiscalYear as 'JAN-DEC' | 'APR-MAR',
+        registeredMobile: mobileNumber,
+      });
 
-    dataStore.setSignupComplete(true);
+      if (!onboardingResult.success) {
+        console.error('Onboarding failed:', onboardingResult.error);
+        Alert.alert('Error', onboardingResult.error || 'Failed to complete onboarding. Please try again.');
+        setIsLoading(false);
+        setIsNavigating(false);
+        return;
+      }
 
-    // Create user account for login
-    const userAccount = dataStore.createUserAccount();
-    console.log('✅ User account created for login:', userAccount.mobile);
+      console.log('✅ Onboarding completed successfully. Business ID:', onboardingResult.businessId);
+      
+      // ✅ Note: complete-onboarding Edge Function now updates signup_progress with business_id
+      // and marks it as 'signupComplete', so we don't need to update it here
+      console.log('✅ Onboarding complete - signup_progress will be updated by complete-onboarding Edge Function');
 
-    // Start the 30-day free trial
-    subscriptionStore.startTrial();
+      const businessData = {
+        personalInfo: {
+          name: editableName,
+          businessName: editableBusinessName,
+          businessType: editableBusinessType,
+        },
+        verification: {
+          type,
+          value,
+          gstinData: gstinData ? JSON.parse(gstinData as string) : null,
+        },
+        addresses: editableAddresses,
+        bankAccounts: editableBankAccounts,
+        initialCashBalance: totalCashBalance,
+        totalBalance: grandTotal,
+        invoiceConfig: {
+          prefix: editableInvoicePrefix,
+          pattern: editableInvoicePattern,
+          startingNumber: editableStartingNumber,
+          fiscalYear: editableFiscalYear,
+        },
+        setupCompletedAt: new Date().toISOString(),
+      };
 
-    setTimeout(() => {
+      console.log('Complete business setup data:', businessData);
+
+      dataStore.setSignupComplete(true);
+
+      // Create user account for login
+      const userAccount = dataStore.createUserAccount();
+      console.log('✅ User account created for login:', userAccount.mobile);
+
+      // Start the 30-day free trial
+      subscriptionStore.startTrial();
+
+      // ✅ Prefetch business data in background (warm up cache for instant dashboard load)
+      (async () => {
+        try {
+          const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+          await prefetchBusinessData();
+          console.log('✅ Business data prefetched - dashboard will load instantly');
+        } catch (error) {
+          console.error('⚠️ Prefetch error (non-blocking):', error);
+        }
+      })();
+      
+      // ✅ Delete signup progress after successful completion
+      try {
+        const deleteResult = await deleteSignupProgress();
+        if (deleteResult.success) {
+          console.log('✅ Signup progress deleted after successful completion');
+        } else {
+          console.warn('⚠️ Failed to delete signup progress (non-blocking):', deleteResult.error);
+        }
+      } catch (error) {
+        console.error('⚠️ Error deleting signup progress (non-blocking):', error);
+      }
+      
       setIsLoading(false);
+      setIsNavigating(false);
+      
+      // ✅ Redirect to dashboard after successful onboarding
+      // Prefetch runs in background, navigation happens immediately
+      router.replace('/dashboard');
+      
+      // Show trial notification (non-blocking)
       setShowTrialNotification(true);
-    }, 1000);
+    } catch (error: any) {
+      console.error('Error completing setup:', error);
+      Alert.alert(
+        'Setup Failed',
+        error.message || 'Failed to complete setup. Please check your connection and try again.'
+      );
+      setIsLoading(false);
+      setIsNavigating(false);
+    }
   };
 
   // Format pattern display with hyphens
@@ -469,11 +574,12 @@ export default function BusinessSummaryScreen() {
                                   outlineColor: 'transparent',
                                   outlineStyle: 'none',
                                 },
-                              }),
+                              }) as any,
                             ]}
                             value={editableName}
                             onChangeText={setEditableName}
                             placeholder="Enter owner name"
+                            autoCapitalize="words"
                           />
                         </View>
                         <View style={styles.editField}>
@@ -487,11 +593,12 @@ export default function BusinessSummaryScreen() {
                                   outlineColor: 'transparent',
                                   outlineStyle: 'none',
                                 },
-                              }),
+                              }) as any,
                             ]}
                             value={editableBusinessType}
                             onChangeText={setEditableBusinessType}
                             placeholder="Enter business type"
+                            autoCapitalize="words"
                           />
                         </View>
                         <TouchableOpacity
@@ -887,7 +994,7 @@ export default function BusinessSummaryScreen() {
                                     outlineColor: 'transparent',
                                     outlineStyle: 'none',
                                   },
-                                }),
+                                }) as any,
                               ]}
                               value={formatIndianNumber(editableCashBalance)}
                               onChangeText={(text) => {
@@ -1030,11 +1137,11 @@ export default function BusinessSummaryScreen() {
               <TouchableOpacity
                 style={styles.completeButton}
                 onPress={handleCompleteSetup}
-                disabled={isLoading}
+                disabled={isLoading || isNavigating}
                 activeOpacity={0.8}
               >
                 <Text style={styles.completeButtonText}>
-                  {isLoading ? 'Setting up your business...' : 'Complete Setup & Start Using'}
+                  {isLoading || isNavigating ? 'Setting up your business...' : 'Complete Setup & Start Using'}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -1047,6 +1154,15 @@ export default function BusinessSummaryScreen() {
         visible={showTrialNotification}
         onClose={() => {
           setShowTrialNotification(false);
+          // ✅ Prefetch business data before navigation (if not already cached)
+          (async () => {
+            try {
+              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+              await prefetchBusinessData();
+            } catch (error) {
+              console.error('⚠️ Prefetch error (non-blocking):', error);
+            }
+          })();
           router.push('/dashboard');
         }}
         onUpgrade={() => {
@@ -1232,7 +1348,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },
@@ -1695,23 +1811,6 @@ const styles = StyleSheet.create({
       default: 6, // Smaller radius on mobile
     }),
     backgroundColor: '#eff6ff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  editButton: {
-    width: Platform.select({
-      web: 32,
-      default: 28, // Smaller on mobile
-    }),
-    height: Platform.select({
-      web: 32,
-      default: 28, // Smaller on mobile
-    }),
-    borderRadius: Platform.select({
-      web: 8,
-      default: 6, // Smaller radius on mobile
-    }),
-    backgroundColor: '#f1f5f9',
     justifyContent: 'center',
     alignItems: 'center',
   },

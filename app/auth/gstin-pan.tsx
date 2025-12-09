@@ -14,7 +14,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
-import { verifyGSTIN } from '../../services/gstinApi';
+import { verifyGSTIN as verifyGSTINBackend, saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
@@ -168,44 +169,34 @@ export default function GstinPanScreen() {
     setVerificationError(null);
     
     try {
-      const result = await verifyGSTIN(gstinNumber);
+      // Call backend API (user should be authenticated by now with JWT)
+      const result = await verifyGSTINBackend(gstinNumber);
       
-      if (result.error) {
-        setVerificationError(result.message || 'GSTIN verification failed');
-        setIsValid(false);
-        // Clear input and reset for re-entry when GSTIN is invalid
-        setInputValue('');
-        setHasAutoVerified(false);
-        setVerifiedGstinData(null);
-        // Focus input so user can start typing again
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 300);
-      } else if (result.taxpayerInfo) {
+      console.log('📡 GSTIN Backend API response:', result);
+      
+      if (result.success && result.taxpayerInfo) {
         // GSTIN is valid and verified
         setVerifiedGstinData(result.taxpayerInfo);
         setIsValid(true);
         setVerificationError(null);
       } else {
-        setVerificationError('Invalid GSTIN number');
+        // GSTIN verification failed
+        setVerificationError(result.error || 'GSTIN verification failed');
         setIsValid(false);
-        // Clear input and reset for re-entry when GSTIN is invalid
         setInputValue('');
         setHasAutoVerified(false);
         setVerifiedGstinData(null);
-        // Focus input so user can start typing again
         setTimeout(() => {
           inputRef.current?.focus();
         }, 300);
       }
-    } catch (error) {
-      setVerificationError('Network error. Please check your connection and try again.');
+    } catch (error: any) {
+      console.error('GSTIN verification error:', error);
+      setVerificationError(error.message || 'Failed to verify GSTIN. Please check your connection and try again.');
       setIsValid(false);
-      // Clear input and reset for re-entry on network error
       setInputValue('');
       setHasAutoVerified(false);
       setVerifiedGstinData(null);
-      // Focus input so user can start typing again
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
@@ -214,8 +205,31 @@ export default function GstinPanScreen() {
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (isValid && !isVerifying) {
+      // ✅ Save signup progress to backend (taxId step)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const progressResult = await saveSignupProgress({
+            mobile: mobile as string,
+            mobileVerified: true,
+            taxIdType: selectedType as 'GSTIN' | 'PAN',
+            taxIdValue: inputValue,
+            taxIdVerified: false, // Will be verified after OTP
+            currentStep: 'gstinPan',
+          });
+          if (progressResult.success) {
+            console.log('✅ Signup progress saved: gstinPan');
+          } else {
+            console.error('❌ Failed to save signup progress:', progressResult.error);
+          }
+        }
+      } catch (error) {
+        console.error('Error saving signup progress:', error);
+        // Continue with navigation even if save fails
+      }
+      
       if (selectedType === 'GSTIN') {
         // For GSTIN, go to OTP verification screen
         // Use replace to prevent going back to GSTIN/PAN screen
@@ -425,7 +439,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },

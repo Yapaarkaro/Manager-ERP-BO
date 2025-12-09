@@ -6,6 +6,7 @@ import Toast from 'react-native-toast-message';
 import { StatusBarProvider } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 // Global function to clear all data - call this when needed for testing
 global.clearAllData = async () => {
@@ -18,12 +19,17 @@ global.clearAllData = async () => {
 export default function RootLayout() {
   useFrameworkReady();
 
-  // Load data from persistent storage when app starts
+  // ✅ Reset dataStore on app reload/refresh (backend is source of truth)
   useEffect(() => {
     const initializeData = async () => {
-      console.log('🔄 Loading data from persistent storage...');
-      await dataStore.loadData();
-      console.log('✅ Data loaded successfully');
+      console.log('🔄 Resetting dataStore on app reload...');
+      
+      // Clear all local signup data (backend is source of truth)
+      dataStore.clearSignupProgress();
+      
+      // Only load non-signup data (addresses, bank accounts for completed users)
+      // Signup progress will be fetched from backend after OTP verification
+      console.log('✅ DataStore reset - signup progress will be fetched from backend');
     };
     initializeData();
   }, []);

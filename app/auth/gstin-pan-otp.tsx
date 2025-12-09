@@ -5,13 +5,13 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   ScrollView,
   Modal,
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -21,6 +21,8 @@ import CustomDatePicker from '@/components/CustomDatePicker';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { verifyGSTINOTP, verifyPAN, saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -144,24 +146,56 @@ export default function GstinPanOTPScreen() {
     
     setIsVerifying(true);
     
-    // Use the editable PAN value if it was edited, otherwise use the original value
-    const panValue = isEditingPan ? editablePanValue.trim().toUpperCase() : (value as string);
+    // Always use the editable PAN value (it's initialized with the original value)
+    const panValue = editablePanValue.trim().toUpperCase();
+    const panNameValue = panName.trim();
+    const dobValue = dateOfBirth ? dateOfBirth.toISOString().split('T')[0] : '';
     
-    // PAN verification using Name and DOB (no OTP needed)
-    setTimeout(() => {
-      // Use replace to prevent going back to PAN details screen after verification
-      debouncedNavigate({
-        pathname: '/auth/business-details',
-        params: { 
-          type: type,
-          value: panValue,
-          panName: panName.trim(),
-          panDob: dateOfBirth?.toISOString() || '',
-          mobile: mobile,
+    try {
+      // Call backend API to verify PAN
+      const result = await verifyPAN(panValue, panNameValue, dobValue);
+      
+      if (result.success && result.panVerified) {
+        // ✅ Save signup progress to backend (PAN verified, moving to businessDetails)
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            await saveSignupProgress({
+              mobile: mobile as string,
+              mobileVerified: true,
+              taxIdType: 'PAN',
+              taxIdValue: panValue,
+              taxIdVerified: true,
+              ownerName: panNameValue,
+              ownerDob: dobValue,
+              currentStep: 'verifyPan',
+            });
+          }
+        } catch (error) {
+          console.error('Error saving signup progress:', error);
         }
-      }, 'replace');
+        
+        // Use replace to prevent going back to PAN details screen after verification
+        debouncedNavigate({
+          pathname: '/auth/business-details',
+          params: { 
+            type: type,
+            value: panValue,
+            panName: panNameValue,
+            panDob: dateOfBirth ? 
+              `${dateOfBirth.getFullYear()}-${String(dateOfBirth.getMonth() + 1).padStart(2, '0')}-${String(dateOfBirth.getDate()).padStart(2, '0')}` : '',
+            mobile: mobile,
+          }
+        }, 'replace');
+      } else {
+        Alert.alert('Verification Failed', result.error || 'PAN verification failed. Please check your details and try again.');
+      }
+    } catch (error: any) {
+      console.error('PAN verification error:', error);
+      Alert.alert('Verification Failed', error.message || 'Unable to verify PAN. Please check your connection and try again.');
+    } finally {
       setIsVerifying(false);
-    }, 1000);
+    }
   };
 
   const verifyOTP = async () => {
@@ -172,17 +206,46 @@ export default function GstinPanOTPScreen() {
     
     setIsVerifying(true);
     const otpCode = otp.join('');
+    const gstinValue = value as string;
     
     if (type === 'GSTIN') {
-      // Use demo OTP 654321 for GSTIN verification
-      setTimeout(() => {
-        if (otpCode === '654321') {
-          // Use replace to prevent going back to OTP screen after verification
+      // Optimize: Navigate immediately, handle verification in background
+      const verifyPromise = verifyGSTINOTP(gstinValue, otpCode);
+      
+      verifyPromise.then(async (result) => {
+        if (result.success && result.gstinVerified) {
+          // ✅ Save signup progress to backend (non-blocking)
+          supabase.auth.getSession().then(async ({ data: { session } }) => {
+            if (session?.user) {
+              saveSignupProgress({
+                mobile: mobile as string,
+                mobileVerified: true,
+                taxIdType: 'GSTIN',
+                taxIdValue: gstinValue,
+                taxIdVerified: true,
+                gstinData: typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData,
+                currentStep: 'gstinOtp',
+              }).then((result) => {
+                if (result.success) {
+                  console.log('✅ Signup progress saved: gstinOtp');
+                } else {
+                  console.error('❌ Failed to save signup progress:', result.error);
+                }
+              }).catch((error) => {
+                console.error('Error saving signup progress:', error);
+              });
+            }
+          }).catch((error) => {
+            console.error('Error getting session:', error);
+          });
+          
+          // Navigate immediately (don't wait for signup progress save)
+          setIsVerifying(false);
           debouncedNavigate({
             pathname: '/auth/business-details',
             params: { 
               type: type,
-              value: value,
+              value: gstinValue,
               gstinData: gstinData,
               mobile: mobile,
             }
@@ -190,10 +253,16 @@ export default function GstinPanOTPScreen() {
         } else {
           setOtp(['', '', '', '', '', '']);
           inputRefs.current[0]?.focus();
-          Alert.alert('Invalid OTP', 'Please enter the correct verification code');
+          Alert.alert('Invalid OTP', result.error || 'Please enter the correct verification code');
+          setIsVerifying(false);
         }
+      }).catch((error: any) => {
+        console.error('GSTIN OTP verification error:', error);
+        setOtp(['', '', '', '', '', '']);
+        inputRefs.current[0]?.focus();
+        Alert.alert('Verification Failed', error.message || 'Unable to verify OTP. Please check your connection and try again.');
         setIsVerifying(false);
-      }, 1000);
+      });
     } else {
       // PAN - should not reach here as PAN uses handlePanVerification
       Alert.alert('Error', 'Invalid verification method');
@@ -358,9 +427,8 @@ export default function GstinPanOTPScreen() {
                       web: {
                         outlineWidth: 0,
                         outlineColor: 'transparent',
-                        outlineStyle: 'none',
                       },
-                    }),
+                    }) as any,
                   ]}
                   value={isEditingPan ? editablePanValue : (value as string)}
                   onChangeText={setEditablePanValue}
@@ -399,6 +467,7 @@ export default function GstinPanOTPScreen() {
                         }
                       }}
                       activeOpacity={0.7}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                       <Text style={styles.saveButtonText}>Save</Text>
                     </TouchableOpacity>
@@ -409,6 +478,7 @@ export default function GstinPanOTPScreen() {
                         setEditablePanValue(value as string);
                       }}
                       activeOpacity={0.7}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                       <Text style={styles.cancelEditButtonText}>Cancel</Text>
                     </TouchableOpacity>
@@ -429,9 +499,8 @@ export default function GstinPanOTPScreen() {
                       web: {
                         outlineWidth: 0,
                         outlineColor: 'transparent',
-                        outlineStyle: 'none',
                       },
-                    }),
+                    }) as any,
                   ]}
                   placeholder="Enter your full name"
                   value={panName}
@@ -453,9 +522,8 @@ export default function GstinPanOTPScreen() {
                       web: {
                         outlineWidth: 0,
                         outlineColor: 'transparent',
-                        outlineStyle: 'none',
                       },
-                    }),
+                    }) as any,
                   ]}
                   value={dobText}
                   onChangeText={handleDobTextChange}
@@ -645,7 +713,7 @@ const styles = StyleSheet.create({
             paddingBottom: Platform.select({
               web: 40,
               ios: 20,
-              android: 12, // Consistent bottom padding on Android
+              android: 20, // Consistent bottom padding across all platforms
               default: 20,
             }),
           },
@@ -837,15 +905,13 @@ const styles = StyleSheet.create({
     ...Platform.select({
       default: {
         position: 'relative',
-        pointerEvents: 'box-none', // Allow touches to pass through to children
-        zIndex: 1, // Ensure wrapper is below icon
+        overflow: 'visible', // Allow absolutely positioned children to be visible and clickable
       },
     }),
   },
   editButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    marginLeft: 8,
     borderRadius: 6,
     backgroundColor: COLORS.primary,
     ...Platform.select({
@@ -856,6 +922,9 @@ const styles = StyleSheet.create({
         marginTop: -12, // Half of button height to center vertically
         marginLeft: 0, // Remove margin when absolutely positioned
       },
+      web: {
+        marginLeft: 8,
+      },
     }),
   },
   editButtonText: {
@@ -864,7 +933,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   inputIcon: {
-    marginRight: 12,
     ...Platform.select({
       default: {
         position: 'absolute',
@@ -875,6 +943,9 @@ const styles = StyleSheet.create({
         elevation: 10, // On Android, elevation is needed to ensure icon renders above input with elevation
         pointerEvents: 'none',
         marginRight: 0, // Remove margin when absolutely positioned
+      },
+      web: {
+        marginRight: 12,
       },
     }),
   },
@@ -929,7 +1000,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
     paddingTop: Platform.select({
@@ -972,8 +1043,9 @@ const styles = StyleSheet.create({
   },
   editActions: {
     flexDirection: 'row',
-    marginLeft: 8,
     gap: 8,
+    alignItems: 'center',
+    zIndex: 10,
     ...Platform.select({
       default: {
         position: 'absolute',
@@ -981,6 +1053,11 @@ const styles = StyleSheet.create({
         top: '50%',
         marginTop: -14, // Half of button height to center vertically
         marginLeft: 0, // Remove margin when absolutely positioned
+        elevation: 10, // Android elevation
+        pointerEvents: 'auto', // Ensure buttons can receive touches
+      },
+      web: {
+        marginLeft: 8,
       },
     }),
   },

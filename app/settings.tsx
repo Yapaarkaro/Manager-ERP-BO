@@ -51,6 +51,7 @@ import { subscriptionStore } from '@/utils/subscriptionStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -131,6 +132,9 @@ const getPlatformShadow = () => {
 export default function SettingsScreen() {
   const { setStatusBarStyle } = useStatusBar();
   
+  // ✅ Use unified business data hook FIRST (before any useEffects that use it)
+  const { data: businessData, refetch } = useBusinessData();
+  
   const [userProfile, setUserProfile] = useState({ ...DEFAULT_USER_PROFILE });
   const [subscription, setSubscription] = useState(subscriptionStore.getSubscription());
   const [trialProgress, setTrialProgress] = useState(subscriptionStore.getTrialProgress());
@@ -140,56 +144,27 @@ export default function SettingsScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // Check if signup is complete (allow access during signup process)
+  // ✅ Update user profile from cached business data (instant display)
   useEffect(() => {
-    const isSignupComplete = dataStore.getSignupComplete();
-    // Allow access to settings during signup process for address management
-    // Only redirect if user is not in the middle of signup
-    if (!isSignupComplete) {
-      // Check if user is in signup process by looking for addresses
-      const addresses = dataStore.getAddresses();
-      if (addresses.length === 0) {
-        // No addresses means user hasn't started signup, redirect to dashboard
-        router.replace('/dashboard');
-      }
-      // If addresses exist, user is in signup process, allow access
+    if (businessData?.user) {
+      setUserProfile(prev => ({
+        ...prev,
+        name: businessData.user!.full_name || prev.name,
+      }));
     }
-  }, []);
+    if (businessData?.business) {
+      setUserProfile(prev => ({
+        ...prev,
+        businessName: businessData.business!.legal_name || prev.businessName,
+        gstin: businessData.business!.tax_id || prev.gstin,
+      }));
+    }
+  }, [businessData]);
 
-  // Load real user data from signup progress
+  // Update subscription data
   useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        // Load data from AsyncStorage first
-        await dataStore.loadData();
-        
-        // Get signup summary which contains user and business names
-        const signupSummary = dataStore.getSignupSummary();
-        
-        if (signupSummary.userName || signupSummary.businessName || signupSummary.taxIdValue) {
-          setUserProfile(prev => ({
-            ...prev,
-            name: signupSummary.userName || prev.name,
-            businessName: signupSummary.businessName || prev.businessName,
-            gstin: signupSummary.taxIdValue || prev.gstin,
-          }));
-          console.log('✅ Loaded real user data in settings:', {
-            userName: signupSummary.userName,
-            businessName: signupSummary.businessName,
-            taxId: signupSummary.taxIdValue
-          });
-        }
-
-        // Update subscription data
-        setSubscription(subscriptionStore.getSubscription());
-        setTrialProgress(subscriptionStore.getTrialProgress());
-      } catch (error) {
-        console.error('Error loading user data in settings:', error);
-        // Keep default values if loading fails
-      }
-    };
-
-    loadUserData();
+    setSubscription(subscriptionStore.getSubscription());
+    setTrialProgress(subscriptionStore.getTrialProgress());
   }, []);
 
   const [addresses, setAddresses] = useState<BusinessAddress[]>([]);
@@ -268,41 +243,52 @@ export default function SettingsScreen() {
   const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
   const [showBankAccountsModal, setShowBankAccountsModal] = useState(false);
 
-  // Load addresses from dataStore
+  // ✅ Update addresses and bank accounts from cached data (instant display)
   useEffect(() => {
-    loadAddresses();
-    loadBankAccounts();
-    
-    // Subscribe to dataStore changes
-    const unsubscribe = dataStore.subscribe(() => {
-      loadAddresses();
-      loadBankAccounts();
-    });
-    
-    return unsubscribe;
-  }, []);
+    if (businessData?.addresses) {
+      const formattedAddresses: BusinessAddress[] = businessData.addresses.map((addr: any) => ({
+        id: addr.id,
+        backendId: addr.id,
+        name: addr.name,
+        type: addr.type,
+        doorNumber: addr.door_number || '',
+        addressLine1: addr.address_line1 || '',
+        addressLine2: addr.address_line2 || '',
+        city: addr.city || '',
+        pincode: addr.pincode || '',
+        stateName: addr.state || '',
+        stateCode: '',
+        isPrimary: addr.is_primary || false,
+        manager: addr.manager_name || '',
+        phone: addr.manager_mobile_number || '',
+        status: 'active',
+        createdAt: addr.created_at || new Date().toISOString(),
+        updatedAt: addr.updated_at || new Date().toISOString(),
+      }));
+      setAddresses(formattedAddresses);
+    }
+    if (businessData?.bankAccounts) {
+      const formattedAccounts = businessData.bankAccounts.map((acc: any) => ({
+        id: acc.id,
+        accountHolderName: acc.account_holder_name,
+        bankName: acc.bank_name,
+        bankCode: acc.bank_short_name || '',
+        accountNumber: acc.account_number,
+        ifscCode: acc.ifsc_code,
+        upiId: acc.upi_id || '',
+        accountType: acc.account_type.toLowerCase() as 'savings' | 'current',
+        isPrimary: acc.is_primary || false
+      }));
+      setBankAccounts(formattedAccounts);
+    }
+  }, [businessData]);
 
-  const loadAddresses = () => {
-    // Load real addresses from dataStore
-    const realAddresses = dataStore.getAddresses();
-    setAddresses(realAddresses);
-  };
-
-  const loadBankAccounts = () => {
-    // Load real bank accounts from data store
-    const realBankAccounts = dataStore.getBankAccounts();
-    setBankAccounts(realBankAccounts.map(account => ({
-      id: account.id,
-      accountHolderName: account.accountHolderName,
-      bankName: account.bankName,
-      bankCode: account.bankShortName,
-      accountNumber: account.accountNumber,
-      ifscCode: account.ifscCode,
-      upiId: account.upiId,
-      accountType: account.accountType.toLowerCase() as 'savings' | 'current',
-      isPrimary: account.isPrimary
-    })));
-  };
+  // Reload when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch(); // Refresh data
+    }, [refetch])
+  );
 
   const getAddressesByType = (type: 'branch' | 'warehouse') => {
     return addresses.filter(addr => addr.type === type);
@@ -416,11 +402,27 @@ export default function SettingsScreen() {
     } as any);
   };
 
-  const handleDeleteBankAccount = (accountId: string) => {
-    // Delete from data store
-    dataStore.deleteBankAccount(accountId);
-    // Reload bank accounts to refresh UI
-    loadBankAccounts();
+  const handleDeleteBankAccount = async (accountId: string) => {
+    try {
+      // Find account to get backend ID
+      const account = bankAccounts.find(acc => acc.id === accountId);
+      if (account?.id) {
+        const { deleteBankAccount } = await import('@/services/backendApi');
+        const result = await deleteBankAccount(account.id);
+        
+        if (result.success) {
+          // Optimistic update - remove from UI immediately
+          setBankAccounts(prev => prev.filter(acc => acc.id !== accountId));
+          // Refresh cache to get latest data
+          refetch();
+        } else {
+          Alert.alert('Error', result.error || 'Failed to delete bank account');
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting bank account:', error);
+      Alert.alert('Error', 'Failed to delete bank account');
+    }
   };
 
   const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
@@ -466,12 +468,32 @@ export default function SettingsScreen() {
     console.log('Bank account toggled:', accountId);
   };
 
-  const confirmDeleteAddress = () => {
+  const confirmDeleteAddress = async () => {
     if (addressToDelete) {
-      // Mock delete for now - replace with actual dataStore.deleteAddress() when available
-      setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
-      setAddressToDelete(null);
-      setShowDeleteModal(false);
+      try {
+        // Find address to get backend ID
+        const address = addresses.find(addr => addr.id === addressToDelete);
+        if (address?.backendId) {
+          const { deleteAddress } = await import('@/services/backendApi');
+          const result = await deleteAddress(address.backendId);
+          
+          if (result.success) {
+            // Optimistic update - remove from UI immediately
+            setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
+            // Refresh cache to get latest data
+            refetch();
+          } else {
+            Alert.alert('Error', result.error || 'Failed to delete address');
+          }
+        }
+        setAddressToDelete(null);
+        setShowDeleteModal(false);
+      } catch (error) {
+        console.error('Error deleting address:', error);
+        Alert.alert('Error', 'Failed to delete address');
+        setAddressToDelete(null);
+        setShowDeleteModal(false);
+      }
     }
   };
 

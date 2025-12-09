@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -16,6 +17,7 @@ import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, Tre
 import { dataStore, BusinessAddress } from '../../utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 const Colors = {
   background: '#FFFFFF',
@@ -197,31 +199,33 @@ export default function WarehousesScreen() {
   const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseData | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
-  // Load warehouses from dataStore
+  // ✅ Use unified business data hook (fast, cached, parallel)
+  const { data: businessData, refetch } = useBusinessData();
+
+  // ✅ Update warehouses from cached data (instant display)
   useEffect(() => {
-    const loadWarehouses = () => {
-      const allAddresses = dataStore.getAddresses();
-      const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+    if (businessData.addresses) {
+      // Filter only warehouse addresses
+      const warehouseAddresses = businessData.addresses.filter((addr: any) => addr.type === 'warehouse');
       
-      // Convert BusinessAddress to WarehouseData format
-      const warehouseData: WarehouseData[] = warehouseAddresses.map(addr => ({
+      // Convert backend format to WarehouseData format
+      const warehouseData: WarehouseData[] = warehouseAddresses.map((addr: any) => ({
         id: addr.id,
         name: addr.name,
         type: 'warehouse' as const,
-        doorNumber: addr.doorNumber || '',
-        addressLine1: addr.addressLine1,
-        addressLine2: addr.addressLine2,
-        city: addr.city,
-        pincode: addr.pincode,
-        stateName: addr.stateName,
-        stateCode: addr.stateCode,
-        isPrimary: addr.isPrimary,
-        createdAt: addr.createdAt,
-        manager: addr.manager,
-        phone: addr.phone,
-        status: addr.status,
-        // Default business performance data (can be enhanced later)
-        usesManager: !!addr.manager,
+        doorNumber: addr.door_number || '',
+        addressLine1: addr.address_line1 || '',
+        addressLine2: addr.address_line2 || '',
+        city: addr.city || '',
+        pincode: addr.pincode || '',
+        stateName: addr.state || '',
+        stateCode: '',
+        isPrimary: addr.is_primary || false,
+        createdAt: addr.created_at || new Date().toISOString(),
+        manager: addr.manager_name || '',
+        phone: addr.manager_mobile_number || '',
+        status: 'active' as const,
+        usesManager: !!addr.manager_name,
         staffCount: 0,
         staffAttendance: 0,
         dailySales: 0,
@@ -242,10 +246,15 @@ export default function WarehousesScreen() {
       
       setWarehouses(warehouseData);
       setFilteredWarehouses(warehouseData);
-    };
-    
-    loadWarehouses();
-  }, []);
+    }
+  }, [businessData]);
+
+  // ✅ Reload warehouses when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refetch(); // Refresh cached data
+    }, [refetch])
+  );
 
   useEffect(() => {
     // Filter warehouses based on search query

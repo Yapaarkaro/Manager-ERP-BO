@@ -2,11 +2,6 @@ import { Dimensions, Platform, StyleSheet } from 'react-native';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Web-specific responsive constants
-const WEB_MAX_CONTENT_WIDTH = 1400; // Maximum width for content on web (increased for better desktop experience)
-const WEB_CONTENT_PADDING = Platform.OS === 'web' ? 32 : 24; // Horizontal padding for web content
-const WEB_SIDEBAR_WIDTH = 0; // Sidebar width (if needed in future)
-
 // Platform-specific responsive calculations
 export const getResponsiveValues = () => {
   const baseHeaderPaddingHorizontal = Math.max(16, screenWidth * 0.04);
@@ -27,9 +22,6 @@ export const getResponsiveValues = () => {
     containerPaddingTop: Platform.OS === 'android' ? 4 : 0,
     headerBorderRadius: Platform.OS === 'ios' ? 0 : 0,
     headerElevation: Platform.OS === 'android' ? 2 : 0,
-    // Web-specific values
-    webMaxContentWidth: WEB_MAX_CONTENT_WIDTH,
-    webContentPadding: WEB_CONTENT_PADDING,
   };
 };
 
@@ -108,10 +100,13 @@ export const getContainerStyles = () => {
   };
 };
 
+// Web-specific responsive constants
+const WEB_MAX_CONTENT_WIDTH = 1400; // Maximum width for content on web
+const WEB_CONTENT_PADDING = 32; // Horizontal padding for web content
+
 // Web-responsive container styles
 export const getWebContainerStyles = () => {
   const colors = getPlatformColors();
-  const values = getResponsiveValues();
   
   return StyleSheet.create({
     webContainer: {
@@ -128,16 +123,16 @@ export const getWebContainerStyles = () => {
       width: '100%',
       ...Platform.select({
         web: {
-          maxWidth: values.webMaxContentWidth,
+          maxWidth: WEB_MAX_CONTENT_WIDTH,
           marginHorizontal: 'auto',
-          paddingHorizontal: values.webContentPadding,
+          paddingHorizontal: WEB_CONTENT_PADDING,
         },
       }),
     },
     webScrollContent: {
       ...Platform.select({
         web: {
-          paddingHorizontal: values.webContentPadding,
+          paddingHorizontal: WEB_CONTENT_PADDING,
         },
         default: {
           paddingHorizontal: 16,
@@ -177,7 +172,7 @@ export const getInputFocusStyles = () => {
         web: {
           // Use rgba for proper opacity on web
           boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)', // primary color with 12% opacity
-          outline: 'none',
+          // Removed outline property - not supported in React Native
         },
         default: {
           shadowColor: colors.primary,

@@ -14,6 +14,7 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
 import { 
   Menu, 
   TrendingUp, 
@@ -105,12 +106,58 @@ function getGreeting() {
   return 'Good Evening';
 }
 
+// Helper to get cached data synchronously (for initial state)
+// This reads from the same global cache that the hook uses
+function getCachedBusinessData() {
+  try {
+    // Access the global cache directly (same as in useBusinessData hook)
+    const CACHE_DURATION = 30000; // 30 seconds
+    const now = Date.now();
+    // Use dynamic import to avoid circular dependencies
+    const useBusinessDataModule = require('@/hooks/useBusinessData');
+    const globalCache = useBusinessDataModule.__getGlobalCache?.() || { data: null, timestamp: 0 };
+    const hasValidCache = globalCache.data && (now - globalCache.timestamp) < CACHE_DURATION;
+    return hasValidCache ? globalCache.data : null;
+  } catch (error) {
+    // If cache access fails, return null (will fetch fresh data)
+    return null;
+  }
+}
+
 export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [userName, setUserName] = useState('John Doe');
-  const [businessName, setBusinessName] = useState('ABC Electronics');
+  
+  // ✅ Initialize state from cache synchronously (zero delay on first render)
+  const cachedData = getCachedBusinessData();
+  const [userName, setUserName] = useState(() => cachedData?.user?.full_name || '');
+  const [businessName, setBusinessName] = useState(() => cachedData?.business?.legal_name || '');
+  const [businessData, setBusinessData] = useState<{
+    initialCashBalance?: number;
+    currentCashBalance?: number;
+    initialBankBalance?: number;
+    currentPrimaryBankBalance?: number;
+    currentTotalBankBalance?: number;
+    currentTotalCashBalance?: number;
+    currentTotalFunds?: number;
+  }>(() => cachedData?.business ? {
+    initialCashBalance: cachedData.business.initial_cash_balance,
+    currentCashBalance: cachedData.business.current_cash_balance,
+    initialBankBalance: cachedData.business.initial_bank_balance,
+    currentPrimaryBankBalance: cachedData.business.current_primary_bank_balance,
+    currentTotalBankBalance: cachedData.business.current_total_bank_balance,
+    currentTotalCashBalance: cachedData.business.current_total_cash_balance,
+    currentTotalFunds: cachedData.business.current_total_funds,
+  } : {});
+  
+  const [isLoading, setIsLoading] = useState(() => {
+    // If we have cached data, don't show loading
+    return !(cachedData?.user && cachedData?.business);
+  });
+  
+  // ✅ Use unified business data hook (instant from cache, fast parallel loading)
+  const { data: cachedBusinessData, loading: dataLoading } = useBusinessData();
   
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
@@ -121,32 +168,73 @@ export default function DashboardScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // Load real user data from signup progress
+  // ✅ Update UI when data changes (for fresh fetches)
   useEffect(() => {
-    const loadUserData = async () => {
+    if (!dataLoading && cachedBusinessData) {
+      // Update UI immediately - no delay
+      if (cachedBusinessData.user?.full_name) {
+        setUserName(cachedBusinessData.user.full_name);
+      }
+      if (cachedBusinessData.business?.legal_name) {
+        setBusinessName(cachedBusinessData.business.legal_name);
+      }
+      if (cachedBusinessData.business) {
+        setBusinessData({
+          initialCashBalance: cachedBusinessData.business.initial_cash_balance,
+          currentCashBalance: cachedBusinessData.business.current_cash_balance,
+          initialBankBalance: cachedBusinessData.business.initial_bank_balance,
+          currentPrimaryBankBalance: cachedBusinessData.business.current_primary_bank_balance,
+          currentTotalBankBalance: cachedBusinessData.business.current_total_bank_balance,
+          currentTotalCashBalance: cachedBusinessData.business.current_total_cash_balance,
+          currentTotalFunds: cachedBusinessData.business.current_total_funds,
+        });
+      }
+      setIsLoading(false);
+    } else if (dataLoading && !cachedBusinessData?.user) {
+      // Only set loading if we don't have cached data
+      setIsLoading(true);
+    }
+  }, [cachedBusinessData, dataLoading]);
+
+  // ✅ Save device snapshot in background (non-blocking)
+  useEffect(() => {
+    (async () => {
       try {
-        // Load data from AsyncStorage first
-        await dataStore.loadData();
-        
-        // Get signup summary which contains user and business names
-        const signupSummary = dataStore.getSignupSummary();
-        
-        if (signupSummary.userName) {
-          setUserName(signupSummary.userName);
-          console.log('✅ Loaded real user name:', signupSummary.userName);
-        }
-        
-        if (signupSummary.businessName) {
-          setBusinessName(signupSummary.businessName);
-          console.log('✅ Loaded real business name:', signupSummary.businessName);
+        const { supabase } = await import('@/lib/supabase');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) return;
+
+        const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
+        const { saveDeviceSnapshot } = await import('@/services/backendApi');
+        const deviceSnapshot = await collectDeviceSnapshot();
+        if (deviceSnapshot.deviceId) {
+          await saveDeviceSnapshot({
+            deviceId: deviceSnapshot.deviceId,
+            deviceName: deviceSnapshot.deviceName,
+            deviceBrand: deviceSnapshot.deviceBrand,
+            deviceModel: deviceSnapshot.deviceModel,
+            deviceType: deviceSnapshot.deviceType,
+            deviceYearClass: deviceSnapshot.deviceYearClass,
+            osName: deviceSnapshot.osName,
+            osVersion: deviceSnapshot.osVersion,
+            platformApiLevel: deviceSnapshot.platformApiLevel,
+            networkServiceProvider: deviceSnapshot.networkServiceProvider,
+            internetServiceProvider: deviceSnapshot.internetServiceProvider,
+            wifiName: deviceSnapshot.wifiName,
+            bluetoothName: deviceSnapshot.bluetoothName,
+            manufacturer: deviceSnapshot.manufacturer,
+            totalMemory: deviceSnapshot.totalMemory,
+            isDevice: deviceSnapshot.isDevice,
+            isEmulator: deviceSnapshot.isEmulator,
+            isTablet: deviceSnapshot.isTablet,
+            appVersion: deviceSnapshot.appVersion,
+            appBuildNumber: deviceSnapshot.appBuildNumber,
+          });
         }
       } catch (error) {
-        console.error('Error loading user data:', error);
-        // Keep default values if loading fails
+        // Silent fail
       }
-    };
-
-    loadUserData();
+    })();
   }, []);
 
   const handleMenuPress = () => {
@@ -231,17 +319,23 @@ export default function DashboardScreen() {
     console.log('FAB action:', action);
   };
 
-  // Render greeting section
-  const renderGreeting = () => (
-    <View style={styles.greetingSection}>
-      <Text style={styles.greeting}>
-        {getGreeting()}, <Text style={styles.greetingName}>{userName}</Text>
-      </Text>
-      <Text style={styles.greetingSubtext}>
-        Welcome to <Text style={styles.greetingBusinessName}>{businessName}</Text>
-      </Text>
-    </View>
-  );
+  // Render greeting section - use hook data directly for instant display
+  const renderGreeting = () => {
+    // ✅ Use hook data directly (instant, no state copy delay)
+    const displayUserName = cachedBusinessData?.user?.full_name || userName;
+    const displayBusinessName = cachedBusinessData?.business?.legal_name || businessName;
+    
+    return (
+      <View style={styles.greetingSection}>
+        <Text style={styles.greeting}>
+          {getGreeting()}, <Text style={styles.greetingName}>{displayUserName}</Text>
+        </Text>
+        <Text style={styles.greetingSubtext}>
+          Welcome to <Text style={styles.greetingBusinessName}>{displayBusinessName}</Text>
+        </Text>
+      </View>
+    );
+  };
 
   // Render KPI cards section
   const renderKPICards = () => (
@@ -552,7 +646,7 @@ export default function DashboardScreen() {
   const renderBusinessOverview = () => (
     <View style={[styles.section, styles.lastSection]}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Business Overview</Text>
+      <Text style={styles.sectionTitle}>Business Overview</Text>
         <Clock size={20} color={Colors.text} />
       </View>
 
@@ -579,17 +673,29 @@ export default function DashboardScreen() {
           <View style={styles.paymentMethods}>
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Cash</Text>
-              <Text style={styles.paymentAmount}>₹25,000</Text>
+              <Text style={styles.paymentAmount}>
+                {businessData.currentCashBalance !== undefined && !isNaN(businessData.currentCashBalance)
+                  ? `₹${Math.round(businessData.currentCashBalance / 1000)}K`
+                  : '₹0'}
+              </Text>
             </View>
 
             <View style={styles.paymentMethod}>
-              <Text style={styles.paymentTitle}>UPI</Text>
-              <Text style={styles.paymentAmount}>₹45,000</Text>
+              <Text style={styles.paymentTitle}>Bank</Text>
+              <Text style={styles.paymentAmount}>
+                {businessData.currentPrimaryBankBalance !== undefined && !isNaN(businessData.currentPrimaryBankBalance)
+                  ? `₹${Math.round(businessData.currentPrimaryBankBalance / 1000)}K`
+                  : '₹0'}
+              </Text>
             </View>
 
             <View style={styles.paymentMethod}>
-              <Text style={styles.paymentTitle}>Card</Text>
-              <Text style={styles.paymentAmount}>₹18,000</Text>
+              <Text style={styles.paymentTitle}>Total</Text>
+              <Text style={styles.paymentAmount}>
+                {businessData.currentTotalFunds !== undefined && !isNaN(businessData.currentTotalFunds)
+                  ? `₹${Math.round(businessData.currentTotalFunds / 1000)}K`
+                  : '₹0'}
+              </Text>
             </View>
           </View>
 
@@ -677,26 +783,26 @@ export default function DashboardScreen() {
       
       <View style={styles.contentWrapper}>
         <ResponsiveContainer>
-          <SafeAreaView style={styles.safeArea}>
-          {/* Header */}
-          <View style={styles.header}>
+    <SafeAreaView style={styles.safeArea}>
+      {/* Header */}
+      <View style={styles.header}>
             {/* Hamburger Menu - Only on mobile */}
             {Platform.OS !== 'web' && (
-              <TouchableWithoutFeedback onPress={handleMenuPress}>
-                <View style={styles.menuButton}>
-                  <Menu size={24} color={Colors.text} />
-                </View>
-              </TouchableWithoutFeedback>
-            )}
-            
-            <Text style={styles.headerTitle}>Dashboard</Text>
+        <TouchableWithoutFeedback onPress={handleMenuPress}>
+          <View style={styles.menuButton}>
+            <Menu size={24} color={Colors.text} />
           </View>
+        </TouchableWithoutFeedback>
+            )}
+        
+        <Text style={styles.headerTitle}>Dashboard</Text>
+      </View>
 
-        <FlatList
-          data={dashboardSections}
-          renderItem={renderSection}
-          keyExtractor={(item) => item.id}
-          style={styles.flatList}
+      <FlatList
+        data={dashboardSections}
+        renderItem={renderSection}
+        keyExtractor={(item) => item.id}
+        style={styles.flatList}
           contentContainerStyle={[
             styles.flatListContent,
             Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
@@ -718,11 +824,11 @@ export default function DashboardScreen() {
 
       {/* Hamburger Menu - Only on mobile */}
       {Platform.OS !== 'web' && (
-        <HamburgerMenu
-          visible={showHamburgerMenu}
-          onClose={() => setShowHamburgerMenu(false)}
-          onNavigate={handleMenuNavigation}
-        />
+      <HamburgerMenu
+        visible={showHamburgerMenu}
+        onClose={() => setShowHamburgerMenu(false)}
+        onNavigate={handleMenuNavigation}
+      />
       )}
 
       {/* FAB */}
@@ -913,8 +1019,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     ...Platform.select({
       web: {
-        borderTopWidth: 8,
-        borderTopColor: Colors.grey[100],
+    borderTopWidth: 8,
+    borderTopColor: Colors.grey[100],
       },
       default: {
         // Remove grey top border on mobile for cleaner look
@@ -966,8 +1072,8 @@ const styles = StyleSheet.create({
     }),
     ...Platform.select({
       web: {
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.grey[200],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
       },
       default: {
         // Remove bottom border on mobile, use left accent instead
@@ -1276,6 +1382,16 @@ const styles = StyleSheet.create({
   },
   dayOrders: {
     fontSize: 12,
+    color: Colors.textLight,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    fontSize: 16,
     color: Colors.textLight,
   },
 });

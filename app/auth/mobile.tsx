@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// TODO: REMOVE TEST BYPASS BEFORE PRODUCTION DEPLOYMENT
-// Test bypass: Mobile number '1234567890' automatically redirects to dashboard
-// This bypass should be removed when deploying to production
 import {
   View,
   Text,
@@ -22,6 +19,8 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
+import { supabase } from '@/lib/supabase';
+import { saveSignupProgress } from '@/services/backendApi';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -55,24 +54,23 @@ export default function MobileScreen() {
         try {
           console.log('🔍 Checking for returning user with mobile:', mobileNumber);
           
-          // First check if user has a completed account
+          // ✅ First check backend to see if user has completed signup
+          // Note: We can't check backend before OTP verification, so we'll check after OTP
+          // This check is mainly for UI indication (showing "Welcome back" message)
+          // The actual backend check happens in OTP screen after verification
+          
+          // Fallback to local dataStore check
           const userAccount = dataStore.getUserAccountByMobile(mobileNumber);
           
           if (userAccount) {
             setIsReturningUser(true);
-            console.log('👋 Welcome back! Found existing account for:', mobileNumber);
-            console.log('Account ID:', userAccount.id);
-            console.log('Business Name:', userAccount.businessName);
-            
-            // Don't redirect immediately - user needs to verify OTP first
-            console.log('✅ User account found, proceeding to OTP verification');
+            console.log('👋 Welcome back! Found existing account locally for:', mobileNumber);
           } else {
-            console.log('🔍 No completed account found, checking for incomplete signup...');
             // Check if user has incomplete signup progress
             const existingProgress = await dataStore.getSignupProgressByMobile(mobileNumber);
             if (existingProgress && existingProgress.ownerName) {
               setIsReturningUser(true);
-              console.log('👋 Welcome back! Found incomplete signup for:', mobileNumber);
+              console.log('👋 Welcome back! Found incomplete signup locally for:', mobileNumber);
             } else {
               setIsReturningUser(false);
               console.log('📭 No existing data found for mobile:', mobileNumber);
@@ -90,28 +88,46 @@ export default function MobileScreen() {
   }, [mobileNumber]);
 
   useEffect(() => {
-    // Test bypass: Auto-navigate to dashboard for test number
-    if (mobileNumber === '1234567890' && !isNavigating) {
-      setIsValid(true);
-      setIsNavigating(true);
-      // Simulate API call delay
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 500);
-      return;
-    }
-    
     // Auto-navigate when 10 digits are entered (only once)
     if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber) && !isNavigating) {
       setIsValid(true);
       setIsNavigating(true);
-      // Simulate API call delay
-      setTimeout(() => {
-        router.push({
-          pathname: '/auth/otp',
-          params: { mobile: mobileNumber }
-        });
-      }, 500);
+      
+      // Send OTP via Supabase Auth
+      const sendOTP = async () => {
+        try {
+          const phoneNumber = `+91${mobileNumber}`;
+          const { error } = await supabase.auth.signInWithOtp({
+            phone: phoneNumber,
+          });
+          
+          if (error && !error.message.includes('already sent')) {
+            console.error('Error sending OTP:', error);
+            Alert.alert('Error', 'Failed to send OTP. Please try again.');
+            setIsNavigating(false);
+            setIsValid(false);
+            return;
+          }
+          
+          console.log('✅ OTP sent successfully to', phoneNumber);
+          
+          // Note: Can't save signup progress here - user not authenticated yet
+          // Progress will be saved after OTP verification in otp.tsx
+          
+          // Navigate to OTP screen
+          router.push({
+            pathname: '/auth/otp',
+            params: { mobile: mobileNumber }
+          });
+        } catch (error: any) {
+          console.error('Error in sendOTP:', error);
+          Alert.alert('Error', 'Failed to send OTP. Please try again.');
+          setIsNavigating(false);
+          setIsValid(false);
+        }
+      };
+      
+      sendOTP();
     } else if (mobileNumber.length !== 10) {
       setIsValid(false);
       setIsNavigating(false);
@@ -131,14 +147,14 @@ export default function MobileScreen() {
   return (
     <ResponsiveContainer>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <KeyboardAvoidingView 
-          style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
           enabled={true}
-        >
-          <ScrollView 
-            style={styles.content}
+      >
+        <ScrollView 
+          style={styles.content}
             contentContainerStyle={[
               styles.scrollContent,
               Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
@@ -150,9 +166,9 @@ export default function MobileScreen() {
                 }) 
               }
             ]}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Phone size={32} color={COLORS.primary} />
@@ -162,11 +178,6 @@ export default function MobileScreen() {
         <Text style={styles.title}>Enter Mobile Number</Text>
         <Text style={styles.subtitle}>
           We'll send you a verification code to confirm your mobile number
-        </Text>
-        
-        {/* Test bypass info - REMOVE BEFORE PRODUCTION */}
-        <Text style={styles.testInfo}>
-          💡 Test mode: Use 1234567890 to skip authentication
         </Text>
 
         <TouchableOpacity
@@ -249,15 +260,26 @@ export default function MobileScreen() {
         {isValid && (
           <View style={styles.successContainer}>
             <Text style={styles.successText}>
-              {mobileNumber === '1234567890' 
-                ? 'Test mode: Proceeding to dashboard...' 
-                : isReturningUser 
-                  ? 'Welcome back! Redirecting to your account...'
-                  : 'Proceeding to verification...'
+              {isReturningUser 
+                ? 'Welcome back! Redirecting to your account...'
+                : 'Proceeding to verification...'
               }
             </Text>
           </View>
         )}
+
+        {/* Privacy Policy and Terms */}
+        <View style={[styles.legalContainer, { paddingBottom: Platform.select({
+          web: 20,
+          default: Math.max(insets.bottom, 20),
+        })}]}>
+          <Text style={styles.legalText}>
+            By continuing, you agree to our{' '}
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+            {' '}and{' '}
+            <Text style={styles.legalLink}>Terms & Conditions</Text>
+          </Text>
+        </View>
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -290,7 +312,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },
@@ -421,6 +443,22 @@ const styles = StyleSheet.create({
     color: '#047857',
     fontSize: 14,
     textAlign: 'center',
+    fontWeight: '500',
+  },
+  legalContainer: {
+    marginTop: 'auto',
+    paddingTop: 24,
+    paddingHorizontal: 16,
+  },
+  legalText: {
+    fontSize: 12,
+    color: COLORS.gray,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  legalLink: {
+    color: COLORS.primary,
+    textDecorationLine: 'underline',
     fontWeight: '500',
   },
 });

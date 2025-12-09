@@ -319,6 +319,7 @@ export interface Payable {
 
 export interface BankAccount {
   id: string;
+  backendId?: string; // Backend ID for API operations
   bankId: string;
   bankName: string;
   bankShortName: string;

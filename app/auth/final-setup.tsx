@@ -9,6 +9,8 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -18,6 +20,8 @@ import { dataStore } from '@/utils/dataStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import FiscalYearSelector from '@/components/FiscalYearSelector';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -30,6 +34,7 @@ export default function FinalSetupScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     allAddresses,
     allBankAccounts,
     // Invoice configuration from business summary (if coming back)
@@ -48,7 +53,9 @@ export default function FinalSetupScreen() {
     (incomingInvoicePattern !== undefined && incomingInvoicePattern !== null);
 
   const [initialCashBalance, setInitialCashBalance] = useState(
-    (incomingCashBalance !== undefined && incomingCashBalance !== null) ? (incomingCashBalance as string) : ''
+    (incomingCashBalance !== undefined && incomingCashBalance !== null && incomingCashBalance !== '0' && incomingCashBalance !== '0.00' && incomingCashBalance !== '0.') 
+      ? (incomingCashBalance as string) 
+      : ''
   );
   const [invoicePrefix, setInvoicePrefix] = useState(
     (incomingInvoicePrefix !== undefined && incomingInvoicePrefix !== null) ? (incomingInvoicePrefix as string) : 'INV'
@@ -65,6 +72,7 @@ export default function FinalSetupScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const cashBalanceInputRef = useRef<TextInput>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0); // Track keyboard height
   const colors = useThemeColors();
   const debouncedNavigate = useDebounceNavigation();
 
@@ -93,7 +101,7 @@ export default function FinalSetupScreen() {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web', // Web doesn't support native driver
     }).start();
   }, []);
 
@@ -129,6 +137,19 @@ export default function FinalSetupScreen() {
     // Remove all non-numeric characters except decimal point
     let cleaned = text.replace(/[^0-9.]/g, '');
     
+    // If user deletes everything, ensure it's truly empty
+    if (cleaned === '' || cleaned === '0' || cleaned === '0.' || cleaned === '0.00') {
+      setInitialCashBalance('');
+      setTimeout(() => {
+        if (cashBalanceInputRef.current && Platform.OS !== 'web') {
+          cashBalanceInputRef.current.setNativeProps({
+            selection: { start: 0, end: 0 }
+          });
+        }
+      }, 10);
+      return;
+    }
+    
     // Ensure only one decimal point
     const parts = cleaned.split('.');
     if (parts.length > 2) {
@@ -146,9 +167,9 @@ export default function FinalSetupScreen() {
     
     // Move cursor to end after formatting
     setTimeout(() => {
-      if (cashBalanceInputRef.current) {
-        const formatted = formatIndianNumber(cleaned || '0.00');
-        const length = formatted.length || 4; // Default to "0.00" length if empty
+      if (cashBalanceInputRef.current && Platform.OS !== 'web') {
+        const formatted = formatIndianNumber(cleaned);
+        const length = formatted.length;
         cashBalanceInputRef.current.setNativeProps({
           selection: { start: length, end: length }
         });
@@ -167,12 +188,47 @@ export default function FinalSetupScreen() {
     return `₹${formatBalance(balance)}`;
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!isFormValid()) return;
+
+    setIsLoading(true);
+
+    // ✅ Save signup progress - finalSetup step
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        // Get mobile from params or from user's phone metadata
+        const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+        if (mobileNumber) {
+          const progressResult = await saveSignupProgress({
+            mobile: mobileNumber,
+            mobileVerified: true,
+            currentStep: 'finalSetup',
+          });
+          if (progressResult.success) {
+            console.log('✅ Signup progress saved: finalSetup');
+          } else {
+            console.error('❌ Failed to save signup progress:', progressResult.error);
+          }
+        } else {
+          console.warn('⚠️ Mobile number not available for saving final setup progress');
+          Alert.alert('Error', 'Mobile number is required to complete final setup. Please try again.');
+          setIsLoading(false);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error saving signup progress:', error);
+      Alert.alert('Error', 'Failed to save setup progress. Please try again.');
+      setIsLoading(false);
+      return;
+    }
 
     // Get latest data from dataStore to ensure we have all updates
     const latestAddresses = dataStore.getAddresses();
     const latestBankAccounts = dataStore.getBankAccounts();
+
+    setIsLoading(false);
 
     // Navigate to business summary with all collected data
     debouncedNavigate({
@@ -262,8 +318,13 @@ export default function FinalSetupScreen() {
 
           <ScrollView 
             style={styles.scrollView} 
-            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            contentContainerStyle={[
+              Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+              Platform.OS === 'android' ? { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 20 : 20 } : {},
+              Platform.OS === 'ios' ? { paddingBottom: 20 } : {}
+            ]} 
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -289,30 +350,38 @@ export default function FinalSetupScreen() {
                     ref={cashBalanceInputRef}
                     style={[
                       styles.input,
-                      Platform.select({
+                      (Platform.select({
                         web: {
                           outlineWidth: 0,
                           outlineColor: 'transparent',
-                          outlineStyle: 'none',
+                          // outlineStyle removed - React Native doesn't support 'none'
                         },
-                      }),
+                      }) as any), // ✅ Type assertion for web-specific styles
                     ]}
-                    value={formatIndianNumber(initialCashBalance)}
+                    value={initialCashBalance && initialCashBalance !== '0' && initialCashBalance !== '0.' && initialCashBalance !== '0.00' ? formatIndianNumber(initialCashBalance) : ''}
                     onChangeText={handleInitialCashBalanceChange}
                     placeholder="0.00"
                     placeholderTextColor="#999999"
                     keyboardType="decimal-pad"
                     onFocus={() => {
-                      // Move cursor to end when focused
+                      // Move cursor to end when focused, or start if empty
                       setTimeout(() => {
-                        if (cashBalanceInputRef.current) {
-                          const formatted = formatIndianNumber(initialCashBalance || '0.00');
-                          const length = formatted.length || 4; // Default to "0.00" length if empty
-                          cashBalanceInputRef.current.setNativeProps({
-                            selection: { start: length, end: length }
-                          });
+                        if (cashBalanceInputRef.current && Platform.OS !== 'web') {
+                          // If empty or just "0", clear and position at start
+                          if (!initialCashBalance || initialCashBalance === '0' || initialCashBalance === '0.' || initialCashBalance === '0.00') {
+                            setInitialCashBalance('');
+                            cashBalanceInputRef.current.setNativeProps({
+                              selection: { start: 0, end: 0 }
+                            });
+                          } else {
+                            const formatted = formatIndianNumber(initialCashBalance);
+                            const length = formatted.length;
+                            cashBalanceInputRef.current.setNativeProps({
+                              selection: { start: length, end: length }
+                            });
+                          }
                         }
-                      }, 150);
+                      }, 100);
                     }}
                   />
                 </View>
@@ -415,7 +484,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },

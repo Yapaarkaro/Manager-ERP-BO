@@ -19,6 +19,8 @@ import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { dataStore } from '@/utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 
 interface BankAccount {
   id: string;
@@ -28,7 +30,6 @@ interface BankAccount {
   accountHolderName: string;
   accountNumber: string;
   ifscCode: string;
-  branchName: string;
   accountType: string;
   initialBalance: number;
   upiId?: string;
@@ -45,6 +46,7 @@ export default function BankAccountsScreen() {
     businessName,
     businessType,
     customBusinessType,
+    mobile,
     allAddresses,
     allBankAccounts = '[]',
     // Invoice configuration (for returning users from business summary)
@@ -69,7 +71,22 @@ export default function BankAccountsScreen() {
     
     if (dataStoreBankAccounts && dataStoreBankAccounts.length > 0) {
       console.log('📥 Loaded bank accounts from dataStore:', dataStoreBankAccounts.length);
-      setBankAccounts(dataStoreBankAccounts);
+      // Map dataStore BankAccount to local BankAccount interface
+      const mappedAccounts: BankAccount[] = dataStoreBankAccounts.map(acc => ({
+        id: acc.id,
+        bankId: acc.bankId,
+        bankName: acc.bankName,
+        bankShortName: acc.bankShortName,
+        accountHolderName: acc.accountHolderName,
+        accountNumber: acc.accountNumber,
+        ifscCode: acc.ifscCode,
+        accountType: acc.accountType,
+        initialBalance: acc.initialBalance,
+        upiId: acc.upiId,
+        isPrimary: acc.isPrimary,
+        createdAt: acc.createdAt,
+      }));
+      setBankAccounts(mappedAccounts);
     } else {
       // Fallback to params if dataStore is empty
       try {
@@ -85,7 +102,7 @@ export default function BankAccountsScreen() {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: false, // Disable for web to avoid warning
     }).start();
   }, [allBankAccounts]);
 
@@ -241,11 +258,55 @@ export default function BankAccountsScreen() {
     }
   };
 
-  const handleContinue = () => {
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const handleContinue = async () => {
+    // Prevent double navigation
+    if (isNavigating) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (bankAccounts.length === 0) {
       Alert.alert('No Bank Account', 'Please add at least one bank account to continue');
       return;
     }
+
+    setIsNavigating(true);
+
+    // ✅ Save signup progress to backend (banking step complete, moving to summary) - non-blocking
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        // Get mobile from params or from user's phone metadata
+        const mobileNumber = (mobile as string) || session.user.phone || session.user.user_metadata?.phone;
+        if (mobileNumber) {
+          saveSignupProgress({
+            mobile: mobileNumber,
+            mobileVerified: true,
+            taxIdType: type as 'GSTIN' | 'PAN',
+            taxIdValue: value as string,
+            taxIdVerified: true,
+            ownerName: name as string,
+            businessName: businessName as string,
+            businessType: businessType as string,
+            gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
+            currentStep: 'bankManagement',
+          }).then((result) => {
+            if (result.success) {
+              console.log('✅ Signup progress saved: bankManagement');
+            } else {
+              console.error('❌ Failed to save signup progress:', result.error);
+            }
+          }).catch((error) => {
+            console.error('Error saving signup progress:', error);
+          });
+        } else {
+          console.warn('⚠️ Mobile number not available for saving signup progress');
+        }
+      }
+    }).catch((error) => {
+      console.error('Error getting session:', error);
+    });
 
     // Get latest data from dataStore to ensure we have all updates
     const latestAddresses = dataStore.getAddresses();
@@ -273,6 +334,11 @@ export default function BankAccountsScreen() {
         fiscalYear,
       }
     }, 'replace');
+    
+    // Reset navigation flag after a delay
+    setTimeout(() => {
+      setIsNavigating(false);
+    }, 1000);
   };
 
   const renderBankAccountCard = (account: BankAccount) => {
@@ -600,9 +666,12 @@ export default function BankAccountsScreen() {
             <TouchableOpacity
               style={styles.continueButton}
               onPress={handleContinue}
+              disabled={isNavigating}
               activeOpacity={0.8}
             >
-              <Text style={styles.continueButtonText}>Continue</Text>
+              <Text style={styles.continueButtonText}>
+                {isNavigating ? 'Loading...' : 'Continue'}
+              </Text>
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
           </Animated.View>
@@ -688,7 +757,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },
@@ -774,14 +843,21 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    ...Platform.select({
+      web: {
+        boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.05)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: {
+          width: 0,
+          height: 2,
+        },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+      },
+    }),
   },
   sectionHeaderLeft: {
     flexDirection: 'row',

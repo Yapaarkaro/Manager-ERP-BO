@@ -19,9 +19,12 @@ import { dataStore } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { deleteAddress, updateAddress, saveSignupProgress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 
 interface Address {
   id: string;
+  backendId?: string; // Backend ID for API operations
   name: string;
   type: 'primary' | 'branch' | 'warehouse';
   doorNumber: string;
@@ -65,13 +68,14 @@ export default function AddressConfirmationScreen() {
   const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation();
+  const debouncedNavigate = useDebounceNavigation(500);
+  const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: true,
+      useNativeDriver: false, // Disable for web to avoid warning
     }).start();
   }, []);
 
@@ -169,17 +173,30 @@ export default function AddressConfirmationScreen() {
     setExpandedSections(newExpanded);
   };
 
-  const getAddressesByType = (type: AddressSection) => {
-    const filtered = addresses.filter(addr => addr.type === type);
-    console.log(`📋 Filtering addresses for type "${type}":`, filtered.map(a => ({ 
-      id: a.id, 
-      name: a.name, 
-      isPrimary: a.isPrimary,
-      manager: a.manager,
-      phone: a.phone
-    })));
-    return filtered;
-  };
+  // ✅ Memoize filtered addresses to prevent excessive re-renders and logging
+  const getAddressesByType = React.useMemo(() => {
+    const cache: Record<AddressSection, typeof addresses> = {
+      primary: [],
+      branch: [],
+      warehouse: [],
+    };
+    
+    // Pre-compute filtered addresses once
+    addresses.forEach(addr => {
+      if (addr.type === 'primary') cache.primary.push(addr);
+      else if (addr.type === 'branch') cache.branch.push(addr);
+      else if (addr.type === 'warehouse') cache.warehouse.push(addr);
+    });
+    
+    return (type: AddressSection) => {
+      const filtered = cache[type] || [];
+      // Only log occasionally in development to reduce noise
+      if (__DEV__ && Math.random() < 0.05) { // Log only 5% of calls
+        console.log(`📋 Filtering addresses for type "${type}":`, filtered.length);
+      }
+      return filtered;
+    };
+  }, [addresses]);
 
   const getAddressCount = (type: AddressSection) => {
     return getAddressesByType(type).length;
@@ -231,22 +248,58 @@ export default function AddressConfirmationScreen() {
     setShowDeleteModal(true);
   };
 
-  const confirmDeleteAddress = () => {
+  const confirmDeleteAddress = async () => {
     if (addressToDelete) {
-      // Update local state
-      setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
-      
-      // Update dataStore
-      dataStore.deleteAddress(addressToDelete);
-      
-      setAddressToDelete(null);
-      setShowDeleteModal(false);
+      try {
+        const address = addresses.find(addr => addr.id === addressToDelete);
+        
+        // Delete from backend if backendId exists
+        if (address?.backendId) {
+          const result = await deleteAddress(address.backendId);
+          if (!result.success) {
+            console.warn('⚠️ Backend delete failed, continuing with local delete:', result.error);
+          } else {
+            console.log('✅ Address deleted from backend');
+          }
+        }
+        
+        // Update local state
+        setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
+        
+        // Update dataStore
+        dataStore.deleteAddress(addressToDelete);
+        
+        setAddressToDelete(null);
+        setShowDeleteModal(false);
+      } catch (error: any) {
+        console.error('Error deleting address:', error);
+        Alert.alert('Error', error.message || 'Failed to delete address. Please try again.');
+      }
     }
   };
 
-  const handleMakePrimary = (addressId: string) => {
-    setAddresses(prev => {
-      const currentPrimaryIndex = prev.findIndex(addr => addr.isPrimary);
+  const handleMakePrimary = async (addressId: string) => {
+    try {
+      const address = addresses.find(addr => addr.id === addressId);
+      
+      // Update in backend if backendId exists (non-blocking)
+      if (address?.backendId) {
+        updateAddress({
+          addressId: address.backendId,
+          isPrimary: true,
+        }).then((result) => {
+          if (!result.success) {
+            console.warn('⚠️ Backend update failed, continuing with local update:', result.error);
+          } else {
+            console.log('✅ Address set as primary in backend');
+          }
+        }).catch((error) => {
+          console.error('Error updating address in backend:', error);
+        });
+      }
+      
+      setAddresses(prev => {
+        const currentPrimaryIndex = prev.findIndex(addr => addr.isPrimary);
       const newPrimaryIndex = prev.findIndex(addr => addr.id === addressId);
       
       if (currentPrimaryIndex === -1 || newPrimaryIndex === -1) return prev;
@@ -273,16 +326,16 @@ export default function AddressConfirmationScreen() {
       });
       
       // Keep each address's own data, only change type and isPrimary
-      const swappedOldPrimary = {
+      const swappedOldPrimary: Address = {
         ...currentPrimary, // Keep ALL the primary's address data (including undefined manager/phone)
         isPrimary: false,
-        type: newPrimary.type, // Becomes branch or warehouse type
+        type: newPrimary.type as 'primary' | 'branch' | 'warehouse', // ✅ Type assertion
       };
       
-      const swappedNewPrimary = {
+      const swappedNewPrimary: Address = {
         ...newPrimary, // Keep ALL the branch/warehouse's address data (including manager/phone)
         isPrimary: true,
-        type: 'primary', // Becomes primary type
+        type: 'primary', // ✅ Already correct type
       };
       
       console.log('✏️ Old primary will become:', { 
@@ -374,12 +427,57 @@ export default function AddressConfirmationScreen() {
       
       return updatedAddresses;
     });
+    } catch (error: any) {
+      console.error('Error setting primary address:', error);
+      Alert.alert('Error', error.message || 'Failed to set primary address. Please try again.');
+    }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    // Prevent double navigation
+    if (isNavigating) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (addresses.length === 0) {
       Alert.alert('No Address', 'Please add at least one business address to continue');
       return;
+    }
+
+    setIsNavigating(true);
+
+    // ✅ Save signup progress to backend (address step complete, moving to banking)
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        // Get mobile from params or from user's phone metadata
+        const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+        if (mobileNumber) {
+          const progressResult = await saveSignupProgress({
+            mobile: mobileNumber,
+            mobileVerified: true,
+            taxIdType: taxIdType as 'GSTIN' | 'PAN',
+            taxIdValue: taxIdValue as string,
+            taxIdVerified: true,
+            ownerName: name as string,
+            businessName: businessName as string,
+            businessType: businessType as string,
+            gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
+            currentStep: 'addressManagement',
+          });
+          if (progressResult.success) {
+            console.log('✅ Signup progress saved: addressManagement');
+          } else {
+            console.error('❌ Failed to save signup progress:', progressResult.error);
+          }
+        } else {
+          console.warn('⚠️ Mobile number not available for saving signup progress');
+        }
+      }
+    } catch (error) {
+      console.error('Error saving signup progress:', error);
+      // Continue even if progress save fails
     }
 
     // Check if user already has bank accounts (returning from business summary)
@@ -431,6 +529,11 @@ export default function AddressConfirmationScreen() {
         }
       }, 'replace');
     }
+    
+    // Reset navigation flag after a delay
+    setTimeout(() => {
+      setIsNavigating(false);
+    }, 1000);
   };
 
   const renderAddressCard = (address: Address) => {
@@ -779,9 +882,12 @@ export default function AddressConfirmationScreen() {
             <TouchableOpacity
               style={styles.continueButton}
               onPress={handleContinue}
+              disabled={isNavigating}
               activeOpacity={0.8}
             >
-              <Text style={styles.continueButtonText}>Continue</Text>
+              <Text style={styles.continueButtonText}>
+                {isNavigating ? 'Loading...' : 'Continue'}
+              </Text>
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
           </Animated.View>
@@ -867,7 +973,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 40,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },

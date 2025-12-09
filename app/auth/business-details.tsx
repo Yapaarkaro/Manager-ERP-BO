@@ -4,20 +4,23 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Modal,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
-import { dataStore, getGSTINStateCode, toTitleCase } from '@/utils/dataStore';
+import { dataStore, getGSTINStateCode, toTitleCase, type BusinessAddress } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
+import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { submitBusinessDetails, saveSignupProgress, createAddress } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -70,12 +73,14 @@ export default function BusinessDetailsScreen() {
   const [customBusinessType, setCustomBusinessType] = useState((incomingCustomBusinessType as string) || '');
   const [showBusinessTypeModal, setShowBusinessTypeModal] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasLoadedProgress, setHasLoadedProgress] = useState(false);
+  const debouncedNavigate = useDebounceNavigation();
 
   // Check if we have incoming data from navigation (e.g., returning from business summary)
   useEffect(() => {
@@ -94,46 +99,62 @@ export default function BusinessDetailsScreen() {
         businessType: incomingBusinessType,
       });
     } else {
-      // No incoming data, check signup progress
+      // ✅ Check signup progress from backend in parallel (don't block GST auto-fill)
       const loadExistingProgress = async () => {
         if (mobile && !hasLoadedProgress) {
-          const existingProgress = await dataStore.getSignupProgressByMobile(mobile as string);
-          if (existingProgress && (existingProgress.ownerName || existingProgress.businessName)) {
-            console.log('📥 Loading existing signup progress - USER DATA TAKES PRIORITY');
-            console.log('🚫 BLOCKING all auto-fill from GSTIN/PAN');
+          // Mark as loading immediately so GST can still auto-fill
+          setHasLoadedProgress(true);
+          
+          try {
+            // ✅ Load signup progress from backend (fast, single query, non-blocking)
+            const { getSignupProgress } = await import('@/services/backendApi');
+            const progressResult = await getSignupProgress();
             
-            if (existingProgress.ownerName && !name) {
-              setName(existingProgress.ownerName);
-              console.log('✅ Restored user name:', existingProgress.ownerName);
-            }
-            if (existingProgress.businessName && !businessName) {
-              setBusinessName(existingProgress.businessName);
-              console.log('✅ Restored business name:', existingProgress.businessName);
-            }
-            if (existingProgress.businessType && !businessType) {
-              const businessTypesList = [
-                'Manufacturer', 'C&F', 'Distributor', 'Trader', 
-                'Wholesaler', 'Retailer', 'Others'
-              ];
-              if (businessTypesList.includes(existingProgress.businessType)) {
-                setBusinessType(existingProgress.businessType);
-              } else {
-                setBusinessType('Others');
-                setCustomBusinessType(existingProgress.businessType);
+            if (progressResult.success && progressResult.progress) {
+              const existingProgress = progressResult.progress;
+              
+              // Only override if mobile matches and we have relevant data (user data takes priority)
+              if (existingProgress.mobile === mobile && (existingProgress.owner_name || existingProgress.business_name)) {
+                console.log('📥 Loading signup progress from backend - USER DATA TAKES PRIORITY');
+                console.log('🔄 Overriding auto-filled data with user data from backend');
+                
+                // Override with user data (user data is more accurate)
+                if (existingProgress.owner_name) {
+                  setName(existingProgress.owner_name);
+                  console.log('✅ Restored user name:', existingProgress.owner_name);
+                }
+                if (existingProgress.business_name) {
+                  setBusinessName(existingProgress.business_name);
+                  console.log('✅ Restored business name:', existingProgress.business_name);
+                }
+                if (existingProgress.business_type) {
+                  const businessTypesList = [
+                    'Manufacturer', 'C&F', 'Distributor', 'Trader', 
+                    'Wholesaler', 'Retailer', 'Others'
+                  ];
+                  if (businessTypesList.includes(existingProgress.business_type)) {
+                    setBusinessType(existingProgress.business_type);
+                  } else {
+                    setBusinessType('Others');
+                    setCustomBusinessType(existingProgress.business_type);
+                  }
+                  console.log('✅ Restored business type:', existingProgress.business_type);
+                }
+                
+                // Block further auto-fill attempts
+                setIsInitialized(true);
+                setHasAutoFilled(true);
               }
-              console.log('✅ Restored business type:', existingProgress.businessType);
+            } else {
+              console.log('📝 No existing progress found in backend, GST auto-fill will be used');
             }
-            
-            // IMPORTANT: Block all auto-fill attempts
-            setIsInitialized(true);
-            setHasAutoFilled(true);
-            setHasLoadedProgress(true);
-          } else {
-            console.log('📝 No existing progress found, allowing auto-fill from GSTIN/PAN');
-            setHasLoadedProgress(true);
+          } catch (error) {
+            console.error('⚠️ Error loading signup progress from backend:', error);
+            // Continue - GST auto-fill will be used
           }
         }
       };
+      // ✅ Load in parallel - don't block GST auto-fill
       loadExistingProgress();
     }
   }, [mobile, hasLoadedProgress, incomingName, incomingBusinessName, incomingBusinessType]);
@@ -146,60 +167,76 @@ export default function BusinessDetailsScreen() {
     }
   }, [type, panName, hasAutoFilled, hasLoadedProgress]);
 
-  // Auto-fill data from GSTIN verification (only once and only if not loaded from progress)
+  // ✅ Auto-fill data from GSTIN verification IMMEDIATELY (don't wait for backend progress)
   useEffect(() => {
-    if (!isInitialized && type === 'GSTIN' && gstinData && !hasAutoFilled && hasLoadedProgress) {
-      setIsInitialized(true);
-      console.log('📝 Auto-filling from GSTIN data (no existing user data found)');
+    // Auto-fill GST data immediately if available, but check backend progress in parallel
+    if (!isInitialized && type === 'GSTIN' && gstinData && !hasAutoFilled) {
+      console.log('📝 Auto-filling from GSTIN data IMMEDIATELY');
       try {
         const parsedData = JSON.parse(gstinData as string);
         if (parsedData) {
+          setIsInitialized(true);
           setHasAutoFilled(true);
           
           // Auto-fill business name from trade name or legal name (with title case)
           const businessNameFromGstin = parsedData.tradeNam || parsedData.lgnm || '';
-          setBusinessName(toTitleCase(businessNameFromGstin));
+          if (businessNameFromGstin && !businessName) {
+            setBusinessName(toTitleCase(businessNameFromGstin));
+          }
           
           // Auto-fill owner name from legal name (with title case)
           const ownerNameFromGstin = parsedData.lgnm || '';
-          setName(toTitleCase(ownerNameFromGstin));
+          if (ownerNameFromGstin && !name) {
+            setName(toTitleCase(ownerNameFromGstin));
+          }
           
           // Set business type based on constitution of business
           const constitutionType = parsedData.ctb || '';
-          let mappedBusinessType = '';
-          
-          // Map constitution types to our business types
-          switch (constitutionType.toLowerCase()) {
-            case 'proprietorship':
-              mappedBusinessType = 'Retailer';
-              break;
-            case 'partnership':
-            case 'llp':
-              mappedBusinessType = 'Trader';
-              break;
-            case 'private limited company':
-            case 'public limited company':
-            case 'company':
-              mappedBusinessType = 'Manufacturer';
-              break;
-            case 'trust':
-            case 'society':
-            case 'association of persons':
-              mappedBusinessType = 'Others';
-              setCustomBusinessType(constitutionType);
-              break;
-            default:
-              mappedBusinessType = 'Others';
-              setCustomBusinessType(constitutionType);
+          if (constitutionType && !businessType) {
+            let mappedBusinessType = '';
+            
+            // Map constitution types to our business types
+            switch (constitutionType.toLowerCase()) {
+              case 'proprietorship':
+                mappedBusinessType = 'Retailer';
+                break;
+              case 'partnership':
+              case 'llp':
+                mappedBusinessType = 'Trader';
+                break;
+              case 'private limited company':
+              case 'public limited company':
+              case 'company':
+                mappedBusinessType = 'Manufacturer';
+                break;
+              case 'trust':
+              case 'society':
+              case 'association of persons':
+                mappedBusinessType = 'Others';
+                setCustomBusinessType(constitutionType);
+                break;
+              default:
+                mappedBusinessType = 'Others';
+                setCustomBusinessType(constitutionType);
+            }
+            
+            setBusinessType(mappedBusinessType);
           }
-          
-          setBusinessType(mappedBusinessType);
         }
       } catch (error) {
         console.error('Error parsing GSTIN data:', error);
       }
     }
-  }, [type, gstinData, isInitialized, hasAutoFilled, hasLoadedProgress]); // Wait for progress load before auto-filling
+  }, [type, gstinData, isInitialized, hasAutoFilled]); // ✅ Removed hasLoadedProgress dependency - show immediately
+
+  // ✅ Check backend progress in parallel and override if user data exists
+  useEffect(() => {
+    if (hasLoadedProgress && !hasAutoFilled && mobile) {
+      // Backend progress check completed, but no auto-fill happened yet
+      // This means no GST data was available, so we can proceed
+      console.log('✅ Backend progress check completed');
+    }
+  }, [hasLoadedProgress, hasAutoFilled]);
 
   const isFormValid = () => {
     return (
@@ -271,40 +308,158 @@ export default function BusinessDetailsScreen() {
   };
 
   const handleComplete = async () => {
+    // Prevent double navigation
+    if (isNavigating || isCompleting) {
+      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (!isFormValid()) {
       Alert.alert('Incomplete Details', 'Please fill in all required fields');
       return;
     }
 
     setIsCompleting(true);
+    setIsNavigating(true);
     
-    // Update signup progress before navigation
-    dataStore.updateSignupProgress({
-      mobile: mobile as string,
-      mobileVerified: true,
-      taxIdType: type as 'GSTIN' | 'PAN',
-      taxIdValue: value as string,
-      taxIdVerified: true,
-      ownerName: name,
-      ownerDob: panDob as string,
-      businessName: businessName,
-      businessType: businessType !== 'Others' ? businessType : customBusinessType,
-      currentStep: 'address',
-    });
+    try {
+      // Step 1: Get authenticated user (should already have JWT from mobile OTP)
+      // Get current session (user should be authenticated from mobile OTP step)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      // Get mobile from params or from user's phone metadata
+      const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+      if (!mobileNumber) {
+        console.warn('⚠️ Mobile number not available for business details submission');
+        Alert.alert('Error', 'Mobile number is required. Please try again.');
+        setIsCompleting(false);
+        setIsNavigating(false);
+        return;
+      }
+      
+      if (!session || !session.user) {
+        // If no session, try to create one (fallback)
+        console.warn('⚠️ No session found, attempting to authenticate...');
+        const phoneNumber = `+91${mobileNumber}`;
+        const tempPassword = `Temp@${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+        
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          phone: phoneNumber,
+          password: tempPassword,
+        });
+        
+        if (signUpError && signUpError.message.includes('already registered')) {
+          // User exists, try to sign in
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            phone: phoneNumber,
+            password: tempPassword,
+          });
+          
+          if (signInError) {
+            throw new Error('Authentication required. Please complete mobile OTP verification first.');
+          }
+        } else if (signUpError) {
+          throw signUpError;
+        }
+        
+        // Get session again
+        const { data: { session: newSession } } = await supabase.auth.getSession();
+        if (!newSession || !newSession.user) {
+          throw new Error('User authentication failed. Please try again.');
+        }
+        
+        console.log('✅ User authenticated successfully');
+        console.log('👤 User ID:', newSession.user.id);
+      } else {
+        console.log('✅ Using existing authenticated session');
+        console.log('👤 User ID:', session.user.id);
+      }
 
-    // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
-    if (type === 'GSTIN' && gstinData) {
+      // Step 2: Get current user ID (from session)
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('User not authenticated. Please complete mobile OTP verification first.');
+      }
+
+      console.log('👤 Submitting business details for user:', user.id);
+
+      // Step 3: Submit business details to backend
+      const parsedGstinData = type === 'GSTIN' && gstinData ? JSON.parse(gstinData as string) : null;
+      const finalBusinessType = businessType !== 'Others' ? businessType : customBusinessType;
+      
+      // ✅ CRITICAL: For GSTIN users, we MUST await business creation before creating address
+      // because the address creation requires business_id to exist
+      const businessResult = await submitBusinessDetails({
+        ownerName: name,
+        businessName: businessName,
+        businessType: finalBusinessType,
+        taxIdType: type as 'GSTIN' | 'PAN',
+        taxIdValue: value as string,
+        gstinData: parsedGstinData,
+        dateOfBirth: panDob as string || undefined,
+        registeredMobile: mobileNumber, // Pass mobile number
+      });
+
+      if (!businessResult.success) {
+        console.error('❌ Business details save failed:', businessResult.error);
+        Alert.alert('Error', 'Failed to save business details. Please try again.');
+        setIsCompleting(false);
+        setIsNavigating(false);
+        return;
+      }
+
+      console.log('✅ Business details saved successfully. Business ID:', businessResult.businessId);
+      
+      // ✅ Save signup progress to backend (await to ensure it's saved)
       try {
-        const parsedGstinData = JSON.parse(gstinData as string);
+        await saveSignupProgress({
+          mobile: mobileNumber,
+          mobileVerified: true,
+          taxIdType: type as 'GSTIN' | 'PAN',
+          taxIdValue: value as string,
+          taxIdVerified: true,
+          ownerName: name,
+          ownerDob: panDob as string,
+          businessName: businessName,
+          businessType: finalBusinessType,
+          gstinData: parsedGstinData,
+          currentStep: 'businessDetails',
+        });
+        console.log('✅ Signup progress saved: businessDetails');
+      } catch (error) {
+        console.error('Error saving signup progress:', error);
+        // Continue even if progress save fails
+      }
+      
+      // Also update local dataStore (for UI consistency)
+      dataStore.updateSignupProgress({
+        mobile: mobileNumber,
+        mobileVerified: true,
+        taxIdType: type as 'GSTIN' | 'PAN',
+        taxIdValue: value as string,
+        taxIdVerified: true,
+        ownerName: name,
+        ownerDob: panDob as string,
+        businessName: businessName,
+        businessType: finalBusinessType,
+        currentStep: 'businessDetails',
+      });
+
+      // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
+      // ✅ CRITICAL: Business must be created first (we already awaited it above)
+      if (type === 'GSTIN' && gstinData && businessResult.success) {
+        try {
+          const parsedGstinDataForAddress = JSON.parse(gstinData as string);
         
-        // Check if a primary address already exists
-        const existingAddresses = dataStore.getAddresses();
-        const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
-        
-        if (!hasPrimaryAddress) {
-          // Extract address from GSTIN data
-          if (parsedGstinData.pradr && parsedGstinData.pradr.addr) {
-            const addr = parsedGstinData.pradr.addr;
+          // Check if a primary address already exists
+          const existingAddresses = dataStore.getAddresses();
+          const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+          
+          if (!hasPrimaryAddress) {
+            // Extract address from GSTIN data
+            if (parsedGstinDataForAddress.pradr && parsedGstinDataForAddress.pradr.addr) {
+              const addr = parsedGstinDataForAddress.pradr.addr;
             
             // Build address components from GSTIN data
             // addressLine1: Building Name, Floor Number (not door number - that's separate)
@@ -315,7 +470,7 @@ export default function BusinessDetailsScreen() {
             const stateName = addr.stcd || '';
             
             // Create primary address from GSTIN data
-            const primaryAddress = {
+            const primaryAddress: BusinessAddress & { backendId?: string } = {
               id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               name: businessName.trim() || 'Primary Address',
               type: 'primary' as const,
@@ -327,110 +482,204 @@ export default function BusinessDetailsScreen() {
               stateName: stateName,
               stateCode: getGSTINStateCode(stateName),
               isPrimary: true,
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
               // Add manager and phone for primary addresses to show user info
               manager: name,
-              phone: mobile,
+              phone: typeof mobile === 'string' ? mobile : (Array.isArray(mobile) ? mobile[0] : ''),
             };
             
             console.log('🏢 Auto-creating primary address from GSTIN data:', primaryAddress);
+            console.log('✅ Business ID exists:', businessResult.businessId, '- Address can now be created');
+            
+            // ✅ Geocode the address to get latitude/longitude
+            const { geocodeAddress } = await import('@/services/googleMapsApi');
+            const formattedAddress = `${primaryAddress.addressLine1}, ${primaryAddress.addressLine2}, ${primaryAddress.city}, ${primaryAddress.stateName} - ${primaryAddress.pincode}`;
+            let latitude: number | undefined;
+            let longitude: number | undefined;
+            
+            try {
+              const geocodeResults = await geocodeAddress(formattedAddress);
+              if (geocodeResults && geocodeResults.length > 0) {
+                latitude = geocodeResults[0].geometry.location.lat;
+                longitude = geocodeResults[0].geometry.location.lng;
+                console.log('✅ Geocoded GSTIN address:', { latitude, longitude });
+              }
+            } catch (geocodeError) {
+              console.warn('⚠️ Failed to geocode GSTIN address, continuing without lat/long:', geocodeError);
+            }
+            
+            // ✅ Save the primary address to backend (AWAIT to ensure it's created before navigation)
+            // Business now exists, so address creation should succeed
+            try {
+              const addressResult = await createAddress({
+                name: primaryAddress.name,
+                addressJson: {
+                  doorNumber: primaryAddress.doorNumber,
+                  addressLine1: primaryAddress.addressLine1,
+                  addressLine2: primaryAddress.addressLine2,
+                  city: primaryAddress.city,
+                  pincode: primaryAddress.pincode,
+                  stateName: primaryAddress.stateName,
+                  stateCode: primaryAddress.stateCode,
+                  formatted_address: formattedAddress,
+                },
+                type: 'primary',
+                managerName: primaryAddress.manager,
+                managerMobileNumber: typeof primaryAddress.phone === 'string' ? primaryAddress.phone : (primaryAddress.phone ? String(primaryAddress.phone) : undefined),
+                isPrimary: true,
+                latitude: latitude,
+                longitude: longitude,
+              });
+              
+              if (addressResult.success && addressResult.address) {
+                console.log('✅ Primary address created in backend from GSTIN data:', addressResult.address.id);
+                console.log('✅ Address will be synced to businesses table via database trigger');
+                // Update local address with backend ID
+                primaryAddress.backendId = addressResult.address.id;
+                
+                // ✅ Save signup progress - primary address created
+                try {
+                  const progressResult = await saveSignupProgress({
+                    mobile: mobileNumber,
+                    mobileVerified: true,
+                    taxIdType: type as 'GSTIN' | 'PAN',
+                    taxIdValue: value as string,
+                    taxIdVerified: true,
+                    ownerName: name,
+                    businessName: businessName,
+                    businessType: finalBusinessType,
+                    gstinData: parsedGstinData,
+                    currentStep: 'primaryAddress',
+                  });
+                  if (progressResult.success) {
+                    console.log('✅ Signup progress saved: primaryAddress');
+                  } else {
+                    console.error('❌ Failed to save signup progress:', progressResult.error);
+                  }
+                } catch (error) {
+                  console.error('Error saving signup progress:', error);
+                }
+              } else {
+                console.error('❌ Backend address creation failed:', addressResult.error);
+                Alert.alert('Error', 'Failed to create primary address. Please try again.');
+                setIsCompleting(false);
+                setIsNavigating(false);
+                return;
+              }
+            } catch (error) {
+              console.error('❌ Error creating address in backend:', error);
+              Alert.alert('Error', 'Failed to create primary address. Please try again.');
+              setIsCompleting(false);
+              setIsNavigating(false);
+              return;
+            }
             
             // Save the primary address to dataStore
             dataStore.addAddress(primaryAddress);
+            } else {
+              // No address in GSTIN data, fall back to normal flow
+              console.warn('⚠️ No address in GSTIN data, falling back to normal flow');
+            }
           } else {
-            // No address in GSTIN data, fall back to normal flow
-            throw new Error('No address in GSTIN data');
+            console.log('🏢 Primary address already exists, skipping auto-creation from GSTIN data');
           }
-        } else {
-          console.log('🏢 Primary address already exists, skipping auto-creation from GSTIN data');
+          
+          // Navigate directly to address confirmation screen
+          debouncedNavigate({
+              pathname: '/auth/address-confirmation',
+              params: {
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType: businessType !== 'Others' ? businessType : customBusinessType,
+                customBusinessType: businessType === 'Others' ? customBusinessType : '',
+                mobile,
+                allAddresses: JSON.stringify(dataStore.getAddresses()),
+                // Pass invoice configuration for returning users
+                initialCashBalance,
+                invoicePrefix,
+                invoicePattern,
+                startingInvoiceNumber,
+                fiscalYear,
+              }
+            });
+            setIsCompleting(false);
+            setIsNavigating(false);
+        } catch (addressError: any) {
+          console.error('Error auto-creating address from GSTIN:', addressError);
+          Alert.alert('Error', addressError.message || 'Failed to process address. Please try again.');
+          setIsCompleting(false);
+          setIsNavigating(false);
+          // Fall back to normal flow if auto-creation fails
+          debouncedNavigate({
+              pathname: '/auth/business-address',
+              params: {
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType: businessType !== 'Others' ? businessType : customBusinessType,
+                customBusinessType: businessType === 'Others' ? customBusinessType : '',
+                mobile,
+                addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
+              }
+            });
         }
-        
-        // Navigate directly to address confirmation screen
-        setTimeout(() => {
-          router.push({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile,
-              allAddresses: JSON.stringify(dataStore.getAddresses()),
-              // Pass invoice configuration for returning users
-              initialCashBalance,
-              invoicePrefix,
-              invoicePattern,
-              startingInvoiceNumber,
-              fiscalYear,
-            }
-          });
-          setIsCompleting(false);
-        }, 500);
-      } catch (error) {
-        console.error('Error auto-creating address from GSTIN:', error);
-        // Fall back to normal flow if auto-creation fails
-        setTimeout(() => {
-          router.push({
-            pathname: '/auth/business-address',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile,
-            }
-          });
-          setIsCompleting(false);
-        }, 500);
-      }
-    } else {
-      // For PAN users, check if primary address already exists
-      const existingAddresses = dataStore.getAddresses();
-      const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
-      
-      if (hasPrimaryAddress) {
-        // Primary address exists, skip to address confirmation
-        setTimeout(() => {
-          router.push({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile,
-              allAddresses: JSON.stringify(existingAddresses),
-            }
-          });
-          setIsCompleting(false);
-        }, 500);
       } else {
-        // No primary address exists, continue with normal flow (select address from map/search)
-        setTimeout(() => {
-          router.push({
-            pathname: '/auth/business-address',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile, // Add mobile parameter for PAN users
-            }
-          });
-          setIsCompleting(false);
-        }, 500);
+        // For PAN users, check if primary address already exists
+        const existingAddresses = dataStore.getAddresses();
+        const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+        
+        if (hasPrimaryAddress) {
+          // Primary address exists, skip to address confirmation
+          debouncedNavigate({
+              pathname: '/auth/address-confirmation',
+              params: {
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType: businessType !== 'Others' ? businessType : customBusinessType,
+                customBusinessType: businessType === 'Others' ? customBusinessType : '',
+                mobile,
+                allAddresses: JSON.stringify(existingAddresses),
+              }
+            });
+            setIsCompleting(false);
+            setIsNavigating(false);
+        } else {
+          // No primary address exists, continue with normal flow (select address from map/search)
+          debouncedNavigate({
+              pathname: '/auth/business-address',
+              params: {
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType: businessType !== 'Others' ? businessType : customBusinessType,
+                customBusinessType: businessType === 'Others' ? customBusinessType : '',
+                mobile, // Add mobile parameter for PAN users
+                addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
+              }
+            });
+            setIsCompleting(false);
+            setIsNavigating(false);
+        }
       }
+    } catch (error: any) {
+      console.error('Error completing business details:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to save business details. Please check your connection and try again.'
+      );
+      setIsCompleting(false);
     }
   };
 
@@ -486,16 +735,16 @@ export default function BusinessDetailsScreen() {
   return (
     <ResponsiveContainer>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <KeyboardAvoidingView 
-          style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoidingView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
           enabled={true}
-        >
-        {/* Back button removed - users should not go back from business details to prevent signup abandonment */}
+      >
+      {/* Back button removed - users should not go back from business details to prevent signup abandonment */}
 
-        <ScrollView 
-          style={styles.content}
+      <ScrollView 
+        style={styles.content}
           contentContainerStyle={[
             styles.scrollContent,
             Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
@@ -507,11 +756,11 @@ export default function BusinessDetailsScreen() {
               }) 
             }
           ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          ref={scrollViewRef}
-        >
-          <View style={styles.contentPadding}>
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        ref={scrollViewRef}
+      >
+        <View style={styles.contentPadding}>
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Building2 size={32} color={COLORS.primary} />
@@ -535,7 +784,7 @@ export default function BusinessDetailsScreen() {
             <View style={styles.inputWrapper}>
               <User size={20} color={COLORS.gray} style={styles.inputIconAbsolute} />
               <CapitalizedTextInput
-                style={[
+              style={[
                   {
                     borderWidth: 2,
                     borderColor: focusedField === 'name' ? COLORS.primary : '#E5E7EB',
@@ -565,11 +814,11 @@ export default function BusinessDetailsScreen() {
                       shadowOffset: { width: 0, height: 4 },
                       shadowOpacity: 0.12,
                       shadowRadius: 8,
-                      elevation: 2, // Reduced elevation to prevent covering icon
-                      zIndex: 1, // Lower than icon to ensure icon stays visible
+                      elevation: 2,
+                      zIndex: 1,
                     } : {}),
                   },
-                ]}
+                ] as any}
                 placeholder="Enter your full name"
                 placeholderTextColor={COLORS.gray}
                 value={name}
@@ -587,7 +836,7 @@ export default function BusinessDetailsScreen() {
             <View style={styles.inputWrapper}>
               <Building2 size={20} color={COLORS.gray} style={styles.inputIconAbsolute} />
               <CapitalizedTextInput
-                style={[
+              style={[
                   {
                     borderWidth: 2,
                     borderColor: focusedField === 'businessName' ? COLORS.primary : '#E5E7EB',
@@ -617,11 +866,11 @@ export default function BusinessDetailsScreen() {
                       shadowOffset: { width: 0, height: 4 },
                       shadowOpacity: 0.12,
                       shadowRadius: 8,
-                      elevation: 2, // Reduced elevation to prevent covering icon
-                      zIndex: 1, // Lower than icon to ensure icon stays visible
+                      elevation: 2,
+                      zIndex: 1,
                     } : {}),
                   },
-                ]}
+                ] as any}
                 placeholder="Enter your business name"
                 placeholderTextColor={COLORS.gray}
                 value={businessName}
@@ -641,7 +890,7 @@ export default function BusinessDetailsScreen() {
             {businessType === 'Others' ? (
               <View style={styles.customTypeWrapper}>
                 <CapitalizedTextInput
-                  style={[
+                style={[
                     {
                       borderWidth: 2,
                       borderColor: focusedField === 'customBusinessType' ? COLORS.primary : '#E5E7EB',
@@ -675,7 +924,7 @@ export default function BusinessDetailsScreen() {
                         elevation: 4,
                       } : {}),
                     },
-                  ]}
+                  ] as any}
                   placeholder="Enter your specific business type"
                   placeholderTextColor={COLORS.gray}
                   value={customBusinessType}
@@ -762,7 +1011,7 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({
       web: 100,
       ios: 20,
-      android: 12, // Consistent bottom padding on Android for cleaner look
+      android: 20, // Consistent bottom padding across all platforms
       default: 20,
     }),
   },

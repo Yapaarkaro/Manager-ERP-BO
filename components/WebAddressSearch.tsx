@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Search, MapPin } from 'lucide-react-native';
+import { parseGooglePlace, createAutocompleteService, createPlacesService, loadGoogleMapsScript } from '@/utils/googleMaps';
 
 interface WebAddressSearchProps {
   onAddressSelect: (addressData: any) => void;
@@ -37,36 +38,32 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
 
   // Initialize Google Places services
   useEffect(() => {
-    const initializePlacesService = () => {
+    const initializePlacesService = async () => {
       console.log('🏗️ Initializing Places services...');
-      console.log('🏗️ Google exists:', !!window.google);
-      console.log('🏗️ Maps exists:', !!(window.google && window.google.maps));
-      console.log('🏗️ Places exists:', !!(window.google && window.google.maps && window.google.maps.places));
       
-      if (window.google && window.google.maps && window.google.maps.places) {
-        try {
-          console.log('✅ Creating AutocompleteService...');
-          autocompleteService.current = new google.maps.places.AutocompleteService();
-          
-          console.log('✅ Creating PlacesService...');
-          // Create a dummy div for PlacesService (required by Google Maps API)
-          const dummyDiv = document.createElement('div');
-          placesService.current = new google.maps.places.PlacesService(dummyDiv);
-          
+      try {
+        // Load Google Maps API if not already loaded
+        const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+        await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
+        
+        // Create services using utility functions
+        autocompleteService.current = createAutocompleteService();
+        placesService.current = createPlacesService();
+        
+        if (autocompleteService.current && placesService.current) {
           console.log('✅ Places services initialized successfully!');
-        } catch (error) {
-          console.error('❌ Error initializing Google Places services:', error);
-          setTimeout(initializePlacesService, 1000);
+        } else {
+          console.warn('⚠️ Failed to create Places services');
         }
-      } else {
-        console.log('⏳ Places API not ready, retrying...');
-        // Retry after a short delay if Google Maps API is not ready
-        setTimeout(initializePlacesService, 500);
+      } catch (error) {
+        console.error('❌ Error initializing Google Places services:', error);
+        // Retry after a delay
+        setTimeout(initializePlacesService, 1000);
       }
     };
 
-    // Start checking after a short delay to ensure the main map component has started loading
-    setTimeout(initializePlacesService, 1500);
+    // Start initialization
+    initializePlacesService();
   }, []);
 
   // Debounced search function
@@ -149,9 +146,19 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
 
       placesService.current.getDetails(request, (place, status) => {
         if (status === google.maps.places.PlacesServiceStatus.OK && place) {
-          // Process the place data to match the expected format
-          const addressData = processPlaceData(place);
-          onAddressSelect(addressData);
+          // Use parseGooglePlace for better address parsing
+          const addressData = parseGooglePlace(place);
+          // Merge with additional fields for compatibility
+          const fullAddressData = {
+            ...addressData,
+            place_id: place.place_id,
+            formatted_address: place.formatted_address,
+            name: place.name,
+            lat: addressData.coordinates.lat,
+            lng: addressData.coordinates.lng,
+            placeName: place.name,
+          };
+          onAddressSelect(fullAddressData);
           setQuery(place.formatted_address || '');
           setShowSuggestions(false);
         }
@@ -161,39 +168,7 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
     }
   };
 
-  const processPlaceData = (place: google.maps.places.PlaceResult) => {
-    const addressComponents = place.address_components || [];
-    
-    // Extract address components
-    const components: any = {};
-    addressComponents.forEach(component => {
-      const types = component.types;
-      if (types.includes('street_number')) {
-        components.street_number = component.long_name;
-      } else if (types.includes('route')) {
-        components.route = component.long_name;
-      } else if (types.includes('locality')) {
-        components.locality = component.long_name;
-      } else if (types.includes('administrative_area_level_1')) {
-        components.administrative_area_level_1 = component.long_name;
-      } else if (types.includes('postal_code')) {
-        components.postal_code = component.long_name;
-      } else if (types.includes('country')) {
-        components.country = component.long_name;
-        components.country_code = component.short_name;
-      }
-    });
-
-    return {
-      place_id: place.place_id,
-      formatted_address: place.formatted_address,
-      name: place.name,
-      lat: place.geometry?.location?.lat(),
-      lng: place.geometry?.location?.lng(),
-      ...components,
-      placeName: place.name,
-    };
-  };
+  // processPlaceData removed - now using parseGooglePlace from utils/googleMaps.ts
 
   const renderSuggestion = ({ item, index }: { item: AddressSuggestion; index: number }) => (
     <TouchableOpacity
@@ -229,7 +204,6 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
               web: {
                 outlineWidth: 0,
                 outlineColor: 'transparent',
-                outlineStyle: 'none',
               },
             }),
           ]}

@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Plus, CreditCard, Banknote, Edit3, Trash2 } from 'lucide-react-native';
 import { dataStore } from '@/utils/dataStore';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 interface BankAccount {
   id: string;
@@ -26,25 +27,43 @@ export default function BankAccountsScreen() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [totalBalance, setTotalBalance] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Data loading is handled by useBusinessData hook
+
+  // ✅ Use unified business data hook (fast, cached, parallel)
+  const { data: businessData, loading: dataLoading } = useBusinessData();
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = () => {
-    try {
-      const accounts = dataStore.getBankAccounts();
-      const signupSummary = dataStore.getSignupSummary();
+    if (!dataLoading && businessData) {
+      // Update balances immediately from cached data
+      if (businessData.business) {
+        const cashBalance = businessData.business.current_cash_balance || businessData.business.initial_cash_balance || 0;
+        setCashBalance(cashBalance);
+        
+        const totalFunds = businessData.business.current_total_funds || 
+          (businessData.business.current_total_bank_balance + cashBalance);
+        setTotalBalance(totalFunds);
+      }
       
-      setBankAccounts(accounts);
-      setCashBalance(signupSummary?.initialCashBalance || 0);
-      
-      const totalBankBalance = accounts.reduce((sum, account) => sum + (parseFloat(account.initialBalance) || 0), 0);
-      setTotalBalance(totalBankBalance + cashBalance);
-    } catch (error) {
-      console.error('Error loading bank data:', error);
+      // Update bank accounts immediately from cached data
+      if (businessData.bankAccounts) {
+        const accounts = businessData.bankAccounts.map((acc: any) => ({
+          id: acc.id,
+          accountHolderName: acc.account_holder_name,
+          bankName: acc.bank_name,
+          accountNumber: acc.account_number,
+          ifscCode: acc.ifsc_code,
+          initialBalance: parseFloat(String(acc.initial_balance)) || 0,
+          isPrimary: acc.is_primary || false,
+        }));
+        setBankAccounts(accounts);
+      }
+      setIsLoading(false);
+    } else if (dataLoading) {
+      setIsLoading(true);
     }
-  };
+  }, [businessData, dataLoading]);
 
   const formatBalance = (balance: number) => {
     return new Intl.NumberFormat('en-IN', {
