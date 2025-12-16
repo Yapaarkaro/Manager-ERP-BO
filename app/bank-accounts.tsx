@@ -109,11 +109,14 @@ export default function BankAccountsScreen() {
           style: 'destructive',
           onPress: () => {
             try {
+              // Delete from DataStore
+              dataStore.deleteBankAccount(account.id);
+              
+              // Update local state
               const updatedAccounts = bankAccounts.filter(acc => acc.id !== account.id);
-              dataStore.setBankAccounts(updatedAccounts);
               setBankAccounts(updatedAccounts);
               
-              const totalBankBalance = updatedAccounts.reduce((sum, acc) => sum + (parseFloat(acc.initialBalance) || 0), 0);
+              const totalBankBalance = updatedAccounts.reduce((sum, acc) => sum + (acc.initialBalance || 0), 0);
               setTotalBalance(totalBankBalance + cashBalance);
             } catch (error) {
               console.error('Error deleting account:', error);
@@ -156,7 +159,7 @@ export default function BankAccountsScreen() {
                 <CreditCard size={16} color="#3f66ac" />
                 <Text style={styles.summaryLabel}>Bank Accounts:</Text>
                 <Text style={styles.summaryValue}>
-                  {formatBalance(bankAccounts.reduce((sum, acc) => sum + (parseFloat(acc.initialBalance) || 0), 0))}
+                  {formatBalance(bankAccounts.reduce((sum, acc) => sum + (acc.initialBalance || 0), 0))}
                 </Text>
               </View>
               <View style={styles.summaryItem}>
@@ -210,7 +213,7 @@ export default function BankAccountsScreen() {
                     </View>
                     <View style={styles.accountBalance}>
                       <Text style={styles.balanceAmount}>
-                        {formatBalance(parseFloat(account.initialBalance) || 0)}
+                        {formatBalance(account.initialBalance || 0)}
                       </Text>
                       {account.isPrimary && (
                         <View style={styles.primaryBadge}>

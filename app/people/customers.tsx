@@ -161,6 +161,8 @@ export default function CustomersScreen() {
   };
 
   const handleAddCustomer = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('add customer')) return;
     router.push('/people/add-customer');
   };
 

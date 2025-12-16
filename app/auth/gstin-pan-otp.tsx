@@ -18,7 +18,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, User, CreditCard, Calendar } from 'lucide-react-native';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import CustomDatePicker from '@/components/CustomDatePicker';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { verifyGSTINOTP, verifyPAN, saveSignupProgress } from '@/services/backendApi';
@@ -37,7 +36,6 @@ const COLORS = {
 
 export default function GstinPanOTPScreen() {
   const { setStatusBarStyle } = useStatusBar();
-  const debouncedNavigate = useDebounceNavigation();
   const { type, value, gstinData, mobile } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -157,26 +155,30 @@ export default function GstinPanOTPScreen() {
       
       if (result.success && result.panVerified) {
         // ✅ Save signup progress to backend (PAN verified, moving to businessDetails)
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            await saveSignupProgress({
-              mobile: mobile as string,
-              mobileVerified: true,
-              taxIdType: 'PAN',
-              taxIdValue: panValue,
-              taxIdVerified: true,
-              ownerName: panNameValue,
-              ownerDob: dobValue,
-              currentStep: 'verifyPan',
-            });
+        // ✅ Optimistically save signup progress (non-blocking)
+        (async () => {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
+              optimisticSaveSignupProgress({
+                mobile: mobile as string,
+                mobileVerified: true,
+                taxIdType: 'PAN',
+                taxIdValue: panValue,
+                taxIdVerified: true,
+                ownerName: panNameValue,
+                ownerDob: dobValue,
+                currentStep: 'verifyPan',
+              });
+            }
+          } catch (error) {
+            console.error('Error saving signup progress:', error);
           }
-        } catch (error) {
-          console.error('Error saving signup progress:', error);
-        }
+        })();
         
-        // Use replace to prevent going back to PAN details screen after verification
-        debouncedNavigate({
+        // Navigate immediately (no delay)
+        router.replace({
           pathname: '/auth/business-details',
           params: { 
             type: type,
@@ -186,7 +188,7 @@ export default function GstinPanOTPScreen() {
               `${dateOfBirth.getFullYear()}-${String(dateOfBirth.getMonth() + 1).padStart(2, '0')}-${String(dateOfBirth.getDate()).padStart(2, '0')}` : '',
             mobile: mobile,
           }
-        }, 'replace');
+        });
       } else {
         Alert.alert('Verification Failed', result.error || 'PAN verification failed. Please check your details and try again.');
       }
@@ -241,7 +243,7 @@ export default function GstinPanOTPScreen() {
           
           // Navigate immediately (don't wait for signup progress save)
           setIsVerifying(false);
-          debouncedNavigate({
+          router.replace({
             pathname: '/auth/business-details',
             params: { 
               type: type,
@@ -249,7 +251,7 @@ export default function GstinPanOTPScreen() {
               gstinData: gstinData,
               mobile: mobile,
             }
-          }, 'replace');
+          });
         } else {
           setOtp(['', '', '', '', '', '']);
           inputRefs.current[0]?.focus();
@@ -945,7 +947,7 @@ const styles = StyleSheet.create({
         marginRight: 0, // Remove margin when absolutely positioned
       },
       web: {
-        marginRight: 12,
+        marginRight: 8, // Reduced from 12 to 8 for tighter spacing
       },
     }),
   },
@@ -957,11 +959,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     ...Platform.select({
       default: {
-        paddingLeft: 44, // Space for icon
+        paddingLeft: 40, // Reduced space for icon (icon at left: 16, so 24px gap)
         paddingRight: 80, // Space for edit button on mobile
         borderWidth: 0, // Border is on container
         minHeight: 50,
         zIndex: 1, // Lower than icon to ensure icon stays visible
+      },
+      web: {
+        paddingLeft: 8, // Reduced spacing on web - icon has marginRight: 8, so total is 16px
       },
     }),
   },

@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
-import { dataStore, BusinessAddress } from '../../utils/dataStore';
+import { dataStore, BusinessAddress, getGSTINStateCode } from '../../utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -219,7 +219,7 @@ export default function WarehousesScreen() {
         city: addr.city || '',
         pincode: addr.pincode || '',
         stateName: addr.state || '',
-        stateCode: '',
+        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
         isPrimary: addr.is_primary || false,
         createdAt: addr.created_at || new Date().toISOString(),
         manager: addr.manager_name || '',
@@ -249,10 +249,22 @@ export default function WarehousesScreen() {
     }
   }, [businessData]);
 
-  // ✅ Reload warehouses when screen comes into focus
+  // ✅ Only refetch when screen comes into focus if cache is stale
   useFocusEffect(
     React.useCallback(() => {
-      refetch(); // Refresh cached data
+      // Check if cache is stale (older than 10 seconds) before refetching
+      const { __getGlobalCache } = require('@/hooks/useBusinessData');
+      const cache = __getGlobalCache();
+      const now = Date.now();
+      const CACHE_DURATION = 10000; // 10 seconds
+      
+      // Only refetch if cache is stale or missing
+      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
+        console.log('🔄 Warehouses: Cache stale, refetching business data');
+        refetch();
+      } else {
+        console.log('✅ Warehouses: Using cached data (no refetch needed)');
+      }
     }, [refetch])
   );
 
@@ -298,10 +310,11 @@ export default function WarehousesScreen() {
 
   const handleEditWarehouse = (warehouse: WarehouseData) => {
     router.push({
-      pathname: '/locations/edit-warehouse',
+      pathname: '/locations/warehouse-details',
       params: {
         warehouseId: warehouse.id,
-        warehouseData: JSON.stringify(warehouse)
+        editMode: 'true',
+        editWarehouse: JSON.stringify(warehouse)
       }
     });
   };
@@ -445,10 +458,16 @@ export default function WarehousesScreen() {
         {(warehouse.manager || warehouse.phone) && (
           <View style={styles.contactSection}>
             {warehouse.manager && (
-              <Text style={styles.managerText}>Manager: {warehouse.manager}</Text>
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>Manager:</Text>
+                <Text style={styles.managerText}>{warehouse.manager}</Text>
+              </View>
             )}
             {warehouse.phone && (
-              <Text style={styles.phoneText}>Phone: {warehouse.phone}</Text>
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>Phone:</Text>
+                <Text style={styles.phoneText}>{warehouse.phone}</Text>
+              </View>
             )}
           </View>
         )}
@@ -510,7 +529,7 @@ export default function WarehousesScreen() {
                     web: {
                       outlineWidth: 0,
                       outlineColor: 'transparent',
-                      outlineStyle: 'none',
+                      outlineStyle: 'none' as any,
                     },
                   }),
                 ]}
@@ -1073,16 +1092,30 @@ const styles = StyleSheet.create({
   },
   contactSection: {
     marginBottom: 12,
+    gap: 6,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+    minWidth: 70,
   },
   managerText: {
     fontSize: 14,
-    color: Colors.text,
-    fontWeight: '500',
-    marginBottom: 4,
+    color: '#3F66AC', // Brand blue for manager name
+    fontWeight: '600',
+    flex: 1,
   },
   phoneText: {
     fontSize: 14,
-    color: Colors.textLight,
+    color: '#059669', // Success green for phone number
+    fontWeight: '600',
+    flex: 1,
   },
   gstSection: {
     flexDirection: 'row',

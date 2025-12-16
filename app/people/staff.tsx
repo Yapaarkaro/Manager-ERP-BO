@@ -14,7 +14,72 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX } from 'lucide-react-native';
+import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX, AlertCircle } from 'lucide-react-native';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { getStaff as getStaffFromBackend } from '@/services/backendApi';
+
+// Map backend staff to display Staff format
+function mapBackendStaffToDisplayStaff(s: any): Staff {
+  // Handle missing or invalid data
+  if (!s) {
+    throw new Error('Staff data is null or undefined');
+  }
+  
+  // Ensure we have at least a name and id
+  if (!s.name && !s.staff_name) {
+    console.warn('⚠️ Staff member missing name:', s);
+  }
+  
+  const staffId = s.id || s.staff_id || s.staffId || `staff_${Date.now()}`;
+  const staffName = s.name || s.staff_name || 'Unknown';
+  const staffMobile = s.mobile || s.mobile_number || s.phone || '';
+  const staffRole = s.role || s.job_role || 'Staff';
+  
+  return {
+    id: staffId,
+    name: staffName,
+    avatar: s.avatar || s.profile_picture || `https://ui-avatars.com/api/?name=${encodeURIComponent(staffName)}&background=3f66ac&color=fff&size=150`,
+    role: staffRole,
+    department: s.department || s.department_name || 'Operations',
+    email: s.email || s.email_address || '',
+    mobile: staffMobile,
+    address: s.address || s.full_address || '',
+    joinDate: s.join_date || s.created_at || s.date_joined || new Date().toISOString(),
+    employeeId: s.employee_id || s.employeeId || s.emp_id || `EMP${staffId.slice(-4)}`,
+    status: s.status || 'active',
+    attendance: s.attendance || {
+      percentage: 0,
+      presentDays: 0,
+      totalDays: 0,
+      lastCheckIn: new Date().toISOString()
+    },
+    performance: s.performance || {
+      score: 0,
+      salesAmount: 0,
+      invoicesProcessed: 0,
+      customersServed: 0,
+      returnsHandled: 0,
+      rating: 0
+    },
+    targets: s.targets || {
+      monthlySalesTarget: s.monthly_sales_target || s.monthlySalesTarget || 0,
+      achievedSales: 0,
+      monthlyInvoiceTarget: s.monthly_invoice_target || s.monthlyInvoiceTarget || 0,
+      achievedInvoices: 0
+    },
+    permissions: s.permissions || s.permission_list || [],
+    salary: (s.basic_salary || s.basicSalary || s.allowances) ? {
+      basic: s.basic_salary || s.basicSalary || 0,
+      allowances: s.allowances || 0,
+      total: (s.basic_salary || s.basicSalary || 0) + (s.allowances || 0)
+    } : undefined,
+    emergencyContact: (s.emergency_contact_name || s.emergencyContactName) ? {
+      name: s.emergency_contact_name || s.emergencyContactName,
+      relation: s.emergency_contact_relation || s.emergencyContactRelation || '',
+      phone: s.emergency_contact_phone || s.emergencyContactPhone || ''
+    } : undefined
+  };
+}
 
 const Colors = {
   background: '#FFFFFF',
@@ -78,232 +143,10 @@ interface Staff {
   };
 }
 
-const mockStaffData: Staff[] = [
-  {
-    id: 'STAFF-001',
-    name: 'Rajesh Kumar',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    role: 'Sales Manager',
-    department: 'Sales',
-    email: 'rajesh.kumar@company.com',
-    mobile: '+91 98765 43210',
-    address: '123, MG Road, Bangalore, Karnataka - 560001',
-    joinDate: '2023-03-15',
-    employeeId: 'EMP001',
-    status: 'active',
-    attendance: {
-      percentage: 95,
-      presentDays: 28,
-      totalDays: 30,
-      lastCheckIn: '2024-01-16T09:15:00Z'
-    },
-    performance: {
-      score: 92,
-      salesAmount: 450000,
-      invoicesProcessed: 28,
-      customersServed: 45,
-      returnsHandled: 3,
-      rating: 4.8
-    },
-    targets: {
-      monthlySalesTarget: 500000,
-      achievedSales: 450000,
-      monthlyInvoiceTarget: 30,
-      achievedInvoices: 28
-    },
-    permissions: ['sales', 'customer_management', 'inventory_view'],
-    salary: {
-      basic: 45000,
-      allowances: 8000,
-      total: 53000
-    },
-    emergencyContact: {
-      name: 'Sunita Kumar',
-      relation: 'Spouse',
-      phone: '+91 98765 43211'
-    }
-  },
-  {
-    id: 'STAFF-002',
-    name: 'Priya Sharma',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    role: 'Sales Executive',
-    department: 'Sales',
-    email: 'priya.sharma@company.com',
-    mobile: '+91 87654 32109',
-    address: '456, Electronic City, Bangalore, Karnataka - 560100',
-    joinDate: '2023-06-20',
-    employeeId: 'EMP002',
-    status: 'active',
-    attendance: {
-      percentage: 88,
-      presentDays: 26,
-      totalDays: 30,
-      lastCheckIn: '2024-01-16T09:30:00Z'
-    },
-    performance: {
-      score: 85,
-      salesAmount: 380000,
-      invoicesProcessed: 22,
-      customersServed: 38,
-      returnsHandled: 5,
-      rating: 4.5
-    },
-    targets: {
-      monthlySalesTarget: 400000,
-      achievedSales: 380000,
-      monthlyInvoiceTarget: 25,
-      achievedInvoices: 22
-    },
-    permissions: ['sales', 'customer_management'],
-    salary: {
-      basic: 35000,
-      allowances: 6000,
-      total: 41000
-    },
-    emergencyContact: {
-      name: 'Ramesh Sharma',
-      relation: 'Father',
-      phone: '+91 87654 32110'
-    }
-  },
-  {
-    id: 'STAFF-003',
-    name: 'Amit Singh',
-    avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    role: 'Store Manager',
-    department: 'Operations',
-    email: 'amit.singh@company.com',
-    mobile: '+91 76543 21098',
-    address: '789, Koramangala, Bangalore, Karnataka - 560095',
-    joinDate: '2022-11-10',
-    employeeId: 'EMP003',
-    status: 'active',
-    attendance: {
-      percentage: 92,
-      presentDays: 27,
-      totalDays: 30,
-      lastCheckIn: '2024-01-16T08:45:00Z'
-    },
-    performance: {
-      score: 89,
-      salesAmount: 520000,
-      invoicesProcessed: 31,
-      customersServed: 52,
-      returnsHandled: 2,
-      rating: 4.7
-    },
-    targets: {
-      monthlySalesTarget: 550000,
-      achievedSales: 520000,
-      monthlyInvoiceTarget: 35,
-      achievedInvoices: 31
-    },
-    permissions: ['sales', 'inventory_management', 'staff_management', 'reports'],
-    salary: {
-      basic: 50000,
-      allowances: 10000,
-      total: 60000
-    },
-    emergencyContact: {
-      name: 'Kavita Singh',
-      relation: 'Spouse',
-      phone: '+91 76543 21099'
-    }
-  },
-  {
-    id: 'STAFF-004',
-    name: 'Meera Joshi',
-    avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    role: 'Inventory Supervisor',
-    department: 'Operations',
-    email: 'meera.joshi@company.com',
-    mobile: '+91 99887 76655',
-    address: '321, Jayanagar, Bangalore, Karnataka - 560011',
-    joinDate: '2023-01-08',
-    employeeId: 'EMP004',
-    status: 'on_leave',
-    attendance: {
-      percentage: 85,
-      presentDays: 25,
-      totalDays: 30,
-      lastCheckIn: '2024-01-14T10:00:00Z'
-    },
-    performance: {
-      score: 88,
-      salesAmount: 0,
-      invoicesProcessed: 0,
-      customersServed: 0,
-      returnsHandled: 8,
-      rating: 4.6
-    },
-    targets: {
-      monthlySalesTarget: 0,
-      achievedSales: 0,
-      monthlyInvoiceTarget: 0,
-      achievedInvoices: 0
-    },
-    permissions: ['inventory_management', 'stock_audit'],
-    salary: {
-      basic: 40000,
-      allowances: 7000,
-      total: 47000
-    },
-    emergencyContact: {
-      name: 'Suresh Joshi',
-      relation: 'Father',
-      phone: '+91 99887 76656'
-    }
-  },
-  {
-    id: 'STAFF-005',
-    name: 'Vikram Patel',
-    avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    role: 'Cashier',
-    department: 'Sales',
-    email: 'vikram.patel@company.com',
-    mobile: '+91 88776 65544',
-    address: '567, Whitefield, Bangalore, Karnataka - 560066',
-    joinDate: '2023-08-12',
-    employeeId: 'EMP005',
-    status: 'active',
-    attendance: {
-      percentage: 90,
-      presentDays: 27,
-      totalDays: 30,
-      lastCheckIn: '2024-01-16T09:00:00Z'
-    },
-    performance: {
-      score: 82,
-      salesAmount: 280000,
-      invoicesProcessed: 45,
-      customersServed: 78,
-      returnsHandled: 6,
-      rating: 4.3
-    },
-    targets: {
-      monthlySalesTarget: 300000,
-      achievedSales: 280000,
-      monthlyInvoiceTarget: 50,
-      achievedInvoices: 45
-    },
-    permissions: ['sales', 'payment_processing'],
-    salary: {
-      basic: 28000,
-      allowances: 5000,
-      total: 33000
-    },
-    emergencyContact: {
-      name: 'Ravi Patel',
-      relation: 'Brother',
-      phone: '+91 88776 65545'
-    }
-  },
-];
-
 export default function StaffScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredStaff, setFilteredStaff] = useState(mockStaffData);
+  const [allStaff, setAllStaff] = useState<Staff[]>([]);
+  const [filteredStaff, setFilteredStaff] = useState<Staff[]>([]);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     status: [] as string[],
@@ -315,6 +158,135 @@ export default function StaffScreen() {
   });
 
   const debouncedNavigate = useDebounceNavigation(500);
+  const { data: businessData } = useBusinessData();
+
+  // ✅ Fetch staff from backend (backend is source of truth)
+  useEffect(() => {
+    const loadStaff = async () => {
+      try {
+        console.log('🔄 Fetching staff from backend...');
+        // Fetch staff directly from backend
+        let backendResult = await getStaffFromBackend();
+        
+        console.log('📦 Backend result:', {
+          success: backendResult.success,
+          staffCount: backendResult.staff?.length || 0,
+          error: backendResult.error,
+          staff: backendResult.staff
+        });
+        
+        // If Edge Function fails, try direct Supabase query as fallback
+        if (!backendResult.success && (backendResult.error?.includes('Failed to fetch') || backendResult.error?.includes('Network error'))) {
+          console.log('🔄 Edge Function unavailable, trying direct Supabase query...');
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            
+            if (session?.user) {
+              // Get business_id from users table first, then fallback to businessData
+              const { data: userData } = await supabase
+                .from('users')
+                .select('business_id')
+                .eq('id', session.user.id)
+                .single();
+              
+              const businessId = userData?.business_id || businessData?.business?.id;
+              if (businessId) {
+                const { data: staffData, error: dbError } = await supabase
+                  .from('staff')
+                  .select('*')
+                  .eq('business_id', businessId)
+                  .order('created_at', { ascending: false });
+                
+                if (!dbError && staffData && Array.isArray(staffData)) {
+                  console.log('✅ Fetched staff directly from Supabase, count:', staffData.length);
+                  backendResult = {
+                    success: true,
+                    staff: staffData,
+                  };
+                } else {
+                  console.warn('⚠️ Direct Supabase query also failed:', dbError);
+                }
+              } else {
+                console.warn('⚠️ No business_id found for fallback query');
+              }
+            }
+          } catch (fallbackError) {
+            console.warn('⚠️ Fallback query failed:', fallbackError);
+          }
+        }
+        
+        if (backendResult.success && backendResult.staff && Array.isArray(backendResult.staff)) {
+          // Get current user's phone number to filter out business owner
+          let ownerMobile = '';
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.phone) {
+              ownerMobile = user.phone.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10);
+              console.log('📱 Owner mobile for filtering:', ownerMobile);
+            }
+          } catch (error) {
+            console.warn('Could not get user phone for filtering:', error);
+          }
+          
+          // Convert backend staff to display format
+          let formattedStaff: Staff[] = backendResult.staff.map((s: any) => {
+            try {
+              return mapBackendStaffToDisplayStaff(s);
+            } catch (error) {
+              console.error('Error mapping staff member:', s, error);
+              return null;
+            }
+          }).filter((s: Staff | null): s is Staff => s !== null);
+          
+          console.log('✅ Formatted staff count before filtering:', formattedStaff.length);
+          
+          // ✅ Filter out business owner
+          // Filter by: 1) Role contains "owner", 2) Mobile matches current user's phone
+          const filteredStaff = formattedStaff.filter(staff => {
+            const roleLower = (staff.role || '').toLowerCase();
+            const isOwnerRole = roleLower.includes('owner') || roleLower.includes('business owner');
+            
+            // Also check if mobile matches current user (business owner)
+            const staffMobile = (staff.mobile || '').replace(/\D/g, '').slice(0, 10);
+            const isOwnerMobile = ownerMobile && staffMobile === ownerMobile;
+            
+            // Exclude if it's the owner
+            const shouldExclude = isOwnerRole || isOwnerMobile;
+            if (shouldExclude) {
+              console.log('🚫 Filtered out owner:', staff.name, { isOwnerRole, isOwnerMobile, role: staff.role, mobile: staff.mobile });
+            }
+            return !shouldExclude;
+          });
+          
+          // Safety check: If filtering removed all staff, show all staff (filtering might be too aggressive)
+          const finalStaff = filteredStaff.length > 0 ? filteredStaff : formattedStaff;
+          
+          if (filteredStaff.length === 0 && formattedStaff.length > 0) {
+            console.warn('⚠️ All staff were filtered out! Showing all staff instead. This might indicate the owner filter is too aggressive.');
+          }
+          
+          console.log('✅ Final staff count after filtering:', finalStaff.length);
+          console.log('📋 Staff list:', finalStaff.map(s => ({ name: s.name, role: s.role, mobile: s.mobile })));
+          
+          setAllStaff(finalStaff);
+          setFilteredStaff(finalStaff);
+        } else {
+          // If backend fetch fails, show empty state
+          console.warn('⚠️ Backend fetch failed or no staff data:', backendResult);
+          setAllStaff([]);
+          setFilteredStaff([]);
+        }
+      } catch (error) {
+        console.error('❌ Error loading staff from backend:', error);
+        setAllStaff([]);
+        setFilteredStaff([]);
+      }
+    };
+    
+    loadStaff();
+  }, [businessData]);
 
 
   const handleSearch = (query: string) => {
@@ -323,7 +295,8 @@ export default function StaffScreen() {
   };
 
   const applyFilters = (query: string, filters: typeof activeFilters) => {
-    let filtered = mockStaffData;
+    // Use allStaff state as the source
+    let filtered = [...allStaff];
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -414,10 +387,26 @@ export default function StaffScreen() {
   };
 
   const handleStaffPress = (staff: Staff) => {
-    debouncedNavigate({
-      pathname: '/people/staff-details',
-      params: { staffId: staff.id }
-    });
+    // Check if staff is incomplete (missing email, address, salary, or emergency contact)
+    const isIncomplete = !staff.email || !staff.address || !staff.salary || !staff.emergencyContact;
+    
+    if (isIncomplete) {
+      // Navigate to add-staff form with pre-filled data
+      debouncedNavigate({
+        pathname: '/people/add-staff',
+        params: {
+          staffId: staff.id,
+          prefillName: staff.name,
+          prefillMobile: staff.mobile,
+          prefillRole: staff.role,
+        }
+      });
+    } else {
+      debouncedNavigate({
+        pathname: '/people/staff-details',
+        params: { staffId: staff.id }
+      });
+    }
   };
 
   const handleAddStaff = () => {
@@ -533,10 +522,10 @@ export default function StaffScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters, searchQuery, or allStaff change
   useEffect(() => {
     applyFilters(searchQuery, activeFilters);
-  }, [activeFilters]);
+  }, [activeFilters, searchQuery, allStaff]);
 
   const getTargetAchievement = (achieved: number, target: number) => {
     if (target === 0) return 0;
@@ -548,6 +537,8 @@ export default function StaffScreen() {
     const statusColor = getStatusColor(staff.status);
     const performanceColor = getPerformanceColor(staff.performance.score);
     const salesAchievement = getTargetAchievement(staff.targets.achievedSales, staff.targets.monthlySalesTarget);
+    // Check if staff is incomplete (missing email, address, salary, or emergency contact)
+    const isIncomplete = !staff.email || !staff.address || !staff.salary || !staff.emergencyContact;
 
     return (
       <TouchableOpacity
@@ -562,15 +553,32 @@ export default function StaffScreen() {
         {/* Header */}
         <View style={styles.staffHeader}>
           <View style={styles.staffLeft}>
-            <Image 
-              source={{ uri: staff.avatar }}
-              style={styles.staffAvatar}
-            />
+            <View style={styles.avatarContainer}>
+              <Image 
+                source={{ uri: staff.avatar }}
+                style={styles.staffAvatar}
+              />
+              {/* Notification icon for incomplete staff */}
+              {isIncomplete && (
+                <View style={styles.incompleteBadge}>
+                  <AlertCircle size={12} color="#FFFFFF" fill="#FFC754" />
+                </View>
+              )}
+            </View>
             <View style={styles.staffInfo}>
-              <Text style={styles.staffName}>{staff.name}</Text>
+              <View style={styles.staffNameRow}>
+                <Text style={styles.staffName}>{staff.name}</Text>
+                {isIncomplete && (
+                  <View style={styles.incompleteIndicator}>
+                    <Text style={styles.incompleteText}>Complete Details</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.staffRole}>{staff.role}</Text>
               <Text style={styles.staffDepartment}>{staff.department}</Text>
-              <Text style={styles.employeeId}>ID: {staff.employeeId}</Text>
+              {staff.employeeId && (
+                <Text style={styles.employeeId}>ID: {staff.employeeId}</Text>
+              )}
             </View>
           </View>
 
@@ -588,73 +596,87 @@ export default function StaffScreen() {
               </Text>
             </View>
             
-            <View style={[
-              styles.performanceBadge,
-              { backgroundColor: `${performanceColor}20` }
-            ]}>
-              <Award size={14} color={performanceColor} />
-              <Text style={[
-                styles.performanceScore,
-                { color: performanceColor }
+            {staff.performance.score > 0 && (
+              <View style={[
+                styles.performanceBadge,
+                { backgroundColor: `${performanceColor}20` }
               ]}>
-                {staff.performance.score}/100
-              </Text>
-            </View>
+                <Award size={14} color={performanceColor} />
+                <Text style={[
+                  styles.performanceScore,
+                  { color: performanceColor }
+                ]}>
+                  {staff.performance.score}/100
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Performance Stats */}
-        <View style={styles.performanceSection}>
-          <View style={styles.performanceGrid}>
-            <View style={styles.performanceStat}>
-              <Text style={styles.performanceLabel}>Attendance</Text>
-              <Text style={[
-                styles.performanceValue,
-                { color: staff.attendance.percentage >= 90 ? Colors.success : 
-                         staff.attendance.percentage >= 80 ? Colors.warning : Colors.error }
-              ]}>
-                {staff.attendance.percentage}%
-              </Text>
-            </View>
+        {/* Performance Stats - Only show if staff has performance data */}
+        {!isIncomplete && staff.performance && staff.performance.score > 0 && (
+          <View style={styles.performanceSection}>
+            <View style={styles.performanceGrid}>
+              <View style={styles.performanceStat}>
+                <Text style={styles.performanceLabel}>Attendance</Text>
+                <Text style={[
+                  styles.performanceValue,
+                  { color: staff.attendance.percentage >= 90 ? Colors.success : 
+                           staff.attendance.percentage >= 80 ? Colors.warning : Colors.error }
+                ]}>
+                  {staff.attendance.percentage}%
+                </Text>
+              </View>
 
-            <View style={styles.performanceStat}>
-              <Text style={styles.performanceLabel}>
-                {staff.performance.salesAmount > 0 ? 'Sales' : 'Tasks'}
-              </Text>
-              <Text style={[
-                styles.performanceValue, 
-                { color: staff.performance.salesAmount > 0 ? Colors.success : Colors.primary }
-              ]}>
-                {staff.performance.salesAmount > 0 
-                  ? formatAmount(staff.performance.salesAmount)
-                  : `${staff.performance.returnsHandled || staff.performance.invoicesProcessed || 0}`
-                }
-              </Text>
-            </View>
+              <View style={styles.performanceStat}>
+                <Text style={styles.performanceLabel}>
+                  {staff.performance.salesAmount > 0 ? 'Sales' : 'Tasks'}
+                </Text>
+                <Text style={[
+                  styles.performanceValue, 
+                  { color: staff.performance.salesAmount > 0 ? Colors.success : Colors.primary }
+                ]}>
+                  {staff.performance.salesAmount > 0 
+                    ? formatAmount(staff.performance.salesAmount)
+                    : `${staff.performance.returnsHandled || staff.performance.invoicesProcessed || 0}`
+                  }
+                </Text>
+              </View>
 
-            <View style={styles.performanceStat}>
-              <Text style={styles.performanceLabel}>
-                {staff.performance.salesAmount > 0 ? 'Invoices' : 'Customers'}
-              </Text>
-              <Text style={styles.performanceValue}>
-                {staff.performance.salesAmount > 0 
-                  ? staff.performance.invoicesProcessed 
-                  : staff.performance.customersServed
-                }
-              </Text>
-            </View>
+              <View style={styles.performanceStat}>
+                <Text style={styles.performanceLabel}>
+                  {staff.performance.salesAmount > 0 ? 'Invoices' : 'Customers'}
+                </Text>
+                <Text style={styles.performanceValue}>
+                  {staff.performance.salesAmount > 0 
+                    ? staff.performance.invoicesProcessed 
+                    : staff.performance.customersServed
+                  }
+                </Text>
+              </View>
 
-            <View style={styles.performanceStat}>
-              <Text style={styles.performanceLabel}>Rating</Text>
-              <Text style={[styles.performanceValue, { color: Colors.warning }]}>
-                ⭐ {staff.performance.rating}
-              </Text>
+              <View style={styles.performanceStat}>
+                <Text style={styles.performanceLabel}>Rating</Text>
+                <Text style={[styles.performanceValue, { color: Colors.warning }]}>
+                  ⭐ {staff.performance.rating}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
+
+        {/* Incomplete Info Message */}
+        {isIncomplete && (
+          <View style={styles.incompleteSection}>
+            <AlertCircle size={16} color={Colors.warning} />
+            <Text style={styles.incompleteMessage}>
+              Complete staff details to enable performance tracking
+            </Text>
+          </View>
+        )}
 
         {/* Target Achievement */}
-        {staff.targets.monthlySalesTarget > 0 && (
+        {!isIncomplete && staff.targets && staff.targets.monthlySalesTarget > 0 && (
           <View style={styles.targetSection}>
             <View style={styles.targetHeader}>
               <Target size={16} color={Colors.primary} />
@@ -692,20 +714,41 @@ export default function StaffScreen() {
           </View>
         </View>
 
-        {/* Last Check-in */}
-        <View style={styles.checkInSection}>
-          <Clock size={14} color={Colors.textLight} />
-          <Text style={styles.checkInText}>
-            Last check-in: {formatDateTime(staff.attendance.lastCheckIn)}
-          </Text>
+        {/* Contact Info - Always show for all staff */}
+        <View style={styles.contactSection}>
+          <View style={styles.contactRow}>
+            <Phone size={14} color={Colors.textLight} />
+            <Text style={styles.contactText}>{staff.mobile}</Text>
+          </View>
+          {staff.email && (
+            <View style={styles.contactRow}>
+              <Mail size={14} color={Colors.textLight} />
+              <Text style={styles.contactText} numberOfLines={1}>
+                {staff.email}
+              </Text>
+            </View>
+          )}
         </View>
+        
+        {/* Last Check-in - Only show if staff has attendance data */}
+        {!isIncomplete && staff.attendance && staff.attendance.lastCheckIn && (
+          <View style={styles.checkInSection}>
+            <Clock size={14} color={Colors.textLight} />
+            <Text style={styles.checkInText}>
+              Last check-in: {formatDateTime(staff.attendance.lastCheckIn)}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
 
   const activeStaff = filteredStaff.filter(s => s.status === 'active').length;
   const onLeaveStaff = filteredStaff.filter(s => s.status === 'on_leave').length;
-  const avgPerformance = Math.round(filteredStaff.reduce((sum, s) => sum + s.performance.score, 0) / filteredStaff.length);
+  const staffWithPerformance = filteredStaff.filter(s => s.performance && s.performance.score > 0);
+  const avgPerformance = staffWithPerformance.length > 0
+    ? Math.round(staffWithPerformance.reduce((sum, s) => sum + s.performance.score, 0) / staffWithPerformance.length)
+    : 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1123,9 +1166,9 @@ const styles = StyleSheet.create({
   },
   staffCard: {
     backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: Colors.grey[200],
     borderLeftWidth: 4,
@@ -1134,61 +1177,72 @@ const styles = StyleSheet.create({
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
   },
   staffHeader: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   staffLeft: {
     flexDirection: 'row',
     flex: 1,
-    marginRight: 16,
+    marginRight: 20,
   },
   staffAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 12,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    marginRight: 16,
   },
   staffInfo: {
     flex: 1,
+    justifyContent: 'center',
+  },
+  staffNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   staffName: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
     color: Colors.text,
+    flex: 1,
     marginBottom: 4,
   },
   staffRole: {
-    fontSize: 14,
+    fontSize: 15,
     color: Colors.primary,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  staffDepartment: {
-    fontSize: 12,
-    color: Colors.textLight,
+    fontWeight: '600',
     marginBottom: 4,
   },
+  staffDepartment: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginBottom: 6,
+  },
   employeeId: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textLight,
     fontFamily: 'monospace',
+    marginTop: 2,
   },
   staffRight: {
     alignItems: 'flex-end',
-    gap: 8,
+    gap: 10,
+    justifyContent: 'flex-start',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
   },
   statusText: {
     fontSize: 12,
@@ -1197,10 +1251,10 @@ const styles = StyleSheet.create({
   performanceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
   },
   performanceScore: {
     fontSize: 12,
@@ -1208,55 +1262,57 @@ const styles = StyleSheet.create({
   },
   performanceSection: {
     backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
   },
   performanceGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 16,
   },
   performanceStat: {
     flex: 1,
     minWidth: '22%',
     alignItems: 'center',
+    paddingVertical: 4,
   },
   performanceLabel: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textLight,
-    marginBottom: 4,
+    marginBottom: 6,
     textAlign: 'center',
+    fontWeight: '500',
   },
   performanceValue: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: Colors.text,
     textAlign: 'center',
   },
   targetSection: {
     backgroundColor: '#f0f4ff',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: Colors.primary,
   },
   targetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    gap: 6,
+    marginBottom: 12,
+    gap: 8,
   },
   targetLabel: {
-    fontSize: 12,
+    fontSize: 13,
     color: Colors.primary,
     fontWeight: '600',
   },
   targetProgress: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   targetProgressBar: {
     flex: 1,
@@ -1277,30 +1333,82 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   contactSection: {
-    gap: 8,
-    marginBottom: 12,
+    gap: 10,
+    marginBottom: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+    paddingVertical: 2,
   },
   contactText: {
-    fontSize: 12,
+    fontSize: 13,
     color: Colors.textLight,
     flex: 1,
+    fontWeight: '500',
   },
   checkInSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingTop: 8,
+    gap: 8,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[100],
   },
   checkInText: {
-    fontSize: 11,
+    fontSize: 12,
     color: Colors.textLight,
+    fontWeight: '500',
+  },
+  avatarContainer: {
+    position: 'relative',
+  },
+  incompleteBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FFC754',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: Colors.background,
+    zIndex: 10,
+  },
+  incompleteIndicator: {
+    backgroundColor: '#FFC754',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    marginLeft: 8,
+  },
+  incompleteText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  incompleteSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFFBEB',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FFC754',
+  },
+  incompleteMessage: {
+    fontSize: 13,
+    color: Colors.warning,
+    fontWeight: '600',
+    flex: 1,
   },
   addStaffFAB: {
     position: 'absolute',

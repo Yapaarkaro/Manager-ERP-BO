@@ -111,6 +111,8 @@ export default function SuppliersScreen() {
   };
 
   const handleAddSupplier = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('add supplier')) return;
     router.push('/purchasing/add-supplier');
   };
 

@@ -87,15 +87,10 @@ export default function EditCashBalanceScreen() {
     setIsLoading(true);
 
     try {
-      // Update the cash balance in dataStore
-      const signupSummary = dataStore.getSignupSummary();
-      if (signupSummary) {
-        signupSummary.initialCashBalance = balance;
-        dataStore.saveBusinessData({
-          ...signupSummary,
-          initialCashBalance: balance,
-        });
-      }
+      // Update the cash balance in signup progress
+      dataStore.updateSignupProgress({
+        initialCashBalance: balance,
+      });
 
       Alert.alert(
         'Success',

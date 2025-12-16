@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { router } from 'expo-router';
+import React, { useState, useEffect, useRef } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -106,58 +106,13 @@ function getGreeting() {
   return 'Good Evening';
 }
 
-// Helper to get cached data synchronously (for initial state)
-// This reads from the same global cache that the hook uses
-function getCachedBusinessData() {
-  try {
-    // Access the global cache directly (same as in useBusinessData hook)
-    const CACHE_DURATION = 30000; // 30 seconds
-    const now = Date.now();
-    // Use dynamic import to avoid circular dependencies
-    const useBusinessDataModule = require('@/hooks/useBusinessData');
-    const globalCache = useBusinessDataModule.__getGlobalCache?.() || { data: null, timestamp: 0 };
-    const hasValidCache = globalCache.data && (now - globalCache.timestamp) < CACHE_DURATION;
-    return hasValidCache ? globalCache.data : null;
-  } catch (error) {
-    // If cache access fails, return null (will fetch fresh data)
-    return null;
-  }
-}
-
 export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   
-  // ✅ Initialize state from cache synchronously (zero delay on first render)
-  const cachedData = getCachedBusinessData();
-  const [userName, setUserName] = useState(() => cachedData?.user?.full_name || '');
-  const [businessName, setBusinessName] = useState(() => cachedData?.business?.legal_name || '');
-  const [businessData, setBusinessData] = useState<{
-    initialCashBalance?: number;
-    currentCashBalance?: number;
-    initialBankBalance?: number;
-    currentPrimaryBankBalance?: number;
-    currentTotalBankBalance?: number;
-    currentTotalCashBalance?: number;
-    currentTotalFunds?: number;
-  }>(() => cachedData?.business ? {
-    initialCashBalance: cachedData.business.initial_cash_balance,
-    currentCashBalance: cachedData.business.current_cash_balance,
-    initialBankBalance: cachedData.business.initial_bank_balance,
-    currentPrimaryBankBalance: cachedData.business.current_primary_bank_balance,
-    currentTotalBankBalance: cachedData.business.current_total_bank_balance,
-    currentTotalCashBalance: cachedData.business.current_total_cash_balance,
-    currentTotalFunds: cachedData.business.current_total_funds,
-  } : {});
-  
-  const [isLoading, setIsLoading] = useState(() => {
-    // If we have cached data, don't show loading
-    return !(cachedData?.user && cachedData?.business);
-  });
-  
-  // ✅ Use unified business data hook (instant from cache, fast parallel loading)
-  const { data: cachedBusinessData, loading: dataLoading } = useBusinessData();
+  // ✅ Use unified business data hook directly (instant from cache, no redundant state)
+  const { data: businessData, loading: dataLoading, refetch } = useBusinessData();
   
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
@@ -168,47 +123,44 @@ export default function DashboardScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // ✅ Update UI when data changes (for fresh fetches)
-  useEffect(() => {
-    if (!dataLoading && cachedBusinessData) {
-      // Update UI immediately - no delay
-      if (cachedBusinessData.user?.full_name) {
-        setUserName(cachedBusinessData.user.full_name);
+  // ✅ Only refetch when screen comes into focus if cache is stale (not on every focus)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Check if cache is stale (older than 30 seconds) before refetching
+      const { __getGlobalCache } = require('@/hooks/useBusinessData');
+      const cache = __getGlobalCache();
+      const now = Date.now();
+      const CACHE_DURATION = 30000; // 30 seconds - longer for dashboard
+      
+      // Only refetch if cache is stale or missing
+      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
+        console.log('🔄 Dashboard: Cache stale, refetching business data');
+        refetch();
+      } else {
+        console.log('✅ Dashboard: Using cached data (no refetch needed)');
       }
-      if (cachedBusinessData.business?.legal_name) {
-        setBusinessName(cachedBusinessData.business.legal_name);
-      }
-      if (cachedBusinessData.business) {
-        setBusinessData({
-          initialCashBalance: cachedBusinessData.business.initial_cash_balance,
-          currentCashBalance: cachedBusinessData.business.current_cash_balance,
-          initialBankBalance: cachedBusinessData.business.initial_bank_balance,
-          currentPrimaryBankBalance: cachedBusinessData.business.current_primary_bank_balance,
-          currentTotalBankBalance: cachedBusinessData.business.current_total_bank_balance,
-          currentTotalCashBalance: cachedBusinessData.business.current_total_cash_balance,
-          currentTotalFunds: cachedBusinessData.business.current_total_funds,
-        });
-      }
-      setIsLoading(false);
-    } else if (dataLoading && !cachedBusinessData?.user) {
-      // Only set loading if we don't have cached data
-      setIsLoading(true);
-    }
-  }, [cachedBusinessData, dataLoading]);
+    }, [refetch])
+  );
 
-  // ✅ Save device snapshot in background (non-blocking)
+  // ✅ Save device snapshot in background (non-blocking, only once per session)
+  const deviceSnapshotSavedRef = React.useRef(false);
   useEffect(() => {
+    if (deviceSnapshotSavedRef.current) return; // Only save once per session
+    
     (async () => {
       try {
         const { supabase } = await import('@/lib/supabase');
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) return;
 
+        deviceSnapshotSavedRef.current = true; // Mark as saved
+        
         const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
         const { saveDeviceSnapshot } = await import('@/services/backendApi');
         const deviceSnapshot = await collectDeviceSnapshot();
         if (deviceSnapshot.deviceId) {
-          await saveDeviceSnapshot({
+          // Save in background, don't await (non-blocking)
+          saveDeviceSnapshot({
             deviceId: deviceSnapshot.deviceId,
             deviceName: deviceSnapshot.deviceName,
             deviceBrand: deviceSnapshot.deviceBrand,
@@ -229,7 +181,7 @@ export default function DashboardScreen() {
             isTablet: deviceSnapshot.isTablet,
             appVersion: deviceSnapshot.appVersion,
             appBuildNumber: deviceSnapshot.appBuildNumber,
-          });
+          }).catch(() => {}); // Silent fail
         }
       } catch (error) {
         // Silent fail
@@ -322,8 +274,8 @@ export default function DashboardScreen() {
   // Render greeting section - use hook data directly for instant display
   const renderGreeting = () => {
     // ✅ Use hook data directly (instant, no state copy delay)
-    const displayUserName = cachedBusinessData?.user?.full_name || userName;
-    const displayBusinessName = cachedBusinessData?.business?.legal_name || businessName;
+    const displayUserName = businessData?.user?.full_name || '';
+    const displayBusinessName = businessData?.business?.legal_name || '';
     
     return (
       <View style={styles.greetingSection}>
@@ -674,8 +626,8 @@ export default function DashboardScreen() {
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Cash</Text>
               <Text style={styles.paymentAmount}>
-                {businessData.currentCashBalance !== undefined && !isNaN(businessData.currentCashBalance)
-                  ? `₹${Math.round(businessData.currentCashBalance / 1000)}K`
+                {businessData?.business?.current_cash_balance !== undefined && !isNaN(businessData.business.current_cash_balance)
+                  ? `₹${Math.round(businessData.business.current_cash_balance / 1000)}K`
                   : '₹0'}
               </Text>
             </View>
@@ -683,8 +635,8 @@ export default function DashboardScreen() {
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Bank</Text>
               <Text style={styles.paymentAmount}>
-                {businessData.currentPrimaryBankBalance !== undefined && !isNaN(businessData.currentPrimaryBankBalance)
-                  ? `₹${Math.round(businessData.currentPrimaryBankBalance / 1000)}K`
+                {businessData?.business?.current_primary_bank_balance !== undefined && !isNaN(businessData.business.current_primary_bank_balance)
+                  ? `₹${Math.round(businessData.business.current_primary_bank_balance / 1000)}K`
                   : '₹0'}
               </Text>
             </View>
@@ -692,8 +644,8 @@ export default function DashboardScreen() {
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Total</Text>
               <Text style={styles.paymentAmount}>
-                {businessData.currentTotalFunds !== undefined && !isNaN(businessData.currentTotalFunds)
-                  ? `₹${Math.round(businessData.currentTotalFunds / 1000)}K`
+                {businessData?.business?.current_total_funds !== undefined && !isNaN(businessData.business.current_total_funds)
+                  ? `₹${Math.round(businessData.business.current_total_funds / 1000)}K`
                   : '₹0'}
               </Text>
             </View>

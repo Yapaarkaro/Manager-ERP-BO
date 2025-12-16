@@ -1224,7 +1224,7 @@ export default function CartScreen() {
 
                                   {/* Collapsed View - Only show when not expanded */}
                  {!isExpanded && (
-                   <View style={styles.collapsedInfo} pointerEvents="box-none">
+                   <View style={styles.collapsedInfo}>
                      {/* Product Meta Info (HSN, Barcode, Category) - Below Title */}
                      <View style={styles.collapsedMetaRow}>
                        <View style={styles.collapsedMetaLeft}>
@@ -1357,7 +1357,6 @@ export default function CartScreen() {
                        <View style={styles.collapsedQuantitySection}>
                          <View 
                            style={styles.collapsedQuantityControls}
-                           pointerEvents="auto"
                          >
                            <TouchableOpacity
                              style={styles.collapsedQuantityButton}
@@ -4600,6 +4599,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[200],
+    pointerEvents: 'box-none', // Allow touches to pass through to children
   },
   collapsedRow: {
     flexDirection: 'row',
@@ -4803,6 +4803,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 4,
     paddingVertical: 2,
+    pointerEvents: 'auto', // Ensure buttons can receive touches
   },
   collapsedQuantityButton: {
     width: 24,

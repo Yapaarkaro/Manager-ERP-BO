@@ -22,7 +22,7 @@ import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/u
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { createAddress } from '@/services/backendApi';
+import { createAddress, createStaff } from '@/services/backendApi';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -425,10 +425,12 @@ export default function BranchDetailsScreen() {
     
     try {
       // Prepare address JSON for backend
+      // Include all additional lines (not just doorNumber)
       const addressJson = {
         doorNumber: doorNumber.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
+        additionalLines: additionalLines.filter(line => line.trim().length > 0), // Store all additional lines
         city: city.trim(),
         pincode: pincode,
         stateName: selectedState?.name || '',
@@ -470,12 +472,36 @@ export default function BranchDetailsScreen() {
         isPrimary: false,
         latitude: addressLatitude,
         longitude: addressLongitude,
-      }).then((result) => {
+      }).then(async (result) => {
         if (result.success && result.address) {
           console.log('✅ Branch created in backend:', result.address);
           // Update local address with backend ID
           const updatedAddress = { ...newBranch, backendId: result.address.id };
           dataStore.updateAddress(newBranch.id, updatedAddress);
+          
+          // ✅ Create staff from manager info directly in backend (backend is source of truth)
+          // Note: This is non-blocking - if it fails, signup continues
+          if (managerName.trim() && managerPhone) {
+            // Run in background - don't await to avoid blocking signup
+            createStaff({
+              name: managerName.trim(),
+              mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
+              role: 'Branch Manager',
+              locationId: result.address.id, // Use backend address ID
+              locationType: 'branch',
+              locationName: branchName.trim(),
+            }).then((staffResult) => {
+              if (staffResult.success) {
+                console.log('✅ Staff created from branch manager in backend:', managerName.trim());
+              } else {
+                console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
+                // Staff will still be created when they visit the staff screen
+              }
+            }).catch((staffError) => {
+              console.warn('⚠️ Staff creation error (non-blocking):', staffError);
+              // Don't block the flow - staff can be created later
+            });
+          }
         } else {
           console.warn('⚠️ Backend create failed:', result.error);
         }
@@ -486,52 +512,54 @@ export default function BranchDetailsScreen() {
       console.error('Error preparing branch for backend:', error);
     }
     
-    // Navigate immediately without waiting for backend (optimize performance)
-    setTimeout(() => {
-      if (fromSummary === 'true') {
-        // User came from business summary, navigate back with all data
-        router.replace({
-          pathname: '/auth/business-summary',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            allAddresses: JSON.stringify(dataStore.getAddresses()),
-            allBankAccounts,
-            initialCashBalance,
-            invoicePrefix,
-            invoicePattern,
-            startingInvoiceNumber,
-            fiscalYear,
-          }
-        });
-      } else if (type && value) {
-        // User is in signup flow, go to address confirmation
-        // Use replace to prevent going back to branch details screen
-        router.replace({
-          pathname: '/auth/address-confirmation',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            mobile,
-            allAddresses: JSON.stringify(dataStore.getAddresses()),
-          }
-        });
-      } else {
-        // User is not in signup flow, go to settings
-        router.push('/settings');
-      }
-      setIsLoading(false);
-    }, 500);
+    // ✅ Clear cache to ensure fresh data is loaded when navigating back
+    const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+    clearBusinessDataCache();
+    
+    // Navigate immediately without delay for instant UX
+    setIsLoading(false);
+    if (fromSummary === 'true') {
+      // User came from business summary, navigate back with all data
+      router.replace({
+        pathname: '/auth/business-summary',
+        params: {
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          allBankAccounts,
+          initialCashBalance,
+          invoicePrefix,
+          invoicePattern,
+          startingInvoiceNumber,
+          fiscalYear,
+        }
+      });
+    } else if (type && value) {
+      // User is in signup flow, go to address confirmation
+      // Use replace to prevent going back to branch details screen
+      router.replace({
+        pathname: '/auth/address-confirmation',
+        params: {
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          mobile,
+          allAddresses: JSON.stringify(dataStore.getAddresses()),
+        }
+      });
+    } else {
+      // User is not in signup flow, go to settings
+      router.push('/settings');
+    }
   };
 
   const slideTransform = {
@@ -570,10 +598,7 @@ export default function BranchDetailsScreen() {
             ref={scrollViewRef}
             style={styles.scrollView} 
             contentContainerStyle={[
-              Platform.select({
-                web: webContainerStyles.webScrollContent,
-                default: {} // Let content style handle padding
-              }),
+              webContainerStyles.webScrollContent,
               // Add bottom safe area inset for consistent padding
               Platform.OS !== 'web' ? { 
                 paddingBottom: 20 + insets.bottom 
@@ -622,7 +647,7 @@ export default function BranchDetailsScreen() {
                       })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
-                      onFocus={handleInputFocus}
+                      onFocus={() => handleInputFocus('branchName')}
                     />
                   </View>
                 </View>
@@ -747,7 +772,7 @@ export default function BranchDetailsScreen() {
                             web: {
                               outlineWidth: 0,
                               outlineColor: 'transparent',
-                              outlineStyle: 'none',
+                              outlineStyle: 'none' as any,
                             },
                           }),
                         ]}
@@ -842,7 +867,7 @@ export default function BranchDetailsScreen() {
                             web: {
                               outlineWidth: 0,
                               outlineColor: 'transparent',
-                              outlineStyle: 'none',
+                              outlineStyle: 'none' as any,
                             },
                           }),
                         ]}
@@ -1335,15 +1360,18 @@ const styles = StyleSheet.create({
   removeLineButton: {
     padding: Platform.select({
       web: 4,
-      default: 8, // Larger touch target on mobile
+      ios: 8,
+      android: 8,
     }),
     minWidth: Platform.select({
-      web: 'auto',
-      default: 40, // Ensure minimum touch target
+      web: 'auto' as any,
+      ios: 40,
+      android: 40,
     }),
     minHeight: Platform.select({
-      web: 'auto',
-      default: 40, // Ensure minimum touch target
+      web: 'auto' as any,
+      ios: 40,
+      android: 40,
     }),
     justifyContent: 'center',
     alignItems: 'center',
@@ -1372,19 +1400,23 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     backgroundColor: Platform.select({
       web: 'transparent',
-      default: 'transparent', // No background for cleaner look
+      ios: 'transparent',
+      android: 'transparent',
     }),
     marginBottom: Platform.select({
       web: 20,
-      default: 12, // Reduced spacing on mobile
+      ios: 12,
+      android: 12,
     }),
     marginTop: Platform.select({
       web: 0,
-      default: 8, // Reduced spacing on mobile
+      ios: 8,
+      android: 8,
     }),
     minHeight: Platform.select({
-      web: 'auto',
-      default: 36, // Smaller height for cleaner look
+      web: 'auto' as any,
+      ios: 36,
+      android: 36,
     }),
     ...Platform.select({
       default: {
@@ -1564,7 +1596,7 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        outlineStyle: 'none' as any,
       },
     }),
   },

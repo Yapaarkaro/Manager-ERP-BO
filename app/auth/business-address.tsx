@@ -21,7 +21,6 @@ import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -62,7 +61,6 @@ export default function BusinessAddressScreen() {
   } = useLocalSearchParams();
 
   const { setStatusBarStyle } = useStatusBar();
-  const debouncedNavigate = useDebounceNavigation();
   const [selectedAddress, setSelectedAddress] = useState<SelectedAddress | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
@@ -629,10 +627,10 @@ export default function BusinessAddressScreen() {
       params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
       }
 
-    debouncedNavigate({
+    router.replace({
       pathname: targetPath,
       params,
-    }, 'replace'); // Use replace to prevent going back to map screen
+    }); // Use replace to prevent going back to map screen
   };
 
   const handleManualEntry = () => {
@@ -679,10 +677,10 @@ export default function BusinessAddressScreen() {
       params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
       }
 
-    debouncedNavigate({
+    router.replace({
       pathname: targetPath,
       params,
-    }, 'replace'); // Use replace to prevent going back to map screen
+    }); // Use replace to prevent going back to map screen
   };
 
   const handleShowSearchAgain = () => {

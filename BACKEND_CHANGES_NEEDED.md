@@ -31,3 +31,6 @@ The frontend has been fixed to use local timezone when formatting dates. The bac
 - Ensure Edge Functions accept dates in `YYYY-MM-DD` format
 - Store dates as DATE type (not TIMESTAMP) to avoid timezone issues
 - Verify that dates are stored exactly as received from frontend
+
+
+

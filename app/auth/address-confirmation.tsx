@@ -16,11 +16,11 @@ import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, Home, ChevronDown, ChevronUp, User, Phone, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { deleteAddress, updateAddress, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { getPlatformShadow } from '@/utils/shadowUtils';
 
 interface Address {
   id: string;
@@ -68,7 +68,6 @@ export default function AddressConfirmationScreen() {
   const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation(500);
   const [isNavigating, setIsNavigating] = useState(false);
 
   useEffect(() => {
@@ -79,45 +78,65 @@ export default function AddressConfirmationScreen() {
     }).start();
   }, []);
 
-  // Reload addresses when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      console.log('🔄 Address Confirmation screen focused - reloading addresses');
-      console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
-      console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
-      console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
-      console.log('🔍 Address Confirmation - All params:', { taxIdType, taxIdValue, addressType, name, businessName });
+  // ✅ Load addresses once on mount and when params change (not on every focus)
+  useEffect(() => {
+    console.log('🔄 Address Confirmation - loading addresses');
+    console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
+    console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
+    console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
+    
+    // Load addresses from dataStore first (single source of truth)
+    const dataStoreAddresses = dataStore.getAddresses();
+    console.log(`📋 Loaded ${dataStoreAddresses.length} addresses from DataStore:`, 
+      dataStoreAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
+    
+    // Try to parse addresses from parameters (for backward compatibility)
+    let paramAddresses: Address[] = [];
+    try {
+      paramAddresses = JSON.parse(allAddresses as string);
+      console.log(`📋 Parsed ${paramAddresses.length} addresses from params:`, 
+        paramAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
+    } catch (error) {
+      // No addresses to parse from parameters or parse error
+      console.log('⚠️ Could not parse addresses from params');
+    }
+    
+    // ✅ CRITICAL: Always use DataStore as primary source, merge with params only for missing data
+    if (dataStoreAddresses.length > 0) {
+      // Merge: Use DataStore addresses, but update with param data if param has newer info
+      const mergedAddresses = dataStoreAddresses.map(dataStoreAddr => {
+        const paramAddr = paramAddresses.find(addr => addr.id === dataStoreAddr.id);
+        if (paramAddr) {
+          // Use parameter address if it exists (it might have more recent data)
+          // But preserve backendId from DataStore if param doesn't have it
+          return {
+            ...paramAddr,
+            backendId: paramAddr.backendId || dataStoreAddr.backendId,
+          };
+        }
+        return dataStoreAddr;
+      });
       
-      // Load addresses from dataStore first, then fallback to parameter
-      const dataStoreAddresses = dataStore.getAddresses();
-      
-      // Try to parse addresses from parameters
-      let paramAddresses: Address[] = [];
-      try {
-        paramAddresses = JSON.parse(allAddresses as string);
-      } catch (error) {
-        // No addresses to parse from parameters or parse error
+      // ✅ Also add any addresses from params that don't exist in DataStore (shouldn't happen, but safety)
+      const missingFromDataStore = paramAddresses.filter(
+        paramAddr => !dataStoreAddresses.find(dsAddr => dsAddr.id === paramAddr.id)
+      );
+      if (missingFromDataStore.length > 0) {
+        console.warn(`⚠️ Found ${missingFromDataStore.length} addresses in params but not in DataStore, adding them`);
+        mergedAddresses.push(...missingFromDataStore);
       }
       
-      if (dataStoreAddresses.length > 0) {
-        // Merge dataStore addresses with parameter addresses to ensure we have the latest info
-        const mergedAddresses = dataStoreAddresses.map(dataStoreAddr => {
-          const paramAddr = paramAddresses.find(addr => addr.id === dataStoreAddr.id);
-          if (paramAddr) {
-            // Use parameter address if it exists (it might have more recent data like mobile number)
-            return paramAddr;
-          }
-          return dataStoreAddr;
-        });
-        setAddresses(mergedAddresses);
-      } else if (paramAddresses.length > 0) {
-        // Fallback to parsing addresses from the previous screen
-        setAddresses(paramAddresses);
-      } else {
-        setAddresses([]);
-      }
-    }, [taxIdType, taxIdValue, addressType, allAddresses])
-  );
+      console.log(`✅ Final merged addresses: ${mergedAddresses.length}`, 
+        mergedAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
+      setAddresses(mergedAddresses);
+    } else if (paramAddresses.length > 0) {
+      // Fallback: If DataStore is empty, use params (shouldn't happen in normal flow)
+      console.warn('⚠️ DataStore is empty, using addresses from params');
+      setAddresses(paramAddresses);
+    } else {
+      setAddresses([]);
+    }
+  }, [taxIdType, taxIdValue, addressType, allAddresses]);
 
   const getAddressTypeInfo = (type: Address['type']) => {
     switch (type) {
@@ -447,93 +466,123 @@ export default function AddressConfirmationScreen() {
 
     setIsNavigating(true);
 
-    // ✅ Save signup progress to backend (address step complete, moving to banking)
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Get mobile from params or from user's phone metadata
-        const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
-        if (mobileNumber) {
-          const progressResult = await saveSignupProgress({
-            mobile: mobileNumber,
-            mobileVerified: true,
-            taxIdType: taxIdType as 'GSTIN' | 'PAN',
-            taxIdValue: taxIdValue as string,
-            taxIdVerified: true,
-            ownerName: name as string,
-            businessName: businessName as string,
-            businessType: businessType as string,
-            gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
-            currentStep: 'addressManagement',
-          });
-          if (progressResult.success) {
-            console.log('✅ Signup progress saved: addressManagement');
-          } else {
-            console.error('❌ Failed to save signup progress:', progressResult.error);
-          }
-        } else {
-          console.warn('⚠️ Mobile number not available for saving signup progress');
-        }
+      // ✅ CRITICAL: Sync all addresses to backend before navigation
+      // This ensures all edits are saved, even if individual syncs failed
+      console.log('🔄 Syncing all addresses to backend before navigation...');
+      const { syncAllAddressesToBackend } = await import('@/utils/optimisticSync');
+      const syncResult = await syncAllAddressesToBackend({ 
+        showError: false,
+        awaitSync: true 
+      });
+
+      if (!syncResult.success && syncResult.errors.length > 0) {
+        console.warn('⚠️ Some addresses failed to sync:', syncResult.errors);
+        // Show warning but allow navigation (addresses are in DataStore)
+        Alert.alert(
+          'Sync Warning',
+          `${syncResult.synced} addresses synced successfully. ${syncResult.errors.length} failed to sync. Changes are saved locally and will sync when connection is restored.`,
+          [{ text: 'Continue', style: 'default' }]
+        );
+      } else {
+        console.log(`✅ All addresses synced successfully: ${syncResult.synced} addresses`);
       }
-    } catch (error) {
-      console.error('Error saving signup progress:', error);
-      // Continue even if progress save fails
-    }
 
-    // Check if user already has bank accounts (returning from business summary)
-    const existingBankAccounts = dataStore.getBankAccounts();
-    const hasExistingBanks = existingBankAccounts && existingBankAccounts.length > 0;
-
-    // Get latest data from dataStore to ensure we have all updates
-    const latestAddresses = dataStore.getAddresses();
-
-    if (hasExistingBanks) {
-      // Returning user with existing banks - go directly to bank account management
-      console.log('🔄 User has existing bank accounts, navigating to bank account management');
-      debouncedNavigate({
-        pathname: '/auth/bank-accounts',
-        params: {
-          type: taxIdType,
-          value: taxIdValue,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          mobile,
-          allAddresses: JSON.stringify(latestAddresses),
-          allBankAccounts: JSON.stringify(existingBankAccounts),
-          // Pass invoice configuration for returning users
-          initialCashBalance,
-          invoicePrefix,
-          invoicePattern,
-          startingInvoiceNumber,
-          fiscalYear,
+      // ✅ Save signup progress to backend (non-blocking for instant navigation)
+      (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            // Get mobile from params or from user's phone metadata
+            const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+            if (mobileNumber) {
+              saveSignupProgress({
+                mobile: mobileNumber,
+                mobileVerified: true,
+                taxIdType: taxIdType as 'GSTIN' | 'PAN',
+                taxIdValue: taxIdValue as string,
+                taxIdVerified: true,
+                ownerName: name as string,
+                businessName: businessName as string,
+                businessType: businessType as string,
+                gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
+                currentStep: 'addressManagement',
+              }).then((progressResult) => {
+                if (progressResult.success) {
+                  console.log('✅ Signup progress saved: addressManagement');
+                } else {
+                  console.error('❌ Failed to save signup progress:', progressResult.error);
+                }
+              }).catch((error) => {
+                console.error('Error saving signup progress:', error);
+              });
+            } else {
+              console.warn('⚠️ Mobile number not available for saving signup progress');
+            }
+          }
+        } catch (error) {
+          console.error('Error getting session:', error);
         }
-      }, 'replace');
-    } else {
-      // Fresh signup - go to banking details to add primary bank account
-      console.log('📝 Fresh signup, navigating to banking details');
-      debouncedNavigate({
-        pathname: '/auth/banking-details',
-        params: {
-          type: taxIdType,
-          value: taxIdValue,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          mobile,
-          allAddresses: JSON.stringify(latestAddresses),
-        }
-      }, 'replace');
-    }
-    
-    // Reset navigation flag after a delay
-    setTimeout(() => {
+      })();
+
+      // Check if user already has bank accounts (returning from business summary)
+      const existingBankAccounts = dataStore.getBankAccounts();
+      const hasExistingBanks = existingBankAccounts && existingBankAccounts.length > 0;
+
+      // Get latest data from dataStore to ensure we have all updates (after sync)
+      const latestAddresses = dataStore.getAddresses();
+      console.log(`📋 Navigating with ${latestAddresses.length} addresses from DataStore`);
+
+      // Navigate after sync completes
+      if (hasExistingBanks) {
+        // Returning user with existing banks - go directly to bank account management
+        console.log('🔄 User has existing bank accounts, navigating to bank account management');
+        router.replace({
+          pathname: '/auth/bank-accounts',
+          params: {
+            type: taxIdType,
+            value: taxIdValue,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            mobile,
+            allAddresses: JSON.stringify(latestAddresses),
+            allBankAccounts: JSON.stringify(existingBankAccounts),
+            // Pass invoice configuration for returning users
+            initialCashBalance,
+            invoicePrefix,
+            invoicePattern,
+            startingInvoiceNumber,
+            fiscalYear,
+          }
+        });
+      } else {
+        // Fresh signup - go to banking details to add primary bank account
+        console.log('📝 Fresh signup, navigating to banking details');
+        router.replace({
+          pathname: '/auth/banking-details',
+          params: {
+            type: taxIdType,
+            value: taxIdValue,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            mobile,
+            allAddresses: JSON.stringify(latestAddresses),
+          }
+        });
+      }
+    } catch (error: any) {
+      console.error('❌ Error in handleContinue:', error);
+      Alert.alert('Error', 'Failed to sync addresses. Please check your connection and try again.');
+    } finally {
+      // Reset navigation flag
       setIsNavigating(false);
-    }, 1000);
+    }
   };
 
   const renderAddressCard = (address: Address) => {
@@ -886,7 +935,7 @@ export default function AddressConfirmationScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.continueButtonText}>
-                {isNavigating ? 'Loading...' : 'Continue'}
+                {isNavigating ? 'Please wait...' : 'Continue'}
               </Text>
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>
@@ -1027,14 +1076,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderRadius: 16,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    ...getPlatformShadow(2, '#000', 0.05),
   },
   sectionHeaderLeft: {
     flexDirection: 'row',

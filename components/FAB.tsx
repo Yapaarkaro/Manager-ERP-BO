@@ -105,6 +105,13 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
   const handleActionPress = (actionId: string) => {
     if (isNavigating) return;
     
+    // Check if trial expired before allowing action
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('this action')) {
+      toggleFAB();
+      return;
+    }
+    
     onAction?.(actionId);
     setIsNavigating(true);
     

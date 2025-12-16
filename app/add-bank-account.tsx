@@ -30,6 +30,8 @@ import {
 } from 'lucide-react-native';
 import { dataStore, BankAccount } from '@/utils/dataStore';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
+import { optimisticUpdateBankAccount, optimisticAddBankAccount } from '@/utils/optimisticSync';
+import { clearBusinessDataCache } from '@/hooks/useBusinessData';
 
 const Colors = {
   primary: '#007AFF',
@@ -234,7 +236,7 @@ export default function AddBankAccount() {
     );
   };
 
-  const handleConfirmBankAccount = () => {
+  const handleConfirmBankAccount = async () => {
     if (!isFormValid()) {
       Alert.alert('Missing Information', 'Please fill in all required fields correctly.');
       return;
@@ -253,8 +255,8 @@ export default function AddBankAccount() {
     }
 
     if (isEditMode && existingAccount) {
-      // Update existing bank account
-      dataStore.updateBankAccount(existingAccount.id, {
+      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
+      const bankAccountUpdates = {
         accountHolderName: accountHolderName.trim(),
         bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
         bankId: selectedBank?.shortName || '',
@@ -265,7 +267,17 @@ export default function AddBankAccount() {
         accountType: accountType,
         isPrimary,
         balance: existingAccount.balance || 0,
-      });
+      };
+      
+      // Optimistically update (DataStore updated immediately, backend sync in background)
+      // ✅ Await backend sync to ensure changes are persisted before navigation
+      await optimisticUpdateBankAccount(existingAccount.id, bankAccountUpdates, { showError: false, awaitSync: true });
+      
+      // ✅ Clear cache to ensure fresh data is loaded when navigating back
+      clearBusinessDataCache();
+      
+      // ✅ Small additional delay to ensure backend has fully processed the update
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // If setting as primary, update the dataStore
       if (isPrimary) {
@@ -293,7 +305,16 @@ export default function AddBankAccount() {
         createdAt: new Date().toISOString(),
       };
       
-      dataStore.addBankAccount(newBankAccount);
+      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
+      // Optimistically add (DataStore updated immediately, backend sync in background)
+      // ✅ Await backend sync to ensure changes are persisted before navigation
+      await optimisticAddBankAccount(newBankAccount, { showError: false, awaitSync: true });
+      
+      // ✅ Clear cache to ensure fresh data is loaded when navigating back
+      clearBusinessDataCache();
+      
+      // ✅ Small additional delay to ensure backend has fully processed the update
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // If setting as primary, update the dataStore
       if (isPrimary) {

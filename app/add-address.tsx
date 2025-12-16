@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 import { dataStore, BusinessAddress, getStateCode } from '@/utils/dataStore';
+import { createStaff } from '@/services/backendApi';
 
 const Colors = {
   primary: '#007AFF',
@@ -237,7 +238,7 @@ export default function AddAddress() {
 
     if (isEditMode && existingAddress) {
       // Update existing address
-      dataStore.updateAddress(existingAddress.id, {
+      const updatedAddressData = {
         name: addressName.trim(),
         doorNumber: doorNumber.trim(),
         addressLine1: addressLine1.trim(),
@@ -251,7 +252,38 @@ export default function AddAddress() {
         phone: phone.trim(),
         isPrimary: primaryAddress,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      
+      dataStore.updateAddress(existingAddress.id, updatedAddressData);
+      
+      // ✅ Create/update staff if manager info provided
+      if (manager.trim() && phone.trim()) {
+        const updatedAddress = dataStore.getAddressById(existingAddress.id);
+        if (updatedAddress) {
+          dataStore.createStaffFromAddress(updatedAddress).then(async (staffId) => {
+            if (staffId && updatedAddress.backendId) {
+              const staffData = dataStore.getStaffById(staffId);
+              if (staffData && !staffData.employeeId) {
+                try {
+                  await createStaff({
+                    name: staffData.name,
+                    mobile: staffData.mobile,
+                    role: staffData.role,
+                    locationId: updatedAddress.backendId,
+                    locationType: staffData.locationType,
+                    locationName: staffData.locationName,
+                  });
+                  console.log('✅ Staff created from address update');
+                } catch (error) {
+                  console.error('Error creating staff from address update:', error);
+                }
+              }
+            }
+          }).catch(error => {
+            console.error('Error creating staff from address:', error);
+          });
+        }
+      }
       
       // If setting as primary, update the dataStore
       if (primaryAddress) {
@@ -283,6 +315,32 @@ export default function AddAddress() {
       };
       
       dataStore.addAddress(newAddress);
+      
+      // ✅ Create staff if manager info provided
+      if (manager.trim() && phone.trim()) {
+        dataStore.createStaffFromAddress(newAddress).then(async (staffId) => {
+          if (staffId) {
+            const staffData = dataStore.getStaffById(staffId);
+            if (staffData) {
+              try {
+                await createStaff({
+                  name: staffData.name,
+                  mobile: staffData.mobile,
+                  role: staffData.role,
+                  locationId: newAddress.backendId || newAddress.id,
+                  locationType: staffData.locationType,
+                  locationName: staffData.locationName,
+                });
+                console.log('✅ Staff created from new address');
+              } catch (error) {
+                console.error('Error creating staff from new address:', error);
+              }
+            }
+          }
+        }).catch(error => {
+          console.error('Error creating staff from address:', error);
+        });
+      }
       
       // If setting as primary, update the dataStore
       if (primaryAddress) {

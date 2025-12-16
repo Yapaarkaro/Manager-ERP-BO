@@ -48,9 +48,10 @@ const WebMapView: React.FC<WebMapViewProps> = ({
       const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]');
       existingScripts.forEach(script => script.remove());
       
-      // Create and load the script with async loading
+      // Create and load the script with async loading and loading=async parameter
+      // This prevents the deprecation warning about loading the API directly
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&v=3.54`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&v=3.54&loading=async`;
       script.async = true;
       script.defer = true;
       

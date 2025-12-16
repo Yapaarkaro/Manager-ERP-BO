@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lucide-react-native';
-import { dataStore, BusinessAddress } from '../../utils/dataStore';
+import { dataStore, BusinessAddress, getGSTINStateCode } from '../../utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -210,7 +210,7 @@ export default function BranchesScreen() {
         city: addr.city || '',
         pincode: addr.pincode || '',
         stateName: addr.state || '',
-        stateCode: '',
+        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
         isPrimary: addr.is_primary || false,
         createdAt: addr.created_at || new Date().toISOString(),
         manager: addr.manager_name || '',
@@ -240,10 +240,22 @@ export default function BranchesScreen() {
     }
   }, [businessData]);
 
-  // ✅ Reload branches when screen comes into focus
+  // ✅ Only refetch when screen comes into focus if cache is stale
   useFocusEffect(
     React.useCallback(() => {
-      refetch(); // Refresh cached data
+      // Check if cache is stale (older than 10 seconds) before refetching
+      const { __getGlobalCache } = require('@/hooks/useBusinessData');
+      const cache = __getGlobalCache();
+      const now = Date.now();
+      const CACHE_DURATION = 10000; // 10 seconds
+      
+      // Only refetch if cache is stale or missing
+      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
+        console.log('🔄 Branches: Cache stale, refetching business data');
+        refetch();
+      } else {
+        console.log('✅ Branches: Using cached data (no refetch needed)');
+      }
     }, [refetch])
   );
 
@@ -290,10 +302,11 @@ export default function BranchesScreen() {
 
   const handleEditBranch = (branch: Branch) => {
     router.push({
-      pathname: '/locations/edit-branch',
+      pathname: '/locations/branch-details',
       params: {
         branchId: branch.id,
-        branchData: JSON.stringify(branch)
+        editMode: 'true',
+        editBranch: JSON.stringify(branch)
       }
     });
   };
@@ -390,10 +403,16 @@ export default function BranchesScreen() {
         {(branch.manager || branch.phone) && (
           <View style={styles.contactSection}>
             {branch.manager && (
-              <Text style={styles.managerText}>Manager: {branch.manager}</Text>
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>Manager:</Text>
+                <Text style={styles.managerText}>{branch.manager}</Text>
+              </View>
             )}
             {branch.phone && (
-              <Text style={styles.phoneText}>Phone: {branch.phone}</Text>
+              <View style={styles.contactRow}>
+                <Text style={styles.contactLabel}>Phone:</Text>
+                <Text style={styles.phoneText}>{branch.phone}</Text>
+              </View>
             )}
           </View>
         )}
@@ -455,7 +474,7 @@ export default function BranchesScreen() {
                     web: {
                       outlineWidth: 0,
                       outlineColor: 'transparent',
-                      outlineStyle: 'none',
+                      outlineStyle: 'none' as any,
                     },
                   }),
                 ]}
@@ -598,7 +617,7 @@ export default function BranchesScreen() {
                       </View>
 
                       {/* Customer Overdue Details */}
-                      {selectedBranch.overdueReceivables > 0 && (
+                      {(selectedBranch.overdueReceivables || 0) > 0 && (
                         <View style={styles.overviewSection}>
                           <Text style={styles.overviewSectionTitle}>Overdue Customers</Text>
                           <View style={styles.overdueItem}>
@@ -617,7 +636,7 @@ export default function BranchesScreen() {
                       )}
 
                       {/* Supplier Overdue Details */}
-                      {selectedBranch.overduePayables > 0 && (
+                      {(selectedBranch.overduePayables || 0) > 0 && (
                         <View style={styles.overviewSection}>
                           <Text style={styles.overviewSectionTitle}>Overdue Suppliers</Text>
                           <View style={styles.overdueItem}>
@@ -989,16 +1008,30 @@ const styles = StyleSheet.create({
   },
   contactSection: {
     marginBottom: 12,
+    gap: 6,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontWeight: '500',
+    minWidth: 70,
   },
   managerText: {
     fontSize: 14,
-    color: Colors.text,
-    fontWeight: '500',
-    marginBottom: 4,
+    color: '#3F66AC', // Brand blue for manager name
+    fontWeight: '600',
+    flex: 1,
   },
   phoneText: {
     fontSize: 14,
-    color: Colors.textLight,
+    color: '#059669', // Success green for phone number
+    fontWeight: '600',
+    flex: 1,
   },
   gstSection: {
     flexDirection: 'row',

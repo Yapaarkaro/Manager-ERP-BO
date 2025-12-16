@@ -59,7 +59,8 @@ export const parseGooglePlace = (place: google.maps.places.PlaceResult) => {
 };
 
 /**
- * Load Google Maps API script with async loading
+ * Load Google Maps API script with async loading and loading=async parameter
+ * This prevents the deprecation warning about loading the API directly
  */
 export const loadGoogleMapsScript = (apiKey: string): Promise<void> => {
   return new Promise((resolve, reject) => {
@@ -73,9 +74,10 @@ export const loadGoogleMapsScript = (apiKey: string): Promise<void> => {
     const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]');
     existingScripts.forEach(script => script.remove());
 
-    // Create script with async loading
+    // Create script with async loading and loading=async parameter
+    // This is the recommended way to load Google Maps API to avoid deprecation warnings
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=3.54`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=3.54&loading=async`;
     script.async = true;
     script.defer = true;
 
@@ -148,4 +150,5 @@ export const createMarker = (
     animation: google.maps.Animation.DROP,
   });
 };
+
 

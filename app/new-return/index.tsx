@@ -246,6 +246,8 @@ export default function NewReturnScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleInvoiceSelect = (invoice: Invoice) => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('process return')) return;
     router.push({
       pathname: '/new-return/select-items',
       params: {
@@ -255,6 +257,8 @@ export default function NewReturnScreen() {
   };
 
   const handleScanInvoice = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('scan invoice for return')) return;
     router.push('/new-return/scan-invoice');
   };
 

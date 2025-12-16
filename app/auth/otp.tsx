@@ -168,19 +168,21 @@ export default function OTPScreen() {
         console.log('👤 User ID:', verifyData.session.user.id);
         console.log('🔑 Access Token:', verifyData.session.access_token.substring(0, 20) + '...');
 
-        // ✅ Save signup progress first (await to ensure it's saved)
-        try {
-          const { saveSignupProgress } = await import('@/services/backendApi');
-          await saveSignupProgress({
-            mobile: mobileNumber,
-            mobileVerified: true,
-            currentStep: 'mobileOtp',
-          });
-          console.log('✅ Signup progress saved: mobileOtp');
-        } catch (error) {
-          console.error('Error saving signup progress:', error);
-          // Continue even if progress save fails
-        }
+        // ✅ Save signup progress in background (non-blocking to speed up verification)
+        (async () => {
+          try {
+            const { saveSignupProgress } = await import('@/services/backendApi');
+            await saveSignupProgress({
+              mobile: mobileNumber,
+              mobileVerified: true,
+              currentStep: 'mobileOtp',
+            });
+            console.log('✅ Signup progress saved: mobileOtp');
+          } catch (error) {
+            console.error('Error saving signup progress:', error);
+            // Continue even if progress save fails
+          }
+        })().catch(err => console.error('Error saving signup progress:', err));
 
         // ✅ Save device snapshot in background (non-blocking)
         (async () => {
@@ -231,9 +233,9 @@ export default function OTPScreen() {
           }
         })().catch(err => console.error('Error in device snapshot save:', err));
 
-        // Step 3: Proceed with verification check (after progress is saved)
-        handleSuccessfulVerification(mobileNumber);
+        // Step 3: Proceed with verification check immediately (don't wait for background saves)
         setIsVerifying(false);
+        handleSuccessfulVerification(mobileNumber);
       }).catch((error: any) => {
         console.error('Error in OTP verification:', error);
         setOtp(['', '', '', '', '', '']);

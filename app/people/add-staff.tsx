@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { 
   ArrowLeft, 
   User, 
@@ -30,6 +30,10 @@ import {
   Check,
   MessageSquare
 } from 'lucide-react-native';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { dataStore, Staff as DataStoreStaff } from '@/utils/dataStore';
+import { createStaff, updateStaff } from '@/services/backendApi';
+import { getInputFocusStyles } from '@/utils/platformUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -102,11 +106,33 @@ interface StaffFormData {
 }
 
 export default function AddStaffScreen() {
+  const params = useLocalSearchParams();
+  const editMode = params.staffId ? true : false;
+  const prefillName = params.prefillName as string;
+  const prefillMobile = params.prefillMobile as string;
+  const prefillRole = params.prefillRole as string;
+  const prefillLocationId = params.locationId as string;
+  const prefillLocationType = params.locationType as 'branch' | 'warehouse' | 'primary';
+  const prefillLocationName = params.locationName as string;
+
+  // ✅ Use unified business data hook to get locations
+  const { data: businessData } = useBusinessData();
+  
+  // Get all locations for location dropdown (only if user has multiple locations)
+  const allLocations = businessData?.addresses || [];
+  const hasMultipleLocations = allLocations.length > 1;
+  const locationsForDropdown = allLocations.map((addr: any) => ({
+    id: addr.id,
+    name: addr.name,
+    type: addr.type,
+    displayName: `${addr.type === 'branch' ? 'Branch' : addr.type === 'warehouse' ? 'Warehouse' : 'Primary'}: ${addr.name}`
+  }));
+
   const [formData, setFormData] = useState<StaffFormData>({
-    name: '',
-    mobile: '',
+    name: prefillName || '',
+    mobile: prefillMobile || '',
     email: '',
-    role: '',
+    role: prefillRole || '',
     customRole: '',
     department: '',
     customDepartment: '',
@@ -121,6 +147,10 @@ export default function AddStaffScreen() {
     monthlyInvoiceTarget: '',
   });
 
+  const [selectedLocation, setSelectedLocation] = useState<string>(prefillLocationId || '');
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [locationSearch, setLocationSearch] = useState('');
+
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
@@ -130,9 +160,13 @@ export default function AddStaffScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generatedEmployeeId, setGeneratedEmployeeId] = useState('');
   const [generatedOtp, setGeneratedOtp] = useState('');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const roleSearchRef = useRef<TextInput>(null);
   const departmentSearchRef = useRef<TextInput>(null);
+  
+  // Get input focus styles
+  const inputFocusStyles = getInputFocusStyles();
 
   const updateFormData = (field: keyof StaffFormData, value: string | string[]) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -228,11 +262,82 @@ export default function AddStaffScreen() {
     setGeneratedEmployeeId(employeeId);
     setGeneratedOtp(otp);
 
-    // Simulate API call
-    setTimeout(() => {
+    // Create staff object
+    const staffData: DataStoreStaff = {
+      id: editMode && params.staffId ? params.staffId as string : `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: formData.name.trim(),
+      mobile: formData.mobile,
+      email: formData.email.trim(),
+      role: formData.role === 'Others' ? formData.customRole.trim() : formData.role,
+      department: formData.department === 'Others' ? formData.customDepartment.trim() : formData.department,
+      address: formData.address.trim(),
+      employeeId: employeeId,
+      locationId: selectedLocation || undefined,
+      locationType: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.type : undefined,
+      locationName: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.name : undefined,
+      status: 'active',
+      basicSalary: formData.basicSalary ? parseFloat(formData.basicSalary) : undefined,
+      allowances: formData.allowances ? parseFloat(formData.allowances) : undefined,
+      emergencyContactName: formData.emergencyContactName.trim(),
+      emergencyContactRelation: formData.emergencyContactRelation.trim() || undefined,
+      emergencyContactPhone: formData.emergencyContactPhone,
+      permissions: formData.permissions,
+      monthlySalesTarget: formData.monthlySalesTarget ? parseFloat(formData.monthlySalesTarget) : undefined,
+      monthlyInvoiceTarget: formData.monthlyInvoiceTarget ? parseFloat(formData.monthlyInvoiceTarget) : undefined,
+      isIncomplete: false, // Mark as complete since all details are filled
+      createdAt: editMode && params.staffId ? dataStore.getStaffById(params.staffId as string)?.createdAt || new Date().toISOString() : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Save to backend
+    try {
+      if (editMode && params.staffId) {
+        const updateResult = await updateStaff({
+          staffId: params.staffId as string,
+          ...staffData,
+        });
+        
+        if (!updateResult.success) {
+          Alert.alert('Error', updateResult.error || 'Failed to update staff');
+          setIsSubmitting(false);
+          return;
+        }
+        
+        // Also update local dataStore
+        dataStore.updateStaff(params.staffId as string, staffData);
+      } else {
+        const createResult = await createStaff(staffData);
+        
+        if (!createResult.success) {
+          Alert.alert('Error', createResult.error || 'Failed to create staff');
+          setIsSubmitting(false);
+          return;
+        }
+        
+        // Also add to local dataStore
+        if (createResult.staff) {
+          const createdStaff: DataStoreStaff = {
+            ...staffData,
+            id: createResult.staff.id || createResult.staff.staff_id || staffData.id,
+            createdAt: createResult.staff.created_at || staffData.createdAt,
+            updatedAt: createResult.staff.updated_at || staffData.updatedAt,
+          };
+          dataStore.addStaff(createdStaff);
+        } else {
+          dataStore.addStaff(staffData);
+        }
+      }
+      
+      // Generate OTP for display
+      setGeneratedEmployeeId(employeeId);
+      setGeneratedOtp(otp);
       setIsSubmitting(false);
       setShowOtpModal(true);
-    }, 2000);
+    } catch (error: any) {
+      console.error('Error saving staff:', error);
+      Alert.alert('Error', error.message || 'Failed to save staff');
+      setIsSubmitting(false);
+    }
   };
 
   const handleOtpConfirm = () => {
@@ -272,6 +377,46 @@ export default function AddStaffScreen() {
     dept.toLowerCase().includes(departmentSearch.toLowerCase())
   );
 
+  const filteredLocations = locationsForDropdown.filter(loc =>
+    loc.displayName.toLowerCase().includes(locationSearch.toLowerCase())
+  );
+
+  const handleLocationSelect = (locationId: string) => {
+    setSelectedLocation(locationId);
+    setLocationSearch('');
+    setShowLocationModal(false);
+  };
+
+  // Load existing staff data if editing
+  useEffect(() => {
+    if (editMode && params.staffId) {
+      const existingStaff = dataStore.getStaffById(params.staffId as string);
+      if (existingStaff) {
+        setFormData({
+          name: existingStaff.name,
+          mobile: existingStaff.mobile,
+          email: existingStaff.email || '',
+          role: existingStaff.role,
+          customRole: '',
+          department: existingStaff.department || '',
+          customDepartment: '',
+          address: existingStaff.address || '',
+          basicSalary: existingStaff.basicSalary?.toString() || '',
+          allowances: existingStaff.allowances?.toString() || '',
+          emergencyContactName: existingStaff.emergencyContactName || '',
+          emergencyContactRelation: existingStaff.emergencyContactRelation || '',
+          emergencyContactPhone: existingStaff.emergencyContactPhone || '',
+          permissions: existingStaff.permissions || [],
+          monthlySalesTarget: existingStaff.monthlySalesTarget?.toString() || '',
+          monthlyInvoiceTarget: existingStaff.monthlyInvoiceTarget?.toString() || '',
+        });
+        if (existingStaff.locationId) {
+          setSelectedLocation(existingStaff.locationId);
+        }
+      }
+    }
+  }, [editMode, params.staffId]);
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -303,57 +448,99 @@ export default function AddStaffScreen() {
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Full Name *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'name' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'name' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <User size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.name}
                   onChangeText={(text) => updateFormData('name', text)}
                   placeholder="Enter full name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
+                  onFocus={() => setFocusedField('name')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Mobile Number *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'mobile' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'mobile' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <Phone size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.mobile}
                   onChangeText={handleMobileChange}
                   placeholder="Enter 10-digit mobile number"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="numeric"
                   maxLength={10}
+                  onFocus={() => setFocusedField('mobile')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'email' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'email' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <Mail size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.email}
                   onChangeText={(text) => updateFormData('email', text.toLowerCase())}
                   placeholder="Enter email address"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  onFocus={() => setFocusedField('email')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Address *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'address' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'address' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={[styles.input, styles.addressInput]}
+                  style={[Platform.OS === 'web' ? inputFocusStyles.input : styles.input, styles.addressInput]}
                   value={formData.address}
                   onChangeText={(text) => updateFormData('address', text)}
                   placeholder="Enter complete address"
@@ -361,6 +548,8 @@ export default function AddStaffScreen() {
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
+                  onFocus={() => setFocusedField('address')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
@@ -370,18 +559,42 @@ export default function AddStaffScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Job Information</Text>
             
+            {/* Location Selection - Only show if user has multiple locations */}
+            {hasMultipleLocations && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Location</Text>
+                <TouchableOpacity
+                  style={styles.dropdown}
+                  onPress={() => setShowLocationModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.dropdownText,
+                    !selectedLocation && styles.placeholderText
+                  ]}>
+                    {selectedLocation 
+                      ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.displayName || 'Select location'
+                      : 'Select location (optional)'}
+                  </Text>
+                  <ChevronDown size={20} color={Colors.textLight} />
+                </TouchableOpacity>
+              </View>
+            )}
+            
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Role *</Text>
               {formData.role === 'Others' ? (
                 <View style={styles.customInputContainer}>
                   <View style={styles.inputContainer}>
                     <TextInput
-                      style={styles.input}
+                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.customRole}
                       onChangeText={(text) => updateFormData('customRole', text)}
                       placeholder="Enter custom role"
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
+                      onFocus={() => setFocusedField('customRole')}
+                      onBlur={() => setFocusedField(null)}
                     />
                   </View>
                   <TouchableOpacity
@@ -413,14 +626,25 @@ export default function AddStaffScreen() {
               <Text style={styles.label}>Department *</Text>
               {formData.department === 'Others' ? (
                 <View style={styles.customInputContainer}>
-                  <View style={styles.inputContainer}>
+                  <View style={Platform.select({
+                    web: [
+                      inputFocusStyles.inputContainer,
+                      focusedField === 'customDepartment' && inputFocusStyles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                    default: [
+                      styles.inputContainer,
+                      focusedField === 'customDepartment' && styles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                  }) as any}>
                     <TextInput
-                      style={styles.input}
+                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.customDepartment}
                       onChangeText={(text) => updateFormData('customDepartment', text)}
                       placeholder="Enter custom department"
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
+                      onFocus={() => setFocusedField('customDepartment')}
+                      onBlur={() => setFocusedField(null)}
                     />
                   </View>
                   <TouchableOpacity
@@ -490,30 +714,52 @@ export default function AddStaffScreen() {
             <View style={styles.rowContainer}>
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Basic Salary *</Text>
-                <View style={styles.inputContainer}>
+                <View style={Platform.select({
+                  web: [
+                    inputFocusStyles.inputContainer,
+                    focusedField === 'basicSalary' && inputFocusStyles.inputContainerFocused,
+                  ].filter(Boolean) as any,
+                  default: [
+                    styles.inputContainer,
+                    focusedField === 'basicSalary' && styles.inputContainerFocused,
+                  ].filter(Boolean) as any,
+                }) as any}>
                   <Text style={styles.currencySymbol}>₹</Text>
                   <TextInput
-                    style={styles.input}
+                    style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                     value={formData.basicSalary}
                     onChangeText={(text) => handleSalaryChange('basicSalary', text)}
                     placeholder="0"
                     placeholderTextColor={Colors.textLight}
                     keyboardType="numeric"
+                    onFocus={() => setFocusedField('basicSalary')}
+                    onBlur={() => setFocusedField(null)}
                   />
                 </View>
               </View>
 
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Allowances</Text>
-                <View style={styles.inputContainer}>
+                <View style={Platform.select({
+                  web: [
+                    inputFocusStyles.inputContainer,
+                    focusedField === 'allowances' && inputFocusStyles.inputContainerFocused,
+                  ].filter(Boolean) as any,
+                  default: [
+                    styles.inputContainer,
+                    focusedField === 'allowances' && styles.inputContainerFocused,
+                  ].filter(Boolean) as any,
+                }) as any}>
                   <Text style={styles.currencySymbol}>₹</Text>
                   <TextInput
-                    style={styles.input}
+                    style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                     value={formData.allowances}
                     onChangeText={(text) => handleSalaryChange('allowances', text)}
                     placeholder="0"
                     placeholderTextColor={Colors.textLight}
                     keyboardType="numeric"
+                    onFocus={() => setFocusedField('allowances')}
+                    onBlur={() => setFocusedField(null)}
                   />
                 </View>
               </View>
@@ -537,29 +783,53 @@ export default function AddStaffScreen() {
               <View style={styles.rowContainer}>
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Sales Target</Text>
-                  <View style={styles.inputContainer}>
+                  <View style={Platform.select({
+                    web: [
+                      inputFocusStyles.inputContainer,
+                      focusedField === 'monthlySalesTarget' && inputFocusStyles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                    default: [
+                      styles.inputContainer,
+                      focusedField === 'monthlySalesTarget' && styles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                  }) as any}>
                     <Text style={styles.currencySymbol}>₹</Text>
                     <TextInput
-                      style={styles.input}
+                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.monthlySalesTarget}
                       onChangeText={(text) => handleTargetChange('monthlySalesTarget', text)}
                       placeholder="0"
                       placeholderTextColor={Colors.textLight}
                       keyboardType="numeric"
+                      onFocus={() => setFocusedField('monthlySalesTarget')}
+                      onBlur={() => setFocusedField(null)}
                     />
                   </View>
                 </View>
 
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Invoice Target</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={formData.monthlyInvoiceTarget}
-                    onChangeText={(text) => handleTargetChange('monthlyInvoiceTarget', text)}
-                    placeholder="0"
-                    placeholderTextColor={Colors.textLight}
-                    keyboardType="numeric"
-                  />
+                  <View style={Platform.select({
+                    web: [
+                      inputFocusStyles.inputContainer,
+                      focusedField === 'monthlyInvoiceTarget' && inputFocusStyles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                    default: [
+                      styles.inputContainer,
+                      focusedField === 'monthlyInvoiceTarget' && styles.inputContainerFocused,
+                    ].filter(Boolean) as any,
+                  }) as any}>
+                    <TextInput
+                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
+                      value={formData.monthlyInvoiceTarget}
+                      onChangeText={(text) => handleTargetChange('monthlyInvoiceTarget', text)}
+                      placeholder="0"
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType="numeric"
+                      onFocus={() => setFocusedField('monthlyInvoiceTarget')}
+                      onBlur={() => setFocusedField(null)}
+                    />
+                  </View>
                 </View>
               </View>
             </View>
@@ -571,43 +841,79 @@ export default function AddStaffScreen() {
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Contact Name *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'emergencyContactName' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'emergencyContactName' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <User size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.emergencyContactName}
                   onChangeText={(text) => updateFormData('emergencyContactName', text)}
                   placeholder="Enter emergency contact name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
+                  onFocus={() => setFocusedField('emergencyContactName')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Relation</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.emergencyContactRelation}
-                onChangeText={(text) => updateFormData('emergencyContactRelation', text)}
-                placeholder="e.g., Spouse, Father, Mother"
-                placeholderTextColor={Colors.textLight}
-                autoCapitalize="words"
-              />
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'emergencyContactRelation' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'emergencyContactRelation' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
+                <User size={20} color={Colors.textLight} style={styles.inputIcon} />
+                <TextInput
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
+                  value={formData.emergencyContactRelation}
+                  onChangeText={(text) => updateFormData('emergencyContactRelation', text)}
+                  placeholder="e.g., Spouse, Father, Mother"
+                  placeholderTextColor={Colors.textLight}
+                  autoCapitalize="words"
+                  onFocus={() => setFocusedField('emergencyContactRelation')}
+                  onBlur={() => setFocusedField(null)}
+                />
+              </View>
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Contact Phone *</Text>
-              <View style={styles.inputContainer}>
+              <View style={Platform.select({
+                web: [
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'emergencyContactPhone' && inputFocusStyles.inputContainerFocused,
+                ].filter(Boolean) as any,
+                default: [
+                  styles.inputContainer,
+                  focusedField === 'emergencyContactPhone' && styles.inputContainerFocused,
+                ].filter(Boolean) as any,
+              }) as any}>
                 <Phone size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.emergencyContactPhone}
                   onChangeText={handleEmergencyPhoneChange}
                   placeholder="Enter 10-digit phone number"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="numeric"
                   maxLength={10}
+                  onFocus={() => setFocusedField('emergencyContactPhone')}
+                  onBlur={() => setFocusedField(null)}
                 />
               </View>
             </View>
@@ -801,6 +1107,89 @@ export default function AddStaffScreen() {
           </View>
         </Modal>
 
+        {/* Location Selection Modal */}
+        {hasMultipleLocations && (
+          <Modal
+            visible={showLocationModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setShowLocationModal(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Select Location</Text>
+                  <TouchableOpacity
+                    style={styles.modalCloseButton}
+                    onPress={() => setShowLocationModal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={24} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.searchContainer}>
+                  <Search size={18} color={Colors.textLight} />
+                  <TextInput
+                    style={styles.searchInput}
+                    value={locationSearch}
+                    onChangeText={setLocationSearch}
+                    placeholder="Search locations..."
+                    placeholderTextColor={Colors.textLight}
+                    onFocus={(e) => {
+                      if (Platform.OS === 'web') {
+                        e.target.style.outline = 'none';
+                      }
+                    }}
+                  />
+                </View>
+                
+                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalOption,
+                      !selectedLocation && styles.selectedOption
+                    ]}
+                    onPress={() => handleLocationSelect('')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.modalOptionText,
+                      !selectedLocation && styles.selectedOptionText
+                    ]}>
+                      No Location (Optional)
+                    </Text>
+                    {!selectedLocation && (
+                      <Check size={20} color={Colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                  {filteredLocations.map((location) => (
+                    <TouchableOpacity
+                      key={location.id}
+                      style={[
+                        styles.modalOption,
+                        selectedLocation === location.id && styles.selectedOption
+                      ]}
+                      onPress={() => handleLocationSelect(location.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.modalOptionText,
+                        selectedLocation === location.id && styles.selectedOptionText
+                      ]}>
+                        {location.displayName}
+                      </Text>
+                      {selectedLocation === location.id && (
+                        <Check size={20} color={Colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+        )}
+
         {/* OTP Confirmation Modal */}
         <Modal
           visible={showOtpModal}
@@ -934,23 +1323,41 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: Colors.grey[50],
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: Colors.grey[200],
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 4,
+    ...Platform.select({
+      default: {
+        minHeight: 50,
+      },
+    }),
   },
   inputIcon: {
     marginRight: 12,
-    marginTop: 2,
+    alignSelf: 'center',
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    
+    paddingVertical: Platform.select({
+      web: 14,
+      default: 14,
+    }),
+    ...Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+        outlineStyle: 'none' as any,
+      },
+      default: {
+        minHeight: 50,
+      },
+    }),
   },
   addressInput: {
     minHeight: 80,

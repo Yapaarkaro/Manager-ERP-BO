@@ -34,14 +34,20 @@ const Colors = {
 
 export default function StockManagementScreen() {
   const handleStockIn = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('stock in')) return;
     router.push('/inventory/stock-in');
   };
 
   const handleStockOut = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('stock out')) return;
     router.push('/inventory/stock-out');
   };
 
   const handleNewSale = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create new sale')) return;
     router.push('/new-sale');
   };
 

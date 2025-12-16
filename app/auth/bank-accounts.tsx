@@ -15,7 +15,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { dataStore } from '@/utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
@@ -63,7 +62,6 @@ export default function BankAccountsScreen() {
   const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation();
 
   useEffect(() => {
     // Load bank accounts from dataStore first (for returning users), then fallback to params
@@ -312,9 +310,9 @@ export default function BankAccountsScreen() {
     const latestAddresses = dataStore.getAddresses();
     const latestBankAccounts = dataStore.getBankAccounts();
 
-    // Navigate to final setup screen
+    // Navigate to final setup screen immediately (no delay)
     // Use replace to prevent going back to bank accounts list after continuing
-    debouncedNavigate({
+    router.replace({
       pathname: '/auth/final-setup',
       params: {
         type,
@@ -333,12 +331,10 @@ export default function BankAccountsScreen() {
         startingInvoiceNumber,
         fiscalYear,
       }
-    }, 'replace');
+    });
     
-    // Reset navigation flag after a delay
-    setTimeout(() => {
-      setIsNavigating(false);
-    }, 1000);
+    // Reset navigation flag immediately
+    setIsNavigating(false);
   };
 
   const renderBankAccountCard = (account: BankAccount) => {
@@ -670,7 +666,7 @@ export default function BankAccountsScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.continueButtonText}>
-                {isNavigating ? 'Loading...' : 'Continue'}
+                {isNavigating ? 'Please wait...' : 'Continue'}
               </Text>
               <ArrowRight size={20} color="#3f66ac" />
             </TouchableOpacity>

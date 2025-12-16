@@ -22,10 +22,11 @@ import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
 import { extractAddressComponents } from '@/services/googleMapsApi';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { createAddress, updateAddress } from '@/services/backendApi';
+import { BusinessAddress } from '@/utils/dataStore';
+import { getPlatformShadow } from '@/utils/shadowUtils';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -127,10 +128,12 @@ export default function BusinessAddressManualScreen() {
   const inputPositionsRef = useRef<{ [key: string]: number }>({});
   const saveButtonRef = useRef<View | null>(null);
   const keyboardHeightRef = useRef<number>(0);
+  const prefilledInitializedRef = useRef(false);
+  const contactInitializedRef = useRef(false);
+  const editAddressLoadedRef = useRef(false);
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
   const scrollCheckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation();
 
   const typeInfo = React.useMemo(() => {
     // Dynamic header based on address type and edit mode
@@ -251,8 +254,10 @@ export default function BusinessAddressManualScreen() {
     }).start();
   }, [businessName, prefilledState, addressType]);
 
-  // Handle prefilled address data
+  // Handle prefilled address data - only run once on mount to prevent cursor jumping
   useEffect(() => {
+    if (prefilledInitializedRef.current) return; // Already initialized
+    
     console.log('🏠 useEffect - Prefilled values check:');
     console.log('  - prefilledStreet:', prefilledStreet, typeof prefilledStreet);
     console.log('  - prefilledArea:', prefilledArea, typeof prefilledArea);
@@ -300,12 +305,16 @@ export default function BusinessAddressManualScreen() {
       console.log('🏠 Setting prefilled pincode:', prefilledPincode);
       setPincode(prefilledPincode as string);
     }
-  }, [prefilledStreet, prefilledArea, prefilledCity, prefilledPincode]);
+    
+    prefilledInitializedRef.current = true; // Mark as initialized
+  }, []); // Empty dependency array - only run once on mount
 
   useEffect(() => {
     if ((addressType || 'primary') !== 'primary') {
       return;
     }
+    
+    if (contactInitializedRef.current) return; // Already initialized
 
     const nextContactName = (prefilledContactName as string) || (name as string) || '';
     if (nextContactName && !contactPersonName) {
@@ -318,18 +327,63 @@ export default function BusinessAddressManualScreen() {
     if (nextContactPhone && !contactPhone) {
       setContactPhone(nextContactPhone);
     }
-  }, [prefilledContactName, prefilledContactPhone, name, mobile, addressType, contactPersonName, contactPhone]);
+    
+    contactInitializedRef.current = true; // Mark as initialized
+  }, []); // Empty dependency array - only run once on mount
 
   useEffect(() => {
-    if ((addressType || 'primary') !== 'primary' || editMode !== 'true' || !editAddressId) {
+    if (editMode !== 'true' || !editAddressId || editAddressLoadedRef.current) {
       return;
     }
 
     try {
       const existingAddressesParam = existingAddresses as string;
       if (!existingAddressesParam || existingAddressesParam === '[]') {
+        // Try loading from dataStore as fallback
+        const addressFromStore = dataStore.getAddressById(editAddressId as string);
+        if (addressFromStore) {
+          // Load address data including additional lines
+          setAddressName(addressFromStore.name || '');
+          setAddressLine1(addressFromStore.addressLine1 || '');
+          setAddressLine2(addressFromStore.addressLine2 || '');
+          setCity(addressFromStore.city || '');
+          setPincode(addressFromStore.pincode || '');
+          
+          // Load additional lines: doorNumber is first, then additionalLines array
+          const loadedAdditionalLines: string[] = [];
+          if (addressFromStore.doorNumber) {
+            loadedAdditionalLines.push(addressFromStore.doorNumber);
+          }
+          if (addressFromStore.additionalLines && Array.isArray(addressFromStore.additionalLines)) {
+            loadedAdditionalLines.push(...addressFromStore.additionalLines);
+          }
+          setAdditionalLines(loadedAdditionalLines);
+          
+          // Load state
+          if (addressFromStore.stateCode) {
+            const matchingState = indianStates.find(state => state.code === addressFromStore.stateCode);
+            if (matchingState) {
+              setSelectedState(matchingState);
+            }
+          }
+          
+          // Load contact info for primary addresses
+          if ((addressType || 'primary') === 'primary') {
+            if (addressFromStore.manager) {
+              setContactPersonName(addressFromStore.manager);
+            }
+            if (addressFromStore.phone) {
+              const sanitizedPhone = String(addressFromStore.phone).replace(/\D/g, '').slice(0, 10);
+              setContactPhone(sanitizedPhone);
+            }
+          }
+          
+          editAddressLoadedRef.current = true;
+          return;
+        }
         return;
       }
+      
       const parsed = JSON.parse(existingAddressesParam);
       if (!Array.isArray(parsed)) {
         return;
@@ -337,30 +391,62 @@ export default function BusinessAddressManualScreen() {
 
       const currentAddress = parsed.find((addr: any) => addr.id === editAddressId);
       if (currentAddress) {
-        if (currentAddress.manager) {
-          setContactPersonName(currentAddress.manager);
+        // Load address data including additional lines
+        setAddressName(currentAddress.name || '');
+        setAddressLine1(currentAddress.addressLine1 || '');
+        setAddressLine2(currentAddress.addressLine2 || '');
+        setCity(currentAddress.city || '');
+        setPincode(currentAddress.pincode || '');
+        
+        // Load additional lines: doorNumber is first, then additionalLines array
+        const loadedAdditionalLines: string[] = [];
+        if (currentAddress.doorNumber) {
+          loadedAdditionalLines.push(currentAddress.doorNumber);
         }
-        if (currentAddress.phone) {
-          const sanitizedPhone = String(currentAddress.phone).replace(/\D/g, '').slice(0, 10);
-          setContactPhone(sanitizedPhone);
+        if (currentAddress.additionalLines && Array.isArray(currentAddress.additionalLines)) {
+          loadedAdditionalLines.push(...currentAddress.additionalLines);
         }
+        setAdditionalLines(loadedAdditionalLines);
+        
+        // Load state
+        if (currentAddress.stateCode) {
+          const matchingState = indianStates.find(state => state.code === currentAddress.stateCode);
+          if (matchingState) {
+            setSelectedState(matchingState);
+          }
+        }
+        
+        // Load contact info for primary addresses
+        if ((addressType || 'primary') === 'primary') {
+          if (currentAddress.manager) {
+            setContactPersonName(currentAddress.manager);
+          }
+          if (currentAddress.phone) {
+            const sanitizedPhone = String(currentAddress.phone).replace(/\D/g, '').slice(0, 10);
+            setContactPhone(sanitizedPhone);
+          }
+        }
+        
+        editAddressLoadedRef.current = true;
       }
     } catch (error) {
-      console.log('⚠️ Error parsing existing addresses for contact info:', error);
+      console.log('⚠️ Error parsing existing addresses:', error);
     }
-  }, [addressType, editMode, editAddressId, existingAddresses]);
+  }, []); // Empty dependency array - only run once on mount
 
   // Track which input is currently focused
   const [focusedInputKey, setFocusedInputKey] = useState<string | null>(null);
 
   // Continuous checking to keep focused input above keyboard while typing
+  // Reduced frequency to prevent cursor jumping
   useEffect(() => {
     if (Platform.OS === 'web' || !focusedInputKey || keyboardHeight === 0) return;
 
-    // Check every 300ms while input is focused and keyboard is visible
+    // Check every 500ms (increased from 300ms) while input is focused and keyboard is visible
+    // This reduces interference with cursor position
     const interval = setInterval(() => {
       checkAndScrollToFocusedInput();
-    }, 300);
+    }, 500);
 
     return () => clearInterval(interval);
   }, [focusedInputKey, keyboardHeight]);
@@ -771,10 +857,12 @@ export default function BusinessAddressManualScreen() {
       const addressTypeValue = (Array.isArray(addressType) ? addressType[0] : addressType) || 'primary';
       
       // Prepare address JSON for backend
+      // Include all additional lines (not just the first one as doorNumber)
       const addressJson = {
         doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
+        additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // All lines after the first
         city: city.trim(),
         pincode: pincode,
         stateName: selectedState?.name || '',
@@ -788,33 +876,39 @@ export default function BusinessAddressManualScreen() {
       let backendAddress: any = null;
       
       if (editMode === 'true' && editAddressId) {
-        // Update existing address in backend (non-blocking)
+        // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
         const existingAddress = existingAddressList.find((addr: any) => addr.id === editAddressId);
-        if (existingAddress?.backendId) {
-          updateAddress({
-            addressId: existingAddress.backendId,
+        if (existingAddress) {
+          const { optimisticUpdateAddress } = await import('@/utils/optimisticSync');
+          const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+          
+          // Prepare address updates with all fields including additionalLines
+          const addressUpdates: Partial<BusinessAddress> = {
             name: addressName.trim(),
-            addressJson,
-            type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
-            managerName: addressTypeValue === 'primary' 
+            doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+            addressLine1: addressLine1.trim(),
+            addressLine2: addressLine2.trim(),
+            additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [],
+            city: city.trim(),
+            pincode: pincode,
+            stateName: selectedState?.name || '',
+            stateCode: selectedState?.code || '',
+            manager: addressTypeValue === 'primary' 
               ? (trimmedContactName || existingAddress.manager || fallbackName)
               : undefined,
-            managerMobileNumber: addressTypeValue === 'primary'
+            phone: addressTypeValue === 'primary'
               ? ((sanitizedContactPhone || existingAddress.phone || fallbackPhone) || undefined)
               : undefined,
             isPrimary: addressTypeValue === 'primary',
-            latitude: addressLatitude || undefined,
-            longitude: addressLongitude || undefined,
-          }).then((updateResult) => {
-            if (updateResult.success && updateResult.address) {
-              backendAddress = updateResult.address;
-              console.log('✅ Address updated in backend:', backendAddress);
-            } else {
-              console.warn('⚠️ Backend update failed, continuing with local save:', updateResult.error);
-            }
-          }).catch((error) => {
-            console.error('Error updating address in backend:', error);
-          });
+            updatedAt: new Date().toISOString(),
+          };
+          
+          // Optimistically update (DataStore updated immediately, backend sync in background)
+          const editId = Array.isArray(editAddressId) ? editAddressId[0] : (editAddressId as string);
+          optimisticUpdateAddress(editId, addressUpdates, { showError: false });
+          
+          // Clear cache to ensure fresh data is loaded when navigating back
+          clearBusinessDataCache();
         }
       } else {
         // Create new address in backend (non-blocking for better performance)
@@ -860,6 +954,7 @@ export default function BusinessAddressManualScreen() {
                 doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
                 addressLine1: addressLine1.trim(),
                 addressLine2: addressLine2.trim(),
+                additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // Store all additional lines
                 city: city.trim(),
                 pincode: pincode,
                 stateName: selectedState?.name || '',
@@ -885,6 +980,7 @@ export default function BusinessAddressManualScreen() {
           doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
           addressLine1: addressLine1.trim(),
           addressLine2: addressLine2.trim(),
+          additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // Store all additional lines
           city: city.trim(),
           pincode: pincode,
           stateName: selectedState?.name || '',
@@ -916,8 +1012,8 @@ export default function BusinessAddressManualScreen() {
         }
       }
       
-      // Navigate to address confirmation with all addresses
-      debouncedNavigate({
+      // Navigate immediately to address confirmation with all addresses
+      router.replace({
         pathname: '/auth/address-confirmation',
         params: {
           type,
@@ -930,12 +1026,10 @@ export default function BusinessAddressManualScreen() {
           mobile,
           allAddresses: JSON.stringify(allAddresses),
         }
-      }, 'replace');
+      });
       
-      // Reset navigation flags after a delay
-      setTimeout(() => {
-        setIsNavigating(false);
-      }, 1000);
+      // Reset navigation flag immediately
+      setIsNavigating(false);
       
       setIsLoading(false);
     } catch (error: any) {
@@ -1603,24 +1697,23 @@ export default function BusinessAddressManualScreen() {
                               dataStore.addAddress(newAddress);
                             }
                             
-                            setTimeout(() => {
-                              debouncedNavigate({
-                                pathname: '/auth/address-confirmation',
-                                params: {
-                                  type,
-                                  value,
-                                  gstinData,
-                                  name,
-                                  businessName,
-                                  businessType,
-                                  customBusinessType,
-                                  mobile,
-                                  allAddresses: JSON.stringify(allAddresses),
-                                }
-                              }, 'replace');
-                              setIsLoading(false);
-                              setDuplicateAddressInfo(null);
-                            }, 500);
+                            // Navigate immediately (no delay)
+                            router.replace({
+                              pathname: '/auth/address-confirmation',
+                              params: {
+                                type,
+                                value,
+                                gstinData,
+                                name,
+                                businessName,
+                                businessType,
+                                customBusinessType,
+                                mobile,
+                                allAddresses: JSON.stringify(allAddresses),
+                              }
+                            });
+                            setIsLoading(false);
+                            setDuplicateAddressInfo(null);
                           }}
                           activeOpacity={0.7}
                         >
@@ -2166,14 +2259,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     maxHeight: '80%',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    ...getPlatformShadow(4, '#000', 0.15),
   },
   modalHeader: {
     flexDirection: 'row',

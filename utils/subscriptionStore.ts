@@ -65,34 +65,44 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     id: 'monthly_basic',
     name: 'Monthly Plan',
     type: 'monthly',
-    price: 999,
-    locations: 2,
+    price: 750,
+    locations: 2, // 1 primary location + 2 location overview
     staffAccounts: 3,
     description: 'Perfect for small businesses',
     features: [
+      '1 Primary Location',
       '2 Location Overview',
       '3 Staff Accounts',
-      'Basic Inventory Management',
-      'Invoice Generation',
-      'Basic Reporting'
+      'Full Access to Invoicing',
+      'Staff Management',
+      'Supplier Management',
+      'Customer Management',
+      'Inventory Management',
+      'Reports & Analytics',
+      'Additional Staff: ₹100/month',
+      'Additional Location: ₹150/month'
     ]
   },
   {
     id: 'yearly_premium',
     name: 'Yearly Plan',
     type: 'yearly',
-    price: 9999,
-    locations: 4,
+    price: 7500,
+    locations: 5, // 1 primary address + 5 location overview
     staffAccounts: 10,
     description: 'Best value for growing businesses',
     features: [
-      '4 Location Overview',
+      '1 Primary Address',
+      '5 Location Overview',
       '10 Staff Accounts',
-      'Advanced Inventory Management',
-      'Invoice Generation',
-      'Advanced Reporting',
-      'Priority Support',
-      '2 Months Free'
+      'Full Access to Invoicing',
+      'Staff Management',
+      'Supplier Management',
+      'Customer Management',
+      'Inventory Management',
+      'Reports & Analytics',
+      'GST Filing (calculated based on filing data)',
+      'Priority Support'
     ]
   }
 ];
@@ -102,33 +112,33 @@ export const addOns: AddOn[] = [
     id: 'staff_monthly',
     name: 'Additional Staff',
     type: 'monthly',
-    price: 99,
+    price: 100,
     category: 'staff',
-    description: 'Add more staff accounts to your plan'
+    description: 'Add more staff accounts to your plan (₹100/month per staff)'
   },
   {
     id: 'staff_yearly',
     name: 'Additional Staff',
     type: 'yearly',
-    price: 999,
+    price: 1000, // ₹100/month * 10 months (yearly discount)
     category: 'staff',
-    description: 'Add more staff accounts to your plan'
+    description: 'Add more staff accounts to your plan (₹100/month per staff)'
   },
   {
     id: 'location_monthly',
     name: 'Additional Location',
     type: 'monthly',
-    price: 149,
+    price: 150,
     category: 'location',
-    description: 'Add more locations to your plan'
+    description: 'Add more locations to your plan (₹150/month per location)'
   },
   {
     id: 'location_yearly',
     name: 'Additional Location',
     type: 'yearly',
-    price: 1499,
+    price: 1500, // ₹150/month * 10 months (yearly discount)
     category: 'location',
-    description: 'Add more locations to your plan'
+    description: 'Add more locations to your plan (₹150/month per location)'
   },
   {
     id: 'gst_filing_monthly',
@@ -214,7 +224,7 @@ class SubscriptionStore {
     }
   }
 
-  startTrial() {
+  async startTrial() {
     const trialDurationDays = 30;
     const trialStartDate = new Date();
     const trialEndDate = new Date();
@@ -234,6 +244,24 @@ class SubscriptionStore {
     };
     this.saveSubscription();
     console.log(`🚀 Started 30-day free trial. Ends on: ${trialEndDate.toDateString()}`);
+
+    // Sync to database
+    try {
+      const { createOrUpdateSubscription } = await import('@/services/backendApi');
+      const result = await createOrUpdateSubscription({
+        isOnTrial: true,
+        trialStartDate: trialStartDate.toISOString(),
+        trialEndDate: trialEndDate.toISOString(),
+        status: 'trialing',
+      });
+      if (result.success) {
+        console.log('✅ Trial synced to database');
+      } else {
+        console.warn('⚠️ Failed to sync trial to database:', result.error);
+      }
+    } catch (error) {
+      console.error('⚠️ Error syncing trial to database:', error);
+    }
   }
 
   getSubscription(): Subscription {
@@ -296,13 +324,17 @@ class SubscriptionStore {
   }
 
   getAvailableLocations(): number {
+    // Monthly plan: 1 primary + 2 overview = 3 total locations
+    // Yearly plan: 1 primary + 5 overview = 6 total locations
+    // Trial: 1 primary location only
     let baseLocations = 1; // Free trial only includes primary location
 
     if (this.subscription.currentPlan) {
+      // Plan locations includes primary + overview locations
       baseLocations = this.subscription.currentPlan.locations;
     }
 
-    const locationAddOns = this.subscription.addOns.filter(addon => addon.category === 'location');
+    const locationAddOns = this.subscription.addOns?.filter(addon => addon.category === 'location') || [];
     const additionalLocations = locationAddOns.length;
 
     return baseLocations + additionalLocations;
@@ -315,10 +347,29 @@ class SubscriptionStore {
       baseStaff = this.subscription.currentPlan.staffAccounts;
     }
 
-    const staffAddOns = this.subscription.addOns.filter(addon => addon.category === 'staff');
+    const staffAddOns = this.subscription.addOns?.filter(addon => addon.category === 'staff') || [];
     const additionalStaff = staffAddOns.length;
 
     return baseStaff + additionalStaff;
+  }
+  
+  // Check if user has active subscription (not expired trial)
+  hasActiveSubscription(): boolean {
+    if (this.subscription.isOnTrial) {
+      return !this.isTrialExpired();
+    }
+    return this.subscription.status === 'active' && this.subscription.planId !== undefined;
+  }
+  
+  // Check if user is in read-only mode (trial expired, no active subscription)
+  isReadOnlyMode(): boolean {
+    if (this.subscription.isOnTrial && this.isTrialExpired()) {
+      return true; // Trial expired, read-only
+    }
+    if (!this.hasActiveSubscription()) {
+      return true; // No active subscription, read-only
+    }
+    return false;
   }
 
   canAddLocation(): boolean {
@@ -371,6 +422,84 @@ class SubscriptionStore {
       this.notifyListeners();
     } catch (error) {
       console.error('❌ Error clearing subscription data:', error);
+    }
+  }
+
+  // Test method: Simulate trial expiration (for testing purposes)
+  async simulateTrialExpiration() {
+    if (!this.subscription.isOnTrial || !this.subscription.trialEndDate) {
+      console.warn('⚠️ Cannot simulate trial expiration: Not on trial or no trial end date');
+      return;
+    }
+
+    // Set trial end date to 1 second ago to simulate expiration
+    const expiredDate = new Date();
+    expiredDate.setSeconds(expiredDate.getSeconds() - 1);
+    
+    this.subscription = {
+      ...this.subscription,
+      trialEndDate: expiredDate.toISOString(),
+      status: 'inactive',
+    };
+    
+    this.saveSubscription();
+    console.log('🧪 Trial expiration simulated. Trial ended at:', expiredDate.toISOString());
+    this.notifyListeners();
+
+    // Sync to database
+    try {
+      const { createOrUpdateSubscription } = await import('@/services/backendApi');
+      const result = await createOrUpdateSubscription({
+        isOnTrial: false,
+        trialStartDate: this.subscription.trialStartDate,
+        trialEndDate: expiredDate.toISOString(),
+        status: 'inactive',
+      });
+      if (result.success) {
+        console.log('✅ Trial expiration synced to database');
+      } else {
+        console.warn('⚠️ Failed to sync trial expiration to database:', result.error);
+      }
+    } catch (error) {
+      console.error('⚠️ Error syncing trial expiration to database:', error);
+    }
+  }
+
+  // Test method: Reset trial to active (for testing purposes)
+  async resetTrialToActive() {
+    const trialDurationDays = 30;
+    const trialStartDate = new Date();
+    const trialEndDate = new Date();
+    trialEndDate.setDate(trialStartDate.getDate() + trialDurationDays);
+
+    this.subscription = {
+      ...this.subscription,
+      isOnTrial: true,
+      trialStartDate: trialStartDate.toISOString(),
+      trialEndDate: trialEndDate.toISOString(),
+      status: 'trialing',
+    };
+    
+    this.saveSubscription();
+    console.log('🧪 Trial reset to active. Trial ends on:', trialEndDate.toISOString());
+    this.notifyListeners();
+
+    // Sync to database
+    try {
+      const { createOrUpdateSubscription } = await import('@/services/backendApi');
+      const result = await createOrUpdateSubscription({
+        isOnTrial: true,
+        trialStartDate: trialStartDate.toISOString(),
+        trialEndDate: trialEndDate.toISOString(),
+        status: 'trialing',
+      });
+      if (result.success) {
+        console.log('✅ Trial reset synced to database');
+      } else {
+        console.warn('⚠️ Failed to sync trial reset to database:', result.error);
+      }
+    } catch (error) {
+      console.error('⚠️ Error syncing trial reset to database:', error);
     }
   }
 }

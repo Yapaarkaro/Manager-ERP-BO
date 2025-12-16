@@ -46,12 +46,14 @@ import {
   Clock,
   ChevronRight,
 } from 'lucide-react-native';
-import { dataStore } from '@/utils/dataStore';
+import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
+import { showAlert, showConfirm } from '@/utils/webAlert';
+import CustomAlert from '@/components/CustomAlert';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -61,6 +63,7 @@ interface BusinessAddress {
   doorNumber: string;
   addressLine1: string;
   addressLine2: string;
+  additionalLines?: string[]; // ✅ Include additionalLines
   city: string;
   stateName: string;
   stateCode: string;
@@ -68,6 +71,7 @@ interface BusinessAddress {
   manager?: string;
   phone?: string;
   isPrimary: boolean;
+  backendId?: string; // ✅ Include backendId for proper editing
 }
 
 interface BankAccount {
@@ -135,28 +139,73 @@ export default function SettingsScreen() {
   // ✅ Use unified business data hook FIRST (before any useEffects that use it)
   const { data: businessData, refetch } = useBusinessData();
   
-  const [userProfile, setUserProfile] = useState({ ...DEFAULT_USER_PROFILE });
+  // ✅ Initialize userProfile with cached business data if available, otherwise use empty strings (not mock data)
+  const getInitialUserProfile = () => {
+    // Check if we have cached data available immediately
+    const { __getGlobalCache } = require('@/hooks/useBusinessData');
+    const cache = __getGlobalCache();
+    const now = Date.now();
+    const hasValidCache = cache.data && (now - cache.timestamp) < 30000;
+    
+    if (hasValidCache && cache.data) {
+      return {
+        name: cache.data.user?.full_name || '',
+        position: DEFAULT_USER_PROFILE.position,
+        businessName: cache.data.business?.legal_name || '',
+        gstin: cache.data.business?.tax_id || '',
+        profilePhoto: null as string | null,
+      };
+    }
+    
+    // If no cached data, use empty strings instead of mock data
+    return {
+      name: '',
+      position: DEFAULT_USER_PROFILE.position,
+      businessName: '',
+      gstin: '',
+      profilePhoto: null as string | null,
+    };
+  };
+  
+  const [userProfile, setUserProfile] = useState(getInitialUserProfile());
   const [subscription, setSubscription] = useState(subscriptionStore.getSubscription());
   const [trialProgress, setTrialProgress] = useState(subscriptionStore.getTrialProgress());
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    buttons: any[];
+    type: 'default' | 'success' | 'error' | 'warning' | 'info';
+  } | null>(null);
 
   // Set status bar to dark for white header
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // ✅ Update user profile from cached business data (instant display)
+  // Subscribe to alert state changes
   useEffect(() => {
-    if (businessData?.user) {
-      setUserProfile(prev => ({
-        ...prev,
-        name: businessData.user!.full_name || prev.name,
-      }));
+    const { subscribeToAlert, getAlertState } = require('@/utils/webAlert');
+    const unsubscribe = subscribeToAlert((state) => {
+      setAlertState(state);
+    });
+    // Check initial state
+    const initialState = getAlertState();
+    if (initialState) {
+      setAlertState(initialState);
     }
-    if (businessData?.business) {
+    return unsubscribe;
+  }, []);
+
+  // ✅ Update user profile from business data (runs immediately if data is already available)
+  // This ensures we update as soon as data loads, even if it wasn't in cache
+  useEffect(() => {
+    if (businessData?.user || businessData?.business) {
       setUserProfile(prev => ({
         ...prev,
-        businessName: businessData.business!.legal_name || prev.businessName,
-        gstin: businessData.business!.tax_id || prev.gstin,
+        name: businessData?.user?.full_name || prev.name || '',
+        businessName: businessData?.business?.legal_name || prev.businessName || '',
+        gstin: businessData?.business?.tax_id || prev.gstin || '',
       }));
     }
   }, [businessData]);
@@ -246,25 +295,41 @@ export default function SettingsScreen() {
   // ✅ Update addresses and bank accounts from cached data (instant display)
   useEffect(() => {
     if (businessData?.addresses) {
-      const formattedAddresses: BusinessAddress[] = businessData.addresses.map((addr: any) => ({
-        id: addr.id,
-        backendId: addr.id,
-        name: addr.name,
-        type: addr.type,
-        doorNumber: addr.door_number || '',
-        addressLine1: addr.address_line1 || '',
-        addressLine2: addr.address_line2 || '',
-        city: addr.city || '',
-        pincode: addr.pincode || '',
-        stateName: addr.state || '',
-        stateCode: '',
-        isPrimary: addr.is_primary || false,
-        manager: addr.manager_name || '',
-        phone: addr.manager_mobile_number || '',
-        status: 'active',
-        createdAt: addr.created_at || new Date().toISOString(),
-        updatedAt: addr.updated_at || new Date().toISOString(),
-      }));
+      const formattedAddresses: BusinessAddress[] = businessData.addresses.map((addr: any) => {
+        const formattedAddress = {
+          id: addr.id, // ✅ Use backend ID as the address ID
+          backendId: addr.id, // ✅ Also store as backendId for consistency
+          name: addr.name,
+          type: addr.type,
+          doorNumber: addr.door_number || '',
+          addressLine1: addr.address_line1 || '',
+          addressLine2: addr.address_line2 || '',
+          additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [], // ✅ Include additionalLines
+          city: addr.city || '',
+          pincode: addr.pincode || '',
+          stateName: addr.state || '',
+          stateCode: addr.state ? getGSTINStateCode(addr.state) : '', // ✅ Get state code from state name
+          isPrimary: addr.is_primary || false,
+          manager: addr.manager_name || '',
+          phone: addr.manager_mobile_number || '',
+          status: 'active' as const,
+          createdAt: addr.created_at || new Date().toISOString(),
+          updatedAt: addr.updated_at || new Date().toISOString(),
+        };
+        
+        // ✅ Sync address to DataStore so edit-address-simple can find it
+        // Check if address already exists in DataStore
+        const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
+        if (!existingAddress) {
+          // Add to DataStore if not present (for editing purposes)
+          dataStore.addAddress(formattedAddress as any);
+        } else {
+          // Update existing address in DataStore to match backend
+          dataStore.updateAddress(existingAddress.id, formattedAddress as any);
+        }
+        
+        return formattedAddress;
+      });
       setAddresses(formattedAddresses);
     }
     if (businessData?.bankAccounts) {
@@ -283,10 +348,43 @@ export default function SettingsScreen() {
     }
   }, [businessData]);
 
-  // Reload when screen comes into focus
+  // ✅ Refetch when screen comes into focus to get latest data (especially after edits)
   useFocusEffect(
     React.useCallback(() => {
-      refetch(); // Refresh data
+      // Always clear cache and refetch when coming back from edits
+      // This ensures we show the latest data after editing addresses or bank accounts
+      console.log('🔄 Settings: Screen focused, refetching business data');
+      
+      // Since edit screens now await backend sync, wait 500ms, and prefetch data,
+      // we can refetch immediately (data should be ready)
+      // But add a small delay to ensure navigation has completed
+      setTimeout(() => {
+        refetch().then(() => {
+          console.log('✅ Settings: Business data refetched');
+        }).catch((error) => {
+          console.error('❌ Error refetching settings data:', error);
+        });
+      }, 200); // 200ms delay - ensures navigation has completed and screen is ready
+    }, [refetch])
+  );
+  
+  // ✅ Legacy focus effect for backward compatibility (kept for other use cases)
+  useFocusEffect(
+    React.useCallback(() => {
+      // This effect is kept for other use cases but the main refetch happens above
+      // Check if cache is stale (older than 5 seconds) before refetching
+      const { __getGlobalCache } = require('@/hooks/useBusinessData');
+      const cache = __getGlobalCache();
+      const now = Date.now();
+      const CACHE_DURATION = 5000; // 5 seconds - shorter for settings screen
+      
+      // Only refetch if cache is stale or missing (fallback)
+      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
+        console.log('🔄 Settings: Cache stale, refetching business data');
+        refetch();
+      } else {
+        console.log('✅ Settings: Using cached data (no refetch needed)');
+      }
     }, [refetch])
   );
 
@@ -303,7 +401,8 @@ export default function SettingsScreen() {
   };
 
   const handleBackPress = () => {
-    router.back();
+    // Navigate to dashboard instead of back (fixes web navigation issue)
+    router.push('/dashboard');
   };
 
 
@@ -336,34 +435,19 @@ export default function SettingsScreen() {
     
     setIsAddingAddress(true);
     
-    // Navigate to the correct map screen based on address type
-    if (address.type === 'branch') {
-      router.push({
-        pathname: '/locations/add-branch',
-        params: {
-          editMode: 'true',
-          editAddress: JSON.stringify(address)
-        }
-      });
-    } else if (address.type === 'warehouse') {
-      router.push({
-        pathname: '/locations/add-warehouse',
-        params: {
-          editMode: 'true',
-          editAddress: JSON.stringify(address)
-        }
-      });
-    } else {
-      // For primary addresses, go to business-address screen
-      router.push({
-        pathname: '/auth/business-address',
-        params: {
-          addressType: 'primary',
-          editMode: 'true',
-          editAddress: JSON.stringify(address)
-        }
-      });
-    }
+    // ✅ Use edit-address-simple.tsx for all address types (consistent with business summary)
+    // This ensures proper backend sync and consistent editing experience
+    // Use backendId if available, otherwise use local ID
+    const addressId = address.backendId || address.id;
+    
+    router.push({
+      pathname: '/edit-address-simple',
+      params: {
+        editAddressId: addressId, // ✅ Use backendId if available for proper editing
+        addressType: address.type,
+        fromSettings: 'true', // ✅ Flag to indicate coming from settings
+      }
+    });
   };
 
   const handleDeleteAddress = (addressId: string) => {
@@ -634,10 +718,23 @@ export default function SettingsScreen() {
             <TouchableOpacity 
                   style={[styles.addFirstButton, { backgroundColor: typeInfo.color }]}
                   onPress={() => {
+                    // Get business data for navigation
+                    const business = businessData?.business;
+                    const user = businessData?.user;
                     router.push({
-                      pathname: '/add-address',
-                      params: { type: 'branch' }
-                    } as any);
+                      pathname: '/auth/business-address',
+                      params: { 
+                        addressType: 'primary',
+                        editMode: 'false',
+                        // Pass business info if available
+                        ...(business?.legal_name && { businessName: business.legal_name }),
+                        ...(business?.tax_id && { value: business.tax_id }),
+                        ...(business?.tax_id && business.tax_id.length === 15 && { type: 'GSTIN' }),
+                        ...(business?.tax_id && business.tax_id.length === 10 && { type: 'PAN' }),
+                        ...(user?.full_name && { name: user.full_name }),
+                        existingAddresses: JSON.stringify(addresses)
+                      }
+                    });
                   }}
               activeOpacity={0.7}
             >
@@ -768,6 +865,14 @@ export default function SettingsScreen() {
                 )}
                 {address.addressLine2 && address.addressLine2.trim() !== '' && (
             <Text style={styles.addressLine}>{address.addressLine2}</Text>
+                )}
+                {/* ✅ Display additional address lines */}
+                {address.additionalLines && Array.isArray(address.additionalLines) && address.additionalLines.length > 0 && (
+                  address.additionalLines.map((line, index) => (
+                    line && line.trim() !== '' && (
+                      <Text key={index} style={styles.addressLine}>{line}</Text>
+                    )
+                  ))
                 )}
                 {address.city && address.city.trim() !== '' && (
             <Text style={styles.addressLine}>{address.city}</Text>
@@ -1068,21 +1173,33 @@ export default function SettingsScreen() {
             <View style={styles.profileImageContainer}>
               {userProfile.profilePhoto ? (
                 <View style={styles.profileImage}>
-                  <Text style={styles.profileImageText}>JD</Text>
+                  <Text style={styles.profileImageText}>
+                    {userProfile.name 
+                      ? userProfile.name.split(' ').map(n => n[0]).join('').toUpperCase() 
+                      : 'U'}
+                  </Text>
                 </View>
               ) : (
                 <View style={[styles.profileImage, { backgroundColor: Colors.primary }]}>
                   <Text style={styles.profileImageText}>
-                    {userProfile.name.split(' ').map(n => n[0]).join('')}
+                    {userProfile.name 
+                      ? userProfile.name.split(' ').map(n => n[0]).join('').toUpperCase() 
+                      : 'U'}
                   </Text>
                 </View>
               )}
             </View>
             <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{userProfile.name}</Text>
+              <Text style={styles.profileName}>
+                {userProfile.name || 'Loading...'}
+              </Text>
               <Text style={styles.profilePosition}>{userProfile.position}</Text>
-              <Text style={styles.profileBusiness}>{userProfile.businessName}</Text>
-              <Text style={styles.profileGstin}>{userProfile.gstin}</Text>
+              <Text style={styles.profileBusiness}>
+                {userProfile.businessName || 'Loading...'}
+              </Text>
+              <Text style={styles.profileGstin}>
+                {userProfile.gstin || 'Loading...'}
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.editProfileButton}
@@ -1104,6 +1221,24 @@ export default function SettingsScreen() {
             <Text style={styles.subscriptionSubtitle}>
               {trialProgress.daysRemaining} days remaining
             </Text>
+            {businessData?.business?.trial_start_date && (
+              <Text style={styles.trialDateText}>
+                Started: {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })}
+              </Text>
+            )}
+            {businessData?.business?.trial_end_date && (
+              <Text style={styles.trialDateText}>
+                Ends: {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })}
+              </Text>
+            )}
             <View style={styles.progressBarContainer}>
               <View style={styles.progressBar}>
                 <View 
@@ -1124,6 +1259,146 @@ export default function SettingsScreen() {
             >
               <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
             </TouchableOpacity>
+            
+            {/* Test Button - Simulate Trial Expiration */}
+            <TouchableOpacity
+              style={styles.testButton}
+              onPress={() => {
+                console.log('🧪 Test button clicked - showing confirmation popup');
+                
+                // Show confirmation using web-compatible alert
+                showConfirm(
+                  '🧪 Simulate Trial Expiration',
+                  'This will activate test mode where your trial appears expired. You will enter read-only mode and all actions will be blocked.\n\nDo you want to continue?',
+                  async () => {
+                    try {
+                      console.log('🧪 Starting trial expiration simulation...');
+                      
+                      // Activate trial expiration
+                      await subscriptionStore.simulateTrialExpiration();
+                      
+                      // Update local state
+                      setSubscription(subscriptionStore.getSubscription());
+                      setTrialProgress(subscriptionStore.getTrialProgress());
+                      
+                      console.log('✅ Trial expiration activated, showing success popup');
+                      
+                      // Show success popup immediately after activation
+                      showAlert(
+                        '✅ Test Trial Expiration Activated!',
+                        'Test trial expiration has been activated and you can start testing.\n\nYou are now in read-only mode:\n\n✅ You CAN:\n• View all your data\n• Browse screens\n• Search and filter\n\n❌ You CANNOT:\n• Create new sales, purchases, or returns\n• Add products, customers, or suppliers\n• Perform stock operations\n• Add income/expense\n• Notify staff\n\n💡 Try clicking any action button (like "New Sale" or "Add Product") to see the trial expiration alert.',
+                        [
+                          {
+                            text: 'View Plans',
+                            onPress: () => router.push('/subscription'),
+                            style: 'default'
+                          },
+                          {
+                            text: 'Start Testing',
+                            style: 'default',
+                            onPress: () => {
+                              console.log('User ready to start testing');
+                            }
+                          }
+                        ],
+                        { cancelable: false },
+                        'success'
+                      );
+                      
+                      console.log('✅ Trial expiration simulation completed');
+                    } catch (error) {
+                      console.error('❌ Error simulating trial expiration:', error);
+                      showAlert(
+                        'Error',
+                        'Failed to activate test trial expiration. Please try again.',
+                        [{ text: 'OK' }],
+                        undefined,
+                        'error'
+                      );
+                    }
+                  },
+                  () => {
+                    console.log('Trial expiration simulation cancelled');
+                  },
+                  'info'
+                );
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.testButtonText}>🧪 Test: Simulate Trial Expiration</Text>
+            </TouchableOpacity>
+            
+            {/* Test Button - Reset Trial */}
+            <TouchableOpacity
+              style={[styles.testButton, { backgroundColor: Colors.success + '15', borderColor: Colors.success }]}
+              onPress={() => {
+                showConfirm(
+                  'Reset Trial',
+                  'This will reset your trial to active status with 30 days remaining. Continue?',
+                  async () => {
+                    try {
+                      await subscriptionStore.resetTrialToActive();
+                      setSubscription(subscriptionStore.getSubscription());
+                      setTrialProgress(subscriptionStore.getTrialProgress());
+                      showAlert(
+                        'Trial Reset',
+                        'Your trial has been reset to active status.',
+                        [{ text: 'OK' }],
+                        undefined,
+                        'success'
+                      );
+                    } catch (error) {
+                      console.error('❌ Error resetting trial:', error);
+                      showAlert(
+                        'Error',
+                        'Failed to reset trial. Please try again.',
+                        [{ text: 'OK' }],
+                        undefined,
+                        'error'
+                      );
+                    }
+                  },
+                  () => {
+                    console.log('Trial reset cancelled');
+                  },
+                  'info'
+                );
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.testButtonText, { color: Colors.success }]}>🔄 Test: Reset Trial to Active</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        
+        {/* Show subscription status if not on trial */}
+        {!subscription.isOnTrial && businessData?.business?.subscription_status && (
+          <View style={styles.subscriptionSection}>
+            <View style={styles.subscriptionHeader}>
+              <CreditCard size={20} color="#3f66ac" />
+              <Text style={styles.subscriptionTitle}>Subscription Status</Text>
+            </View>
+            <Text style={styles.subscriptionSubtitle}>
+              Status: {businessData.business.subscription_status}
+            </Text>
+            {businessData.business.trial_start_date && (
+              <Text style={styles.trialDateText}>
+                Trial Started: {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })}
+              </Text>
+            )}
+            {businessData.business.trial_end_date && (
+              <Text style={styles.trialDateText}>
+                Trial Ended: {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric'
+                })}
+              </Text>
+            )}
           </View>
         )}
 
@@ -1726,7 +2001,20 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-
+      {/* Custom Alert Modal */}
+      {alertState && (
+        <CustomAlert
+          visible={alertState.visible}
+          title={alertState.title}
+          message={alertState.message}
+          buttons={alertState.buttons}
+          type={alertState.type}
+          onClose={() => {
+            const { setAlertState } = require('@/utils/webAlert');
+            setAlertState(null);
+          }}
+        />
+      )}
     </SafeAreaView>
     </ResponsiveContainer>
   );
@@ -2650,10 +2938,31 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+    marginTop: 8,
   },
   upgradeButtonText: {
     color: '#ffffff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  trialDateText: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  testButton: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  testButtonText: {
+    color: '#ef4444',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

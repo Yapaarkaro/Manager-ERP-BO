@@ -494,6 +494,8 @@ export default function NotificationsScreen() {
   };
 
   const handleNotifyStaff = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('notify staff')) return;
     debouncedNavigate('/notifications/notify-staff');
   };
 

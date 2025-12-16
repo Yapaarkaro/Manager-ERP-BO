@@ -442,6 +442,8 @@ export default function SalesInvoicesScreen() {
   };
 
   const handleNewSale = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create new sale')) return;
     if (isNavigating) return;
     setIsNavigating(true);
     debouncedNavigate('/new-sale');
@@ -1243,10 +1245,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
     padding: 0,
     fontWeight: '500',
-    // Better contrast for glassmorphism
-    textShadowColor: 'rgba(0, 0, 0, 0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    // Better contrast for glassmorphism - use platform-specific textShadow
+    ...Platform.select({
+      web: {
+        textShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        textShadowColor: 'rgba(0, 0, 0, 0.1)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+      },
+    }),
   },
   // Filter Badge Styles
   filterBadge: {

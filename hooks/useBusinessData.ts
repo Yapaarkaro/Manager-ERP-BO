@@ -25,6 +25,11 @@ interface BusinessData {
     current_total_bank_balance: number;
     current_total_cash_balance: number;
     current_total_funds: number;
+    primary_address_id: string | null;
+    primary_bank_account_id: string | null;
+    trial_start_date: string | null;
+    trial_end_date: string | null;
+    subscription_status: string | null;
   } | null;
   addresses: any[];
   bankAccounts: any[];
@@ -144,14 +149,48 @@ export function useBusinessData(): UseBusinessDataReturn {
           throw new Error('No session found');
         }
 
-        // ✅ PARALLEL: Fetch all data simultaneously
-        const [userResult, addressesResult, bankAccountsResult] = await Promise.allSettled([
-          // Fetch user profile
-          supabase
-            .from('users')
-            .select('id, business_id, full_name, role')
-            .eq('id', session.user.id)
-            .single(),
+        // ✅ PARALLEL: Fetch user profile first to get business_id
+        const userResult = await supabase
+          .from('users')
+          .select('id, business_id, full_name, role')
+          .eq('id', session.user.id)
+          .single();
+
+        // Process user result
+        let user = null;
+        let businessId: string | null = null;
+
+        if (userResult.data) {
+          user = userResult.data;
+          businessId = user.business_id;
+        }
+
+        // ✅ PARALLEL: Fetch all remaining data simultaneously (business, addresses, bank accounts)
+        const [businessResult, addressesResult, bankAccountsResult] = await Promise.allSettled([
+          // Fetch business data (only if business_id exists)
+          businessId
+            ? supabase
+                .from('businesses')
+                .select(`
+                  id,
+                  legal_name,
+                  tax_id,
+                  initial_cash_balance,
+                  current_cash_balance,
+                  initial_bank_balance,
+                  current_primary_bank_balance,
+                  current_total_bank_balance,
+                  current_total_cash_balance,
+                  current_total_funds,
+                  primary_address_id,
+                  primary_bank_account_id,
+                  trial_start_date,
+                  trial_end_date,
+                  subscription_status
+                `)
+                .eq('id', businessId)
+                .single()
+            : Promise.resolve({ data: null, error: null }),
           
           // Fetch addresses
           (async () => {
@@ -166,45 +205,19 @@ export function useBusinessData(): UseBusinessDataReturn {
           })(),
         ]);
 
-        // Process user result
-        let user = null;
+        // Process business result
         let business = null;
-
-        if (userResult.status === 'fulfilled' && userResult.value.data) {
-          user = userResult.value.data;
-          
-          // If user has business_id, fetch business data
-          if (user.business_id) {
-            const businessResult = await supabase
-              .from('businesses')
-              .select(`
-                id,
-                legal_name,
-                tax_id,
-                initial_cash_balance,
-                current_cash_balance,
-                initial_bank_balance,
-                current_primary_bank_balance,
-                current_total_bank_balance,
-                current_total_cash_balance,
-                current_total_funds
-              `)
-              .eq('id', user.business_id)
-              .single();
-            
-            if (businessResult.data) {
-              business = {
-                ...businessResult.data,
-                initial_cash_balance: parseFloat(String(businessResult.data.initial_cash_balance)) || 0,
-                current_cash_balance: parseFloat(String(businessResult.data.current_cash_balance)) || 0,
-                initial_bank_balance: parseFloat(String(businessResult.data.initial_bank_balance)) || 0,
-                current_primary_bank_balance: parseFloat(String(businessResult.data.current_primary_bank_balance)) || 0,
-                current_total_bank_balance: parseFloat(String(businessResult.data.current_total_bank_balance)) || 0,
-                current_total_cash_balance: parseFloat(String(businessResult.data.current_total_cash_balance)) || 0,
-                current_total_funds: parseFloat(String(businessResult.data.current_total_funds)) || 0,
-              };
-            }
-          }
+        if (businessResult.status === 'fulfilled' && businessResult.value.data) {
+          business = {
+            ...businessResult.value.data,
+            initial_cash_balance: parseFloat(String(businessResult.value.data.initial_cash_balance)) || 0,
+            current_cash_balance: parseFloat(String(businessResult.value.data.current_cash_balance)) || 0,
+            initial_bank_balance: parseFloat(String(businessResult.value.data.initial_bank_balance)) || 0,
+            current_primary_bank_balance: parseFloat(String(businessResult.value.data.current_primary_bank_balance)) || 0,
+            current_total_bank_balance: parseFloat(String(businessResult.value.data.current_total_bank_balance)) || 0,
+            current_total_cash_balance: parseFloat(String(businessResult.value.data.current_total_cash_balance)) || 0,
+            current_total_funds: parseFloat(String(businessResult.value.data.current_total_funds)) || 0,
+          };
         }
 
         // Process addresses result
@@ -303,50 +316,87 @@ export async function prefetchBusinessData(): Promise<void> {
   if (!globalCache.data || (now - globalCache.timestamp) >= CACHE_DURATION) {
     // Cache is stale or doesn't exist, fetch fresh data
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.user) {
+        return;
+      }
 
       // Import fetch functions
       const { getAddresses } = await import('@/services/backendApi');
       const { getBankAccounts } = await import('@/services/backendApi');
 
-      // Fetch in parallel
-      const [userResult, businessResult, addressesResult, bankAccountsResult] = await Promise.allSettled([
-        supabase.from('users').select('id, full_name, business_id, role').eq('id', authUser.id).maybeSingle(),
-        supabase.rpc('get_business_summary', { user_id: authUser.id }).maybeSingle(),
+      // ✅ PARALLEL: Fetch user profile first to get business_id (same as fetchData)
+      const userResult = await supabase
+        .from('users')
+        .select('id, business_id, full_name, role')
+        .eq('id', session.user.id)
+        .single();
+
+      // Process user result
+      let user = null;
+      let businessId: string | null = null;
+
+      if (userResult.data) {
+        user = userResult.data;
+        businessId = user.business_id;
+      }
+
+      // ✅ PARALLEL: Fetch all remaining data simultaneously (same as fetchData)
+      const [businessResult, addressesResult, bankAccountsResult] = await Promise.allSettled([
+        // Fetch business data (only if business_id exists)
+        businessId
+          ? supabase
+              .from('businesses')
+              .select(`
+                id,
+                legal_name,
+                tax_id,
+                initial_cash_balance,
+                current_cash_balance,
+                initial_bank_balance,
+                current_primary_bank_balance,
+                current_total_bank_balance,
+                current_total_cash_balance,
+                current_total_funds,
+                primary_address_id,
+                primary_bank_account_id,
+                trial_start_date,
+                trial_end_date,
+                subscription_status
+              `)
+              .eq('id', businessId)
+              .single()
+          : Promise.resolve({ data: null, error: null }),
+        
+        // Fetch addresses
         getAddresses(),
+        
+        // Fetch bank accounts
         getBankAccounts(),
       ]);
 
-      // Process results (same logic as in useBusinessData)
-      const user = userResult.status === 'fulfilled' && userResult.value.data ? {
-        id: userResult.value.data.id,
-        full_name: userResult.value.data.full_name || '',
-        business_id: userResult.value.data.business_id,
-        role: userResult.value.data.role || 'owner',
-      } : null;
-
+      // Process business result (same logic as fetchData)
       let business = null;
       if (businessResult.status === 'fulfilled' && businessResult.value.data) {
-        const businessData = businessResult.value.data as any;
         business = {
-          id: businessData.id,
-          legal_name: businessData.legal_name || '',
-          tax_id: businessData.tax_id || '',
-          initial_cash_balance: parseFloat(String(businessData.initial_cash_balance)) || 0,
-          current_cash_balance: parseFloat(String(businessData.current_cash_balance)) || 0,
-          initial_bank_balance: parseFloat(String(businessData.initial_bank_balance)) || 0,
-          current_primary_bank_balance: parseFloat(String(businessData.current_primary_bank_balance)) || 0,
-          current_total_bank_balance: parseFloat(String(businessData.current_total_bank_balance)) || 0,
-          current_total_cash_balance: parseFloat(String(businessData.current_total_cash_balance)) || 0,
-          current_total_funds: parseFloat(String(businessData.current_total_funds)) || 0,
+          ...businessResult.value.data,
+          initial_cash_balance: parseFloat(String(businessResult.value.data.initial_cash_balance)) || 0,
+          current_cash_balance: parseFloat(String(businessResult.value.data.current_cash_balance)) || 0,
+          initial_bank_balance: parseFloat(String(businessResult.value.data.initial_bank_balance)) || 0,
+          current_primary_bank_balance: parseFloat(String(businessResult.value.data.current_primary_bank_balance)) || 0,
+          current_total_bank_balance: parseFloat(String(businessResult.value.data.current_total_bank_balance)) || 0,
+          current_total_cash_balance: parseFloat(String(businessResult.value.data.current_total_cash_balance)) || 0,
+          current_total_funds: parseFloat(String(businessResult.value.data.current_total_funds)) || 0,
         };
       }
 
+      // Process addresses result
       const addresses = addressesResult.status === 'fulfilled' && addressesResult.value.success
         ? addressesResult.value.addresses || []
         : [];
 
+      // Process bank accounts result
       const bankAccounts = bankAccountsResult.status === 'fulfilled' && bankAccountsResult.value.success
         ? bankAccountsResult.value.accounts || []
         : [];
@@ -364,4 +414,5 @@ export async function prefetchBusinessData(): Promise<void> {
     }
   }
 }
+
 

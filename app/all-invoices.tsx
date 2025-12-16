@@ -346,6 +346,8 @@ export default function AllInvoicesScreen() {
   };
 
   const handleNewSalePress = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create new sale')) return;
     if (isNavigating) return;
     setIsNavigating(true);
     debouncedNavigate('/new-sale');
@@ -353,6 +355,8 @@ export default function AllInvoicesScreen() {
   };
 
   const handleNewReturnPress = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create new return')) return;
     if (isNavigating) return;
     setIsNavigating(true);
     debouncedNavigate('/new-return');
@@ -360,6 +364,8 @@ export default function AllInvoicesScreen() {
   };
 
   const handleNewPurchasePress = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create new purchase')) return;
     if (isNavigating) return;
     setIsNavigating(true);
     debouncedNavigate('/purchasing/add-purchase-invoice');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef } from 'react';
 import { TextInput, TextInputProps, Platform, StyleSheet } from 'react-native';
 
 interface CapitalizedTextInputProps extends TextInputProps {
@@ -21,8 +21,8 @@ const inputStyles = StyleSheet.create({
 });
 
 // Helper function to capitalize words intelligently (for web only)
+// Capitalizes first letter of words immediately when typed
 // Preserves existing capital letters (e.g., "HDFC" stays "HDFC")
-// Capitalizes first letter if all lowercase (e.g., "vikram" → "Vikram")
 const capitalizeWords = (text: string, previousText: string = ''): string => {
   if (!text) return text;
   
@@ -31,33 +31,40 @@ const capitalizeWords = (text: string, previousText: string = ''): string => {
     return text;
   }
   
-  // Split by spaces and process each word
-  return text
-    .split(' ')
-    .map((word, wordIndex) => {
-      if (!word) return word;
-      
-      // Check if word has multiple capital letters (like "HDFC", "USA")
-      const hasMultipleCaps = word.length > 1 && /^[A-Z]{2,}$/.test(word);
-      
-      // If word has multiple capitals, preserve it as-is
-      if (hasMultipleCaps) {
-        return word;
-      }
-      
-      // Check if first letter is already capital
-      const firstChar = word.charAt(0);
-      const isFirstCapital = firstChar === firstChar.toUpperCase() && firstChar !== firstChar.toLowerCase();
-      
-      // If first letter is already capital, preserve the word
-      if (isFirstCapital) {
-        return word;
-      }
-      
-      // Otherwise, capitalize first letter and lowercase the rest
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(' ');
+  // Split text into words and process each one
+  const words = text.split(' ');
+  let modified = false;
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (!word || word.length === 0) continue;
+    
+    // Check if word has multiple capital letters (like "HDFC", "USA")
+    const hasMultipleCaps = word.length > 1 && /^[A-Z]{2,}$/.test(word);
+    
+    // If word has multiple capitals, preserve it as-is
+    if (hasMultipleCaps) {
+      continue;
+    }
+    
+    // Check if first letter is already capital
+    const firstChar = word.charAt(0);
+    const isFirstCapital = firstChar === firstChar.toUpperCase() && firstChar !== firstChar.toLowerCase();
+    
+    // If first letter is already capital, preserve the word (no change needed)
+    if (isFirstCapital) {
+      continue;
+    }
+    
+    // First letter is lowercase - capitalize it immediately
+    // This only changes the first character, rest stays as user typed
+    words[i] = word.charAt(0).toUpperCase() + word.slice(1);
+    modified = true;
+  }
+  
+  // Return modified text if changes were made, otherwise return original
+  // This prevents unnecessary re-renders when text doesn't need capitalization
+  return modified ? words.join(' ') : text;
 };
 
 const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
@@ -67,24 +74,65 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
   ...props
 }, ref) => {
   const [internalValue, setInternalValue] = useState(value);
+  const isUserTypingRef = useRef<boolean>(false);
+  const lastTextRef = useRef<string>(value);
 
-  // Update internal value when external value changes
+  // Update internal value when external value changes (but not when user is typing)
   useEffect(() => {
-    if (value !== internalValue) {
+    if (!isUserTypingRef.current && value !== internalValue && value !== lastTextRef.current) {
       setInternalValue(value);
+      lastTextRef.current = value;
     }
-  }, [value]);
+  }, [value, internalValue]);
 
   const handleTextChange = (text: string) => {
-    let processedText = text;
+    isUserTypingRef.current = true;
+    lastTextRef.current = text;
     
     // On web, apply automatic capitalization if autoCapitalize is 'words'
+    // BUT: Only capitalize when user is typing at the very end of the text
+    // This prevents cursor jumping when editing in the middle
     if (Platform.OS === 'web' && autoCapitalize === 'words') {
-      processedText = capitalizeWords(text, internalValue);
+      // Check if user is typing at the end (text is longer and starts with previous value)
+      const isTypingAtEnd = text.length > internalValue.length && text.startsWith(internalValue);
+      
+      if (isTypingAtEnd) {
+        // User is typing at the end - safe to capitalize
+        const processedText = capitalizeWords(text, internalValue);
+        
+        // Only update state if capitalization actually changed something
+        // This prevents unnecessary re-renders that cause cursor jumping
+        if (processedText !== text) {
+          setInternalValue(processedText);
+          onChangeText?.(processedText);
+        } else {
+          // No capitalization needed - only update if value actually changed
+          if (text !== internalValue) {
+            setInternalValue(text);
+          }
+          onChangeText?.(text);
+        }
+      } else {
+        // User is editing in the middle or deleting - don't modify to preserve cursor position
+        // Only update state if value actually changed to prevent unnecessary re-renders
+        if (text !== internalValue) {
+          setInternalValue(text);
+        }
+        onChangeText?.(text);
+      }
+    } else {
+      // Not web or not words capitalization - pass through as-is
+      // Only update state if value actually changed
+      if (text !== internalValue) {
+        setInternalValue(text);
+      }
+      onChangeText?.(text);
     }
     
-    setInternalValue(processedText);
-    onChangeText?.(processedText);
+    // Reset typing flag after a short delay
+    setTimeout(() => {
+      isUserTypingRef.current = false;
+    }, 50);
   };
 
   // On web, use our capitalization logic; on mobile, let the keyboard handle it

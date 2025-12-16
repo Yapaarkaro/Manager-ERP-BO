@@ -21,6 +21,7 @@ import { dataStore } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { supabase } from '@/lib/supabase';
 import { saveSignupProgress } from '@/services/backendApi';
+import { getPlatformShadow } from '@/utils/shadowUtils';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -210,13 +211,7 @@ export default function MobileScreen() {
               ...(isFocused && Platform.OS === 'web' ? {
                 boxShadow: '0 0 0 3px rgba(63, 102, 172, 0.12)',
               } : {}),
-              ...(isFocused && Platform.OS !== 'web' ? {
-                shadowColor: COLORS.primary,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.12,
-                shadowRadius: 8,
-                elevation: 4,
-              } : {}),
+              ...(isFocused && Platform.OS !== 'web' ? getPlatformShadow(4, COLORS.primary, 0.12) : {}),
             },
           ]}
         >

@@ -16,10 +16,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone, Building2, Package } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import { dataStore, getGSTINStateCode, BusinessAddress } from '@/utils/dataStore';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
 import { extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
+import { updateAddress, createStaff } from '@/services/backendApi';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -131,6 +132,7 @@ export default function EditAddressScreen() {
         setAddressName(existingAddress.name);
         setAddressLine1(existingAddress.addressLine1);
         setAddressLine2(existingAddress.addressLine2);
+        setAdditionalLines(existingAddress.additionalLines || []);
         setCity(existingAddress.city);
         setPincode(existingAddress.pincode);
         setManagerName(existingAddress.manager || '');
@@ -346,14 +348,18 @@ export default function EditAddressScreen() {
     setIsLoading(true);
     
     try {
+      // Get existing address to check if it has backendId
+      const existingAddress = dataStore.getAddressById(editAddressId as string);
+      
       // Update existing address
-      const updatedAddress = {
+      const updatedAddress: BusinessAddress = {
         id: editAddressId as string,
         name: addressName.trim(),
         type: addressType as 'primary' | 'branch' | 'warehouse',
         doorNumber: addressLine1.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
+        additionalLines: additionalLines.filter(line => line.trim().length > 0),
         city: city.trim(),
         pincode: pincode,
         stateName: selectedState?.name || '',
@@ -362,34 +368,93 @@ export default function EditAddressScreen() {
         phone: typeInfo.showContactFields ? managerPhone.trim() : undefined,
         isPrimary: addressType === 'primary',
         status: 'active' as const,
+        createdAt: existingAddress?.createdAt || new Date().toISOString(), // Preserve original createdAt
         updatedAt: new Date().toISOString(),
+        backendId: existingAddress?.backendId, // Preserve backendId
       };
 
       console.log('🔄 Updating address:', updatedAddress);
-      dataStore.updateAddress(editAddressId as string, updatedAddress);
       
-      // Navigate immediately without success alert for cleaner UX
-      setTimeout(() => {
-              // Navigate back to address confirmation screen with signup parameters
-              if (type && value) {
-                router.push({
-                  pathname: '/auth/address-confirmation',
-                  params: {
-                    type,
-                    value,
-                    gstinData,
-                    name,
-                    businessName,
-                    businessType,
-                    customBusinessType,
-                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                  }
-                });
-              } else {
-                router.push('/settings');
+      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
+      const { optimisticUpdateAddress } = await import('@/utils/optimisticSync');
+      
+      // Prepare address updates with all fields including additionalLines
+      const addressUpdates: Partial<BusinessAddress> = {
+        name: addressName.trim(),
+        doorNumber: addressLine1.trim(),
+        addressLine1: addressLine1.trim(),
+        addressLine2: addressLine2.trim(),
+        additionalLines: additionalLines.filter(line => line.trim().length > 0), // ✅ Always include additionalLines
+        city: city.trim(),
+        pincode: pincode,
+        stateName: selectedState?.name || '',
+        stateCode: getGSTINStateCode(selectedState?.name || ''),
+        manager: typeInfo.showContactFields ? managerName.trim() : undefined,
+        phone: typeInfo.showContactFields ? managerPhone.trim() : undefined,
+        isPrimary: addressType === 'primary',
+        updatedAt: new Date().toISOString(),
+      };
+      
+      // ✅ Optimistically update (DataStore updated immediately, backend sync in background)
+      // This ensures backend is always updated with all fields including additionalLines
+      // ✅ Await backend sync to ensure changes are persisted before navigation
+      await optimisticUpdateAddress(editAddressId as string, addressUpdates, { showError: false, awaitSync: true });
+      
+      // ✅ Clear cache to ensure fresh data is loaded when navigating back
+      const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+      clearBusinessDataCache();
+      
+      // ✅ Small additional delay to ensure backend has fully processed the update
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // If manager info was added/updated, ensure staff is synced to backend (non-blocking)
+      if (addressUpdates.manager && addressUpdates.phone && existingAddress?.backendId) {
+        (async () => {
+          try {
+            const updatedAddr = dataStore.getAddressById(editAddressId as string);
+            if (updatedAddr) {
+              const staffId = await dataStore.createStaffFromAddress(updatedAddr);
+              if (staffId) {
+                const staffData = dataStore.getStaffById(staffId);
+                if (staffData && !staffData.employeeId) {
+                  // Staff doesn't exist in backend yet, create it
+                  await createStaff({
+                    name: staffData.name,
+                    mobile: staffData.mobile,
+                    role: staffData.role,
+                    locationId: existingAddress.backendId,
+                    locationType: staffData.locationType,
+                    locationName: staffData.locationName,
+                  });
+                  console.log('✅ Staff synced to backend from address update');
+                }
               }
-        setIsLoading(false);
-      }, 500);
+            }
+          } catch (error) {
+            console.error('Error syncing staff to backend:', error);
+          }
+        })();
+      }
+      
+      setIsLoading(false);
+      // Navigate back to address confirmation screen with signup parameters
+      if (type && value) {
+        router.push({
+          pathname: '/auth/address-confirmation',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            allAddresses: JSON.stringify(dataStore.getAddresses()),
+          }
+        });
+      } else {
+        router.push('/settings');
+      }
     } catch (error) {
       console.error('Error updating address:', error);
       Alert.alert('Error', 'Failed to update address. Please try again.');
@@ -543,6 +608,59 @@ export default function EditAddressScreen() {
                   autoCapitalize="words"
                 />
               </View>
+
+              {/* Additional Address Lines */}
+              {additionalLines.map((line, index) => (
+                <View key={index} style={styles.inputGroup}>
+                  <View style={styles.additionalLineHeader}>
+                    <Text style={styles.label}>Address Line {index + 3}</Text>
+                    <TouchableOpacity
+                      style={styles.removeLineButton}
+                      onPress={() => {
+                        const newLines = [...additionalLines];
+                        newLines.splice(index, 1);
+                        setAdditionalLines(newLines);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <X size={Platform.select({
+                        web: 16,
+                        default: 20,
+                      })} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    style={styles.input}
+                    value={line}
+                    onChangeText={(text) => {
+                      const newLines = [...additionalLines];
+                      newLines[index] = text;
+                      setAdditionalLines(newLines);
+                    }}
+                    placeholder="Additional address line"
+                    placeholderTextColor="#999999"
+                    autoCapitalize="words"
+                  />
+                </View>
+              ))}
+
+              {additionalLines.length < 3 && (
+                <TouchableOpacity 
+                  style={styles.addLineButton} 
+                  onPress={() => {
+                    if (additionalLines.length < 3) {
+                      setAdditionalLines([...additionalLines, '']);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={Platform.select({
+                    web: 16,
+                    default: 14,
+                  })} color="#3f66ac" />
+                  <Text style={styles.addLineText}>Add Address Line</Text>
+                </TouchableOpacity>
+              )}
 
               <View style={styles.rowContainer}>
                 <View style={[styles.inputGroup, styles.cityInput]}>
@@ -922,6 +1040,36 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: '500',
     flex: 1,
+  },
+  // Additional lines styles
+  additionalLineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  removeLineButton: {
+    padding: 4,
+    borderRadius: 8,
+  },
+  addLineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#3f66ac',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  addLineText: {
+    color: '#3f66ac',
+    fontSize: 14,
+    fontWeight: '600',
   },
   submitButton: {
     borderRadius: 16,

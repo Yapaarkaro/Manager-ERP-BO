@@ -19,11 +19,11 @@ import { useThemeColors } from '@/hooks/useColorScheme';
 import { dataStore } from '@/utils/dataStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import FiscalYearSelector from '@/components/FiscalYearSelector';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { numberToWords } from '@/utils/numberToWords';
 
 export default function FinalSetupScreen() {
   const { 
@@ -74,7 +74,6 @@ export default function FinalSetupScreen() {
   const cashBalanceInputRef = useRef<TextInput>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0); // Track keyboard height
   const colors = useThemeColors();
-  const debouncedNavigate = useDebounceNavigation();
 
   // Log configuration status for debugging
   useEffect(() => {
@@ -193,45 +192,46 @@ export default function FinalSetupScreen() {
 
     setIsLoading(true);
 
-    // ✅ Save signup progress - finalSetup step
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        // Get mobile from params or from user's phone metadata
-        const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
-        if (mobileNumber) {
-          const progressResult = await saveSignupProgress({
-            mobile: mobileNumber,
-            mobileVerified: true,
-            currentStep: 'finalSetup',
-          });
-          if (progressResult.success) {
-            console.log('✅ Signup progress saved: finalSetup');
+    // ✅ Save signup progress - finalSetup step (non-blocking for instant navigation)
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          // Get mobile from params or from user's phone metadata
+          const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+          if (mobileNumber) {
+            saveSignupProgress({
+              mobile: mobileNumber,
+              mobileVerified: true,
+              currentStep: 'finalSetup',
+            }).then((progressResult) => {
+              if (progressResult.success) {
+                console.log('✅ Signup progress saved: finalSetup');
+              } else {
+                console.error('❌ Failed to save signup progress:', progressResult.error);
+              }
+            }).catch((error) => {
+              console.error('Error saving signup progress:', error);
+            });
           } else {
-            console.error('❌ Failed to save signup progress:', progressResult.error);
+            console.warn('⚠️ Mobile number not available for saving final setup progress');
           }
-        } else {
-          console.warn('⚠️ Mobile number not available for saving final setup progress');
-          Alert.alert('Error', 'Mobile number is required to complete final setup. Please try again.');
-          setIsLoading(false);
-          return;
         }
+      } catch (error) {
+        console.error('Error getting session:', error);
       }
-    } catch (error) {
-      console.error('Error saving signup progress:', error);
-      Alert.alert('Error', 'Failed to save setup progress. Please try again.');
-      setIsLoading(false);
-      return;
-    }
+    })();
 
+    // ✅ Clear cache to ensure fresh data is loaded when navigating to business summary
+    const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+    clearBusinessDataCache();
+    
     // Get latest data from dataStore to ensure we have all updates
     const latestAddresses = dataStore.getAddresses();
     const latestBankAccounts = dataStore.getBankAccounts();
 
-    setIsLoading(false);
-
-    // Navigate to business summary with all collected data
-    debouncedNavigate({
+    // Navigate immediately without delay
+    router.replace({
       pathname: '/auth/business-summary',
       params: {
         type,
@@ -249,7 +249,10 @@ export default function FinalSetupScreen() {
         startingInvoiceNumber,
         fiscalYear,
       }
-    }, 'replace');
+    });
+    
+    // Reset loading state immediately
+    setIsLoading(false);
   };
 
   const isFormValid = () => {
@@ -390,12 +393,20 @@ export default function FinalSetupScreen() {
                 </Text>
                 
                 {totalCashBalance > 0 && (
-                  <View style={styles.cashPreview}>
-                    <Text style={styles.cashPreviewLabel}>Cash Balance:</Text>
-                    <Text style={styles.cashPreviewValue}>
-                      {formatBalanceWithSymbol(totalCashBalance)}
-                    </Text>
-                  </View>
+                  <>
+                    <View style={styles.cashPreview}>
+                      <Text style={styles.cashPreviewLabel}>Cash Balance:</Text>
+                      <Text style={styles.cashPreviewValue}>
+                        {formatBalanceWithSymbol(totalCashBalance)}
+                      </Text>
+                    </View>
+                    <View style={styles.cashWordsContainer}>
+                      <Text style={styles.cashWordsLabel}>Amount in words:</Text>
+                      <Text style={styles.cashWordsValue}>
+                        {numberToWords(totalCashBalance)}
+                      </Text>
+                    </View>
+                  </>
                 )}
               </View>
 
@@ -432,7 +443,7 @@ export default function FinalSetupScreen() {
                   styles.completeButtonText,
                   isFormValid() ? styles.enabledButtonText : styles.disabledButtonText,
                 ]}>
-                  Continue to Summary
+                  {isLoading ? 'Please wait...' : 'Continue to Summary'}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
@@ -635,6 +646,27 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#047857',
+  },
+  cashWordsContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#d1fae5',
+  },
+  cashWordsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#047857',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cashWordsValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#065f46',
+    fontStyle: 'italic',
+    lineHeight: 20,
   },
   invoiceContainer: {
     backgroundColor: '#f8fafc',

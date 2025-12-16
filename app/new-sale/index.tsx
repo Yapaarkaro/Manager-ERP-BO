@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { productStore, Product } from '@/utils/productStore';
+import { canPerformAction } from '@/utils/trialUtils';
 import { 
   ArrowLeft, 
   Search, 
@@ -57,6 +58,11 @@ export default function NewSaleScreen() {
   }, []);
 
   const handleProductSelect = (product: Product) => {
+    // Check if trial expired
+    if (!canPerformAction('add product to sale')) {
+      return;
+    }
+
     // Navigate to cart with selected product
     router.push({
       pathname: '/new-sale/cart',
@@ -169,13 +175,16 @@ export default function NewSaleScreen() {
         {/* Add New Product Card */}
         <TouchableOpacity
           style={styles.addNewProductCard}
-          onPress={() => router.push({
-            pathname: '/inventory/manual-product',
-            params: {
-              returnTo: 'new-sale',
-              preSelectedCustomer: preSelectedCustomer
-            }
-          })}
+          onPress={() => {
+            if (!canPerformAction('add new product')) return;
+            router.push({
+              pathname: '/inventory/manual-product',
+              params: {
+                returnTo: 'new-sale',
+                preSelectedCustomer: preSelectedCustomer
+              }
+            });
+          }}
           activeOpacity={0.7}
         >
           <View style={styles.addNewProductContent}>

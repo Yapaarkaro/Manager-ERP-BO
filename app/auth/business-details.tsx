@@ -18,9 +18,9 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
 import { dataStore, getGSTINStateCode, toTitleCase, type BusinessAddress } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { submitBusinessDetails, saveSignupProgress, createAddress } from '@/services/backendApi';
+import { submitBusinessDetails } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { optimisticAddAddress, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -80,7 +80,6 @@ export default function BusinessDetailsScreen() {
   const [hasAutoFilled, setHasAutoFilled] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasLoadedProgress, setHasLoadedProgress] = useState(false);
-  const debouncedNavigate = useDebounceNavigation();
 
   // Check if we have incoming data from navigation (e.g., returning from business summary)
   useEffect(() => {
@@ -411,29 +410,8 @@ export default function BusinessDetailsScreen() {
 
       console.log('✅ Business details saved successfully. Business ID:', businessResult.businessId);
       
-      // ✅ Save signup progress to backend (await to ensure it's saved)
-      try {
-        await saveSignupProgress({
-          mobile: mobileNumber,
-          mobileVerified: true,
-          taxIdType: type as 'GSTIN' | 'PAN',
-          taxIdValue: value as string,
-          taxIdVerified: true,
-          ownerName: name,
-          ownerDob: panDob as string,
-          businessName: businessName,
-          businessType: finalBusinessType,
-          gstinData: parsedGstinData,
-          currentStep: 'businessDetails',
-        });
-        console.log('✅ Signup progress saved: businessDetails');
-      } catch (error) {
-        console.error('Error saving signup progress:', error);
-        // Continue even if progress save fails
-      }
-      
-      // Also update local dataStore (for UI consistency)
-      dataStore.updateSignupProgress({
+      // ✅ Optimistically save signup progress (DataStore updated immediately, backend sync in background)
+      optimisticSaveSignupProgress({
         mobile: mobileNumber,
         mobileVerified: true,
         taxIdType: type as 'GSTIN' | 'PAN',
@@ -443,24 +421,24 @@ export default function BusinessDetailsScreen() {
         ownerDob: panDob as string,
         businessName: businessName,
         businessType: finalBusinessType,
+        gstinData: parsedGstinData,
         currentStep: 'businessDetails',
       });
 
       // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
       // ✅ CRITICAL: Business must be created first (we already awaited it above)
       if (type === 'GSTIN' && gstinData && businessResult.success) {
-        try {
-          const parsedGstinDataForAddress = JSON.parse(gstinData as string);
+        const parsedGstinDataForAddress = JSON.parse(gstinData as string);
+      
+        // Check if a primary address already exists
+        const existingAddresses = dataStore.getAddresses();
+        const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
         
-          // Check if a primary address already exists
-          const existingAddresses = dataStore.getAddresses();
-          const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+        if (!hasPrimaryAddress) {
+          // Extract address from GSTIN data
+          if (parsedGstinDataForAddress.pradr && parsedGstinDataForAddress.pradr.addr) {
+            const addr = parsedGstinDataForAddress.pradr.addr;
           
-          if (!hasPrimaryAddress) {
-            // Extract address from GSTIN data
-            if (parsedGstinDataForAddress.pradr && parsedGstinDataForAddress.pradr.addr) {
-              const addr = parsedGstinDataForAddress.pradr.addr;
-            
             // Build address components from GSTIN data
             // addressLine1: Building Name, Floor Number (not door number - that's separate)
             const addressLine1Parts = [addr.bnm, addr.flno].filter(Boolean).join(', ');
@@ -493,129 +471,28 @@ export default function BusinessDetailsScreen() {
             console.log('🏢 Auto-creating primary address from GSTIN data:', primaryAddress);
             console.log('✅ Business ID exists:', businessResult.businessId, '- Address can now be created');
             
-            // ✅ Geocode the address to get latitude/longitude
-            const { geocodeAddress } = await import('@/services/googleMapsApi');
-            const formattedAddress = `${primaryAddress.addressLine1}, ${primaryAddress.addressLine2}, ${primaryAddress.city}, ${primaryAddress.stateName} - ${primaryAddress.pincode}`;
-            let latitude: number | undefined;
-            let longitude: number | undefined;
+            // ✅ Optimistically add address (DataStore updated immediately, backend sync in background)
+            // This makes the UI feel instant while backend sync happens asynchronously
+            optimisticAddAddress(primaryAddress, { showError: false });
             
-            try {
-              const geocodeResults = await geocodeAddress(formattedAddress);
-              if (geocodeResults && geocodeResults.length > 0) {
-                latitude = geocodeResults[0].geometry.location.lat;
-                longitude = geocodeResults[0].geometry.location.lng;
-                console.log('✅ Geocoded GSTIN address:', { latitude, longitude });
-              }
-            } catch (geocodeError) {
-              console.warn('⚠️ Failed to geocode GSTIN address, continuing without lat/long:', geocodeError);
-            }
-            
-            // ✅ Save the primary address to backend (AWAIT to ensure it's created before navigation)
-            // Business now exists, so address creation should succeed
-            try {
-              const addressResult = await createAddress({
-                name: primaryAddress.name,
-                addressJson: {
-                  doorNumber: primaryAddress.doorNumber,
-                  addressLine1: primaryAddress.addressLine1,
-                  addressLine2: primaryAddress.addressLine2,
-                  city: primaryAddress.city,
-                  pincode: primaryAddress.pincode,
-                  stateName: primaryAddress.stateName,
-                  stateCode: primaryAddress.stateCode,
-                  formatted_address: formattedAddress,
-                },
-                type: 'primary',
-                managerName: primaryAddress.manager,
-                managerMobileNumber: typeof primaryAddress.phone === 'string' ? primaryAddress.phone : (primaryAddress.phone ? String(primaryAddress.phone) : undefined),
-                isPrimary: true,
-                latitude: latitude,
-                longitude: longitude,
-              });
-              
-              if (addressResult.success && addressResult.address) {
-                console.log('✅ Primary address created in backend from GSTIN data:', addressResult.address.id);
-                console.log('✅ Address will be synced to businesses table via database trigger');
-                // Update local address with backend ID
-                primaryAddress.backendId = addressResult.address.id;
-                
-                // ✅ Save signup progress - primary address created
-                try {
-                  const progressResult = await saveSignupProgress({
-                    mobile: mobileNumber,
-                    mobileVerified: true,
-                    taxIdType: type as 'GSTIN' | 'PAN',
-                    taxIdValue: value as string,
-                    taxIdVerified: true,
-                    ownerName: name,
-                    businessName: businessName,
-                    businessType: finalBusinessType,
-                    gstinData: parsedGstinData,
-                    currentStep: 'primaryAddress',
-                  });
-                  if (progressResult.success) {
-                    console.log('✅ Signup progress saved: primaryAddress');
-                  } else {
-                    console.error('❌ Failed to save signup progress:', progressResult.error);
-                  }
-                } catch (error) {
-                  console.error('Error saving signup progress:', error);
-                }
-              } else {
-                console.error('❌ Backend address creation failed:', addressResult.error);
-                Alert.alert('Error', 'Failed to create primary address. Please try again.');
-                setIsCompleting(false);
-                setIsNavigating(false);
-                return;
-              }
-            } catch (error) {
-              console.error('❌ Error creating address in backend:', error);
-              Alert.alert('Error', 'Failed to create primary address. Please try again.');
-              setIsCompleting(false);
-              setIsNavigating(false);
-              return;
-            }
-            
-            // Save the primary address to dataStore
-            dataStore.addAddress(primaryAddress);
-            } else {
-              // No address in GSTIN data, fall back to normal flow
-              console.warn('⚠️ No address in GSTIN data, falling back to normal flow');
-            }
-          } else {
-            console.log('🏢 Primary address already exists, skipping auto-creation from GSTIN data');
-          }
-          
-          // Navigate directly to address confirmation screen
-          debouncedNavigate({
-              pathname: '/auth/address-confirmation',
-              params: {
-                type,
-                value,
-                gstinData,
-                name,
-                businessName,
-                businessType: businessType !== 'Others' ? businessType : customBusinessType,
-                customBusinessType: businessType === 'Others' ? customBusinessType : '',
-                mobile,
-                allAddresses: JSON.stringify(dataStore.getAddresses()),
-                // Pass invoice configuration for returning users
-                initialCashBalance,
-                invoicePrefix,
-                invoicePattern,
-                startingInvoiceNumber,
-                fiscalYear,
-              }
+            // ✅ Optimistically save signup progress (non-blocking)
+            optimisticSaveSignupProgress({
+              mobile: mobileNumber,
+              mobileVerified: true,
+              taxIdType: type as 'GSTIN' | 'PAN',
+              taxIdValue: value as string,
+              taxIdVerified: true,
+              ownerName: name,
+              businessName: businessName,
+              businessType: finalBusinessType,
+              gstinData: parsedGstinData,
+              currentStep: 'primaryAddress',
             });
-            setIsCompleting(false);
-            setIsNavigating(false);
-        } catch (addressError: any) {
-          console.error('Error auto-creating address from GSTIN:', addressError);
-          Alert.alert('Error', addressError.message || 'Failed to process address. Please try again.');
-          setIsCompleting(false);
-          setIsNavigating(false);
-          // Fall back to normal flow if auto-creation fails
-          debouncedNavigate({
+          } else {
+            // No address in GSTIN data, fall back to normal flow
+            console.warn('⚠️ No address in GSTIN data, falling back to normal flow');
+            // Navigate immediately to business-address screen
+            router.replace({
               pathname: '/auth/business-address',
               params: {
                 type,
@@ -626,51 +503,81 @@ export default function BusinessDetailsScreen() {
                 businessType: businessType !== 'Others' ? businessType : customBusinessType,
                 customBusinessType: businessType === 'Others' ? customBusinessType : '',
                 mobile,
-                addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
+                addressType: 'primary',
               }
             });
+            setIsCompleting(false);
+            setIsNavigating(false);
+            return;
+          }
+        } else {
+          console.log('🏢 Primary address already exists, skipping auto-creation from GSTIN data');
         }
+        
+        // Navigate immediately to address confirmation screen (no delay, no await)
+        router.replace({
+          pathname: '/auth/address-confirmation',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType: businessType !== 'Others' ? businessType : customBusinessType,
+            customBusinessType: businessType === 'Others' ? customBusinessType : '',
+            mobile,
+            allAddresses: JSON.stringify(dataStore.getAddresses()),
+            // Pass invoice configuration for returning users
+            initialCashBalance,
+            invoicePrefix,
+            invoicePattern,
+            startingInvoiceNumber,
+            fiscalYear,
+          }
+        });
+        setIsCompleting(false);
+        setIsNavigating(false);
       } else {
         // For PAN users, check if primary address already exists
         const existingAddresses = dataStore.getAddresses();
         const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
         
         if (hasPrimaryAddress) {
-          // Primary address exists, skip to address confirmation
-          debouncedNavigate({
-              pathname: '/auth/address-confirmation',
-              params: {
-                type,
-                value,
-                gstinData,
-                name,
-                businessName,
-                businessType: businessType !== 'Others' ? businessType : customBusinessType,
-                customBusinessType: businessType === 'Others' ? customBusinessType : '',
-                mobile,
-                allAddresses: JSON.stringify(existingAddresses),
-              }
-            });
-            setIsCompleting(false);
-            setIsNavigating(false);
+          // Primary address exists, skip to address confirmation (navigate immediately)
+          router.replace({
+            pathname: '/auth/address-confirmation',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+              mobile,
+              allAddresses: JSON.stringify(existingAddresses),
+            }
+          });
+          setIsCompleting(false);
+          setIsNavigating(false);
         } else {
-          // No primary address exists, continue with normal flow (select address from map/search)
-          debouncedNavigate({
-              pathname: '/auth/business-address',
-              params: {
-                type,
-                value,
-                gstinData,
-                name,
-                businessName,
-                businessType: businessType !== 'Others' ? businessType : customBusinessType,
-                customBusinessType: businessType === 'Others' ? customBusinessType : '',
-                mobile, // Add mobile parameter for PAN users
-                addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
-              }
-            });
-            setIsCompleting(false);
-            setIsNavigating(false);
+          // No primary address exists, continue with normal flow (navigate immediately)
+          router.replace({
+            pathname: '/auth/business-address',
+            params: {
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+              mobile, // Add mobile parameter for PAN users
+              addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
+            }
+          });
+          setIsCompleting(false);
+          setIsNavigating(false);
         }
       }
     } catch (error: any) {

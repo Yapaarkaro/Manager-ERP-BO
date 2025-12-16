@@ -140,6 +140,9 @@ export default function IncomeExpenseToggleScreen() {
   };
 
   const handleSubmit = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction(`add ${mode === 'income' ? 'income' : 'expense'}`)) return;
+    
     if (!isFormValid()) {
       Alert.alert('Incomplete Form', 'Please fill in all required fields');
       return;

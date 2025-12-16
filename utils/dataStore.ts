@@ -133,6 +133,7 @@ export interface BusinessAddress {
   status: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;
+  backendId?: string; // Optional backend ID for syncing with Supabase
 }
 
 export interface Customer {
@@ -332,6 +333,57 @@ export interface BankAccount {
   balance: number;
   isPrimary: boolean;
   createdAt: string;
+}
+
+export interface Staff {
+  id: string;
+  name: string;
+  mobile: string;
+  email?: string;
+  role: string;
+  department?: string;
+  address?: string;
+  employeeId?: string;
+  locationId?: string; // ID of branch/warehouse this staff is assigned to
+  locationType?: 'branch' | 'warehouse' | 'primary'; // Type of location
+  locationName?: string; // Name of the location for display
+  status: 'active' | 'inactive' | 'on_leave';
+  joinDate?: string;
+  avatar?: string;
+  // Additional details (may be incomplete)
+  basicSalary?: number;
+  allowances?: number;
+  emergencyContactName?: string;
+  emergencyContactRelation?: string;
+  emergencyContactPhone?: string;
+  permissions?: string[];
+  monthlySalesTarget?: number;
+  monthlyInvoiceTarget?: number;
+  // Performance data (optional, may be added later)
+  attendance?: {
+    percentage: number;
+    presentDays: number;
+    totalDays: number;
+    lastCheckIn: string;
+  };
+  performance?: {
+    score: number;
+    salesAmount: number;
+    invoicesProcessed: number;
+    customersServed: number;
+    returnsHandled: number;
+    rating: number;
+  };
+  targets?: {
+    monthlySalesTarget: number;
+    achievedSales: number;
+    monthlyInvoiceTarget: number;
+    achievedInvoices: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+  // Flag to indicate if staff info is incomplete
+  isIncomplete?: boolean;
 }
 
 export interface BankTransaction {
@@ -619,6 +671,7 @@ class DataStore {
   private addresses: BusinessAddress[] = [];
   private bankAccounts: BankAccount[] = [];
   private bankTransactions: BankTransaction[] = [];
+  private staff: Staff[] = [];
   private listeners: (() => void)[] = [];
   private isSignupComplete: boolean = false;
   private signupProgress: SignupProgress = {};
@@ -652,6 +705,14 @@ class DataStore {
         console.log('📥 Loaded bank accounts:', this.bankAccounts.length);
       } else {
         console.log('📭 No bank accounts found in storage');
+      }
+      
+      const staffData = await AsyncStorage.getItem('staff');
+      if (staffData) {
+        this.staff = JSON.parse(staffData);
+        console.log('📥 Loaded staff:', this.staff.length);
+      } else {
+        console.log('📭 No staff found in storage');
       }
       
       const signupCompleteData = await AsyncStorage.getItem('isSignupComplete');
@@ -717,6 +778,7 @@ class DataStore {
     try {
       await AsyncStorage.setItem('addresses', JSON.stringify(this.addresses));
       await AsyncStorage.setItem('bankAccounts', JSON.stringify(this.bankAccounts));
+      await AsyncStorage.setItem('staff', JSON.stringify(this.staff));
       await AsyncStorage.setItem('isSignupComplete', this.isSignupComplete.toString());
       await AsyncStorage.setItem('signupProgress', JSON.stringify(this.signupProgress));
       await AsyncStorage.setItem('changeLogs', JSON.stringify(this.changeLogs));
@@ -967,6 +1029,14 @@ class DataStore {
     this.addresses.push(address);
     this.saveData(); // Save to persistent storage
     
+    // ✅ Create staff if manager info is provided
+    if (address.manager && address.phone) {
+      // Create staff from manager info (async, non-blocking)
+      this.createStaffFromAddress(address).catch(error => {
+        console.error('Error creating staff from new address:', error);
+      });
+    }
+    
     // Log the change
     this.logChange(
       'address_add',
@@ -990,7 +1060,7 @@ class DataStore {
   }
 
   getAddressById(id: string): BusinessAddress | undefined {
-    return this.addresses.find(address => address.id === id);
+    return this.addresses.find(addr => addr.id === id || addr.backendId === id);
   }
 
   getAddressesByType(type: 'primary' | 'branch' | 'warehouse'): BusinessAddress[] {
@@ -1001,8 +1071,17 @@ class DataStore {
     const index = this.addresses.findIndex(address => address.id === id);
     if (index !== -1) {
       const oldAddress = { ...this.addresses[index] };
-      this.addresses[index] = { ...this.addresses[index], ...updates };
+      this.addresses[index] = { ...this.addresses[index], ...updates, updatedAt: new Date().toISOString() };
       this.saveData(); // Save to persistent storage
+      
+      // ✅ Create or update staff if manager info is provided
+      const updatedAddress = this.addresses[index];
+      if (updatedAddress.manager && updatedAddress.phone) {
+        // Create/update staff from manager info (async, non-blocking)
+        this.createStaffFromAddress(updatedAddress).catch(error => {
+          console.error('Error creating/updating staff from address update:', error);
+        });
+      }
       
       // Log the change
       this.logChange(
@@ -1249,6 +1328,176 @@ class DataStore {
 
   getBankAccountCount(): number {
     return this.bankAccounts.length;
+  }
+
+  // Staff methods
+  addStaff(staff: Staff) {
+    this.staff.push(staff);
+    this.saveData();
+    console.log('=== STAFF ADDED TO STORE ===');
+    console.log('Staff ID:', staff.id);
+    console.log('Staff Name:', staff.name);
+    console.log('Role:', staff.role);
+    console.log('Mobile:', staff.mobile);
+    console.log('Total staff in store:', this.staff.length);
+    console.log('Added at:', new Date().toISOString());
+    console.log('================================');
+    this.notifyListeners();
+  }
+
+  getStaff(): Staff[] {
+    return [...this.staff];
+  }
+
+  getStaffById(id: string): Staff | undefined {
+    return this.staff.find(s => s.id === id);
+  }
+
+  getStaffByMobile(mobile: string): Staff | undefined {
+    return this.staff.find(s => s.mobile === mobile);
+  }
+
+  getStaffByLocation(locationId: string): Staff[] {
+    return this.staff.filter(s => s.locationId === locationId);
+  }
+
+  updateStaff(id: string, updates: Partial<Staff>) {
+    const index = this.staff.findIndex(s => s.id === id);
+    if (index !== -1) {
+      this.staff[index] = { ...this.staff[index], ...updates, updatedAt: new Date().toISOString() };
+      this.saveData();
+      this.notifyListeners();
+    }
+  }
+
+  deleteStaff(id: string) {
+    const index = this.staff.findIndex(s => s.id === id);
+    if (index !== -1) {
+      this.staff.splice(index, 1);
+      this.saveData();
+      this.notifyListeners();
+    }
+  }
+
+  // Extract staff from branch/warehouse managers
+  extractStaffFromLocations() {
+    const allAddresses = this.getAddresses();
+    const existingStaff = this.getStaff();
+    const existingMobileNumbers = new Set(existingStaff.map(s => s.mobile));
+    
+    const newStaff: Staff[] = [];
+    
+    allAddresses.forEach(address => {
+      // Only extract if manager name and phone exist
+      if (address.manager && address.phone) {
+        const mobile = address.phone.replace(/\D/g, '').slice(0, 10);
+        
+        // Check if staff with this mobile already exists
+        const existingStaffByMobile = existingStaff.find(s => s.mobile === mobile);
+        
+        if (existingStaffByMobile) {
+          // Update existing staff's location info if it changed
+          if (existingStaffByMobile.locationId !== address.id) {
+            this.updateStaff(existingStaffByMobile.id, {
+              locationId: address.id,
+              locationType: address.type,
+              locationName: address.name,
+            });
+          }
+          return;
+        }
+        
+        // Determine role based on location type
+        let role = 'Store Manager';
+        if (address.type === 'branch') {
+          role = 'Branch Manager';
+        } else if (address.type === 'warehouse') {
+          role = 'Warehouse Manager';
+        } else if (address.type === 'primary') {
+          role = 'Store Manager';
+        }
+        
+        const staff: Staff = {
+          id: `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: address.manager,
+          mobile: mobile,
+          role: role,
+          locationId: address.id,
+          locationType: address.type,
+          locationName: address.name,
+          status: 'active',
+          isIncomplete: true, // Mark as incomplete since only name, mobile, and role are known
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        
+        newStaff.push(staff);
+        existingMobileNumbers.add(mobile); // Track to avoid duplicates
+      }
+    });
+    
+    // Add new staff to store
+    newStaff.forEach(staff => {
+      this.addStaff(staff);
+    });
+    
+    return newStaff;
+  }
+
+  // Create or update staff from address manager info
+  async createStaffFromAddress(address: BusinessAddress) {
+    if (!address.manager || !address.phone) {
+      return null;
+    }
+
+    const mobile = address.phone.replace(/\D/g, '').slice(0, 10);
+    if (mobile.length !== 10) {
+      return null;
+    }
+
+    // Check if staff with this mobile already exists
+    const existingStaff = this.getStaffByMobile(mobile);
+    
+    // Determine role based on location type
+    let role = 'Store Manager';
+    if (address.type === 'branch') {
+      role = 'Branch Manager';
+    } else if (address.type === 'warehouse') {
+      role = 'Warehouse Manager';
+    } else if (address.type === 'primary') {
+      role = 'Store Manager';
+    }
+
+    const staffData: Staff = {
+      id: existingStaff?.id || `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: address.manager,
+      mobile: mobile,
+      role: role,
+      locationId: address.id,
+      locationType: address.type,
+      locationName: address.name,
+      status: 'active',
+      isIncomplete: true, // Mark as incomplete since only name, mobile, and role are known
+      createdAt: existingStaff?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (existingStaff) {
+      // Update existing staff
+      this.updateStaff(existingStaff.id, {
+        name: address.manager,
+        role: role,
+        locationId: address.id,
+        locationType: address.type,
+        locationName: address.name,
+        updatedAt: new Date().toISOString(),
+      });
+      return existingStaff.id;
+    } else {
+      // Create new staff
+      this.addStaff(staffData);
+      return staffData.id;
+    }
   }
 
   // Bank Transaction methods
@@ -1552,6 +1801,7 @@ class DataStore {
       // Clear all arrays and objects
       this.addresses = [];
       this.bankAccounts = [];
+      this.staff = [];
       this.customers = [];
       this.products = [];
       this.invoices = [];
@@ -1570,6 +1820,7 @@ class DataStore {
       await AsyncStorage.multiRemove([
         'addresses',
         'bankAccounts',
+        'staff',
         'customers',
         'products',
         'invoices',
@@ -1865,6 +2116,7 @@ class DataStore {
     this.payables = [];
     this.addresses = [];
     this.bankAccounts = [];
+    this.staff = [];
     this.bankTransactions = [];
     this.isSignupComplete = false;
     this.signupProgress = {};
@@ -1877,6 +2129,7 @@ class DataStore {
     await AsyncStorage.removeItem('changeLogs');
     await AsyncStorage.removeItem('addresses');
     await AsyncStorage.removeItem('bankAccounts');
+    await AsyncStorage.removeItem('staff');
     await AsyncStorage.removeItem('userAccounts');
     await AsyncStorage.removeItem('cartItems');
     await AsyncStorage.removeItem('colorScheme');

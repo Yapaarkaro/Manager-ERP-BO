@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone, Building2, Package } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import { dataStore, getGSTINStateCode, BusinessAddress } from '@/utils/dataStore';
 import { extractAddressComponents, reverseGeocode } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import PlatformMapView from '@/components/PlatformMapView';
@@ -90,6 +90,7 @@ export default function EditAddressSimpleScreen() {
     customBusinessType,
     existingAddresses = '[]',
     fromSummary = 'false',
+    fromSettings = 'false', // ✅ Flag for navigation from settings screen
   } = useLocalSearchParams();
 
   console.log('🔧 EditAddressSimpleScreen - Parameters:', { editAddressId, addressType, type, value });
@@ -142,12 +143,47 @@ export default function EditAddressSimpleScreen() {
     const loadAddress = async () => {
       if (!editAddressId) return;
 
-      const existingAddress = dataStore.getAddressById(editAddressId as string);
+      console.log('🔍 Loading address with editAddressId:', editAddressId);
+      console.log('🔍 From settings:', fromSettings === 'true', 'From summary:', fromSummary === 'true');
+      
+      // ✅ Try to find address by ID first, then by backendId (handles both cases)
+      let existingAddress = dataStore.getAddressById(editAddressId as string);
+      console.log('🔍 Found by ID:', existingAddress ? { id: existingAddress.id, backendId: existingAddress.backendId, name: existingAddress.name } : 'not found');
+      
+      // If not found by ID, try finding by backendId (when coming from business summary/settings with backend ID)
+      if (!existingAddress) {
+        existingAddress = dataStore.getAddresses().find(addr => addr.backendId === editAddressId);
+        console.log('🔍 Found by backendId:', existingAddress ? { id: existingAddress.id, backendId: existingAddress.backendId, name: existingAddress.name } : 'not found');
+      }
+      
+      // ✅ If still not found and coming from settings, try to load from backend via useBusinessData
+      if (!existingAddress && fromSettings === 'true') {
+        try {
+          const { useBusinessData } = await import('@/hooks/useBusinessData');
+          // We can't use hooks here, so we'll need to fetch directly
+          // For now, try to find by backendId in all addresses from backend
+          console.log('🔄 Address not in DataStore, attempting to sync from backend...');
+          // The address should be in DataStore if it was loaded in settings screen
+          // If not, we'll show an error and let user go back
+        } catch (error) {
+          console.error('❌ Error loading address from backend:', error);
+        }
+      }
+      
       if (!existingAddress) {
         console.error('❌ Address not found with ID:', editAddressId);
+        console.error('📋 Available addresses in DataStore:', dataStore.getAddresses().map(a => ({ id: a.id, backendId: a.backendId, name: a.name })));
         Alert.alert('Error', 'Address not found. Please go back and try again.');
         return;
       }
+      
+      // ✅ Log address details for debugging
+      console.log('✅ Address loaded successfully:', {
+        localId: existingAddress.id,
+        backendId: existingAddress.backendId,
+        name: existingAddress.name,
+        type: existingAddress.type
+      });
 
       // Store original address for change detection
       setOriginalAddress({
@@ -160,6 +196,7 @@ export default function EditAddressSimpleScreen() {
         stateCode: existingAddress.stateCode,
         manager: existingAddress.manager || '',
         phone: existingAddress.phone || '',
+        additionalLines: existingAddress.additionalLines || [], // ✅ Include additionalLines in original address
       });
 
       setAddressName(existingAddress.name);
@@ -171,6 +208,13 @@ export default function EditAddressSimpleScreen() {
       setManagerName(existingAddress.manager || '');
       setManagerPhone(existingAddress.phone || '');
       setOriginalPhone(existingAddress.phone || '');
+      
+      // Load additional lines (doorNumber is separate, not in additionalLines)
+      if (existingAddress.additionalLines && Array.isArray(existingAddress.additionalLines)) {
+        setAdditionalLines([...existingAddress.additionalLines]);
+      } else {
+        setAdditionalLines([]);
+      }
 
       const matchingState = indianStates.find(state => state.code === existingAddress.stateCode);
       if (matchingState) {
@@ -529,6 +573,11 @@ export default function EditAddressSimpleScreen() {
   const hasChanges = () => {
     if (!originalAddress) return false;
     
+    // ✅ Check if additionalLines have changed
+    const currentAdditionalLines = additionalLines.filter(line => line.trim().length > 0);
+    const originalAdditionalLines = originalAddress.additionalLines || [];
+    const additionalLinesChanged = JSON.stringify(currentAdditionalLines) !== JSON.stringify(originalAdditionalLines);
+    
     return (
       addressName.trim() !== originalAddress.name ||
       doorNumber.trim() !== originalAddress.doorNumber ||
@@ -538,13 +587,17 @@ export default function EditAddressSimpleScreen() {
       pincode.trim() !== originalAddress.pincode ||
       selectedState?.code !== originalAddress.stateCode ||
       managerName.trim() !== originalAddress.manager ||
-      managerPhone.trim() !== originalAddress.phone
+      managerPhone.trim() !== originalAddress.phone ||
+      additionalLinesChanged // ✅ Include additionalLines in change detection
     );
   };
 
   const handleCancel = () => {
-    // Navigate back to address confirmation screen
-    if (fromSummary === 'true') {
+    // ✅ Navigate back based on source screen
+    if (fromSettings === 'true') {
+      // Navigate back to settings screen
+      router.back();
+    } else if (fromSummary === 'true') {
       router.replace({
         pathname: '/auth/business-summary',
         params: {
@@ -592,74 +645,199 @@ export default function EditAddressSimpleScreen() {
     setIsLoading(true);
     
     try {
-      // Update existing address
-      const updatedAddress = {
-        id: editAddressId as string,
+      // ✅ Get existing address - try by ID first, then by backendId (handles both cases)
+      let existingAddress = dataStore.getAddressById(editAddressId as string);
+      if (!existingAddress) {
+        existingAddress = dataStore.getAddresses().find(addr => addr.backendId === editAddressId);
+      }
+      
+      if (!existingAddress) {
+        console.error('❌ Address not found in DataStore with ID:', editAddressId);
+        console.error('📋 Available addresses:', dataStore.getAddresses().map(a => ({ id: a.id, backendId: a.backendId, name: a.name })));
+        Alert.alert('Error', 'Address not found. Please go back and try again.');
+        setIsLoading(false);
+        return;
+      }
+      
+      // ✅ CRITICAL: Ensure backendId is set - if editAddressId is a backend ID, use it
+      // This handles the case where editAddressId is the backend ID but the address in DataStore
+      // might have a different local ID
+      const backendId = existingAddress.backendId || (existingAddress.id === editAddressId ? editAddressId : null);
+      
+      if (!backendId) {
+        console.error('❌ Address has no backendId and editAddressId is not a backend ID:', {
+          editAddressId,
+          addressId: existingAddress.id,
+          backendId: existingAddress.backendId
+        });
+        Alert.alert('Error', 'Cannot update address: Missing backend ID. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log('✅ Updating address with backendId:', backendId, 'local ID:', existingAddress.id);
+      
+      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
+      const { optimisticUpdateAddress } = await import('@/utils/optimisticSync');
+      
+      // Prepare address updates with all fields including additionalLines
+      const addressUpdates: Partial<BusinessAddress> = {
         name: addressName.trim(),
-        type: addressType as 'primary' | 'branch' | 'warehouse',
         doorNumber: doorNumber.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
+        additionalLines: additionalLines.filter(line => line.trim().length > 0), // ✅ Always include additionalLines
         city: city.trim(),
         pincode: pincode,
         stateName: selectedState?.name || '',
         stateCode: getGSTINStateCode(selectedState?.name || ''),
-        // For primary addresses, preserve user info (name from signup, phone from existing address)
-        // For branch/warehouse, use the manager fields if showContactFields is true
-        manager: addressType === 'primary' ? (name || managerName.trim()) : (typeInfo.showContactFields ? managerName.trim() : undefined),
-        phone: addressType === 'primary' ? (managerPhone.trim() || originalPhone) : (typeInfo.showContactFields ? managerPhone.trim() : undefined),
+        manager: addressType === 'primary' 
+          ? (Array.isArray(name) ? name[0] : (name || managerName.trim()))
+          : (typeInfo.showContactFields ? managerName.trim() : undefined),
+        phone: addressType === 'primary'
+          ? (managerPhone.trim() || originalPhone)
+          : (typeInfo.showContactFields ? managerPhone.trim() : undefined),
         isPrimary: addressType === 'primary',
-        status: 'active' as const,
         updatedAt: new Date().toISOString(),
+        backendId: backendId, // ✅ Ensure backendId is included in updates
       };
-
-      console.log('🔄 Updating address:', updatedAddress);
-      dataStore.updateAddress(editAddressId as string, updatedAddress);
       
-      // Navigate back immediately without alert for better UX
-      setTimeout(() => {
+      // ✅ Optimistically update (DataStore updated immediately, backend sync in background)
+      // Use the address's local ID for DataStore lookup, but ensure backendId is set
+      console.log('🔄 Calling optimisticUpdateAddress with:', {
+        localId: existingAddress.id,
+        backendId: backendId,
+        hasUpdates: Object.keys(addressUpdates).length
+      });
+      
+      const result = await optimisticUpdateAddress(existingAddress.id, addressUpdates, { 
+        showError: true, // ✅ Show errors to help debug
+        awaitSync: true,
+        revertOnError: false // Don't revert - let user see the error
+      });
+      
+      if (!result.success) {
+        console.error('❌ Failed to update address:', result.error);
+        console.error('❌ Update details:', {
+          localId: existingAddress.id,
+          backendId: backendId,
+          addressName: addressName
+        });
+        Alert.alert(
+          'Update Failed', 
+          result.error || 'Failed to update address in backend. Please check your connection and try again.',
+          [{ text: 'OK' }]
+        );
         setIsLoading(false);
-              // Check if we came from business summary page
-              if (fromSummary === 'true') {
-                // Return to business summary page
-                router.replace({
-                  pathname: '/auth/business-summary',
-                  params: {
-                    type,
-                    value,
-                    gstinData,
-                    name,
-                    businessName,
-                    businessType,
-                    customBusinessType,
-                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                    allBankAccounts: '[]', // Will be updated from summary
-                    initialCashBalance: '0',
-                    invoicePrefix: 'INV',
-                    invoicePattern: '',
-                    startingInvoiceNumber: '1',
-                    fiscalYear: 'APR-MAR',
-                  }
-                });
-              } else if (type && value) {
-                // Navigate back to address confirmation screen with signup parameters
-          router.replace({
-                  pathname: '/auth/address-confirmation',
-                  params: {
-                    type,
-                    value,
-                    gstinData,
-                    name,
-                    businessName,
-                    businessType,
-                    customBusinessType,
-                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                  }
-                });
-              } else {
-          router.back();
-              }
-      }, 300);
+        return;
+      }
+      
+      console.log('✅ Address update successful:', {
+        localId: existingAddress.id,
+        backendId: backendId,
+        addressName: addressName
+      });
+      
+      // ✅ Clear cache to ensure fresh data is loaded when navigating back
+      const { clearBusinessDataCache, prefetchBusinessData } = await import('@/hooks/useBusinessData');
+      clearBusinessDataCache();
+      
+      // ✅ Wait for backend to fully process the update (increased delay for reliability)
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // ✅ Prefetch data BEFORE navigation to ensure it's ready when screen loads
+      // This ensures the screen shows updated data immediately without waiting for refetch
+      // AWAIT the prefetch to ensure data is ready before navigation
+      try {
+        await prefetchBusinessData();
+        console.log('✅ Business data prefetched - screen will show updated address immediately');
+        
+        // ✅ After prefetch, update DataStore with the latest backend data to ensure consistency
+        // The prefetched data is now in the cache, but we should also sync it to DataStore
+        // This ensures edit-address-simple can find the address if user edits again
+        const { __getGlobalCache } = await import('@/hooks/useBusinessData');
+        const cache = __getGlobalCache();
+        if (cache.data?.addresses) {
+          // Sync prefetched addresses to DataStore
+          cache.data.addresses.forEach((addr: any) => {
+            const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
+            const formattedAddress = {
+              id: addr.id,
+              backendId: addr.id,
+              name: addr.name,
+              type: addr.type,
+              doorNumber: addr.door_number || '',
+              addressLine1: addr.address_line1 || '',
+              addressLine2: addr.address_line2 || '',
+              additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [],
+              city: addr.city || '',
+              pincode: addr.pincode || '',
+              stateName: addr.state || '',
+              stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
+              isPrimary: addr.is_primary || false,
+              manager: addr.manager_name || '',
+              phone: addr.manager_mobile_number || '',
+              status: 'active' as const,
+              createdAt: addr.created_at || new Date().toISOString(),
+              updatedAt: addr.updated_at || new Date().toISOString(),
+            };
+            if (!existingAddress) {
+              dataStore.addAddress(formattedAddress as any);
+            } else {
+              dataStore.updateAddress(existingAddress.id, formattedAddress as any);
+            }
+          });
+          console.log('✅ DataStore synced with prefetched backend data');
+        }
+      } catch (error) {
+        console.warn('⚠️ Prefetch failed (non-blocking):', error);
+        // Continue with navigation even if prefetch fails
+      }
+      
+      setIsLoading(false);
+      // ✅ Navigate back based on source screen
+      if (fromSettings === 'true') {
+        // Return to settings screen - data is prefetched and will be shown immediately
+        router.back();
+      } else if (fromSummary === 'true') {
+        // Return to business summary page - data will be refreshed from backend via useBusinessData hook
+        router.replace({
+          pathname: '/auth/business-summary',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            // Don't pass allAddresses - let it load from backend via useBusinessData hook to avoid duplicates
+            allBankAccounts: '[]', // Will be updated from summary
+            initialCashBalance: '0',
+            invoicePrefix: 'INV',
+            invoicePattern: '',
+            startingInvoiceNumber: '1',
+            fiscalYear: 'APR-MAR',
+          }
+        });
+      } else if (type && value) {
+        // Navigate back to address confirmation screen with signup parameters
+        router.replace({
+          pathname: '/auth/address-confirmation',
+          params: {
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType,
+            customBusinessType,
+            allAddresses: JSON.stringify(dataStore.getAddresses()),
+          }
+        });
+      } else {
+        router.back();
+      }
     } catch (error) {
       console.error('Error updating address:', error);
       Alert.alert('Error', 'Failed to update address. Please try again.');
@@ -708,10 +886,7 @@ export default function EditAddressSimpleScreen() {
 
         <ScrollView 
           style={styles.scrollView} 
-          contentContainerStyle={Platform.select({
-            web: webContainerStyles.webScrollContent,
-            default: {} // Let content style handle padding
-          })} 
+          contentContainerStyle={webContainerStyles.webScrollContent} 
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -784,7 +959,7 @@ export default function EditAddressSimpleScreen() {
                           web: {
                             outlineWidth: 0,
                             outlineColor: 'transparent',
-                            outlineStyle: 'none',
+                            outlineStyle: 'none' as any,
                           },
                         }),
                       ]}
@@ -920,6 +1095,61 @@ export default function EditAddressSimpleScreen() {
                   />
                 </View>
               </View>
+
+              {/* Additional Address Lines */}
+              {additionalLines.map((line, index) => (
+                <View key={index} style={styles.inputGroup}>
+                  <View style={styles.additionalLineHeader}>
+                    <Text style={styles.label}>Address Line {index + 3}</Text>
+                    <TouchableOpacity
+                      style={styles.removeLineButton}
+                      onPress={() => {
+                        const newLines = [...additionalLines];
+                        newLines.splice(index, 1);
+                        setAdditionalLines(newLines);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <X size={Platform.select({
+                        web: 16,
+                        default: 20,
+                      })} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.inputContainer}>
+                    <CapitalizedTextInput
+                      style={styles.input}
+                      value={line}
+                      onChangeText={(text) => {
+                        const newLines = [...additionalLines];
+                        newLines[index] = text;
+                        setAdditionalLines(newLines);
+                      }}
+                      placeholder="Additional address line"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                    />
+                  </View>
+                </View>
+              ))}
+
+              {additionalLines.length < 3 && (
+                <TouchableOpacity 
+                  style={styles.addLineButton} 
+                  onPress={() => {
+                    if (additionalLines.length < 3) {
+                      setAdditionalLines([...additionalLines, '']);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={Platform.select({
+                    web: 16,
+                    default: 14,
+                  })} color="#3f66ac" />
+                  <Text style={styles.addLineText}>Add Address Line</Text>
+                </TouchableOpacity>
+              )}
 
               <View style={styles.rowContainer}>
                 <View style={[styles.inputGroup, styles.cityInput]}>
@@ -1250,7 +1480,7 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        outlineStyle: 'none' as any,
       },
     }),
   },
@@ -1260,6 +1490,10 @@ const styles = StyleSheet.create({
   loadingIndicator: {
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#666666',
   },
   // Floating search results container
   floatingSearchResultsContainer: {
@@ -1369,7 +1603,7 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        outlineStyle: 'none' as any,
       },
     }),
   },
@@ -1445,7 +1679,7 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        outlineStyle: 'none' as any,
       },
     }),
   },
@@ -1557,7 +1791,7 @@ const styles = StyleSheet.create({
       web: {
         outlineWidth: 0,
         outlineColor: 'transparent',
-        outlineStyle: 'none',
+        outlineStyle: 'none' as any,
       },
     }),
   },
@@ -1606,5 +1840,35 @@ const styles = StyleSheet.create({
   },
   stateCodeTextSelected: {
     color: '#ffffff',
+  },
+  // Additional lines styles
+  additionalLineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  removeLineButton: {
+    padding: 4,
+    borderRadius: 8,
+  },
+  addLineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#3f66ac',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  addLineText: {
+    color: '#3f66ac',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

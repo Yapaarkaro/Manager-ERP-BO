@@ -85,6 +85,8 @@ export default function InventoryScreen() {
   };
 
   const handleAddProduct = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('add product')) return;
     console.log('=== NAVIGATING DIRECTLY TO MANUAL PRODUCT FORM ===');
     console.log('Timestamp:', new Date().toISOString());
     console.log('==================================================');

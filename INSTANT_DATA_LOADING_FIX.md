@@ -83,3 +83,6 @@ Data was loading after a second delay instead of instantly, causing lag across a
 
 The app now feels instant with zero data time gap!
 
+
+
+

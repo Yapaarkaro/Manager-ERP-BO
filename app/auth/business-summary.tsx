@@ -37,14 +37,16 @@ import {
   Eye,
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore } from '@/utils/dataStore';
+import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import TrialNotification from '@/components/TrialNotification';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { completeOnboarding, deleteSignupProgress, saveSignupProgress } from '@/services/backendApi';
+import { completeOnboarding, deleteSignupProgress, saveSignupProgress, updateBusinessCashBalance } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { getPlatformShadow } from '@/utils/shadowUtils';
 
 export default function BusinessSummaryScreen() {
   const { 
@@ -71,7 +73,8 @@ export default function BusinessSummaryScreen() {
   const [editableBusinessType, setEditableBusinessType] = useState(
     businessType !== 'Others' ? businessType as string : customBusinessType as string
   );
-  const [editableAddresses, setEditableAddresses] = useState(JSON.parse(allAddresses as string || '[]'));
+  // Initialize empty, will be populated from backend data via useBusinessData hook
+  const [editableAddresses, setEditableAddresses] = useState<any[]>([]);
   const [editableBankAccounts, setEditableBankAccounts] = useState(JSON.parse(allBankAccounts as string || '[]'));
   const [editableCashBalance, setEditableCashBalance] = useState(initialCashBalance as string || '0');
   const [editableInvoicePrefix, setEditableInvoicePrefix] = useState(invoicePrefix as string);
@@ -107,48 +110,252 @@ export default function BusinessSummaryScreen() {
   const totalCashBalance = parseFloat(editableCashBalance) || 0;
   const grandTotal = totalBankBalance + totalCashBalance;
 
+  // Disable animation on web to prevent scroll jumping
   useEffect(() => {
-    Animated.timing(slideAnimation, {
-      toValue: 1,
-      duration: 500,
-      useNativeDriver: false, // Disable for web to avoid warning
-    }).start();
+    if (Platform.OS === 'web') {
+      // On web, set animation value immediately to prevent layout shifts
+      slideAnimation.setValue(1);
+    } else {
+      Animated.timing(slideAnimation, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }).start();
+    }
   }, []);
 
-  // Reload data when screen comes into focus (after editing)
+  // ✅ Use unified business data hook for instant, cached data
+  const { data: businessData, refetch } = useBusinessData();
+
+  // ✅ Update addresses and bank accounts from cached business data (instant, no delay)
+  // Use refs to track last data and prevent unnecessary updates that cause scroll
+  const lastAddressesRef = useRef<string>('');
+  const lastBankAccountsRef = useRef<string>('');
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollPositionRef = useRef<number>(0);
+  
+  // Save scroll position before updates
+  const handleScroll = (event: any) => {
+    scrollPositionRef.current = event.nativeEvent.contentOffset.y;
+  };
+  
+  useEffect(() => {
+    // Only update if data exists and actually changed (prevent unnecessary re-renders that cause scroll)
+    if (businessData?.addresses) {
+      // Convert backend format to local format
+      // ✅ Use backend data as single source of truth - don't mix with DataStore to avoid duplicates
+      // First, remove any addresses from DataStore that don't exist in backend (cleanup duplicates)
+      const backendAddressIds = new Set(businessData.addresses.map((addr: any) => addr.id));
+      const dataStoreAddresses = dataStore.getAddresses();
+      dataStoreAddresses.forEach((dsAddr) => {
+        // If DataStore address has a backendId that's not in backend, remove it
+        if (dsAddr.backendId && !backendAddressIds.has(dsAddr.backendId)) {
+          // This address was deleted from backend, remove from DataStore
+          dataStore.deleteAddress(dsAddr.id);
+        }
+      });
+      
+      const formattedAddresses = businessData.addresses.map((addr: any) => {
+        // ✅ Use backend ID as the address ID to ensure consistency
+        // Find existing address in DataStore by backendId for editing purposes only
+        const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
+        
+        const formattedAddress = {
+          id: addr.id, // ✅ Use backend ID directly to avoid duplicates
+          name: addr.name,
+          type: addr.type,
+          doorNumber: addr.door_number || '',
+          addressLine1: addr.address_line1 || '',
+          addressLine2: addr.address_line2 || '',
+          additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [], // ✅ Include additionalLines
+          city: addr.city || '',
+          pincode: addr.pincode || '',
+          stateName: addr.state || '',
+          stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
+          isPrimary: addr.is_primary || false,
+          manager: addr.manager_name || '',
+          phone: addr.manager_mobile_number || '',
+          status: 'active' as const,
+          createdAt: addr.created_at || new Date().toISOString(),
+          updatedAt: addr.updated_at || new Date().toISOString(),
+          backendId: addr.id, // ✅ Include backendId
+        };
+        
+        // ✅ Sync to DataStore for editing purposes only
+        // Use backendId to find existing address, but use backend ID as the address ID
+        if (!existingAddress) {
+          // Add to DataStore - use backend ID as the address ID
+          dataStore.addAddress(formattedAddress);
+        } else {
+          // Update existing address in DataStore to match backend
+          // If existingAddress.id doesn't match backend ID, we need to handle it
+          if (existingAddress.id !== addr.id) {
+            // Delete old address and add new one with correct ID
+            dataStore.deleteAddress(existingAddress.id);
+            dataStore.addAddress(formattedAddress);
+          } else {
+            // Same ID, just update
+            dataStore.updateAddress(existingAddress.id, formattedAddress);
+          }
+        }
+        
+        return formattedAddress;
+      });
+      
+      // ✅ Deduplicate addresses by ID (in case of any duplicates)
+      const uniqueAddresses = formattedAddresses.filter((addr, index, self) => 
+        index === self.findIndex(a => a.id === addr.id)
+      );
+      
+      // Only update if addresses actually changed (prevent unnecessary re-renders that cause scroll)
+      // ✅ Include more fields in comparison to detect all changes (addressLine1, city, additionalLines, etc.)
+      const addressesKey = JSON.stringify(uniqueAddresses.map((a: any) => ({ 
+        id: a.id, 
+        name: a.name, 
+        type: a.type,
+        addressLine1: a.addressLine1,
+        addressLine2: a.addressLine2,
+        additionalLines: a.additionalLines,
+        city: a.city,
+        pincode: a.pincode,
+        updatedAt: a.updatedAt,
+      })));
+      if (lastAddressesRef.current !== addressesKey) {
+        // Save current scroll position before update
+        const savedScrollPosition = scrollPositionRef.current;
+        
+        setEditableAddresses(uniqueAddresses);
+        lastAddressesRef.current = addressesKey;
+        
+        // Restore scroll position after state update (on next frame to prevent scroll jump)
+        if (Platform.OS === 'web' && scrollViewRef.current) {
+          requestAnimationFrame(() => {
+            scrollViewRef.current?.scrollTo({ y: savedScrollPosition, animated: false });
+          });
+        }
+      }
+    }
+    if (businessData?.bankAccounts) {
+      // Convert backend format to local format
+      // ✅ Use backend data as single source of truth - don't mix with DataStore to avoid duplicates
+      // First, remove any bank accounts from DataStore that don't exist in backend (cleanup duplicates)
+      const backendAccountIds = new Set(businessData.bankAccounts.map((acc: any) => acc.id));
+      const dataStoreAccounts = dataStore.getBankAccounts();
+      dataStoreAccounts.forEach((dsAcc) => {
+        // If DataStore account has a backendId that's not in backend, remove it
+        if (dsAcc.backendId && !backendAccountIds.has(dsAcc.backendId)) {
+          // This account was deleted from backend, remove from DataStore
+          dataStore.deleteBankAccount(dsAcc.id);
+        }
+      });
+      
+      const formattedAccounts = businessData.bankAccounts.map((acc: any) => {
+        // ✅ Use backend ID as the account ID to ensure consistency
+        // Find existing account in DataStore by backendId for editing purposes only
+        const existingAccount = dataStore.getBankAccounts().find(a => a.backendId === acc.id);
+        
+        const formattedAccount = {
+          id: acc.id, // ✅ Use backend ID directly to avoid duplicates
+          bankId: acc.bank_id || '',
+          bankName: acc.bank_name || '',
+          bankShortName: acc.bank_short_name || '',
+          accountHolderName: acc.account_holder_name || '',
+          accountNumber: acc.account_number || '',
+          ifscCode: acc.ifsc_code || '',
+          upiId: acc.upi_id || '',
+          accountType: (acc.account_type || 'Savings') as 'Savings' | 'Current',
+          initialBalance: parseFloat(String(acc.initial_balance || 0)),
+          balance: parseFloat(String(acc.initial_balance || 0)),
+          isPrimary: acc.is_primary || false,
+          createdAt: acc.created_at || new Date().toISOString(),
+          backendId: acc.id, // ✅ Include backendId
+        };
+        
+        // ✅ Sync to DataStore for editing purposes only
+        // Use backendId to find existing account, but use backend ID as the account ID
+        if (!existingAccount) {
+          // Add to DataStore - use backend ID as the account ID
+          dataStore.addBankAccount(formattedAccount as any);
+        } else {
+          // Update existing account in DataStore to match backend
+          // If existingAccount.id doesn't match backend ID, we need to handle it
+          if (existingAccount.id !== acc.id) {
+            // Delete old account and add new one with correct ID
+            dataStore.deleteBankAccount(existingAccount.id);
+            dataStore.addBankAccount(formattedAccount as any);
+          } else {
+            // Same ID, just update
+            dataStore.updateBankAccount(existingAccount.id, formattedAccount as any);
+          }
+        }
+        
+        return formattedAccount;
+      });
+      
+      // ✅ Deduplicate accounts by ID (in case of any duplicates)
+      const uniqueAccounts = formattedAccounts.filter((acc, index, self) => 
+        index === self.findIndex(a => a.id === acc.id)
+      );
+      
+      // Only update if bank accounts actually changed (prevent unnecessary re-renders that cause scroll)
+      // ✅ Include more fields in comparison to detect all changes
+      const accountsKey = JSON.stringify(uniqueAccounts.map(a => ({ 
+        id: a.id, 
+        accountNumber: a.accountNumber,
+        accountHolderName: a.accountHolderName,
+        bankName: a.bankName,
+        ifscCode: a.ifscCode,
+        initialBalance: a.initialBalance,
+      })));
+      if (lastBankAccountsRef.current !== accountsKey) {
+        // Save current scroll position before update
+        const savedScrollPosition = scrollPositionRef.current;
+        
+        setEditableBankAccounts(uniqueAccounts);
+        lastBankAccountsRef.current = accountsKey;
+        
+        // Restore scroll position after state update (on next frame)
+        if (Platform.OS === 'web' && scrollViewRef.current) {
+          requestAnimationFrame(() => {
+            scrollViewRef.current?.scrollTo({ y: savedScrollPosition, animated: false });
+          });
+        }
+      }
+    }
+    
+    // ✅ Update cash balance from backend data
+    // Only update if backend has a meaningful value (non-zero) OR if we don't have a value from params
+    // This prevents backend from overwriting the user's input before onboarding completion
+    if (businessData?.business) {
+      const backendCashBalance = businessData.business.current_cash_balance || businessData.business.initial_cash_balance || 0;
+      const currentCashBalance = parseFloat(editableCashBalance) || 0;
+      
+      // Only update from backend if:
+      // 1. Backend has a non-zero value AND current value is zero/empty (backend is source of truth after onboarding)
+      // 2. OR if backend value is significantly different (user may have updated it elsewhere)
+      if (backendCashBalance > 0 && (currentCashBalance === 0 || Math.abs(backendCashBalance - currentCashBalance) > 0.01)) {
+        const cashBalanceString = backendCashBalance.toString();
+        setEditableCashBalance(cashBalanceString);
+      }
+    }
+  }, [businessData]);
+
+  // ✅ Refetch when screen comes into focus to get latest data (especially after edits)
   useFocusEffect(
     React.useCallback(() => {
-      const reloadData = async () => {
-        console.log('🔄 Reloading data on business summary screen focus');
-        try {
-          const latestAddresses = await dataStore.getAddresses();
-          const latestBankAccounts = await dataStore.getBankAccounts();
-          console.log('📊 Raw data from store:', { 
-            addresses: latestAddresses, 
-            banks: latestBankAccounts 
-          });
-          
-          // Only update if we have data, otherwise keep existing data
-          if (latestAddresses && latestAddresses.length > 0) {
-            setEditableAddresses(latestAddresses);
-          }
-          if (latestBankAccounts && latestBankAccounts.length > 0) {
-            setEditableBankAccounts(latestBankAccounts);
-          }
-          
-          console.log('✅ Data reloaded:', { 
-            addresses: latestAddresses?.length || 0, 
-            banks: latestBankAccounts?.length || 0,
-            currentAddresses: editableAddresses.length,
-            currentBanks: editableBankAccounts.length
-          });
-        } catch (error) {
-          console.error('❌ Error reloading data:', error);
-        }
-      };
-      
-      reloadData();
-    }, [editableAddresses.length, editableBankAccounts.length])
+      // Refetch to get latest data from backend (especially after address/bank account edits)
+      console.log('✅ Business summary focused - refetching data');
+      // Since edit screens now await backend sync, wait 500ms, and prefetch data,
+      // we can refetch immediately (data should be ready)
+      // But add a small delay to ensure navigation has completed
+      setTimeout(() => {
+        refetch().then(() => {
+          console.log('✅ Business summary data refetched');
+        }).catch((error) => {
+          console.error('❌ Error refetching business summary data:', error);
+        });
+      }, 200); // 200ms delay - ensures navigation has completed and screen is ready
+    }, [refetch])
   );
 
   const formatBalance = (balance: number) => {
@@ -198,10 +405,20 @@ export default function BusinessSummaryScreen() {
   };
 
   const toggleSection = (section: string) => {
+    // Save scroll position before toggling to prevent scroll jump
+    const savedScrollPosition = scrollPositionRef.current;
+    
     setExpandedSections(prev => ({
       ...prev,
       [section]: !prev[section as keyof typeof prev],
     }));
+    
+    // Restore scroll position after toggle (on next frame)
+    if (Platform.OS === 'web' && scrollViewRef.current) {
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollTo({ y: savedScrollPosition, animated: false });
+      });
+    }
   };
 
   const handleDeleteAddress = (addressId: string) => {
@@ -271,22 +488,19 @@ export default function BusinessSummaryScreen() {
       
       const invoicePatternValue = editableInvoicePattern || `${editableInvoicePrefix}-YYYY-####`;
       
-      // ✅ Save signup progress at summary step (before completing)
-      try {
-        const progressResult = await saveSignupProgress({
-          mobile: mobileNumber,
-          mobileVerified: true,
-          currentStep: 'businessSummary',
-        });
-        if (progressResult.success) {
-          console.log('✅ Signup progress saved: businessSummary');
-        } else {
-          console.error('❌ Failed to save signup progress:', progressResult.error);
+      // ✅ Optimistically save signup progress (non-blocking)
+      (async () => {
+        try {
+          const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
+          optimisticSaveSignupProgress({
+            mobile: mobileNumber,
+            mobileVerified: true,
+            currentStep: 'businessSummary',
+          });
+        } catch (error) {
+          console.error('Error saving signup progress:', error);
         }
-      } catch (error) {
-        console.error('Error saving signup progress:', error);
-        // Don't fail onboarding if progress save fails
-      }
+      })();
 
       // Complete onboarding - AWAIT to ensure it completes before navigation
       const onboardingResult = await completeOnboarding({
@@ -307,6 +521,19 @@ export default function BusinessSummaryScreen() {
       }
 
       console.log('✅ Onboarding completed successfully. Business ID:', onboardingResult.businessId);
+
+      // ✅ Clear cache to ensure fresh data is loaded after onboarding completion
+      clearBusinessDataCache();
+      
+      // ✅ Refetch immediately after clearing cache to get fresh data including cash balance
+      // Small delay to ensure backend has finished processing
+      setTimeout(() => {
+        refetch().then(() => {
+          console.log('✅ Business data refetched after onboarding completion');
+        }).catch((error) => {
+          console.error('❌ Error refetching after onboarding:', error);
+        });
+      }, 1000); // 1 second delay to ensure backend has processed the cash balance
       
       // ✅ Note: complete-onboarding Edge Function now updates signup_progress with business_id
       // and marks it as 'signupComplete', so we don't need to update it here
@@ -345,7 +572,7 @@ export default function BusinessSummaryScreen() {
       console.log('✅ User account created for login:', userAccount.mobile);
 
       // Start the 30-day free trial
-      subscriptionStore.startTrial();
+      await subscriptionStore.startTrial();
 
       // ✅ Prefetch business data in background (warm up cache for instant dashboard load)
       (async () => {
@@ -373,11 +600,8 @@ export default function BusinessSummaryScreen() {
       setIsLoading(false);
       setIsNavigating(false);
       
-      // ✅ Redirect to dashboard after successful onboarding
-      // Prefetch runs in background, navigation happens immediately
-      router.replace('/dashboard');
-      
-      // Show trial notification (non-blocking)
+      // ✅ Show trial notification BEFORE navigation
+      // This ensures the popup appears after the business summary screen
       setShowTrialNotification(true);
     } catch (error: any) {
       console.error('Error completing setup:', error);
@@ -451,17 +675,19 @@ export default function BusinessSummaryScreen() {
     return parts.join('-');
   };
 
-  const slideTransform = {
-    transform: [
-      {
-        translateY: slideAnimation.interpolate({
-          inputRange: [0, 1],
-          outputRange: [100, 0],
-        }),
-      },
-    ],
-    // Removed opacity animation to prevent grey background flash
-  };
+  // Disable transform animation on web to prevent scroll jumping
+  const slideTransform = Platform.OS === 'web' 
+    ? {} // No animation on web to prevent layout shifts
+    : {
+        transform: [
+          {
+            translateY: slideAnimation.interpolate({
+              inputRange: [0, 1],
+              outputRange: [100, 0],
+            }),
+          },
+        ],
+      };
 
   const SectionHeader = ({ title, section, icon }: { title: string; section: keyof typeof expandedSections; icon: React.ReactNode }) => (
     <TouchableOpacity
@@ -533,9 +759,19 @@ export default function BusinessSummaryScreen() {
           </TouchableOpacity>
 
           <ScrollView 
+            ref={scrollViewRef}
             style={styles.scrollView} 
-            contentContainerStyle={Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}} 
+            contentContainerStyle={[
+              Platform.OS === 'web' ? webContainerStyles.webScrollContent : {},
+              { flexGrow: 1 } // Prevent auto-scroll on web
+            ]} 
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={true}
+            bounces={Platform.OS !== 'web'} // Disable bounce on web to prevent scroll jumping
+            maintainVisibleContentPosition={Platform.OS === 'android' ? { minIndexForVisible: 0 } : undefined}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
           >
             <Animated.View style={[styles.content, slideTransform]}>
               <View style={styles.iconContainer}>
@@ -740,7 +976,15 @@ export default function BusinessSummaryScreen() {
                         </View>
                         <Text style={styles.addressName}>{address.name}</Text>
                         <Text style={styles.addressText}>
-                          {[address.doorNumber, address.addressLine1, address.addressLine2, address.city, address.stateName, address.pincode].filter(Boolean).join(', ')}
+                          {[
+                            address.doorNumber, 
+                            address.addressLine1, 
+                            address.addressLine2,
+                            ...(address.additionalLines || []), // ✅ Include additionalLines
+                            address.city, 
+                            address.stateName, 
+                            address.pincode
+                          ].filter(Boolean).join(', ')}
                         </Text>
                         {/* Contact Person Details for All Address Types (Primary, Branch, Warehouse) */}
                         {(address.manager || address.phone || (address.isPrimary && (name || mobile))) && (
@@ -1012,9 +1256,38 @@ export default function BusinessSummaryScreen() {
                         </View>
                         <TouchableOpacity
                           style={styles.saveButton}
-                          onPress={() => setEditingSection(null)}
+                          onPress={async () => {
+                            // Save cash balance to backend
+                            const balance = parseFloat(editableCashBalance) || 0;
+                            if (isNaN(balance) || balance < 0) {
+                              Alert.alert('Invalid Amount', 'Please enter a valid cash balance amount.');
+                              return;
+                            }
+                            
+                            setIsLoading(true);
+                            try {
+                              const result = await updateBusinessCashBalance(balance);
+                              if (result.success) {
+                                // Clear cache and refetch to show updated balance
+                                clearBusinessDataCache();
+                                await refetch();
+                                setEditingSection(null);
+                                Alert.alert('Success', 'Cash balance updated successfully!');
+                              } else {
+                                Alert.alert('Error', result.error || 'Failed to update cash balance. Please try again.');
+                              }
+                            } catch (error: any) {
+                              console.error('Error updating cash balance:', error);
+                              Alert.alert('Error', 'Failed to update cash balance. Please try again.');
+                            } finally {
+                              setIsLoading(false);
+                            }
+                          }}
+                          disabled={isLoading}
                         >
-                          <Text style={styles.saveButtonText}>Save Changes</Text>
+                          <Text style={styles.saveButtonText}>
+                            {isLoading ? 'Saving...' : 'Save Changes'}
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     ) : (
@@ -1163,7 +1436,8 @@ export default function BusinessSummaryScreen() {
               console.error('⚠️ Prefetch error (non-blocking):', error);
             }
           })();
-          router.push('/dashboard');
+          // Navigate to dashboard after closing the popup
+          router.replace('/dashboard');
         }}
         onUpgrade={() => {
           setShowTrialNotification(false);
@@ -1561,10 +1835,7 @@ const styles = StyleSheet.create({
     marginVertical: 8,
     borderWidth: 2,
     borderColor: '#3F66AC',
-    shadowColor: '#3F66AC',
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    shadowOpacity: 0.1,
+    ...getPlatformShadow(2, '#3F66AC', 0.1),
     elevation: 3,
   },
   cashEditHeader: {

@@ -353,10 +353,14 @@ export default function PurchasesScreen() {
   };
 
   const handleCreatePO = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('create purchase order')) return;
     router.push('/purchasing/create-po');
   };
 
   const handleAddPurchaseInvoice = () => {
+    const { canPerformAction } = require('@/utils/trialUtils');
+    if (!canPerformAction('add purchase invoice')) return;
     router.push({
       pathname: '/purchasing/add-purchase-invoice' as any
     });

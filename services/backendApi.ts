@@ -23,12 +23,7 @@ async function callEdgeFunction(
   requireAuth: boolean = false
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_ANON_KEY,
-    };
-
-    // Add JWT token if authentication is required
+    // Check authentication if required
     if (requireAuth) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
@@ -37,19 +32,78 @@ async function callEdgeFunction(
           error: 'Authentication required. Please sign in first.',
         };
       }
-      headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+
+    // Try using Supabase's functions.invoke() first (only for POST requests)
+    // This handles CORS automatically and is more reliable on web
+    if (method === 'POST') {
+      try {
+        const response = await supabase.functions.invoke(functionName, {
+          body: body || {},
+        });
+
+        if (response.error) {
+          console.error(`Error calling ${functionName} via functions.invoke():`, response.error);
+          // Fall through to fetch fallback
+        } else {
+          return {
+            success: true,
+            data: response.data,
+          };
+        }
+      } catch (invokeError: any) {
+        console.warn(`Supabase functions.invoke() failed for ${functionName}, falling back to fetch:`, invokeError);
+        // Fall through to fetch fallback
+      }
+    }
+
+    // For GET, PUT, DELETE, or if POST invoke() failed, use fetch
+    // This ensures compatibility with all HTTP methods
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+    };
+
+    if (requireAuth) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
     }
 
     const options: RequestInit = {
       method,
       headers,
+      // Add credentials for CORS (important for web)
+      credentials: 'omit', // Don't send cookies, but allow CORS
     };
 
     if (body && method !== 'GET') {
       options.body = JSON.stringify(body);
     }
 
+    // ✅ Enhanced logging for PUT requests to debug the issue
+    if (method === 'PUT') {
+      console.log(`🔄 Making PUT request to ${functionName}:`, {
+        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
+        hasBody: !!body,
+        bodyKeys: body ? Object.keys(body) : [],
+        headers: Object.keys(headers),
+      });
+    }
+    
     const response = await fetch(`${EDGE_FUNCTIONS_URL}/${functionName}`, options);
+    
+    // ✅ Enhanced error logging for failed requests
+    if (!response.ok) {
+      console.error(`❌ ${method} request to ${functionName} failed:`, {
+        status: response.status,
+        statusText: response.statusText,
+        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
+        method,
+        hasBody: !!body,
+      });
+    }
     
     // Handle non-JSON responses
     let data: any;
@@ -71,9 +125,17 @@ async function callEdgeFunction(
     }
 
     if (!response.ok) {
+      // Provide more detailed error information
+      const errorMessage = data.error || data.message || `Request failed with status ${response.status}`;
+      console.error(`Error calling ${functionName}:`, {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorMessage,
+        data,
+      });
       return {
         success: false,
-        error: data.error || data.message || `Request failed with status ${response.status}`,
+        error: errorMessage,
       };
     }
 
@@ -82,12 +144,32 @@ async function callEdgeFunction(
       data,
     };
   } catch (error: any) {
-    console.error(`Error calling ${functionName}:`, error);
-    // Handle network errors more gracefully
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    console.error(`❌ Error calling ${functionName} (${method}):`, error);
+    // Handle network errors more gracefully with detailed messages
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message === 'Failed to fetch')) {
+      // This usually indicates CORS issue or network problem
+      console.error(`❌ Network error details for ${functionName} (${method}):`, {
+        message: error.message,
+        stack: error.stack,
+        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
+        method,
+        hasBody: !!body,
+        bodyType: body ? typeof body : 'none',
+        // ✅ Log if this is a PUT request (which might have CORS issues)
+        isPutRequest: method === 'PUT',
+      });
+      
+      // ✅ Provide more specific error message for PUT requests
+      if (method === 'PUT') {
+        return {
+          success: false,
+          error: 'Failed to update resource. This may be due to a network issue or CORS configuration. Please check your internet connection and try again. If the problem persists, the Edge Function may need to be reconfigured to accept PUT requests.',
+        };
+      }
+      
       return {
         success: false,
-        error: 'Network error. Please check your internet connection and try again.',
+        error: 'Network error. Please check your internet connection and try again. If the problem persists, the Edge Function may not be deployed.',
       };
     }
     return {
@@ -347,6 +429,11 @@ export async function createAddress(params: {
   );
 
   if (result.success && result.data?.address) {
+    // ✅ Update businesses table if this address is primary
+    if (params.isPrimary && result.data.address.id) {
+      await updateBusinessPrimaryAddress(result.data.address.id);
+    }
+    
     // Clear cache so data refreshes
     getClearCache()?.();
     return {
@@ -375,28 +462,73 @@ export async function updateAddress(params: {
   latitude?: number; // Add latitude
   longitude?: number; // Add longitude
 }): Promise<{ success: boolean; address?: any; error?: string }> {
+  // ✅ Build request body, filtering out undefined values to avoid issues
+  const requestBody: any = {
+    addressId: params.addressId,
+  };
+  
+  // Only include fields that are defined
+  if (params.name !== undefined) {
+    requestBody.name = params.name;
+  }
+  if (params.addressJson !== undefined) {
+    requestBody.addressJson = typeof params.addressJson === 'string' 
+      ? params.addressJson 
+      : JSON.stringify(params.addressJson);
+  }
+  if (params.type !== undefined) {
+    requestBody.type = params.type;
+  }
+  if (params.managerName !== undefined) {
+    requestBody.managerName = params.managerName;
+  }
+  if (params.managerMobileNumber !== undefined) {
+    requestBody.managerMobileNumber = params.managerMobileNumber;
+  }
+  if (params.isPrimary !== undefined) {
+    requestBody.isPrimary = params.isPrimary;
+  }
+  if (params.latitude !== undefined) {
+    requestBody.latitude = params.latitude;
+  }
+  if (params.longitude !== undefined) {
+    requestBody.longitude = params.longitude;
+  }
+  
+  console.log('🔄 updateAddress - Request body:', {
+    addressId: requestBody.addressId,
+    hasName: !!requestBody.name,
+    hasAddressJson: !!requestBody.addressJson,
+    hasType: !!requestBody.type,
+    hasManagerName: !!requestBody.managerName,
+    hasManagerMobileNumber: !!requestBody.managerMobileNumber,
+    isPrimary: requestBody.isPrimary,
+  });
+  
+  // ✅ Use POST instead of PUT to avoid CORS issues on web
+  // The Edge Function now accepts POST requests with addressId for updates
+  // This allows us to use supabase.functions.invoke() which handles CORS automatically
   const result = await callEdgeFunction(
     'manage-addresses',
-    'PUT',
-    {
-      addressId: params.addressId,
-      name: params.name,
-      addressJson: params.addressJson 
-        ? (typeof params.addressJson === 'string' 
-            ? params.addressJson 
-            : JSON.stringify(params.addressJson))
-        : undefined,
-      type: params.type,
-      managerName: params.managerName,
-      managerMobileNumber: params.managerMobileNumber,
-      isPrimary: params.isPrimary,
-      latitude: params.latitude !== undefined ? params.latitude : null,
-      longitude: params.longitude !== undefined ? params.longitude : null,
-    },
+    'POST',
+    requestBody,
     true
   );
 
   if (result.success && result.data?.address) {
+    // ✅ Update businesses table if isPrimary status changed
+    if (params.isPrimary !== undefined) {
+      if (params.isPrimary) {
+        // Set as primary
+        await updateBusinessPrimaryAddress(params.addressId);
+      } else {
+        // Unset primary - find new primary or set to null
+        // The Edge Function should handle setting another address as primary
+        // For now, we'll just update if explicitly set to false
+        // In practice, when unsetting primary, another address should be set as primary first
+      }
+    }
+    
     // Clear cache so data refreshes
     getClearCache()?.();
     return {
@@ -491,6 +623,11 @@ export async function createBankAccount(params: {
   );
 
   if (result.success && result.data?.account) {
+    // ✅ Update businesses table if this account is primary
+    if (params.isPrimary && result.data.account.id) {
+      await updateBusinessPrimaryBankAccount(result.data.account.id);
+    }
+    
     // Clear cache so data refreshes
     getClearCache()?.();
     return {
@@ -521,14 +658,80 @@ export async function updateBankAccount(params: {
   initialBalance?: number;
   isPrimary?: boolean;
 }): Promise<{ success: boolean; account?: any; error?: string }> {
+  // ✅ Build request body with action: 'update' for POST request
+  const requestBody: any = {
+    action: 'update', // ✅ Specify action for POST request
+    accountId: params.accountId,
+  };
+  
+  // Only include fields that are defined
+  if (params.bankName !== undefined) {
+    requestBody.bankName = params.bankName;
+  }
+  if (params.bankShortName !== undefined) {
+    requestBody.bankShortName = params.bankShortName;
+  }
+  if (params.bankId !== undefined) {
+    requestBody.bankId = params.bankId;
+  }
+  if (params.accountHolderName !== undefined) {
+    requestBody.accountHolderName = params.accountHolderName;
+  }
+  if (params.accountNumber !== undefined) {
+    requestBody.accountNumber = params.accountNumber;
+  }
+  if (params.ifscCode !== undefined) {
+    requestBody.ifscCode = params.ifscCode;
+  }
+  if (params.upiId !== undefined) {
+    requestBody.upiId = params.upiId;
+  }
+  if (params.accountType !== undefined) {
+    requestBody.accountType = params.accountType;
+  }
+  if (params.initialBalance !== undefined) {
+    requestBody.initialBalance = params.initialBalance;
+  }
+  if (params.isPrimary !== undefined) {
+    requestBody.isPrimary = params.isPrimary;
+  }
+  
+  console.log('🔄 updateBankAccount - Request body:', {
+    action: requestBody.action,
+    accountId: requestBody.accountId,
+    hasBankName: !!requestBody.bankName,
+    hasAccountHolderName: !!requestBody.accountHolderName,
+    hasAccountNumber: !!requestBody.accountNumber,
+    hasIfscCode: !!requestBody.ifscCode,
+    hasAccountType: !!requestBody.accountType,
+    hasInitialBalance: requestBody.initialBalance !== undefined,
+    isPrimary: requestBody.isPrimary,
+  });
+  
+  // ✅ Use POST instead of PUT to avoid CORS issues on web
+  // The Edge Function now accepts POST requests with action: 'update' for updates
+  // This allows us to use supabase.functions.invoke() which handles CORS automatically
   const result = await callEdgeFunction(
     'manage-bank-accounts',
-    'PUT',
-    params,
+    'POST',
+    requestBody,
     true
   );
 
   if (result.success && result.data?.account) {
+    // ✅ Update businesses table if isPrimary status changed
+    if (params.isPrimary !== undefined) {
+      if (params.isPrimary) {
+        // Set as primary
+        await updateBusinessPrimaryBankAccount(params.accountId);
+      } else {
+        // Unset primary - find new primary or set to null
+        // The Edge Function should handle setting another account as primary
+        // For now, we'll just update if explicitly set to false
+        // In practice, when unsetting primary, another account should be set as primary first
+      }
+    }
+    
     // Clear cache so data refreshes
     getClearCache()?.();
     return {
@@ -563,6 +766,239 @@ export async function deleteBankAccount(accountId: string): Promise<{ success: b
   return {
     success: false,
     error: result.error || 'Failed to delete bank account',
+  };
+}
+
+// ============================================
+// Business Primary References Update API (Requires Authentication)
+// ============================================
+
+/**
+ * Update primary address ID in businesses table
+ */
+export async function updateBusinessPrimaryAddress(addressId: string | null): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return {
+        success: false,
+        error: 'Authentication required',
+      };
+    }
+
+    // Get user's business_id
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return {
+        success: false,
+        error: 'Business not found',
+      };
+    }
+
+    // Update businesses table
+    const { error: updateError } = await supabase
+      .from('businesses')
+      .update({ primary_address_id: addressId })
+      .eq('id', userData.business_id);
+
+    if (updateError) {
+      console.error('Error updating primary_address_id:', updateError);
+      return {
+        success: false,
+        error: updateError.message,
+      };
+    }
+
+    // Clear cache so data refreshes
+    getClearCache()?.();
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating primary address:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update primary address',
+    };
+  }
+}
+
+/**
+ * Update primary bank account ID in businesses table
+ */
+export async function updateBusinessPrimaryBankAccount(accountId: string | null): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return {
+        success: false,
+        error: 'Authentication required',
+      };
+    }
+
+    // Get user's business_id
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return {
+        success: false,
+        error: 'Business not found',
+      };
+    }
+
+    // Update businesses table
+    const { error: updateError } = await supabase
+      .from('businesses')
+      .update({ primary_bank_account_id: accountId })
+      .eq('id', userData.business_id);
+
+    if (updateError) {
+      console.error('Error updating primary_bank_account_id:', updateError);
+      return {
+        success: false,
+        error: updateError.message,
+      };
+    }
+
+    // Clear cache so data refreshes
+    getClearCache()?.();
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating primary bank account:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to update primary bank account',
+    };
+  }
+}
+
+/**
+ * Create or update subscription in database
+ * This syncs the local subscription state to the database
+ */
+export async function createOrUpdateSubscription(
+  subscriptionData: {
+    isOnTrial: boolean;
+    trialStartDate?: string;
+    trialEndDate?: string;
+    status: 'active' | 'inactive' | 'trialing' | 'cancelled';
+    planId?: string;
+  }
+): Promise<{ success: boolean; subscription?: any; error?: string }> {
+  try {
+    // Get current user's business_id
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'User not authenticated' };
+    }
+
+    // Get user's business_id
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    // Check if subscription already exists
+    const { data: existingSubscription } = await supabase
+      .from('subscriptions')
+      .select('id')
+      .eq('business_id', userData.business_id)
+      .in('status', ['active', 'trialing'])
+      .maybeSingle();
+
+    if (existingSubscription) {
+      // Update existing subscription
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .update({
+          is_on_trial: subscriptionData.isOnTrial,
+          trial_start_date: subscriptionData.trialStartDate || null,
+          trial_end_date: subscriptionData.trialEndDate || null,
+          status: subscriptionData.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingSubscription.id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error updating subscription:', error);
+        return { success: false, error: error.message };
+      }
+
+      getClearCache()?.();
+      return { success: true, subscription: data };
+    } else {
+      // Create new subscription
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .insert({
+          business_id: userData.business_id,
+          is_on_trial: subscriptionData.isOnTrial,
+          trial_start_date: subscriptionData.trialStartDate || null,
+          trial_end_date: subscriptionData.trialEndDate || null,
+          status: subscriptionData.status,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating subscription:', error);
+        return { success: false, error: error.message };
+      }
+
+      getClearCache()?.();
+      return { success: true, subscription: data };
+    }
+  } catch (error: any) {
+    console.error('Error in createOrUpdateSubscription:', error);
+    return { success: false, error: error.message || 'Failed to sync subscription' };
+  }
+}
+
+// ============================================
+// Business Cash Balance Update API (Requires Authentication)
+// ============================================
+
+/**
+ * Update business cash balance
+ */
+export async function updateBusinessCashBalance(
+  initialCashBalance: number
+): Promise<{ success: boolean; business?: any; error?: string }> {
+  const result = await callEdgeFunction(
+    'update-business-cash-balance',
+    'POST',
+    { initialCashBalance },
+    true
+  );
+
+  if (result.success && result.data?.business) {
+    // Clear cache so data refreshes
+    getClearCache()?.();
+    return {
+      success: true,
+      business: result.data.business,
+    };
+  }
+
+  return {
+    success: false,
+    error: result.error || 'Failed to update cash balance',
   };
 }
 
@@ -713,7 +1149,16 @@ export async function saveSignupProgress(params: {
  */
 export async function deleteSignupProgress(): Promise<{ success: boolean; error?: string }> {
   try {
-    const result = await callEdgeFunction('manage-signup-progress', 'DELETE', undefined, true);
+    // For DELETE requests, pass an empty object instead of undefined to ensure proper request formatting
+    const result = await callEdgeFunction('manage-signup-progress', 'DELETE', {}, true);
+    
+    // DELETE is idempotent - if it succeeds or if the resource doesn't exist, consider it successful
+    // This prevents errors when signup progress was already deleted or doesn't exist
+    if (result.success || result.error?.includes('not found') || result.error?.includes('does not exist')) {
+      return {
+        success: true,
+      };
+    }
     
     return {
       success: result.success,
@@ -721,7 +1166,14 @@ export async function deleteSignupProgress(): Promise<{ success: boolean; error?
     };
   } catch (error: any) {
     console.error('Error deleting signup progress:', error);
-    // Return success: false but don't throw - this is non-blocking
+    // Return success: true for network errors during cleanup - this is non-blocking cleanup
+    // The signup is already complete, so failing to delete progress shouldn't block the user
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      console.warn('⚠️ Network error during signup progress deletion (non-blocking):', error.message);
+      return {
+        success: true, // Treat as success since this is cleanup after successful signup
+      };
+    }
     return {
       success: false,
       error: error.message || 'Failed to delete signup progress',
@@ -833,6 +1285,221 @@ export async function deleteDeviceSnapshot(deviceId: string): Promise<{ success:
   return {
     success: result.success,
     error: result.error,
+  };
+}
+
+// ============================================
+// Staff Management APIs (Requires Authentication)
+// ============================================
+
+/**
+ * Get all staff for the business
+ */
+export async function getStaff(): Promise<{ success: boolean; staff?: any[]; error?: string }> {
+  try {
+    const result = await callEdgeFunction('manage-staff', 'GET', undefined, true);
+    
+    console.log('🔍 getStaff API response:', {
+      success: result.success,
+      hasData: !!result.data,
+      dataType: typeof result.data,
+      isArray: Array.isArray(result.data),
+      dataKeys: result.data ? Object.keys(result.data) : [],
+      error: result.error
+    });
+    
+    // Handle different response structures
+    if (result.success && result.data) {
+      // Case 1: Staff array is directly in result.data
+      if (Array.isArray(result.data)) {
+        console.log('✅ Staff array found directly in result.data, count:', result.data.length);
+        return {
+          success: true,
+          staff: result.data,
+        };
+      }
+      
+      // Case 2: Staff array is in result.data.staff
+      if (Array.isArray(result.data.staff)) {
+        console.log('✅ Staff array found in result.data.staff, count:', result.data.staff.length);
+        return {
+          success: true,
+          staff: result.data.staff,
+        };
+      }
+      
+      // Case 3: Staff array is in result.data.data
+      if (Array.isArray(result.data.data)) {
+        console.log('✅ Staff array found in result.data.data, count:', result.data.data.length);
+        return {
+          success: true,
+          staff: result.data.data,
+        };
+      }
+      
+      console.warn('⚠️ Unexpected response structure:', result.data);
+    }
+    
+    return {
+      success: false,
+      error: result.error || 'Failed to fetch staff - unexpected response structure',
+    };
+  } catch (error: any) {
+    console.error('❌ Error in getStaff:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to fetch staff - network error',
+    };
+  }
+}
+
+/**
+ * Create a new staff member
+ */
+export async function createStaff(params: {
+  name: string;
+  mobile: string;
+  email?: string;
+  role: string;
+  department?: string;
+  address?: string;
+  employeeId?: string;
+  locationId?: string;
+  locationType?: 'branch' | 'warehouse' | 'primary';
+  locationName?: string;
+  basicSalary?: number;
+  allowances?: number;
+  emergencyContactName?: string;
+  emergencyContactRelation?: string;
+  emergencyContactPhone?: string;
+  permissions?: string[];
+  monthlySalesTarget?: number;
+  monthlyInvoiceTarget?: number;
+}): Promise<{ success: boolean; staff?: any; error?: string }> {
+  try {
+    const result = await callEdgeFunction(
+      'manage-staff',
+      'POST',
+      {
+        name: params.name,
+        mobile: params.mobile,
+        email: params.email || null,
+        role: params.role,
+        department: params.department || null,
+        address: params.address || null,
+        employeeId: params.employeeId || null,
+        locationId: params.locationId || null,
+        locationType: params.locationType || null,
+        locationName: params.locationName || null,
+        basicSalary: params.basicSalary || null,
+        allowances: params.allowances || null,
+        emergencyContactName: params.emergencyContactName || null,
+        emergencyContactRelation: params.emergencyContactRelation || null,
+        emergencyContactPhone: params.emergencyContactPhone || null,
+        permissions: params.permissions || [],
+        monthlySalesTarget: params.monthlySalesTarget || null,
+        monthlyInvoiceTarget: params.monthlyInvoiceTarget || null,
+      },
+      true
+    );
+
+    // Handle different response structures
+    if (result.success) {
+      const staffData = result.data?.staff || result.data;
+      if (staffData) {
+        // Clear cache so data refreshes
+        getClearCache()?.();
+        return {
+          success: true,
+          staff: staffData,
+        };
+      }
+    }
+
+    // If Edge Function doesn't exist or fails, return error but don't throw
+    // This allows the signup flow to continue
+    console.warn('⚠️ Staff creation failed (Edge Function may not be deployed):', result.error);
+    return {
+      success: false,
+      error: result.error || 'Failed to create staff - Edge Function may not be available',
+    };
+  } catch (error: any) {
+    // Catch any unexpected errors and return gracefully
+    console.warn('⚠️ Staff creation error (non-blocking):', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to create staff',
+    };
+  }
+}
+
+/**
+ * Update a staff member
+ */
+export async function updateStaff(params: {
+  staffId: string;
+  name?: string;
+  mobile?: string;
+  email?: string;
+  role?: string;
+  department?: string;
+  address?: string;
+  employeeId?: string;
+  locationId?: string;
+  locationType?: 'branch' | 'warehouse' | 'primary';
+  locationName?: string;
+  status?: 'active' | 'inactive' | 'on_leave';
+  basicSalary?: number;
+  allowances?: number;
+  emergencyContactName?: string;
+  emergencyContactRelation?: string;
+  emergencyContactPhone?: string;
+  permissions?: string[];
+  monthlySalesTarget?: number;
+  monthlyInvoiceTarget?: number;
+}): Promise<{ success: boolean; staff?: any; error?: string }> {
+  const result = await callEdgeFunction(
+    'manage-staff',
+    'PUT',
+    params,
+    true
+  );
+
+  if (result.success && result.data?.staff) {
+    // Clear cache so data refreshes
+    getClearCache()?.();
+    return {
+      success: true,
+      staff: result.data.staff,
+    };
+  }
+
+  return {
+    success: false,
+    error: result.error || 'Failed to update staff',
+  };
+}
+
+/**
+ * Delete a staff member
+ */
+export async function deleteStaff(staffId: string): Promise<{ success: boolean; error?: string }> {
+  const result = await callEdgeFunction(
+    'manage-staff',
+    'DELETE',
+    { staffId },
+    true
+  );
+
+  if (result.success) {
+    // Clear cache so data refreshes
+    getClearCache()?.();
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    error: result.error || 'Failed to delete staff',
   };
 }
 

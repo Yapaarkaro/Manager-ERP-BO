@@ -17,7 +17,6 @@ import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
 import { verifyGSTIN as verifyGSTINBackend, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { useStatusBar } from '@/contexts/StatusBarContext';
-import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -64,7 +63,6 @@ const getKeyboardType = (type: 'GSTIN' | 'PAN', position: number): 'default' | '
 
 export default function GstinPanScreen() {
   const { setStatusBarStyle } = useStatusBar();
-  const debouncedNavigate = useDebounceNavigation();
   const insets = useSafeAreaInsets();
   const { mobile } = useLocalSearchParams();
   const inputRef = React.useRef<TextInput>(null);
@@ -207,33 +205,30 @@ export default function GstinPanScreen() {
 
   const handleContinue = async () => {
     if (isValid && !isVerifying) {
-      // ✅ Save signup progress to backend (taxId step)
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const progressResult = await saveSignupProgress({
-            mobile: mobile as string,
-            mobileVerified: true,
-            taxIdType: selectedType as 'GSTIN' | 'PAN',
-            taxIdValue: inputValue,
-            taxIdVerified: false, // Will be verified after OTP
-            currentStep: 'gstinPan',
-          });
-          if (progressResult.success) {
-            console.log('✅ Signup progress saved: gstinPan');
-          } else {
-            console.error('❌ Failed to save signup progress:', progressResult.error);
+      // ✅ Optimistically save signup progress (non-blocking)
+      (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
+            optimisticSaveSignupProgress({
+              mobile: mobile as string,
+              mobileVerified: true,
+              taxIdType: selectedType as 'GSTIN' | 'PAN',
+              taxIdValue: inputValue,
+              taxIdVerified: false, // Will be verified after OTP
+              currentStep: 'gstinPan',
+            });
           }
+        } catch (error) {
+          console.error('Error saving signup progress:', error);
         }
-      } catch (error) {
-        console.error('Error saving signup progress:', error);
-        // Continue with navigation even if save fails
-      }
+      })();
       
+      // Navigate immediately (no delay)
       if (selectedType === 'GSTIN') {
         // For GSTIN, go to OTP verification screen
-        // Use replace to prevent going back to GSTIN/PAN screen
-        debouncedNavigate({
+        router.replace({
           pathname: '/auth/gstin-pan-otp',
           params: { 
             type: selectedType,
@@ -241,18 +236,17 @@ export default function GstinPanScreen() {
             gstinData: JSON.stringify(verifiedGstinData),
             mobile: mobile
           }
-        }, 'replace');
+        });
       } else {
         // For PAN, go to PAN details screen
-        // Use replace to prevent going back to GSTIN/PAN screen
-        debouncedNavigate({
+        router.replace({
           pathname: '/auth/gstin-pan-otp',
           params: { 
             type: selectedType,
             value: inputValue,
             mobile: mobile
           }
-        }, 'replace');
+        });
       }
     } else {
       if (verificationError) {
