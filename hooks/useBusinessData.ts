@@ -150,19 +150,45 @@ export function useBusinessData(): UseBusinessDataReturn {
         }
 
         // ✅ PARALLEL: Fetch user profile first to get business_id
-        const userResult = await supabase
+        // Handle 406 errors gracefully (RLS policy or column issues)
+        let userResult;
+        try {
+          userResult = await supabase
           .from('users')
           .select('id, business_id, full_name, role')
           .eq('id', session.user.id)
           .single();
+        } catch (error: any) {
+          console.warn('⚠️ Error fetching user data (406/RLS issue):', error);
+          // Fallback: try with minimal fields
+          try {
+            userResult = await supabase
+              .from('users')
+              .select('id, business_id')
+              .eq('id', session.user.id)
+              .single();
+          } catch (fallbackError: any) {
+            console.warn('⚠️ Fallback user query also failed:', fallbackError);
+            userResult = { data: null, error: fallbackError };
+          }
+        }
 
         // Process user result
         let user = null;
         let businessId: string | null = null;
 
-        if (userResult.data) {
-          user = userResult.data;
+        if (userResult.data && !userResult.error) {
+          const userData = userResult.data as { id: string; business_id?: string | null; full_name?: string; role?: string };
+          user = {
+            id: userData.id,
+            business_id: userData.business_id || null,
+            full_name: userData.full_name || session.user.user_metadata?.full_name || '',
+            role: userData.role || 'user',
+          };
           businessId = user.business_id;
+        } else if (userResult.error) {
+          console.warn('⚠️ User query error (non-blocking):', userResult.error);
+          // Continue without user data - business_id might be available from session metadata
         }
 
         // ✅ PARALLEL: Fetch all remaining data simultaneously (business, addresses, bank accounts)

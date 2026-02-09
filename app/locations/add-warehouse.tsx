@@ -10,6 +10,7 @@ import {
   Animated,
   KeyboardAvoidingView,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -22,6 +23,7 @@ import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsA
 import { dataStore } from '../../utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { useBusinessData } from '@/hooks/useBusinessData';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -63,14 +65,23 @@ export default function AddWarehouseScreen() {
     fiscalYear,
   } = useLocalSearchParams();
   
+  // Fetch business data for latest addresses
+  const { data: businessData } = useBusinessData();
+  
   // Get warehouse count for dynamic header
   const getWarehouseCount = () => {
     if (editMode === 'true') {
       // For edit mode, don't show counter
       return '';
     }
+    // Use backend data if available, otherwise fallback to dataStore
+    let warehouseAddresses: any[] = [];
+    if (businessData?.addresses) {
+      warehouseAddresses = businessData.addresses.filter((addr: any) => addr.type === 'warehouse');
+    } else {
     const allAddresses = dataStore.getAddresses();
-    const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+      warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
+    }
     return ` - ${warehouseAddresses.length + 1}`; // +1 for the new warehouse being added
   };
 
@@ -135,8 +146,6 @@ export default function AddWarehouseScreen() {
         // Use appropriate accuracy based on platform for better performance
         const location = await Location.getCurrentPositionAsync({
           accuracy: Platform.OS === 'android' ? Location.Accuracy.Balanced : Location.Accuracy.High,
-          maximumAge: 10000, // Use cached location if less than 10 seconds old
-          timeout: 15000, // 15 second timeout
         });
         
         const userCoords = {
@@ -153,7 +162,14 @@ export default function AddWarehouseScreen() {
             'Please grant location permission to use this feature. You can enable it in your device settings.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Settings', onPress: () => Location.openAppSettingsAsync() }
+              { text: 'Settings', onPress: async () => {
+                  if (Platform.OS === 'android') {
+                    await Linking.openSettings();
+                  } else {
+                    await Linking.openURL('app-settings:');
+                  }
+                } 
+              }
             ]
           );
         }
@@ -237,7 +253,7 @@ export default function AddWarehouseScreen() {
           
           // If still no area, try to extract from formatted address
           if (areaParts.length === 0 && addressData.formatted_address) {
-            const addressParts = addressData.formatted_address.split(',').map(p => p.trim());
+            const addressParts = addressData.formatted_address.split(',').map((p: string) => p.trim());
             // Skip first part (street), last part (country), and parts that are city/state/pincode
             for (let i = 1; i < addressParts.length - 1; i++) {
               const part = addressParts[i];
@@ -400,7 +416,7 @@ export default function AddWarehouseScreen() {
         
         // If still no area, try to extract from formatted address
         if (areaParts.length === 0 && addressData.formatted_address) {
-          const addressParts = addressData.formatted_address.split(',').map(p => p.trim());
+          const addressParts = addressData.formatted_address.split(',').map((p: string) => p.trim());
           // Skip first part (street), last part (country), and parts that are city/state/pincode
           for (let i = 1; i < addressParts.length - 1; i++) {
             const part = addressParts[i];

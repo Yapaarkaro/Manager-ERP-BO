@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 import { dataStore, Customer } from '@/utils/dataStore';
 
@@ -66,6 +67,7 @@ interface Customer {
 // Mock customer data removed - now using real data only
 
 export default function CustomersScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
@@ -429,7 +431,7 @@ export default function CustomersScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

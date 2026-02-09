@@ -22,6 +22,7 @@ import {
   Plus
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { getLowStockProducts } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -60,103 +61,14 @@ interface LowStockItem {
   urgencyLevel: 'critical' | 'low' | 'moderate';
 }
 
-const mockLowStockItems: LowStockItem[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro 128GB',
-    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 3,
-    minStockLevel: 10,
-    maxStockLevel: 50,
-    price: 129900,
-    hsnCode: '85171200',
-    barcode: '1234567890123',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - A1',
-    lastRestocked: '2024-01-10',
-    stockValue: 389700,
-    urgencyLevel: 'critical'
-  },
-  {
-    id: '2',
-    name: 'Samsung Galaxy S23 Ultra',
-    image: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    currentStock: 7,
-    minStockLevel: 15,
-    maxStockLevel: 40,
-    price: 124999,
-    hsnCode: '85171200',
-    barcode: '2345678901234',
-    taxRate: 18,
-    supplier: 'Samsung Electronics',
-    location: 'Main Warehouse - A2',
-    lastRestocked: '2024-01-08',
-    stockValue: 874993,
-    urgencyLevel: 'low'
-  },
-  {
-    id: '3',
-    name: 'MacBook Air M2',
-    image: 'https://images.pexels.com/photos/205421/pexels-photo-205421.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 5,
-    minStockLevel: 12,
-    maxStockLevel: 30,
-    price: 114900,
-    hsnCode: '84713000',
-    barcode: '3456789012345',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - B1',
-    lastRestocked: '2024-01-05',
-    stockValue: 574500,
-    urgencyLevel: 'moderate'
-  },
-  {
-    id: '4',
-    name: 'AirPods Pro 2nd Gen',
-    image: 'https://images.pexels.com/photos/3780681/pexels-photo-3780681.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Audio',
-    currentStock: 2,
-    minStockLevel: 20,
-    maxStockLevel: 60,
-    price: 24900,
-    hsnCode: '85183000',
-    barcode: '4567890123456',
-    taxRate: 18,
-    supplier: 'Apple India Pvt Ltd',
-    location: 'Main Warehouse - C1',
-    lastRestocked: '2024-01-12',
-    stockValue: 49800,
-    urgencyLevel: 'critical'
-  },
-  {
-    id: '5',
-    name: 'Dell XPS 13',
-    image: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    currentStock: 4,
-    minStockLevel: 8,
-    maxStockLevel: 25,
-    price: 89999,
-    hsnCode: '84713000',
-    barcode: '5678901234567',
-    taxRate: 18,
-    supplier: 'Dell Technologies',
-    location: 'Main Warehouse - B2',
-    lastRestocked: '2024-01-07',
-    stockValue: 359996,
-    urgencyLevel: 'moderate'
-  },
-];
+// Mock data removed - now fetching from Supabase backend
 
 export default function LowStockScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredItems, setFilteredItems] = useState(mockLowStockItems);
+  const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
+  const [filteredItems, setFilteredItems] = useState<LowStockItem[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     urgencyLevel: [] as string[],
@@ -171,13 +83,59 @@ export default function LowStockScreen() {
   // Use debounced navigation for low stock item cards
   const debouncedNavigate = useDebounceNavigation(500);
 
+  // Fetch low stock products from Supabase
+  useEffect(() => {
+    const loadLowStockProducts = async () => {
+      setIsLoading(true);
+      try {
+        const result = await getLowStockProducts();
+        if (result.success && result.products) {
+          // Convert Supabase product format to LowStockItem format
+          const convertedItems: LowStockItem[] = result.products.map((prod: any) => ({
+            id: prod.id,
+            name: prod.name,
+            image: prod.product_image || 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
+            category: prod.category || 'Uncategorized',
+            currentStock: parseFloat(prod.current_stock) || 0,
+            minStockLevel: parseFloat(prod.min_stock_level) || 0,
+            maxStockLevel: parseFloat(prod.max_stock_level) || 0,
+            price: parseFloat(prod.sales_price) || parseFloat(prod.per_unit_price) || 0,
+            hsnCode: prod.hsn_code || '',
+            barcode: prod.barcode || '',
+            taxRate: parseFloat(prod.tax_rate) || 0,
+            supplier: prod.preferred_supplier_id || '',
+            location: prod.storage_location_name || prod.storage_location_id || '',
+            lastRestocked: prod.last_restocked_at ? new Date(prod.last_restocked_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            stockValue: parseFloat(prod.stock_value) || 0,
+            urgencyLevel: (prod.urgency_level || 'normal') as 'critical' | 'low' | 'moderate',
+          }));
+          
+          setLowStockItems(convertedItems);
+          setFilteredItems(convertedItems);
+        } else {
+          console.error('Failed to load low stock products:', result.error);
+          setLowStockItems([]);
+          setFilteredItems([]);
+        }
+      } catch (error) {
+        console.error('Error loading low stock products:', error);
+        setLowStockItems([]);
+        setFilteredItems([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadLowStockProducts();
+  }, []);
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     applyFilters(query);
   };
 
   const applyFilters = (searchQuery: string = '') => {
-    let filtered = mockLowStockItems;
+    let filtered = lowStockItems;
 
     // Apply search filter
     if (searchQuery.trim() !== '') {
@@ -315,10 +273,10 @@ export default function LowStockScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or lowStockItems change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters]);
+  }, [activeFilters, lowStockItems]);
 
   const handleItemPress = (item: LowStockItem) => {
     if (isNavigating) return;
@@ -358,6 +316,7 @@ export default function LowStockScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(price);
   };
 
@@ -591,7 +550,13 @@ export default function LowStockScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {filteredItems.length === 0 ? (
+        {isLoading ? (
+          <View style={styles.emptyState}>
+            <Package size={64} color={Colors.textLight} />
+            <Text style={styles.emptyStateTitle}>Loading...</Text>
+            <Text style={styles.emptyStateText}>Fetching low stock items</Text>
+          </View>
+        ) : filteredItems.length === 0 ? (
           <View style={styles.emptyState}>
             <Package size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Low Stock Items</Text>

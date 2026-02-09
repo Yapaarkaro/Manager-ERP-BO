@@ -16,7 +16,7 @@ const getClearCache = () => {
 };
 
 // Helper to call Edge Functions
-async function callEdgeFunction(
+export async function callEdgeFunction(
   functionName: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST',
   body?: any,
@@ -384,6 +384,15 @@ export async function submitBusinessDetails(params: {
 export async function getAddresses(): Promise<{ success: boolean; addresses?: any[]; error?: string }> {
   const result = await callEdgeFunction('manage-addresses', 'GET', undefined, true);
   
+  // Handle 404 gracefully - edge function may not be deployed
+  if (!result.success && result.error?.includes('404')) {
+    console.warn('⚠️ manage-addresses edge function not found (404). This may not be deployed yet.');
+    return {
+      success: true,
+      addresses: [],
+    };
+  }
+  
   if (result.success && Array.isArray(result.data?.addresses)) {
     return {
       success: true,
@@ -575,6 +584,15 @@ export async function deleteAddress(addressId: string): Promise<{ success: boole
  */
 export async function getBankAccounts(): Promise<{ success: boolean; accounts?: any[]; error?: string }> {
   const result = await callEdgeFunction('manage-bank-accounts', 'GET', undefined, true);
+  
+  // Handle 404 gracefully - edge function may not be deployed
+  if (!result.success && result.error?.includes('404')) {
+    console.warn('⚠️ manage-bank-accounts edge function not found (404). This may not be deployed yet.');
+    return {
+      success: true,
+      accounts: [],
+    };
+  }
   
   if (result.success && Array.isArray(result.data?.accounts)) {
     return {
@@ -1146,11 +1164,13 @@ export async function saveSignupProgress(params: {
 
 /**
  * Delete signup progress (when signup is complete)
+ * Uses POST method with action='delete' to avoid CORS issues with DELETE method
  */
 export async function deleteSignupProgress(): Promise<{ success: boolean; error?: string }> {
   try {
-    // For DELETE requests, pass an empty object instead of undefined to ensure proper request formatting
-    const result = await callEdgeFunction('manage-signup-progress', 'DELETE', {}, true);
+    // Use POST with action='delete' instead of DELETE method to avoid CORS issues
+    // This is more reliable on web platforms
+    const result = await callEdgeFunction('manage-signup-progress', 'POST', { action: 'delete' }, true);
     
     // DELETE is idempotent - if it succeeds or if the resource doesn't exist, consider it successful
     // This prevents errors when signup progress was already deleted or doesn't exist
@@ -1503,3 +1523,877 @@ export async function deleteStaff(staffId: string): Promise<{ success: boolean; 
   };
 }
 
+// ============================================
+// Supplier APIs (Direct Supabase)
+// ============================================
+
+/**
+ * Get all suppliers for the current business
+ */
+export async function getSuppliers(): Promise<{ success: boolean; suppliers?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('*')
+      .eq('business_id', userData.business_id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching suppliers:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, suppliers: data || [] };
+  } catch (error: any) {
+    console.error('Error in getSuppliers:', error);
+    return { success: false, error: error.message || 'Failed to fetch suppliers' };
+  }
+}
+
+/**
+ * Create a new supplier
+ */
+export async function createSupplier(params: {
+  businessName: string;
+  contactPerson: string;
+  mobileNumber: string;
+  email?: string;
+  gstinPan?: string;
+  addressLine1: string;
+  addressLine2?: string;
+  addressLine3?: string;
+  city: string;
+  pincode: string;
+  state: string;
+  additionalNotes?: string;
+}): Promise<{ success: boolean; supplier?: any; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    const { data, error } = await supabase
+      .from('suppliers')
+      .insert({
+        business_id: userData.business_id,
+        business_name: params.businessName,
+        contact_person: params.contactPerson,
+        mobile_number: params.mobileNumber,
+        email: params.email || null,
+        gstin_pan: params.gstinPan || null,
+        address_line_1: params.addressLine1,
+        address_line_2: params.addressLine2 || null,
+        address_line_3: params.addressLine3 || null,
+        city: params.city,
+        pincode: params.pincode,
+        state: params.state,
+        additional_notes: params.additionalNotes || null,
+        status: 'active',
+        supplier_type: 'business',
+        created_by: session.user.id,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating supplier:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, supplier: data };
+  } catch (error: any) {
+    console.error('Error in createSupplier:', error);
+    return { success: false, error: error.message || 'Failed to create supplier' };
+  }
+}
+
+/**
+ * Update a supplier
+ */
+export async function updateSupplier(
+  supplierId: string,
+  params: {
+    businessName?: string;
+    contactPerson?: string;
+    mobileNumber?: string;
+    email?: string;
+    gstinPan?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    addressLine3?: string;
+    city?: string;
+    pincode?: string;
+    state?: string;
+    additionalNotes?: string;
+    status?: string;
+  }
+): Promise<{ success: boolean; supplier?: any; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const updateData: any = {
+      updated_by: session.user.id,
+    };
+
+    if (params.businessName !== undefined) updateData.business_name = params.businessName;
+    if (params.contactPerson !== undefined) updateData.contact_person = params.contactPerson;
+    if (params.mobileNumber !== undefined) updateData.mobile_number = params.mobileNumber;
+    if (params.email !== undefined) updateData.email = params.email || null;
+    if (params.gstinPan !== undefined) updateData.gstin_pan = params.gstinPan || null;
+    if (params.addressLine1 !== undefined) updateData.address_line_1 = params.addressLine1;
+    if (params.addressLine2 !== undefined) updateData.address_line_2 = params.addressLine2 || null;
+    if (params.addressLine3 !== undefined) updateData.address_line_3 = params.addressLine3 || null;
+    if (params.city !== undefined) updateData.city = params.city;
+    if (params.pincode !== undefined) updateData.pincode = params.pincode;
+    if (params.state !== undefined) updateData.state = params.state;
+    if (params.additionalNotes !== undefined) updateData.additional_notes = params.additionalNotes || null;
+    if (params.status !== undefined) updateData.status = params.status;
+
+    const { data, error } = await supabase
+      .from('suppliers')
+      .update(updateData)
+      .eq('id', supplierId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating supplier:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, supplier: data };
+  } catch (error: any) {
+    console.error('Error in updateSupplier:', error);
+    return { success: false, error: error.message || 'Failed to update supplier' };
+  }
+}
+
+/**
+ * Delete a supplier
+ */
+export async function deleteSupplier(supplierId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .delete()
+      .eq('id', supplierId);
+
+    if (error) {
+      console.error('Error deleting supplier:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error in deleteSupplier:', error);
+    return { success: false, error: error.message || 'Failed to delete supplier' };
+  }
+}
+
+// ============================================
+// Product APIs (Direct Supabase)
+// ============================================
+
+/**
+ * Get all products for the current business
+ */
+export async function getProducts(): Promise<{ success: boolean; products?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('business_id', userData.business_id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching products:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, products: data || [] };
+  } catch (error: any) {
+    console.error('Error in getProducts:', error);
+    return { success: false, error: error.message || 'Failed to fetch products' };
+  }
+}
+
+/**
+ * Get inventory logs for a product from inventory_logs table
+ * Includes location information for each transaction
+ */
+export async function getProductInventoryLogs(productId: string): Promise<{ success: boolean; logs?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    // Fetch inventory logs from inventory_logs table
+    const { data: logs, error: logsError } = await supabase
+      .from('inventory_logs')
+      .select('*')
+      .eq('business_id', userData.business_id)
+      .eq('product_id', productId)
+      .order('transaction_date', { ascending: false })
+      .limit(100);
+
+    if (logsError) {
+      console.error('Error fetching inventory logs:', logsError);
+      return { success: false, error: logsError.message };
+    }
+
+    // Transform logs to match the expected format
+    const transformedLogs = (logs || []).map((log: any) => {
+      // Keep original transaction_type - don't map opening_stock to purchase
+      const type = log.transaction_type;
+
+      return {
+        id: log.id,
+        type: type, // Keep original: 'opening_stock', 'purchase', 'sale', 'return', 'adjustment', 'transfer'
+        invoiceNumber: log.reference_number || undefined,
+        quantity: parseFloat(log.quantity_change) || 0,
+        date: log.transaction_date || log.created_at,
+        staffName: log.staff_name || 'Staff',
+        customerName: log.customer_name || undefined,
+        supplierName: log.supplier_name || undefined,
+        reason: log.reason || undefined,
+        balanceAfter: parseFloat(log.balance_after) || 0,
+        locationName: log.location_name || undefined,
+        locationId: log.location_id || undefined,
+        referenceType: log.reference_type || undefined,
+        referenceId: log.reference_id || undefined,
+        unitPrice: log.unit_price ? parseFloat(log.unit_price) : undefined,
+        totalValue: log.total_value ? parseFloat(log.total_value) : undefined,
+      };
+    });
+
+    return { success: true, logs: transformedLogs };
+  } catch (error: any) {
+    console.error('Error in getProductInventoryLogs:', error);
+    return { success: false, error: error.message || 'Failed to fetch inventory logs' };
+  }
+}
+
+/**
+ * Get location stock for a product (all locations where product has stock)
+ */
+export async function getProductLocationStock(productId: string): Promise<{ success: boolean; locationStock?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    // Fetch location stock from location_stock table
+    const { data: locationStock, error: locationStockError } = await supabase
+      .from('location_stock')
+      .select('*')
+      .eq('product_id', productId)
+      .order('quantity', { ascending: false });
+
+    if (locationStockError) {
+      console.error('Error fetching location stock:', locationStockError);
+      return { success: false, error: locationStockError.message };
+    }
+
+    // Fetch location details for each location_id
+    const locationIds = [...new Set((locationStock || []).map((stock: any) => stock.location_id))];
+    const { data: locations, error: locationsError } = await supabase
+      .from('locations')
+      .select('id, name, type')
+      .in('id', locationIds);
+
+    // Create a map of location_id to location details
+    const locationMap = new Map();
+    (locations || []).forEach((loc: any) => {
+      locationMap.set(loc.id, loc);
+    });
+
+    // Transform to include location name
+    const transformedStock = (locationStock || []).map((stock: any) => {
+      const location = locationMap.get(stock.location_id);
+      return {
+        locationId: stock.location_id,
+        locationName: location?.name || 'Unknown Location',
+        locationType: location?.type || 'primary',
+        quantity: parseFloat(stock.quantity) || 0,
+        lastUpdated: stock.last_updated,
+        updatedBy: stock.updated_by,
+      };
+    });
+
+    return { success: true, locationStock: transformedStock };
+  } catch (error: any) {
+    console.error('Error in getProductLocationStock:', error);
+    return { success: false, error: error.message || 'Failed to fetch location stock' };
+  }
+}
+
+/**
+ * Get inventory logs for a product filtered by location (optional)
+ */
+export async function getProductInventoryLogsByLocation(
+  productId: string, 
+  locationId?: string
+): Promise<{ success: boolean; logs?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    // Build query with optional location filter
+    let query = supabase
+      .from('inventory_logs')
+      .select('*')
+      .eq('business_id', userData.business_id)
+      .eq('product_id', productId);
+
+    if (locationId) {
+      query = query.eq('location_id', locationId);
+    }
+
+    const { data: logs, error: logsError } = await query
+      .order('transaction_date', { ascending: false })
+      .limit(100);
+
+    if (logsError) {
+      console.error('Error fetching inventory logs:', logsError);
+      return { success: false, error: logsError.message };
+    }
+
+    // Transform logs to match the expected format
+    const transformedLogs = (logs || []).map((log: any) => {
+      return {
+        id: log.id,
+        type: log.transaction_type,
+        invoiceNumber: log.reference_number || undefined,
+        quantity: parseFloat(log.quantity_change) || 0,
+        date: log.transaction_date || log.created_at,
+        staffName: log.staff_name || 'Staff',
+        customerName: log.customer_name || undefined,
+        supplierName: log.supplier_name || undefined,
+        reason: log.reason || undefined,
+        balanceAfter: parseFloat(log.balance_after) || 0,
+        locationName: log.location_name || undefined,
+        locationId: log.location_id || undefined,
+        referenceType: log.reference_type || undefined,
+        referenceId: log.reference_id || undefined,
+        unitPrice: log.unit_price ? parseFloat(log.unit_price) : undefined,
+        totalValue: log.total_value ? parseFloat(log.total_value) : undefined,
+      };
+    });
+
+    return { success: true, logs: transformedLogs };
+  } catch (error: any) {
+    console.error('Error in getProductInventoryLogsByLocation:', error);
+    return { success: false, error: error.message || 'Failed to fetch inventory logs' };
+  }
+}
+
+/**
+ * Get low stock products (where current_stock <= min_stock_level)
+ */
+export async function getLowStockProducts(): Promise<{ success: boolean; products?: any[]; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    // First get all products, then filter in JavaScript for low stock
+    // (Supabase doesn't support comparing two columns directly in a filter)
+    const { data: allProducts, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('business_id', userData.business_id)
+      .gt('min_stock_level', 0)
+      .order('urgency_level', { ascending: false })
+      .order('current_stock', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching products for low stock:', error);
+      return { success: false, error: error.message };
+    }
+
+    // Filter products where current_stock <= min_stock_level
+    const lowStockProducts = (allProducts || []).filter(
+      (product) => product.current_stock <= product.min_stock_level
+    );
+
+    return { success: true, products: lowStockProducts };
+  } catch (error: any) {
+    console.error('Error in getLowStockProducts:', error);
+    return { success: false, error: error.message || 'Failed to fetch low stock products' };
+  }
+}
+
+/**
+ * Assign a unique Manager-generated barcode for a product.
+ * Only use when the product has no manufacturer or existing Manager barcode.
+ * Returns a 13-character alphanumeric (A-Z, 0-9) barcode that is globally unique.
+ */
+export async function assignBarcode(params?: {
+  locationId?: string | null;
+}): Promise<{ success: boolean; barcode?: string; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    const { data: barcode, error } = await supabase.rpc('reserve_assigned_barcode', {
+      p_business_id: userData.business_id,
+      p_location_id: params?.locationId || null,
+    });
+
+    if (error) {
+      console.error('Error assigning barcode:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!barcode || typeof barcode !== 'string') {
+      return { success: false, error: 'Failed to generate barcode' };
+    }
+
+    return { success: true, barcode };
+  } catch (error: any) {
+    console.error('Error in assignBarcode:', error);
+    return { success: false, error: error.message || 'Failed to assign barcode' };
+  }
+}
+
+/**
+ * Create a new product
+ */
+export async function createProduct(params: {
+  name: string;
+  category?: string;
+  customCategory?: string;
+  hsnCode?: string;
+  barcode?: string;
+  productImage?: string;
+  productImages?: string[];
+  showAdvancedOptions?: boolean;
+  batchNumber?: string;
+  expiryDate?: string;
+  useCompoundUnit?: boolean;
+  unitType?: string;
+  primaryUnit: string;
+  secondaryUnit?: string;
+  tertiaryUnit?: string;
+  conversionRatio?: string;
+  tertiaryConversionRatio?: string;
+  priceUnit?: string;
+  stockUom?: string;
+  taxRate?: number;
+  taxInclusive?: boolean;
+  cessType?: string;
+  cessRate?: number;
+  cessAmount?: number;
+  cessUnit?: string;
+  openingStock?: number;
+  minStockLevel?: number;
+  maxStockLevel?: number;
+  stockUnit?: string;
+  perUnitPrice?: number;
+  purchasePrice?: number;
+  salesPrice?: number;
+  mrpPrice?: number;
+  preferredSupplierId?: string;
+  storageLocationId?: string;
+  storageLocationName?: string;
+  brand?: string;
+  description?: string;
+}): Promise<{ success: boolean; product?: any; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Get business_id from user profile
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('business_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (userError || !userData?.business_id) {
+      return { success: false, error: 'Business not found' };
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        business_id: userData.business_id,
+        name: params.name,
+        category: params.category || null,
+        custom_category: params.customCategory || null,
+        hsn_code: params.hsnCode || null,
+        barcode: params.barcode || null,
+        product_image: (params.productImage && params.productImage.trim() !== '') ? params.productImage : null,
+        product_images: params.productImages && params.productImages.length > 0 ? params.productImages : null,
+        show_advanced_options: params.showAdvancedOptions || false,
+        batch_number: params.batchNumber || null,
+        expiry_date: params.expiryDate || null,
+        use_compound_unit: params.useCompoundUnit || false,
+        unit_type: params.unitType || null,
+        primary_unit: params.primaryUnit || 'Piece',
+        secondary_unit: params.secondaryUnit || null,
+        tertiary_unit: params.tertiaryUnit || null,
+        conversion_ratio: params.conversionRatio || null,
+        tertiary_conversion_ratio: params.tertiaryConversionRatio || null,
+        price_unit: params.priceUnit || 'primary',
+        stock_uom: params.stockUom || 'primary',
+        tax_rate: params.taxRate || 0,
+        tax_inclusive: params.taxInclusive || false,
+        cess_type: params.cessType || 'none',
+        cess_rate: params.cessRate || 0,
+        cess_amount: params.cessAmount || 0,
+        cess_unit: params.cessUnit || null,
+        opening_stock: params.openingStock || 0,
+        current_stock: params.openingStock || 0, // Initialize current_stock with opening_stock
+        min_stock_level: params.minStockLevel || 0,
+        max_stock_level: params.maxStockLevel || 0,
+        stock_unit: params.stockUnit || 'primary',
+        per_unit_price: params.perUnitPrice || 0,
+        purchase_price: params.purchasePrice || 0,
+        sales_price: params.salesPrice || 0,
+        mrp_price: params.mrpPrice || 0,
+        preferred_supplier_id: params.preferredSupplierId || null,
+        storage_location_id: params.storageLocationId || null,
+        storage_location_name: params.storageLocationName || null,
+        brand: params.brand || null,
+        description: params.description || null,
+        created_by: session.user.id,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating product:', error);
+      return { success: false, error: error.message };
+    }
+
+    // If location is specified, create location_stock entry
+    // If opening stock > 0, also create inventory log entry
+    const openingStock = params.openingStock || 0;
+    const locationId = params.storageLocationId;
+    
+    if (locationId) {
+      try {
+        // Get user's full name for staff_name
+        const { data: userProfile } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', session.user.id)
+          .single();
+
+        // Get location name if not provided
+        let locationName = params.storageLocationName;
+        if (!locationName) {
+          const { data: locationData } = await supabase
+            .from('locations')
+            .select('name')
+            .eq('id', locationId)
+            .single();
+          locationName = locationData?.name || null;
+        }
+
+        // Create or update location_stock entry (always create, even if stock is 0)
+        const { error: locationStockError } = await supabase
+          .from('location_stock')
+          .upsert({
+            product_id: data.id,
+            location_id: locationId,
+            quantity: openingStock,
+            last_updated: new Date().toISOString(),
+            updated_by: session.user.id,
+          }, {
+            onConflict: 'product_id,location_id'
+          });
+
+        if (locationStockError) {
+          console.error('Error creating location_stock:', locationStockError);
+          // Don't fail the product creation if location_stock creation fails, but log the error
+        }
+
+        // Create inventory log entry for opening stock (only if opening stock > 0)
+        if (openingStock > 0) {
+          const { error: logError } = await supabase
+            .from('inventory_logs')
+            .insert({
+              business_id: userData.business_id,
+              product_id: data.id,
+              transaction_type: 'opening_stock',
+              quantity_change: openingStock,
+              balance_after: openingStock,
+              location_id: locationId,
+              location_name: locationName,
+              staff_id: session.user.id,
+              staff_name: userProfile?.full_name || null,
+              unit_price: params.purchasePrice || params.perUnitPrice || 0,
+              total_value: (params.purchasePrice || params.perUnitPrice || 0) * openingStock,
+              reference_type: 'manual',
+              notes: 'Opening stock recorded during product creation',
+              created_by: session.user.id,
+            });
+
+          if (logError) {
+            console.error('Error creating inventory log:', logError);
+            // Don't fail the product creation if log creation fails, but log the error
+          }
+        }
+      } catch (stockError: any) {
+        console.error('Error recording opening stock:', stockError);
+        // Don't fail the product creation if stock recording fails, but log the error
+      }
+    }
+
+    return { success: true, product: data };
+  } catch (error: any) {
+    console.error('Error in createProduct:', error);
+    return { success: false, error: error.message || 'Failed to create product' };
+  }
+}
+
+/**
+ * Update a product
+ */
+export async function updateProduct(
+  productId: string,
+  params: {
+    name?: string;
+    category?: string;
+    customCategory?: string;
+    hsnCode?: string;
+    barcode?: string;
+    productImage?: string;
+    productImages?: string[];
+    showAdvancedOptions?: boolean;
+    batchNumber?: string;
+    expiryDate?: string;
+    useCompoundUnit?: boolean;
+    unitType?: string;
+    primaryUnit?: string;
+    secondaryUnit?: string;
+    tertiaryUnit?: string;
+    conversionRatio?: string;
+    tertiaryConversionRatio?: string;
+    priceUnit?: string;
+    stockUom?: string;
+    taxRate?: number;
+    taxInclusive?: boolean;
+    cessType?: string;
+    cessRate?: number;
+    cessAmount?: number;
+    cessUnit?: string;
+    openingStock?: number;
+    currentStock?: number;
+    minStockLevel?: number;
+    maxStockLevel?: number;
+    stockUnit?: string;
+    perUnitPrice?: number;
+    purchasePrice?: number;
+    salesPrice?: number;
+    mrpPrice?: number;
+    preferredSupplierId?: string;
+    storageLocationId?: string;
+    storageLocationName?: string;
+    brand?: string;
+    description?: string;
+  }
+): Promise<{ success: boolean; product?: any; error?: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const updateData: any = {
+      updated_by: session.user.id,
+    };
+
+    // Add all provided fields to update
+    if (params.name !== undefined) updateData.name = params.name;
+    if (params.category !== undefined) updateData.category = params.category || null;
+    if (params.customCategory !== undefined) updateData.custom_category = params.customCategory || null;
+    if (params.hsnCode !== undefined) updateData.hsn_code = params.hsnCode || null;
+    if (params.barcode !== undefined) updateData.barcode = params.barcode || null;
+    if (params.productImage !== undefined) updateData.product_image = (params.productImage && params.productImage.trim() !== '') ? params.productImage : null;
+    if (params.productImages !== undefined) updateData.product_images = params.productImages && params.productImages.length > 0 ? params.productImages : null;
+    if (params.showAdvancedOptions !== undefined) updateData.show_advanced_options = params.showAdvancedOptions;
+    if (params.batchNumber !== undefined) updateData.batch_number = params.batchNumber || null;
+    if (params.expiryDate !== undefined) updateData.expiry_date = params.expiryDate || null;
+    if (params.useCompoundUnit !== undefined) updateData.use_compound_unit = params.useCompoundUnit;
+    if (params.unitType !== undefined) updateData.unit_type = params.unitType || null;
+    if (params.primaryUnit !== undefined) updateData.primary_unit = params.primaryUnit;
+    if (params.secondaryUnit !== undefined) updateData.secondary_unit = params.secondaryUnit || null;
+    if (params.tertiaryUnit !== undefined) updateData.tertiary_unit = params.tertiaryUnit || null;
+    if (params.conversionRatio !== undefined) updateData.conversion_ratio = params.conversionRatio || null;
+    if (params.tertiaryConversionRatio !== undefined) updateData.tertiary_conversion_ratio = params.tertiaryConversionRatio || null;
+    if (params.priceUnit !== undefined) updateData.price_unit = params.priceUnit;
+    if (params.stockUom !== undefined) updateData.stock_uom = params.stockUom;
+    if (params.taxRate !== undefined) updateData.tax_rate = params.taxRate;
+    if (params.taxInclusive !== undefined) updateData.tax_inclusive = params.taxInclusive;
+    if (params.cessType !== undefined) updateData.cess_type = params.cessType;
+    if (params.cessRate !== undefined) updateData.cess_rate = params.cessRate;
+    if (params.cessAmount !== undefined) updateData.cess_amount = params.cessAmount;
+    if (params.cessUnit !== undefined) updateData.cess_unit = params.cessUnit || null;
+    if (params.openingStock !== undefined) updateData.opening_stock = params.openingStock;
+    if (params.currentStock !== undefined) updateData.current_stock = params.currentStock;
+    if (params.minStockLevel !== undefined) updateData.min_stock_level = params.minStockLevel;
+    if (params.maxStockLevel !== undefined) updateData.max_stock_level = params.maxStockLevel;
+    if (params.stockUnit !== undefined) updateData.stock_unit = params.stockUnit;
+    if (params.perUnitPrice !== undefined) updateData.per_unit_price = params.perUnitPrice;
+    if (params.purchasePrice !== undefined) updateData.purchase_price = params.purchasePrice;
+    if (params.salesPrice !== undefined) updateData.sales_price = params.salesPrice;
+    if (params.mrpPrice !== undefined) updateData.mrp_price = params.mrpPrice;
+    if (params.preferredSupplierId !== undefined) updateData.preferred_supplier_id = params.preferredSupplierId || null;
+    if (params.storageLocationId !== undefined) updateData.storage_location_id = params.storageLocationId || null;
+    if (params.storageLocationName !== undefined) updateData.storage_location_name = params.storageLocationName || null;
+    if (params.brand !== undefined) updateData.brand = params.brand || null;
+    if (params.description !== undefined) updateData.description = params.description || null;
+
+    const { data, error } = await supabase
+      .from('products')
+      .update(updateData)
+      .eq('id', productId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating product:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, product: data };
+  } catch (error: any) {
+    console.error('Error in updateProduct:', error);
+    return { success: false, error: error.message || 'Failed to update product' };
+  }
+}
+
+/**
+ * Delete a product
+ */
+export async function deleteProduct(productId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', productId);
+
+    if (error) {
+      console.error('Error deleting product:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error in deleteProduct:', error);
+    return { success: false, error: error.message || 'Failed to delete product' };
+  }
+}

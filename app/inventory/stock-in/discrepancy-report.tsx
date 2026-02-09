@@ -127,7 +127,7 @@ export default function DiscrepancyReportScreen() {
             };
           });
 
-          const totalDiscrepancyValue = reportProducts.reduce((sum, product) => sum + product.discrepancyValue, 0);
+          const totalDiscrepancyValue = reportProducts.reduce((sum: number, product: typeof reportProducts[0]) => sum + product.discrepancyValue, 0);
 
           setDiscrepancyReport({
             id: `DISC-${Date.now()}`,
@@ -209,6 +209,7 @@ export default function DiscrepancyReportScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(amount);
   };
 
@@ -311,7 +312,7 @@ export default function DiscrepancyReportScreen() {
           </View>
 
           {/* Summary Stats */}
-          <View style={styles.summaryCard}>
+          <View style={styles.summaryCardTop}>
             <View style={styles.summaryStats}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{discrepancyReport.products.length}</Text>
@@ -533,7 +534,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontWeight: '600',
   },
-  summaryCard: {
+  summaryCardTop: {
     backgroundColor: Colors.background,
     borderRadius: 12,
     borderWidth: 1,

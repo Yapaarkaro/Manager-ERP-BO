@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lucide-react-native';
 import { dataStore, BusinessAddress, getGSTINStateCode } from '../../utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
@@ -181,6 +182,7 @@ const mockBranches: Branch[] = [
 ];
 
 export default function BranchesScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredBranches, setFilteredBranches] = useState<Branch[]>([]);
@@ -447,7 +449,7 @@ export default function BranchesScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

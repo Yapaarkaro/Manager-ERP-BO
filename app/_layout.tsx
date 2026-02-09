@@ -4,9 +4,17 @@ import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import Toast from 'react-native-toast-message';
 import { StatusBarProvider } from '@/contexts/StatusBarContext';
+import { WebNavigationProvider } from '@/contexts/WebNavigationContext';
 import { dataStore } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
-import { useBusinessData } from '@/hooks/useBusinessData';
+import { productStore } from '@/utils/productStore';
+import { prefetchBusinessData } from '@/hooks/useBusinessData';
+import { supabase } from '@/lib/supabase';
+
+// Extend global type
+declare global {
+  var clearAllData: (() => Promise<void>) | undefined;
+}
 
 // Global function to clear all data - call this when needed for testing
 global.clearAllData = async () => {
@@ -27,16 +35,36 @@ export default function RootLayout() {
       // Clear all local signup data (backend is source of truth)
       dataStore.clearSignupProgress();
       
+      // Load products from backend
+      try {
+        await productStore.loadProductsFromBackend();
+      } catch (error) {
+        console.error('Error loading products on app startup:', error);
+      }
+      
       // Only load non-signup data (addresses, bank accounts for completed users)
       // Signup progress will be fetched from backend after OTP verification
       console.log('✅ DataStore reset - signup progress will be fetched from backend');
+      
+      // ✅ Prefetch business data early to warm up cache for instant loading
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          console.log('🚀 Prefetching business data for instant loading...');
+          await prefetchBusinessData();
+          console.log('✅ Business data prefetched and cached');
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to prefetch business data (non-blocking):', error);
+      }
     };
     initializeData();
   }, []);
 
   return (
     <StatusBarProvider>
-      <Stack screenOptions={{ headerShown: false }}>
+      <WebNavigationProvider>
+        <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="auth/mobile" />
         <Stack.Screen name="auth/otp" />
@@ -114,6 +142,7 @@ export default function RootLayout() {
         <Stack.Screen name="+not-found" />
       </Stack>
       <Toast />
+      </WebNavigationProvider>
     </StatusBarProvider>
   );
 }

@@ -9,7 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building } from 'lucide-react-native';
+import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet } from 'lucide-react-native';
 
 interface HamburgerMenuProps {
   visible: boolean;
@@ -68,9 +68,15 @@ const menuSections: MenuSection[] = [
   },
   {
     id: 'bank-accounts',
-    title: 'Bank Accounts & Cash',
+    title: 'Bank Accounts',
     icon: CreditCard,
     route: '/bank-accounts',
+  },
+  {
+    id: 'cash-accounts',
+    title: 'Cash Accounts',
+    icon: Wallet,
+    route: '/cash-accounts',
   },
   {
     id: 'locations',

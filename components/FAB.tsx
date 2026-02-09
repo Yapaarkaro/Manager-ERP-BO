@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import {
   Plus,
   X,
@@ -86,13 +87,16 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
   
   // Use debounced navigation for all FAB actions
   const debouncedNavigate = useDebounceNavigation(500);
+  
+  // Get web navigation context for web split-view
+  const webNav = useWebNavigation();
 
   const toggleFAB = () => {
     const toValue = isExpanded ? 0 : 1;
     
     Animated.spring(animationValue, {
       toValue,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
       tension: 120,
       friction: 10,
     }).start();
@@ -115,34 +119,27 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
     onAction?.(actionId);
     setIsNavigating(true);
     
-    // Navigate to new sale if new-sale action is pressed
+    // Determine route based on action
+    let route = '';
     if (actionId === 'new-sale') {
-      debouncedNavigate('/new-sale');
+      route = '/new-sale';
+    } else if (actionId === 'return') {
+      route = '/new-return';
+    } else if (actionId === 'payments') {
+      route = '/payment-selection';
+    } else if (actionId === 'expense') {
+      route = '/expenses/income-expense-toggle';
+    } else if (actionId === 'notify-staff') {
+      route = '/notifications/notify-staff';
+    } else if (actionId === 'stock') {
+      route = '/inventory/stock-management';
     }
     
-    // Navigate to new return if return action is pressed
-    if (actionId === 'return') {
-      debouncedNavigate('/new-return');
-    }
-    
-    // Navigate to payment selection if payments action is pressed
-    if (actionId === 'payments') {
-      debouncedNavigate('/payment-selection');
-    }
-    
-    // Navigate to income/expense toggle if expense action is pressed
-    if (actionId === 'expense') {
-      debouncedNavigate('/expenses/income-expense-toggle');
-    }
-    
-    // Navigate to notify staff if notify-staff action is pressed
-    if (actionId === 'notify-staff') {
-      debouncedNavigate('/notifications/notify-staff');
-    }
-    
-    // Navigate to stock management if stock action is pressed
-    if (actionId === 'stock') {
-      debouncedNavigate('/inventory/stock-management');
+    // On web, use split-view navigation; otherwise use normal navigation
+    if (Platform.OS === 'web' && webNav.isWeb && route) {
+      webNav.navigateToScreen(route);
+    } else if (route) {
+      debouncedNavigate(route);
     }
     
     // Reset navigation state after 1 second
@@ -184,7 +181,7 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
           <Animated.View
             key={action.id}
             style={[
-              styles.actionButton,
+              styles.actionButton as any,
               {
                 transform: [{ translateY }, { scale }],
                 opacity,
@@ -194,17 +191,17 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
             <View style={styles.actionRow}>
               {/* Text Button (Left) */}
               <TouchableOpacity
-                style={[styles.textButton, isNavigating && styles.actionButtonDisabled]}
+                style={[styles.textButton as any, isNavigating && styles.actionButtonDisabled as any]}
                 onPress={() => handleActionPress(action.id)}
                 activeOpacity={0.8}
                 disabled={isNavigating}
               >
-                <Text style={styles.textButtonLabel}>{action.title}</Text>
+                <Text style={styles.textButtonLabel as any}>{action.title}</Text>
               </TouchableOpacity>
               
               {/* Icon Button (Right) */}
               <TouchableOpacity
-                style={[styles.iconButton, isNavigating && styles.actionButtonDisabled]}
+                style={[styles.iconButton as any, isNavigating && styles.actionButtonDisabled as any]}
                 onPress={() => handleActionPress(action.id)}
                 activeOpacity={0.8}
                 disabled={isNavigating}
@@ -218,7 +215,7 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
 
       {/* Main FAB Button */}
       <TouchableOpacity
-        style={styles.mainButton}
+        style={styles.mainButton as any}
         onPress={toggleFAB}
         activeOpacity={0.8}
       >
@@ -243,14 +240,15 @@ const styles = StyleSheet.create({
     overflow: 'visible', // Ensure proper rendering of animated elements
   },
   backdrop: {
-    position: 'absolute',
-    top: -1000,
-    left: -1000,
-    right: -1000,
-    bottom: -1000,
+    position: Platform.OS === 'web' ? ('fixed' as any) : 'absolute',
+    top: Platform.OS === 'web' ? 0 : -1000,
+    left: Platform.OS === 'web' ? 0 : -1000,
+    right: Platform.OS === 'web' ? 0 : -1000,
+    bottom: Platform.OS === 'web' ? 0 : -1000,
+    ...(Platform.OS === 'web' ? { width: '100vw' as any, height: '100vh' as any } : {}),
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     zIndex: 999, // High z-index to block all interactions
-  },
+  } as any,
   actionButton: {
     marginBottom: 8,
     zIndex: 1001, // Higher than container to ensure buttons are clickable

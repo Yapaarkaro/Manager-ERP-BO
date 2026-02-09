@@ -6,7 +6,7 @@ import {
   StyleSheet,
   FlatList,
   Image,
-  TouchableWithoutFeedback,
+  Pressable,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -39,8 +39,11 @@ import {
 import HamburgerMenu from '@/components/HamburgerMenu';
 import Sidebar from '@/components/Sidebar';
 import FAB from '@/components/FAB';
+import WebScreenRenderer from '@/components/WebScreenRenderer';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
+import { useWebNavigation } from '@/contexts/WebNavigationContext';
+import { getLowStockProducts } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -110,13 +113,37 @@ export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(280); // Track sidebar width for content adjustment
+  const [lowStockCount, setLowStockCount] = useState(23); // Default value, will be updated from backend
   
   // ✅ Use unified business data hook directly (instant from cache, no redundant state)
   const { data: businessData, loading: dataLoading, refetch } = useBusinessData();
+
+  // Fetch low stock count from backend
+  useEffect(() => {
+    const loadLowStockCount = async () => {
+      try {
+        const result = await getLowStockProducts();
+        if (result.success && result.products) {
+          setLowStockCount(result.products.length);
+        }
+      } catch (error) {
+        console.error('Error loading low stock count:', error);
+      }
+    };
+
+    loadLowStockCount();
+  }, []);
   
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
   const pathname = usePathname();
+  const { currentScreen, navigateToScreen, isWeb } = useWebNavigation();
+
+  // Handle sidebar collapse state changes
+  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
+    setSidebarWidth(width);
+  };
 
   // Set status bar to dark for white header
   useEffect(() => {
@@ -263,7 +290,14 @@ export default function DashboardScreen() {
   const handleMenuNavigation = (route: any) => {
     if (isNavigating) return;
     setIsNavigating(true);
-    debouncedNavigate(route);
+    
+    // On web, use split-view navigation; on mobile, use normal navigation
+    if (isWeb) {
+      navigateToScreen(route);
+    } else {
+      debouncedNavigate(route);
+    }
+    
     setTimeout(() => setIsNavigating(false), 1000);
   };
 
@@ -292,7 +326,7 @@ export default function DashboardScreen() {
   // Render KPI cards section
   const renderKPICards = () => (
     <View style={styles.kpiContainer}>
-      <TouchableWithoutFeedback onPress={handleSalesPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleSalesPress} disabled={isNavigating}>
         <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiTitle}>Total Sales</Text>
@@ -305,9 +339,9 @@ export default function DashboardScreen() {
             <Text style={styles.kpiPeriod}>vs same day last month</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
 
-      <TouchableWithoutFeedback onPress={handleReturnsPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleReturnsPress} disabled={isNavigating}>
         <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiTitle}>Returns</Text>
@@ -320,24 +354,24 @@ export default function DashboardScreen() {
             <Text style={styles.kpiPeriod}>decline vs last month</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
 
-      <TouchableWithoutFeedback onPress={handleLowStockPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleLowStockPress} disabled={isNavigating}>
         <View style={[styles.kpiCard, { borderLeftColor: Colors.warning }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiTitle}>Low Stock Items</Text>
             <AlertTriangle size={20} color={Colors.error} />
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.error }]}>23</Text>
+          <Text style={[styles.kpiAmount, { color: Colors.error }]}>{lowStockCount}</Text>
           <View style={styles.kpiFooter}>
             <AlertTriangle size={16} color={Colors.warning} />
             <Text style={[styles.kpiChange, { color: Colors.warning }]}>15.8%</Text>
             <Text style={styles.kpiPeriod}>of stock needs attention</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
 
-      <TouchableWithoutFeedback onPress={handleReceivablesPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleReceivablesPress} disabled={isNavigating}>
         <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiTitle}>Receivables</Text>
@@ -350,9 +384,9 @@ export default function DashboardScreen() {
             <Text style={styles.kpiPeriod}>from 8 unpaid invoices</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
 
-      <TouchableWithoutFeedback onPress={handlePayablesPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handlePayablesPress} disabled={isNavigating}>
         <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
           <View style={styles.kpiHeader}>
             <Text style={styles.kpiTitle}>Payables</Text>
@@ -365,19 +399,19 @@ export default function DashboardScreen() {
             <Text style={styles.kpiPeriod}>due to 12 suppliers</Text>
           </View>
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
     </View>
   );
 
   // Render stock discrepancies section
   const renderStockDiscrepancies = () => (
     <View style={styles.section}>
-      <TouchableWithoutFeedback onPress={handleStockDiscrepancyPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleStockDiscrepancyPress} disabled={isNavigating}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Stock Discrepancies</Text>
           <AlertTriangle size={20} color={Colors.text} />
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
       <View style={styles.discrepancyList}>
         {([
           { 
@@ -409,7 +443,7 @@ export default function DashboardScreen() {
             }
           }
         ] as const).map((item, index) => (
-          <TouchableWithoutFeedback key={index} onPress={handleStockDiscrepancyPress} disabled={isNavigating}>
+          <Pressable key={index} onPress={isNavigating ? undefined : handleStockDiscrepancyPress} disabled={isNavigating}>
             <View style={[
               styles.discrepancyItem,
               item.type === 'shortage' ? styles.shortageItem : styles.excessItem
@@ -444,7 +478,7 @@ export default function DashboardScreen() {
                 </View>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -453,12 +487,12 @@ export default function DashboardScreen() {
   // Render notifications section
   const renderNotifications = () => (
     <View style={styles.section}>
-      <TouchableWithoutFeedback onPress={handleNotificationsPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleNotificationsPress} disabled={isNavigating}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Notification Center</Text>
           <Bell size={20} color={Colors.text} />
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
       <View style={styles.notificationList}>
         {([
           { 
@@ -489,7 +523,7 @@ export default function DashboardScreen() {
             }
           },
         ] as const).map((notification, index) => (
-          <TouchableWithoutFeedback key={index} onPress={handleNotificationsPress} disabled={isNavigating}>
+          <Pressable key={index} onPress={isNavigating ? undefined : handleNotificationsPress} disabled={isNavigating}>
             <View style={styles.notificationItem}>
               <View style={[
                 styles.notificationIcon,
@@ -519,7 +553,7 @@ export default function DashboardScreen() {
                 </View>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -562,7 +596,7 @@ export default function DashboardScreen() {
             score: 89
           },
         ].map((staff) => (
-          <TouchableWithoutFeedback key={staff.id} onPress={() => handleStaffPress(staff.id)} disabled={isNavigating}>
+          <Pressable key={staff.id} onPress={isNavigating ? undefined : () => handleStaffPress(staff.id)} disabled={isNavigating}>
             <View style={styles.staffCard}>
               <View style={styles.staffHeader}>
                 <Image source={{ uri: staff.image }} style={styles.staffImage} />
@@ -588,7 +622,7 @@ export default function DashboardScreen() {
                 </View>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -602,7 +636,7 @@ export default function DashboardScreen() {
         <Clock size={20} color={Colors.text} />
       </View>
 
-      <TouchableWithoutFeedback onPress={handleSalesOverviewPress} disabled={isNavigating}>
+      <Pressable onPress={isNavigating ? undefined : handleSalesOverviewPress} disabled={isNavigating}>
         <View style={styles.salesOverview}>
           <View style={styles.periodSection}>
             <View style={styles.periodHeader}>
@@ -653,7 +687,7 @@ export default function DashboardScreen() {
 
           <View style={styles.divider} />
 
-          <TouchableWithoutFeedback onPress={toggleLastWeekExpansion}>
+          <Pressable onPress={toggleLastWeekExpansion}>
             <View style={styles.periodSection}>
               <View style={styles.expandableHeader}>
                 <View style={styles.periodHeader}>
@@ -676,7 +710,7 @@ export default function DashboardScreen() {
                 <Text style={[styles.trendValue, styles.positive]}>8.7%</Text>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </Pressable>
 
           {isLastWeekExpanded && (
             <>
@@ -703,7 +737,7 @@ export default function DashboardScreen() {
             </>
           )}
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
     </View>
   );
 
@@ -730,63 +764,75 @@ export default function DashboardScreen() {
         <Sidebar 
           onNavigate={handleMenuNavigation} 
           currentRoute={pathname}
+          onCollapseChange={handleSidebarCollapseChange}
         />
       )}
       
-      <View style={styles.contentWrapper}>
-        <ResponsiveContainer>
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
-      <View style={styles.header}>
-            {/* Hamburger Menu - Only on mobile */}
-            {Platform.OS !== 'web' && (
-        <TouchableWithoutFeedback onPress={handleMenuPress}>
-          <View style={styles.menuButton}>
-            <Menu size={24} color={Colors.text} />
-          </View>
-        </TouchableWithoutFeedback>
-            )}
-        
-        <Text style={styles.headerTitle}>Dashboard</Text>
-      </View>
+      <View style={[
+        styles.contentWrapper, 
+        Platform.OS === 'web' && { 
+          marginLeft: sidebarWidth,
+          flex: 1,
+        }
+      ]}>
+        {/* Web Screen Renderer - Replaces dashboard content when a screen is selected */}
+        {Platform.OS === 'web' && currentScreen ? (
+          <WebScreenRenderer sidebarWidth={sidebarWidth} />
+        ) : (
+          <ResponsiveContainer>
+            <SafeAreaView style={styles.safeArea}>
+              {/* Header */}
+              <View style={styles.header}>
+                {/* Hamburger Menu - Only on mobile */}
+                {Platform.OS !== 'web' && (
+                  <Pressable onPress={handleMenuPress}>
+                    <View style={styles.menuButton}>
+                      <Menu size={24} color={Colors.text} />
+                    </View>
+                  </Pressable>
+                )}
+                
+                <Text style={styles.headerTitle}>Dashboard</Text>
+              </View>
 
-      <FlatList
-        data={dashboardSections}
-        renderItem={renderSection}
-        keyExtractor={(item) => item.id}
-        style={styles.flatList}
-          contentContainerStyle={[
-            styles.flatListContent,
-            Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
-          ]}
-        showsVerticalScrollIndicator={false}
-        showsHorizontalScrollIndicator={false}
-        bounces={true}
-        alwaysBounceVertical={false}
-        scrollEventThrottle={16}
-        keyboardShouldPersistTaps="handled"
-        removeClippedSubviews={false}
-        initialNumToRender={6}
-        maxToRenderPerBatch={6}
-        windowSize={10}
-        scrollIndicatorInsets={{ right: -1000, bottom: -1000 }}
-        persistentScrollbar={false}
-        indicatorStyle="white"
-      />
+              <FlatList
+                data={dashboardSections}
+                renderItem={renderSection}
+                keyExtractor={(item) => item.id}
+                style={styles.flatList}
+                contentContainerStyle={[
+                  styles.flatListContent,
+                  Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
+                ]}
+                showsVerticalScrollIndicator={false}
+                showsHorizontalScrollIndicator={false}
+                bounces={true}
+                alwaysBounceVertical={false}
+                scrollEventThrottle={16}
+                keyboardShouldPersistTaps="handled"
+                removeClippedSubviews={false}
+                initialNumToRender={6}
+                maxToRenderPerBatch={6}
+                windowSize={10}
+                scrollIndicatorInsets={{ right: -1000, bottom: -1000 }}
+                persistentScrollbar={false}
+                indicatorStyle="white"
+              />
 
-      {/* Hamburger Menu - Only on mobile */}
-      {Platform.OS !== 'web' && (
-      <HamburgerMenu
-        visible={showHamburgerMenu}
-        onClose={() => setShowHamburgerMenu(false)}
-        onNavigate={handleMenuNavigation}
-      />
-      )}
+              {/* Hamburger Menu - Only on mobile */}
+              {Platform.OS !== 'web' && (
+                <HamburgerMenu
+                  visible={showHamburgerMenu}
+                  onClose={() => setShowHamburgerMenu(false)}
+                  onNavigate={handleMenuNavigation}
+                />
+              )}
 
-      {/* FAB */}
-      <FAB onAction={handleFABAction} />
-    </SafeAreaView>
-    </ResponsiveContainer>
+              {/* FAB */}
+              <FAB onAction={handleFABAction} />
+            </SafeAreaView>
+          </ResponsiveContainer>
+        )}
       </View>
     </View>
   );
@@ -802,8 +848,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     ...Platform.select({
       web: {
-        marginLeft: 280, // Sidebar width when expanded - will be adjusted by sidebar animation
-        transition: 'margin-left 0.3s ease',
+        // marginLeft and width will be set dynamically via inline style based on sidebarWidth state
+        transition: 'margin-left 0.3s ease, width 0.3s ease',
+        minWidth: 0, // Allow content to shrink when sidebar expands
+        position: 'relative', // Allow absolute positioning of screen renderer
+        overflow: 'hidden', // Ensure clean boundaries
       },
     }),
   },

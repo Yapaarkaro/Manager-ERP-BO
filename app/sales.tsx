@@ -32,9 +32,12 @@ import {
   Filter
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
+import Sidebar from '@/components/Sidebar';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { usePathname } from 'expo-router';
 
 const Colors = {
   background: '#FFFFFF',
@@ -186,10 +189,13 @@ const mockSalesInvoices: SalesInvoice[] = [
 ];
 
 export default function SalesInvoicesScreen() {
+  const { handleBack } = useWebBackNavigation();
+  const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(mockSalesInvoices);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
   const [activeFilters, setActiveFilters] = useState({
     paymentStatus: [] as string[],
     paymentMethod: [] as string[],
@@ -557,30 +563,55 @@ export default function SalesInvoicesScreen() {
   const pendingInvoices = filteredInvoices.filter(inv => inv.paymentStatus === 'pending' || inv.paymentStatus === 'partially_paid');
   const webContainerStyles = getWebContainerStyles();
 
-  return (
-    <ResponsiveContainer>
-      <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Sales Invoices</Text>
-        
-        <View style={styles.headerRight}>
-          <Text style={styles.totalCount}>
-            {filteredInvoices.length} invoices
-          </Text>
-        </View>
-      </View>
+  const handleMenuNavigation = (route: any) => {
+    router.push(route);
+  };
 
-      {/* Summary Stats */}
-      <View style={styles.summaryContainer}>
+  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
+    setSidebarWidth(width);
+  };
+
+  return (
+    <View style={styles.mainContainer}>
+      {/* Sidebar - Only on web */}
+      {Platform.OS === 'web' && (
+        <Sidebar
+          onNavigate={handleMenuNavigation}
+          currentRoute={pathname}
+          onCollapseChange={handleSidebarCollapseChange}
+        />
+      )}
+      
+      <View style={[
+        styles.contentWrapper,
+        Platform.OS === 'web' && {
+          marginLeft: sidebarWidth,
+          flex: 1,
+        }
+      ]}>
+        <ResponsiveContainer>
+          <SafeAreaView style={styles.container}>
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleBack}
+                activeOpacity={0.7}
+              >
+                <ArrowLeft size={24} color={Colors.text} />
+              </TouchableOpacity>
+              
+              <Text style={styles.headerTitle}>Sales Invoices</Text>
+              
+              <View style={styles.headerRight}>
+                <Text style={styles.totalCount}>
+                  {filteredInvoices.length} invoices
+                </Text>
+              </View>
+            </View>
+
+            {/* Summary Stats */}
+            <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
           <ShoppingCart size={20} color={Colors.success} />
           <View style={styles.summaryInfo}>
@@ -619,13 +650,13 @@ export default function SalesInvoicesScreen() {
             </Text>
           </View>
         </View>
-      </View>
+            </View>
 
-      {/* Divider */}
-      <View style={styles.divider} />
+            {/* Divider */}
+            <View style={styles.divider} />
 
-      {/* Search Bar - Inline between summary and content */}
-      <View style={styles.inlineSearchContainer}>
+            {/* Search Bar - Inline between summary and content */}
+            <View style={styles.inlineSearchContainer}>
         <View style={styles.searchBar}>
           <Search size={20} color={Colors.primary} />
           <TextInput
@@ -670,10 +701,10 @@ export default function SalesInvoicesScreen() {
         ) : (
           filteredInvoices.map(renderInvoiceCard)
         )}
-      </ScrollView>
+            </ScrollView>
 
-      {/* New Sale FAB */}
-      <TouchableOpacity
+            {/* New Sale FAB */}
+            <TouchableOpacity
         style={styles.newSaleFAB}
         onPress={handleNewSale}
         activeOpacity={0.8}
@@ -681,10 +712,10 @@ export default function SalesInvoicesScreen() {
       >
         <Plus size={20} color="#ffffff" />
         <Text style={styles.newSaleText}>New Sale</Text>
-      </TouchableOpacity>
+            </TouchableOpacity>
 
-      {/* Filter Modal */}
-      <Modal
+            {/* Filter Modal */}
+            <Modal
         visible={showFilterModal}
         transparent={true}
         animationType="slide"
@@ -873,14 +904,30 @@ export default function SalesInvoicesScreen() {
             </View>
           </View>
         </View>
-      </Modal>
-
-    </SafeAreaView>
-    </ResponsiveContainer>
+            </Modal>
+          </SafeAreaView>
+        </ResponsiveContainer>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    backgroundColor: Colors.background,
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    ...Platform.select({
+      web: {
+        transition: 'margin-left 0.3s ease',
+        minWidth: 0,
+      },
+    }),
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,

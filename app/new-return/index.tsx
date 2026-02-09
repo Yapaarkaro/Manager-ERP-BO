@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { 
   ArrowLeft, 
   Search, 
@@ -243,6 +244,7 @@ const recentInvoices: Invoice[] = [
 ];
 
 export default function NewReturnScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
 
   const handleInvoiceSelect = (invoice: Invoice) => {
@@ -305,7 +307,7 @@ export default function NewReturnScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

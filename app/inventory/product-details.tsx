@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,17 @@ import {
   ScrollView,
   Image,
   Alert,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect } from 'react';
+import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import { dataStore } from '@/utils/dataStore';
 import { productStore } from '@/utils/productStore';
-import { ArrowLeft, Package, ChartBar as BarChart3, Hash, Scan, Building2, MapPin, Calendar, TrendingUp, TrendingDown, ShoppingCart, FileText, Eye, Plus, Minus, Trash2, Percent, IndianRupee, Edit3, Phone } from 'lucide-react-native';
+import { getProductInventoryLogs, getProductInventoryLogsByLocation, getProductLocationStock, getSuppliers } from '@/services/backendApi';
+import { ArrowLeft, Package, ChartBar as BarChart3, Hash, Scan, Building2, MapPin, Calendar, TrendingUp, TrendingDown, ShoppingCart, FileText, Eye, Plus, Minus, Trash2, Percent, IndianRupee, Edit3, Phone, ChevronDown, Filter, ChevronLeft, ChevronRight } from 'lucide-react-native';
 
 const Colors = {
   background: '#FFFFFF',
@@ -32,7 +37,7 @@ const Colors = {
 
 interface InventoryLog {
   id: string;
-  type: 'sale' | 'purchase' | 'return' | 'adjustment';
+  type: 'opening_stock' | 'sale' | 'purchase' | 'return' | 'adjustment' | 'transfer';
   invoiceNumber?: string;
   quantity: number;
   date: string;
@@ -41,73 +46,251 @@ interface InventoryLog {
   supplierName?: string;
   reason?: string;
   balanceAfter: number;
+  locationName?: string;
+  locationId?: string;
+  referenceType?: string;
+  referenceId?: string;
+  unitPrice?: number;
+  totalValue?: number;
 }
 
-const mockInventoryLogs: InventoryLog[] = [
-  {
-    id: '1',
-    type: 'sale',
-    invoiceNumber: 'INV-2024-001',
-    quantity: -2,
-    date: '2024-01-15',
-    staffName: 'Priya Sharma',
-    customerName: 'Rajesh Kumar',
-    balanceAfter: 3
-  },
-  {
-    id: '2',
-    type: 'sale',
-    invoiceNumber: 'INV-2024-003',
-    quantity: -1,
-    date: '2024-01-13',
-    staffName: 'Priya Sharma',
-    customerName: 'Sunita Devi',
-    balanceAfter: 5
-  },
-  {
-    id: '3',
-    type: 'purchase',
-    invoiceNumber: 'PUR-2024-005',
-    quantity: 10,
-    date: '2024-01-10',
-    staffName: 'Amit Singh',
-    supplierName: 'Apple India Pvt Ltd',
-    balanceAfter: 6
-  },
-  {
-    id: '4',
-    type: 'return',
-    invoiceNumber: 'RET-2024-001',
-    quantity: 1,
-    date: '2024-01-16',
-    staffName: 'Priya Sharma',
-    customerName: 'Rajesh Kumar',
-    reason: 'Defective product',
-    balanceAfter: 4
-  },
-  {
-    id: '5',
-    type: 'adjustment',
-    quantity: -1,
-    date: '2024-01-12',
-    staffName: 'Amit Singh',
-    reason: 'Damaged during handling',
-    balanceAfter: 5
-  },
-];
+interface LocationStock {
+  locationId: string;
+  locationName: string;
+  locationType: string;
+  quantity: number;
+  lastUpdated: string;
+  updatedBy?: string;
+}
+
+// Mock data removed - now fetching from backend
 
 export default function ProductDetailsScreen() {
   const { productId, productData } = useLocalSearchParams();
-  const product = JSON.parse(productData as string);
+  const { isWeb, currentScreen } = useWebNavigation();
+  
+  // Parse product data with error handling
+  // On web, we might need to parse from URL query string or currentScreen if productData is not available
+  let product: any = null;
+  let parsedProductData: string | null = null;
+  let parsedProductId: string | null = null;
+  
+  // Try to get productData from URL if not in params (for web navigation)
+  if (!productData && isWeb) {
+    // First try from currentScreen (navigation context)
+    if (currentScreen && currentScreen.includes('?')) {
+      const queryString = currentScreen.split('?')[1];
+      const params = new URLSearchParams(queryString);
+      parsedProductData = params.get('productData');
+      parsedProductId = params.get('productId') || null;
+    }
+    
+    // Fallback to window.location.search
+    if (!parsedProductData && typeof window !== 'undefined' && window.location.search) {
+      const urlParams = new URLSearchParams(window.location.search);
+      parsedProductData = urlParams.get('productData');
+      if (!parsedProductId) {
+        parsedProductId = urlParams.get('productId');
+      }
+    }
+  }
+  
+  // Use parsed productId if original is not available
+  const finalProductId = productId || parsedProductId;
+  
+  try {
+    const dataToParse = productData || parsedProductData;
+    if (dataToParse) {
+      const data = typeof dataToParse === 'string' ? dataToParse : JSON.stringify(dataToParse);
+      product = JSON.parse(data);
+    } else if (finalProductId) {
+      // If productData is not available, try to get from productStore
+      product = productStore.getProductById(finalProductId as string);
+    }
+  } catch (error) {
+    console.error('Error parsing product data:', error);
+    // Try to get product from store as fallback
+    if (finalProductId) {
+      product = productStore.getProductById(finalProductId as string);
+    }
+  }
+  
+  // If product is still not found, show error
+  if (!product) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => {
+                if (isWeb) {
+                  router.back();
+                } else {
+                  router.back();
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <ArrowLeft size={24} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Product Details</Text>
+          </View>
+        </SafeAreaView>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ fontSize: 16, color: Colors.error, textAlign: 'center' }}>
+            Product not found. Please go back and try again.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+  
   const [selectedTab, setSelectedTab] = useState<'details' | 'inventory'>('details');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [selectedUoM, setSelectedUoM] = useState<'primary' | 'secondary' | 'tertiary'>('primary');
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null); // null = all locations
+  const [locationStock, setLocationStock] = useState<LocationStock[]>([]);
+  const [showUoMModal, setShowUoMModal] = useState(false);
+  const [showLocationFilterModal, setShowLocationFilterModal] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const imageScrollViewRef = useRef<ScrollView>(null);
+
+  // Load suppliers from backend to ensure supplier names are available
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          // Convert Supabase supplier format to Supplier interface format (matching suppliers.tsx)
+          const convertedSuppliers: any[] = result.suppliers.map((sup: any) => ({
+            id: sup.id,
+            name: sup.contact_person || '',
+            businessName: sup.business_name || '',
+            supplierType: sup.supplier_type || 'business',
+            contactPerson: sup.contact_person || '',
+            mobile: sup.mobile_number || '',
+            email: sup.email || '',
+            address: `${sup.address_line_1 || ''}, ${sup.address_line_2 ? sup.address_line_2 + ', ' : ''}${sup.address_line_3 ? sup.address_line_3 + ', ' : ''}${sup.city || ''}, ${sup.pincode || ''}, ${sup.state || ''}`,
+            gstin: sup.gstin_pan || '',
+            avatar: '',
+            supplierScore: 85,
+            onTimeDelivery: 90,
+            qualityRating: 4.5,
+            responseTime: 2.1,
+            totalOrders: 0,
+            completedOrders: 0,
+            pendingOrders: 0,
+            cancelledOrders: 0,
+            totalValue: 0,
+            lastOrderDate: null,
+            joinedDate: sup.created_at || new Date().toISOString(),
+            status: sup.status || 'active',
+            paymentTerms: 'Net 30 Days',
+            deliveryTime: '3-5 Business Days',
+            categories: [],
+            productCount: 0,
+            createdAt: sup.created_at || new Date().toISOString(),
+          }));
+          
+          // Add suppliers to dataStore if they don't exist
+          convertedSuppliers.forEach((supplier: any) => {
+            if (!dataStore.getSupplierById(supplier.id)) {
+              dataStore.addSupplier(supplier);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error loading suppliers:', error);
+      }
+    };
+    loadSuppliers();
+  }, []);
+
+  // Load location stock from backend
+  useEffect(() => {
+    const loadLocationStock = async () => {
+      const idToUse = productId || parsedProductId;
+      if (!idToUse) return;
+
+      try {
+        const result = await getProductLocationStock(idToUse as string);
+        if (result.success && result.locationStock) {
+          setLocationStock(result.locationStock);
+        }
+      } catch (error) {
+        console.error('Error loading location stock:', error);
+      }
+    };
+
+    if (selectedTab === 'inventory') {
+      loadLocationStock();
+    }
+  }, [productId, parsedProductId, selectedTab]);
+
+  // Load inventory logs from backend (with optional location filter)
+  useEffect(() => {
+    const loadInventoryLogs = async () => {
+      const idToUse = productId || parsedProductId;
+      if (!idToUse) return;
+      
+      setLoadingLogs(true);
+      try {
+        const idToUse = productId || parsedProductId;
+        if (!idToUse) return;
+        
+        // Use location-filtered API if location is selected
+        const result = selectedLocationId
+          ? await getProductInventoryLogsByLocation(idToUse as string, selectedLocationId)
+          : await getProductInventoryLogs(idToUse as string);
+          
+        if (result.success && result.logs) {
+          // Transform backend logs to InventoryLog format
+          const transformedLogs: InventoryLog[] = result.logs.map((log: any) => ({
+            id: log.id,
+            type: log.type,
+            invoiceNumber: log.invoiceNumber,
+            quantity: log.quantity,
+            date: log.date,
+            staffName: log.staffName || 'Staff',
+            customerName: log.customerName,
+            supplierName: log.supplierName,
+            reason: log.reason,
+            balanceAfter: log.balanceAfter || 0,
+            locationName: log.locationName,
+            locationId: log.locationId,
+            referenceType: log.referenceType,
+            referenceId: log.referenceId,
+            unitPrice: log.unitPrice,
+            totalValue: log.totalValue,
+          }));
+          setInventoryLogs(transformedLogs);
+        } else {
+          console.error('Failed to load inventory logs:', result.error);
+          setInventoryLogs([]);
+        }
+      } catch (error) {
+        console.error('Error loading inventory logs:', error);
+        setInventoryLogs([]);
+      } finally {
+        setLoadingLogs(false);
+      }
+    };
+
+    if (selectedTab === 'inventory') {
+      loadInventoryLogs();
+    }
+  }, [productId, parsedProductId, selectedTab, selectedLocationId]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(price);
   };
 
@@ -122,32 +305,87 @@ export default function ProductDetailsScreen() {
 
   const getLogTypeColor = (type: string) => {
     switch (type) {
+      case 'opening_stock': return Colors.primary;
       case 'sale': return Colors.error;
       case 'purchase': return Colors.success;
       case 'return': return Colors.warning;
       case 'adjustment': return Colors.primary;
+      case 'transfer': return '#8b5cf6';
       default: return Colors.textLight;
     }
   };
 
   const getLogTypeIcon = (type: string) => {
     switch (type) {
+      case 'opening_stock': return Package;
       case 'sale': return ShoppingCart;
       case 'purchase': return Plus;
       case 'return': return TrendingUp;
       case 'adjustment': return Package;
+      case 'transfer': return TrendingDown;
       default: return Package;
     }
   };
 
   const getLogTypeText = (type: string) => {
     switch (type) {
+      case 'opening_stock': return 'Opening Stock';
       case 'sale': return 'Sale';
       case 'purchase': return 'Purchase';
       case 'return': return 'Return';
       case 'adjustment': return 'Adjustment';
+      case 'transfer': return 'Transfer';
       default: return type;
     }
+  };
+
+  // Convert quantity based on selected UoM
+  const convertQuantity = (quantity: number): number => {
+    if (!product.useCompoundUnit || selectedUoM === 'primary') {
+      return quantity;
+    }
+
+    const conversionRatio = parseFloat(product.conversionRatio || '1');
+    const tertiaryRatio = parseFloat(product.tertiaryConversionRatio || '1');
+
+    if (selectedUoM === 'secondary' && product.secondaryUnit && product.secondaryUnit !== 'None') {
+      return quantity / conversionRatio;
+    }
+
+    if (selectedUoM === 'tertiary' && product.tertiaryUnit && product.tertiaryUnit !== 'None') {
+      return quantity / (conversionRatio * tertiaryRatio);
+    }
+
+    return quantity;
+  };
+
+  // Get current stock for selected location (or total if all locations)
+  const getCurrentStock = (): number => {
+    if (selectedLocationId) {
+      const location = locationStock.find(loc => loc.locationId === selectedLocationId);
+      return location ? convertQuantity(location.quantity) : 0;
+    }
+    
+    // Sum all locations
+    const totalStock = locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+    return convertQuantity(totalStock);
+  };
+
+  // Get UoM label
+  const getUoMLabel = (): string => {
+    if (!product.useCompoundUnit || selectedUoM === 'primary') {
+      return product.primaryUnit || 'Piece';
+    }
+    
+    if (selectedUoM === 'secondary' && product.secondaryUnit && product.secondaryUnit !== 'None') {
+      return product.secondaryUnit;
+    }
+    
+    if (selectedUoM === 'tertiary' && product.tertiaryUnit && product.tertiaryUnit !== 'None') {
+      return product.tertiaryUnit;
+    }
+    
+    return product.primaryUnit || 'Piece';
   };
 
   const handleLogPress = (log: InventoryLog) => {
@@ -225,6 +463,8 @@ export default function ProductDetailsScreen() {
   const renderInventoryLog = (log: InventoryLog) => {
     const LogIcon = getLogTypeIcon(log.type);
     const logColor = getLogTypeColor(log.type);
+    const convertedQuantity = convertQuantity(log.quantity);
+    const convertedBalance = convertQuantity(log.balanceAfter);
 
     return (
       <TouchableOpacity
@@ -252,15 +492,18 @@ export default function ProductDetailsScreen() {
               styles.logQuantity,
               { color: log.quantity > 0 ? Colors.success : Colors.error }
             ]}>
-              {log.quantity > 0 ? '+' : ''}{log.quantity}
+              {log.quantity > 0 ? '+' : ''}{convertedQuantity.toFixed(3)} {getUoMLabel()}
             </Text>
             <Text style={styles.logBalance}>
-              Bal: {log.balanceAfter}
+              Bal: {convertedBalance.toFixed(3)} {getUoMLabel()}
             </Text>
           </View>
         </View>
 
         <View style={styles.logDetails}>
+          {log.locationName && (
+            <Text style={styles.logDetailText}>Location: {log.locationName}</Text>
+          )}
           {log.customerName && (
             <Text style={styles.logDetailText}>Customer: {log.customerName}</Text>
           )}
@@ -271,6 +514,9 @@ export default function ProductDetailsScreen() {
             <Text style={styles.logDetailText}>Reason: {log.reason}</Text>
           )}
           <Text style={styles.logDetailText}>Staff: {log.staffName}</Text>
+          {log.unitPrice !== undefined && (
+            <Text style={styles.logDetailText}>Unit Price: {formatPrice(log.unitPrice)}</Text>
+          )}
         </View>
 
         {log.invoiceNumber && (
@@ -482,7 +728,14 @@ This action cannot be undone.`;
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              if (isWeb) {
+                // On web, close the screen but keep sidebar visible
+                router.back();
+              } else {
+                router.back();
+              }
+            }}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color={Colors.text} />
@@ -511,10 +764,65 @@ This action cannot be undone.`;
 
       {/* Product Header */}
       <View style={styles.productHeader}>
+        {/* Product Images - Show multiple images if available */}
+        {product.productImages && product.productImages.length > 0 ? (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={styles.productImagesScroll}
+            contentContainerStyle={styles.productImagesContainer}
+          >
+            {product.productImages.map((imageUri: string, index: number) => {
+              // Check if this is the barcode image (last image if barcode exists)
+              const isBarcodeImage = product.barcode && 
+                                    product.barcode.trim().length > 0 && 
+                                    index === product.productImages.length - 1 &&
+                                    imageUri.startsWith('data:image');
+              return (
+                <TouchableOpacity
+                  key={index}
+                  onPress={() => {
+                    setSelectedImageIndex(index);
+                    setShowImageModal(true);
+                    // Scroll to the clicked image after modal opens
+                    setTimeout(() => {
+                      const screenWidth = Dimensions.get('window').width;
+                      imageScrollViewRef.current?.scrollTo({ x: index * screenWidth, animated: false });
+                    }, 100);
+                  }}
+                  activeOpacity={0.8}
+                  style={isBarcodeImage ? styles.barcodeImageContainer : undefined}
+                >
+                  <Image 
+                    source={{ uri: imageUri }}
+                    style={[
+                      styles.productHeaderImage,
+                      isBarcodeImage && styles.barcodeImagePreview
+                    ]}
+                    resizeMode={isBarcodeImage ? 'contain' : 'cover'}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : product.image ? (
+          <TouchableOpacity
+            onPress={() => {
+              setSelectedImageIndex(0);
+              setShowImageModal(true);
+            }}
+            activeOpacity={0.8}
+          >
         <Image 
           source={{ uri: product.image }}
           style={styles.productHeaderImage}
         />
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.productHeaderImage, styles.productImagePlaceholder]}>
+            <Package size={40} color={Colors.textLight} />
+          </View>
+        )}
         <View style={styles.productHeaderInfo}>
           <Text style={styles.productHeaderName}>{product.name}</Text>
           <Text style={styles.productHeaderCategory}>{product.category}</Text>
@@ -676,15 +984,6 @@ This action cannot be undone.`;
                   <Building2 size={16} color={Colors.textLight} />
                   <Text style={styles.detailLabel}>Supplier:</Text>
                   <View style={styles.supplierInfoContainer}>
-                    {product.supplier && (
-                      <TouchableOpacity
-                        style={styles.callButton}
-                        onPress={() => handleCallSupplier(product.supplier)}
-                        activeOpacity={0.7}
-                      >
-                        <Phone size={16} color={Colors.primary} />
-                      </TouchableOpacity>
-                    )}
                     <TouchableOpacity
                       style={styles.clickableValue}
                       onPress={() => handleSupplierPress(product.supplier)}
@@ -698,6 +997,15 @@ This action cannot be undone.`;
                         {formatSupplierNameForDisplay(getSupplierName(product.supplier))}
                       </Text>
                     </TouchableOpacity>
+                    {product.supplier && (
+                      <TouchableOpacity
+                        style={styles.callButton}
+                        onPress={() => handleCallSupplier(product.supplier)}
+                        activeOpacity={0.7}
+                      >
+                        <Phone size={16} color={Colors.primary} />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
                 
@@ -734,7 +1042,7 @@ This action cannot be undone.`;
                   <Text style={styles.stockCardValue}>
                     {product.minStockLevel}
                   </Text>
-                  <Text style={styles.stockCardUnit}>units</Text>
+                  <Text style={styles.stockCardUnit}>{product.primaryUnit || 'units'}</Text>
                 </View>
                 
                 <View style={styles.stockCard}>
@@ -742,7 +1050,7 @@ This action cannot be undone.`;
                   <Text style={styles.stockCardValue}>
                     {product.maxStockLevel}
                   </Text>
-                  <Text style={styles.stockCardUnit}>units</Text>
+                  <Text style={styles.stockCardUnit}>{product.primaryUnit || 'units'}</Text>
                 </View>
                 
                 <View style={styles.stockCard}>
@@ -889,7 +1197,7 @@ This action cannot be undone.`;
                 
                 <View style={styles.restockDetails}>
                   <Text style={styles.restockDetailText}>
-                    Last restocked: {formatDate(product.lastRestocked)}
+                    Last restocked: {product.lastRestocked ? formatDate(product.lastRestocked) : 'Never'}
                   </Text>
                   <Text style={styles.restockDetailText}>
                     Estimated cost: {formatPrice((product.maxStockLevel - product.currentStock) * (product.unitPrice || 0) * 0.8)}
@@ -907,12 +1215,403 @@ This action cannot be undone.`;
               </Text>
             </View>
 
+            {/* Location Filter Toggle (only show if multiple locations) */}
+            {locationStock.length > 1 && (
+              <View style={styles.inventoryControls}>
+                <TouchableOpacity
+                  style={[styles.controlButton, selectedLocationId && styles.controlButtonActive]}
+                  onPress={() => setShowLocationFilterModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <Filter size={18} color={selectedLocationId ? Colors.primary : Colors.textLight} />
+                  <Text style={[styles.controlButtonText, selectedLocationId && styles.controlButtonTextActive]}>
+                    {selectedLocationId 
+                      ? locationStock.find(loc => loc.locationId === selectedLocationId)?.locationName || 'All Locations'
+                      : 'All Locations'}
+                  </Text>
+                  <ChevronDown size={18} color={selectedLocationId ? Colors.primary : Colors.textLight} />
+                </TouchableOpacity>
+              </View>
+            )}
+
             <View style={styles.inventoryLogs}>
-              {mockInventoryLogs.map(renderInventoryLog)}
+              {loadingLogs ? (
+                <View style={styles.loadingContainer}>
+                  <Text style={styles.loadingText}>Loading inventory logs...</Text>
+                </View>
+              ) : inventoryLogs.length > 0 ? (
+                inventoryLogs.map(renderInventoryLog)
+              ) : (
+                <View style={styles.emptyLogsContainer}>
+                  <Package size={48} color={Colors.textLight} />
+                  <Text style={styles.emptyLogsText}>No inventory movements found</Text>
+                  <Text style={styles.emptyLogsSubtext}>
+                    Stock movements will appear here when products are sold, purchased, or adjusted
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Current Stock Display at Bottom with All UoM */}
+            <View style={styles.currentStockContainer}>
+              <View style={styles.currentStockHeader}>
+                <View style={styles.currentStockHeaderLeft}>
+                  <Package size={20} color={Colors.primary} />
+                  <Text style={styles.currentStockLabel}>Current Stock</Text>
+                </View>
+                {/* UoM Dropdown */}
+                <TouchableOpacity
+                  style={styles.currentStockUoMButton}
+                  onPress={() => setShowUoMModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.currentStockUoMText}>
+                    {getUoMLabel()}
+                  </Text>
+                  <ChevronDown size={16} color={Colors.primary} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.currentStockContent}>
+                <View style={styles.currentStockLeft}>
+                  {selectedLocationId && (
+                    <Text style={styles.currentStockLocation}>
+                      at {locationStock.find(loc => loc.locationId === selectedLocationId)?.locationName || 'Selected Location'}
+                    </Text>
+                  )}
+                  {!selectedLocationId && locationStock.length > 1 && (
+                    <Text style={styles.currentStockLocation}>
+                      across {locationStock.length} locations
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.currentStockUoMValues}>
+                  {/* Primary UoM */}
+                  <View style={styles.currentStockUoMItem}>
+                    <Text style={styles.currentStockUoMLabel}>{product.primaryUnit || 'Piece'}:</Text>
+                    <Text style={styles.currentStockUoMValue}>
+                      {(() => {
+                        const totalStock = selectedLocationId 
+                          ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                          : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                        return totalStock.toFixed(3);
+                      })()}
+                    </Text>
+                  </View>
+                  
+                  {/* Secondary UoM (if available) */}
+                  {product.useCompoundUnit && product.secondaryUnit && product.secondaryUnit !== 'None' && (
+                    <View style={styles.currentStockUoMItem}>
+                      <Text style={styles.currentStockUoMLabel}>{product.secondaryUnit}:</Text>
+                      <Text style={styles.currentStockUoMValue}>
+                        {(() => {
+                          const conversionRatio = parseFloat(product.conversionRatio || '1');
+                          const totalStock = selectedLocationId 
+                            ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                            : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                          return (totalStock / conversionRatio).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {/* Tertiary UoM (if available) */}
+                  {product.useCompoundUnit && product.tertiaryUnit && product.tertiaryUnit !== 'None' && (
+                    <View style={styles.currentStockUoMItem}>
+                      <Text style={styles.currentStockUoMLabel}>{product.tertiaryUnit}:</Text>
+                      <Text style={styles.currentStockUoMValue}>
+                        {(() => {
+                          const conversionRatio = parseFloat(product.conversionRatio || '1');
+                          const tertiaryRatio = parseFloat(product.tertiaryConversionRatio || '1');
+                          const totalStock = selectedLocationId 
+                            ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                            : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                          return (totalStock / (conversionRatio * tertiaryRatio)).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
             </View>
           </View>
         )}
       </ScrollView>
+
+      {/* UoM Selection Modal */}
+      <Modal
+        visible={showUoMModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowUoMModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Unit of Measure</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowUoMModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent}>
+              <TouchableOpacity
+                style={[styles.modalOption, selectedUoM === 'primary' && styles.selectedOption]}
+                onPress={() => {
+                  setSelectedUoM('primary');
+                  setShowUoMModal(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.modalOptionContent}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalOptionText, selectedUoM === 'primary' && styles.selectedOptionText]}>
+                      {product.primaryUnit || 'Piece'} (Primary)
+                    </Text>
+                    <Text style={styles.modalOptionSubtext}>
+                      Current Stock: {(() => {
+                        const totalStock = selectedLocationId 
+                          ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                          : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                        return totalStock.toFixed(3);
+                      })()} {product.primaryUnit || 'Piece'}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+              
+              {product.useCompoundUnit && product.secondaryUnit && product.secondaryUnit !== 'None' && (
+                <TouchableOpacity
+                  style={[styles.modalOption, selectedUoM === 'secondary' && styles.selectedOption]}
+                  onPress={() => {
+                    setSelectedUoM('secondary');
+                    setShowUoMModal(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.modalOptionContent}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.modalOptionText, selectedUoM === 'secondary' && styles.selectedOptionText]}>
+                        {product.secondaryUnit} (Secondary)
+                      </Text>
+                      <Text style={styles.modalOptionSubtext}>
+                        Current Stock: {(() => {
+                          const conversionRatio = parseFloat(product.conversionRatio || '1');
+                          const totalStock = selectedLocationId 
+                            ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                            : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                          return (totalStock / conversionRatio).toFixed(3);
+                        })()} {product.secondaryUnit}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              )}
+              
+              {product.useCompoundUnit && product.tertiaryUnit && product.tertiaryUnit !== 'None' && (
+                <TouchableOpacity
+                  style={[styles.modalOption, selectedUoM === 'tertiary' && styles.selectedOption]}
+                  onPress={() => {
+                    setSelectedUoM('tertiary');
+                    setShowUoMModal(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.modalOptionContent}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.modalOptionText, selectedUoM === 'tertiary' && styles.selectedOptionText]}>
+                        {product.tertiaryUnit} (Tertiary)
+                      </Text>
+                      <Text style={styles.modalOptionSubtext}>
+                        Current Stock: {(() => {
+                          const conversionRatio = parseFloat(product.conversionRatio || '1');
+                          const tertiaryRatio = parseFloat(product.tertiaryConversionRatio || '1');
+                          const totalStock = selectedLocationId 
+                            ? (locationStock.find(loc => loc.locationId === selectedLocationId)?.quantity || 0)
+                            : locationStock.reduce((sum, loc) => sum + loc.quantity, 0);
+                          return (totalStock / (conversionRatio * tertiaryRatio)).toFixed(3);
+                        })()} {product.tertiaryUnit}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Location Filter Modal */}
+      <Modal
+        visible={showLocationFilterModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLocationFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter by Location</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowLocationFilterModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent}>
+              <TouchableOpacity
+                style={[styles.modalOption, !selectedLocationId && styles.selectedOption]}
+                onPress={() => {
+                  setSelectedLocationId(null);
+                  setShowLocationFilterModal(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.modalOptionText, !selectedLocationId && styles.selectedOptionText]}>
+                  All Locations
+                </Text>
+              </TouchableOpacity>
+              
+              {locationStock.map((location) => (
+                <TouchableOpacity
+                  key={location.locationId}
+                  style={[styles.modalOption, selectedLocationId === location.locationId && styles.selectedOption]}
+                  onPress={() => {
+                    setSelectedLocationId(location.locationId);
+                    setShowLocationFilterModal(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.modalOptionContent}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.modalOptionText, selectedLocationId === location.locationId && styles.selectedOptionText]}>
+                        {location.locationName}
+                      </Text>
+                      <Text style={styles.modalOptionSubtext}>
+                        {convertQuantity(location.quantity).toFixed(3)} {getUoMLabel()}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Product Images Modal */}
+      <Modal
+        visible={showImageModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImageModal(false)}
+      >
+        <View style={styles.imageModalOverlay}>
+          <View style={styles.imageModalContainer}>
+            <View style={styles.imageModalHeader}>
+              <Text style={styles.imageModalTitle}>Product Images</Text>
+              <TouchableOpacity
+                style={styles.imageModalCloseButton}
+                onPress={() => setShowImageModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.imageModalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.imageModalContent}>
+              <ScrollView 
+                ref={imageScrollViewRef}
+                horizontal 
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                style={styles.imageModalScrollView}
+                contentContainerStyle={styles.imageModalScrollContent}
+                onMomentumScrollEnd={(event) => {
+                  const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
+                  setSelectedImageIndex(index);
+                }}
+              >
+                {(product.productImages && product.productImages.length > 0 ? product.productImages : (product.image ? [product.image] : [])).map((imageUri: string, index: number) => {
+                  const imageArray = product.productImages && product.productImages.length > 0 ? product.productImages : (product.image ? [product.image] : []);
+                  // Check if this is the barcode image (last image if barcode exists)
+                  const isBarcodeImage = product.barcode && 
+                                        product.barcode.trim().length > 0 && 
+                                        index === imageArray.length - 1 &&
+                                        imageUri.startsWith('data:image');
+                  return (
+                    <View key={index} style={[
+                      styles.imageModalImageContainer,
+                      isBarcodeImage && styles.barcodeModalImageContainer
+                    ]}>
+                      <Image 
+                        source={{ uri: imageUri }}
+                        style={[
+                          styles.imageModalImage,
+                          isBarcodeImage && styles.barcodeModalImage
+                        ]}
+                        resizeMode="contain"
+                      />
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              
+              {/* Navigation Arrows - Show conditionally based on position */}
+              {(product.productImages && product.productImages.length > 0 ? product.productImages : (product.image ? [product.image] : [])).length > 1 && (
+                <>
+                  {/* Left Arrow - Only show if not on first image */}
+                  {selectedImageIndex > 0 && (
+                    <TouchableOpacity
+                      style={[styles.imageModalArrow, styles.imageModalArrowLeft]}
+                      onPress={() => {
+                        const newIndex = selectedImageIndex - 1;
+                        setSelectedImageIndex(newIndex);
+                        const screenWidth = Dimensions.get('window').width;
+                        imageScrollViewRef.current?.scrollTo({ x: newIndex * screenWidth, animated: true });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <ChevronLeft size={32} color={Colors.background} />
+                    </TouchableOpacity>
+                  )}
+                  
+                  {/* Right Arrow - Only show if not on last image */}
+                  {selectedImageIndex < ((product.productImages && product.productImages.length > 0 ? product.productImages : (product.image ? [product.image] : [])).length - 1) && (
+                    <TouchableOpacity
+                      style={[styles.imageModalArrow, styles.imageModalArrowRight]}
+                      onPress={() => {
+                        const newIndex = selectedImageIndex + 1;
+                        setSelectedImageIndex(newIndex);
+                        const screenWidth = Dimensions.get('window').width;
+                        imageScrollViewRef.current?.scrollTo({ x: newIndex * screenWidth, animated: true });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <ChevronRight size={32} color={Colors.background} />
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </View>
+            
+            {/* Image Counter - Always show if more than 1 image */}
+            {(() => {
+              const imageArray = product.productImages && product.productImages.length > 0 ? product.productImages : (product.image ? [product.image] : []);
+              return imageArray.length > 1 ? (
+                <View style={styles.imageModalIndicators}>
+                  <Text style={styles.imageModalIndicatorText}>
+                    {selectedImageIndex + 1} / {imageArray.length}
+                  </Text>
+                </View>
+              ) : null;
+            })()}
+          </View>
+        </View>
+      </Modal>
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
@@ -1048,11 +1747,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.grey[200],
   },
+  productImagesScroll: {
+    maxHeight: 80,
+    marginRight: 16,
+  },
+  productImagesContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   productHeaderImage: {
     width: 80,
     height: 80,
     borderRadius: 12,
-    marginRight: 16,
+  },
+  productImagePlaceholder: {
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   productHeaderInfo: {
     flex: 1,
@@ -1160,11 +1871,10 @@ const styles = StyleSheet.create({
   },
   supplierInfoContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start', // Align to top for multi-line text
+    alignItems: 'center',
     flex: 1,
     gap: 8,
-    justifyContent: 'flex-end',
-    paddingTop: 2, // Small top padding for visual balance
+    justifyContent: 'flex-start',
   },
   callButton: {
     width: 32,
@@ -1176,7 +1886,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.primary + '25',
     flexShrink: 0,
-    marginLeft: 4,
+    marginLeft: 'auto',
     shadowColor: Colors.primary,
     shadowOffset: {
       width: 0,
@@ -1341,8 +2051,142 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     marginTop: 4,
   },
+  inventoryControls: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  controlButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.grey[50],
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    gap: 8,
+  },
+  controlButtonActive: {
+    backgroundColor: Colors.primary + '10',
+    borderColor: Colors.primary,
+  },
+  controlButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.text,
+    flex: 1,
+  },
+  controlButtonTextActive: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  currentStockContainer: {
+    marginTop: 20,
+    padding: 16,
+    backgroundColor: Colors.primary + '10',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  currentStockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  currentStockLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    flex: 1,
+  },
+  currentStockUoMButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: Colors.background,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  currentStockUoMText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  currentStockContent: {
+    gap: 16,
+  },
+  currentStockLeft: {
+    marginBottom: 4,
+  },
+  currentStockUoMValues: {
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  currentStockUoMItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    justifyContent: 'flex-end',
+  },
+  currentStockUoMLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: Colors.textLight,
+  },
+  currentStockUoMValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.primary,
+    minWidth: 80,
+    textAlign: 'right',
+  },
+  currentStockLocation: {
+    fontSize: 12,
+    color: Colors.textLight,
+  },
+  currentStockHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
   inventoryLogs: {
     gap: 12,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginTop: 12,
+  },
+  emptyLogsContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyLogsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyLogsSubtext: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 32,
   },
   logCard: {
     backgroundColor: Colors.background,
@@ -1425,6 +2269,85 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.primary,
     fontWeight: '500',
+  },
+  
+  // Modal Styles
+  modalContainer: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontSize: 18,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  modalContent: {
+    maxHeight: 400,
+  },
+  modalOption: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  selectedOption: {
+    backgroundColor: Colors.primary + '10',
+    borderColor: Colors.primary,
+  },
+  modalOptionContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  selectedOptionText: {
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  modalOptionSubtext: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 4,
   },
   
   // Delete Modal Styles
@@ -1573,5 +2496,126 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     color: Colors.background,
+  },
+  // Image Modal Styles
+  imageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  imageModalContent: {
+    flex: 1,
+    width: '100%',
+    position: 'relative',
+  },
+  imageModalHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    paddingTop: 60,
+    zIndex: 10,
+  },
+  imageModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.background,
+  },
+  imageModalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalCloseText: {
+    fontSize: 20,
+    color: Colors.background,
+    fontWeight: '600',
+  },
+  imageModalScrollView: {
+    flex: 1,
+    width: Dimensions.get('window').width,
+  },
+  imageModalScrollContent: {
+    alignItems: 'center',
+  },
+  imageModalImageContainer: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  barcodeImageContainer: {
+    backgroundColor: Colors.grey[50],
+    padding: 12,
+    borderRadius: 12,
+  },
+  barcodeImagePreview: {
+    backgroundColor: Colors.background,
+    padding: 8,
+  },
+  barcodeModalImageContainer: {
+    backgroundColor: Colors.grey[50],
+    padding: 24,
+  },
+  barcodeModalImage: {
+    backgroundColor: Colors.background,
+    padding: 16,
+  },
+  imageModalIndicators: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  imageModalIndicatorText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.background,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  imageModalArrow: {
+    position: 'absolute',
+    top: '50%',
+    transform: [{ translateY: -20 }],
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  imageModalArrowLeft: {
+    left: 20,
+  },
+  imageModalArrowRight: {
+    right: 20,
+  },
+  imageModalArrowDisabled: {
+    opacity: 0.3,
   },
 });

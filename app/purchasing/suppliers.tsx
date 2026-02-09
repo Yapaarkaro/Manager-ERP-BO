@@ -6,15 +6,18 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
   Modal,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, Package, TrendingUp, TrendingDown, Eye, MessageCircle, X, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 import { dataStore, Supplier } from '@/utils/dataStore';
+import { getSuppliers } from '@/services/backendApi';
+import { getInputFocusStyles } from '@/utils/platformUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -32,28 +35,94 @@ const Colors = {
   }
 };
 
+// Helper function to get initials from name
+const getInitials = (name: string): string => {
+  if (!name || name.trim().length === 0) return 'S';
+  const words = name.trim().split(' ').filter(word => word.length > 0);
+  if (words.length === 0) return 'S';
+  
+  // Get first letter of first word and first letter of last word (if multiple words)
+  if (words.length === 1) {
+    return words[0][0].toUpperCase();
+  }
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+};
+
 // Using Supplier interface from dataStore
 
 const mockSuppliers: Supplier[] = [];
 
 export default function SuppliersScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'high_score'>('all');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const inputFocusStyles = getInputFocusStyles();
 
-  // Subscribe to data store changes
+  // Fetch suppliers from Supabase
   React.useEffect(() => {
+    const loadSuppliers = async () => {
+      try {
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          // Convert Supabase supplier format to Supplier interface format
+          const convertedSuppliers: Supplier[] = result.suppliers.map((sup: any) => ({
+            id: sup.id,
+            name: sup.contact_person,
+            businessName: sup.business_name,
+            supplierType: sup.supplier_type || 'business',
+            contactPerson: sup.contact_person,
+            mobile: sup.mobile_number,
+            email: sup.email || '',
+            address: `${sup.address_line_1}, ${sup.address_line_2 ? sup.address_line_2 + ', ' : ''}${sup.address_line_3 ? sup.address_line_3 + ', ' : ''}${sup.city}, ${sup.pincode}, ${sup.state}`,
+            gstin: sup.gstin_pan || '',
+            avatar: '', // No avatar - will show initials instead
+            supplierScore: 85, // Default values for backward compatibility
+            onTimeDelivery: 90,
+            qualityRating: 4.5,
+            responseTime: 2.1,
+            totalOrders: 0,
+            completedOrders: 0,
+            pendingOrders: 0,
+            cancelledOrders: 0,
+            totalValue: 0,
+            lastOrderDate: null,
+            joinedDate: sup.created_at,
+            status: sup.status || 'active',
+            paymentTerms: 'Net 30 Days',
+            deliveryTime: '3-5 Business Days',
+            categories: ['Electronics', 'Accessories'],
+            productCount: 0,
+            createdAt: sup.created_at,
+          }));
+          
+          setSuppliers(convertedSuppliers);
+          setFilteredSuppliers(convertedSuppliers);
+          
+          // Also sync to dataStore for backward compatibility
+          convertedSuppliers.forEach(supplier => {
+            if (!dataStore.getSuppliers().find(s => s.id === supplier.id)) {
+              dataStore.addSupplier(supplier);
+            }
+          });
+        } else {
+          console.error('Failed to load suppliers:', result.error);
+        }
+      } catch (error) {
+        console.error('Error loading suppliers:', error);
+      }
+    };
+
+    loadSuppliers();
+
+    // Also subscribe to data store changes for backward compatibility
     const unsubscribe = dataStore.subscribe(() => {
       const allSuppliers = dataStore.getSuppliers();
       setSuppliers(allSuppliers);
       applyFilters(searchQuery, selectedFilter);
     });
-
-    // Initial load
-    const allSuppliers = dataStore.getSuppliers();
-    setSuppliers(allSuppliers);
-    setFilteredSuppliers(allSuppliers);
 
     return unsubscribe;
   }, []);
@@ -178,10 +247,11 @@ export default function SuppliersScreen() {
         {/* Header */}
         <View style={styles.supplierHeader}>
           <View style={styles.supplierLeft}>
-            <Image 
-              source={{ uri: supplier.avatar }}
-              style={styles.supplierAvatar}
-            />
+            <View style={[styles.supplierAvatar, styles.supplierAvatarInitials]}>
+              <Text style={styles.supplierAvatarText}>
+                {getInitials(supplier.supplierType === 'business' ? supplier.businessName || supplier.name : supplier.name)}
+              </Text>
+            </View>
             <View style={styles.supplierInfo}>
               <Text style={styles.supplierName}>
                 {supplier.supplierType === 'business' ? supplier.businessName : supplier.name}
@@ -341,7 +411,7 @@ export default function SuppliersScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.push('/dashboard')}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />
@@ -388,6 +458,32 @@ export default function SuppliersScreen() {
           </View>
         </View>
       </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
+
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={[
+          styles.searchBar,
+          inputFocusStyles.inputContainer,
+          focusedField === 'search' && inputFocusStyles.inputContainerFocused,
+        ]}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={[styles.searchInput, inputFocusStyles.input as any]}
+            placeholder="Search suppliers..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+            onFocus={() => setFocusedField('search')}
+            onBlur={() => setFocusedField(null)}
+          />
+        </View>
+      </View>
+
+      {/* Divider */}
+      <View style={styles.divider} />
 
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
@@ -671,6 +767,16 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     marginRight: 12,
   },
+  supplierAvatarInitials: {
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  supplierAvatarText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.background,
+  },
   supplierInfo: {
     flex: 1,
   },
@@ -860,23 +966,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 4,
   },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+  },
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: Colors.background,
+  },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.background,
-    borderRadius: 25,
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: Colors.grey[300],
+    gap: 12,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-    marginLeft: 12,
-    marginRight: 12,
-    
   },
   filterButton: {
     width: 32,

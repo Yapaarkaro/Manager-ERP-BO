@@ -418,6 +418,7 @@ export default function StockDiscrepanciesScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(amount);
   };
 
@@ -426,6 +427,7 @@ export default function StockDiscrepanciesScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(amount);
   };
 

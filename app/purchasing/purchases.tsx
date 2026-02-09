@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ShoppingCart, Plus, FileText, User, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, ChevronDown } from 'lucide-react-native';
 
 const Colors = {
@@ -211,6 +212,7 @@ const mockPurchaseOrders: PurchaseOrder[] = [
 ];
 
 export default function PurchasesScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [activeTab, setActiveTab] = useState<'invoices' | 'orders'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
   const [poFilter, setPoFilter] = useState<'all' | 'created' | 'received'>('all');
@@ -472,7 +474,7 @@ export default function PurchasesScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBack}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color={Colors.text} />

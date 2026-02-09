@@ -1,10 +1,13 @@
 // Simple global product store for the ERP app
 // In a real app, this would be replaced with proper state management like Redux or Context API
 
+import { getProducts } from '@/services/backendApi';
+
 export interface Product {
   id: string;
   name: string;
   image: string;
+  productImages?: string[]; // Array of product image URLs
   category: string;
   currentStock: number;
   minStockLevel: number;
@@ -158,6 +161,100 @@ class ProductStore {
   // Notify all listeners
   private notifyListeners() {
     this.listeners.forEach(listener => listener());
+  }
+
+  // Load products from backend
+  async loadProductsFromBackend(): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('🔄 Loading products from backend...');
+      const result = await getProducts();
+      
+      if (!result.success || !result.products) {
+        console.error('❌ Failed to load products:', result.error);
+        return { success: false, error: result.error };
+      }
+
+      // Clear existing products
+      this.products = [];
+
+      // Transform backend products to Product interface format
+      const transformedProducts: Product[] = result.products.map((backendProduct: any) => {
+        // Get first image from product_images array or use product_image
+        // product_images can be an array or a string (JSON string)
+        let images: string[] = [];
+        if (backendProduct.product_images) {
+          if (Array.isArray(backendProduct.product_images)) {
+            images = backendProduct.product_images;
+          } else if (typeof backendProduct.product_images === 'string') {
+            try {
+              images = JSON.parse(backendProduct.product_images);
+            } catch {
+              // If parsing fails, treat as single image URL
+              images = [backendProduct.product_images];
+            }
+          }
+        }
+        const image = images.length > 0 ? images[0] : (backendProduct.product_image || '');
+
+        // Determine urgency level based on stock
+        let urgencyLevel: 'normal' | 'low' | 'critical' = 'normal';
+        if (backendProduct.current_stock !== undefined && backendProduct.min_stock_level !== undefined) {
+          if (backendProduct.current_stock <= 0) {
+            urgencyLevel = 'critical';
+          } else if (backendProduct.current_stock <= backendProduct.min_stock_level) {
+            urgencyLevel = 'low';
+          }
+        }
+
+        return {
+          id: backendProduct.id,
+          name: backendProduct.name || '',
+          image: image,
+          productImages: images.length > 0 ? images : undefined, // Store all images
+          category: backendProduct.category || '',
+          currentStock: backendProduct.current_stock || 0,
+          minStockLevel: backendProduct.min_stock_level || 0,
+          maxStockLevel: backendProduct.max_stock_level || 0,
+          openingStock: backendProduct.opening_stock || 0,
+          unitPrice: backendProduct.per_unit_price || backendProduct.purchase_price || 0,
+          salesPrice: backendProduct.sales_price || 0,
+          hsnCode: backendProduct.hsn_code || '',
+          barcode: backendProduct.barcode || '',
+          taxRate: backendProduct.tax_rate || 0,
+          taxInclusive: backendProduct.tax_inclusive || false,
+          supplier: backendProduct.preferred_supplier_id || undefined,
+          location: backendProduct.storage_location_name || '',
+          lastRestocked: backendProduct.last_restocked_at || backendProduct.last_restocked || undefined,
+          stockValue: backendProduct.stock_value || undefined,
+          primaryUnit: backendProduct.primary_unit || '',
+          secondaryUnit: backendProduct.secondary_unit || undefined,
+          tertiaryUnit: backendProduct.tertiary_unit || undefined,
+          conversionRatio: backendProduct.conversion_ratio || undefined,
+          tertiaryConversionRatio: backendProduct.tertiary_conversion_ratio || undefined,
+          urgencyLevel: urgencyLevel,
+          batchNumber: backendProduct.batch_number || undefined,
+          mrp: backendProduct.mrp_price?.toString() || undefined,
+          brand: backendProduct.brand || undefined,
+          description: backendProduct.description || undefined,
+          createdAt: backendProduct.created_at || undefined,
+          updatedAt: backendProduct.updated_at || undefined,
+          cessType: backendProduct.cess_type || 'none',
+          cessRate: backendProduct.cess_rate || 0,
+          cessAmount: backendProduct.cess_amount || 0,
+          cessUnit: backendProduct.cess_unit || undefined,
+        };
+      });
+
+      // Add all transformed products to store
+      this.products = transformedProducts;
+      console.log(`✅ Loaded ${transformedProducts.length} products from backend`);
+      this.notifyListeners();
+      
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Error loading products from backend:', error);
+      return { success: false, error: error.message || 'Failed to load products' };
+    }
   }
 }
 

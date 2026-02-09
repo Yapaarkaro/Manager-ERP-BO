@@ -172,3 +172,19 @@ The backend Edge Functions (`manage-addresses` and `manage-bank-accounts`) shoul
   - Added `primary_bank_account_id` column to `businesses` table
   - Added indexes for performance
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -114,6 +114,7 @@ export default function ConfirmationScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(price);
   };
 

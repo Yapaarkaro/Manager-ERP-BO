@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { 
   ArrowLeft, 
   Download,
@@ -27,6 +28,9 @@ import {
   Package
 } from 'lucide-react-native';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
+import { getInputFocusStyles } from '@/utils/platformUtils';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import Sidebar from '@/components/Sidebar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -157,6 +161,8 @@ const mockReturnInvoices: ReturnInvoice[] = [
 ];
 
 export default function ReturnsScreen() {
+  const { handleBack } = useWebBackNavigation();
+  const pathname = usePathname();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredReturns, setFilteredReturns] = useState(mockReturnInvoices);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -169,6 +175,9 @@ export default function ReturnsScreen() {
     staffMember: [] as string[],
     reason: [] as string[],
   });
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const inputFocusStyles = getInputFocusStyles();
   
   // Use debounced navigation for FAB button
   const debouncedNavigate = useDebounceNavigation(500);
@@ -475,26 +484,52 @@ export default function ReturnsScreen() {
     );
   };
 
+  const handleMenuNavigation = (route: any) => {
+    router.push(route);
+  };
+
+  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
+    setSidebarWidth(width);
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Return Invoices</Text>
-        
-        <View style={styles.headerRight}>
-          <Text style={styles.totalCount}>
-            {filteredReturns.length} returns
-          </Text>
-        </View>
-      </View>
+    <View style={styles.mainContainer}>
+      {/* Sidebar - Only on web */}
+      {Platform.OS === 'web' && (
+        <Sidebar
+          onNavigate={handleMenuNavigation}
+          currentRoute={pathname}
+          onCollapseChange={handleSidebarCollapseChange}
+        />
+      )}
+      
+      <View style={[
+        styles.contentWrapper,
+        Platform.OS === 'web' && {
+          marginLeft: sidebarWidth,
+          flex: 1,
+        }
+      ]}>
+        <ResponsiveContainer>
+          <SafeAreaView style={styles.container}>
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleBack}
+                activeOpacity={0.7}
+              >
+                <ArrowLeft size={24} color={Colors.text} />
+              </TouchableOpacity>
+              
+              <Text style={styles.headerTitle}>Return Invoices</Text>
+              
+              <View style={styles.headerRight}>
+                <Text style={styles.totalCount}>
+                  {filteredReturns.length} returns
+                </Text>
+              </View>
+            </View>
 
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
@@ -543,14 +578,20 @@ export default function ReturnsScreen() {
 
       {/* Search Bar - Inline between summary and content */}
       <View style={styles.inlineSearchContainer}>
-        <View style={styles.searchBar}>
+        <View style={[
+          styles.searchBar,
+          inputFocusStyles.inputContainer,
+          focusedField === 'search' && inputFocusStyles.inputContainerFocused,
+        ]}>
           <Search size={20} color={Colors.primary} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, inputFocusStyles.input as any]}
             placeholder="Search returns..."
             placeholderTextColor={Colors.textLight}
             value={searchQuery}
             onChangeText={handleSearch}
+            onFocus={() => setFocusedField('search')}
+            onBlur={() => setFocusedField(null)}
           />
           <TouchableOpacity
             style={styles.filterButton}
@@ -791,12 +832,29 @@ export default function ReturnsScreen() {
           </View>
         </View>
       </Modal>
-
-    </SafeAreaView>
+          </SafeAreaView>
+        </ResponsiveContainer>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    backgroundColor: Colors.background,
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    ...Platform.select({
+      web: {
+        transition: 'margin-left 0.3s ease',
+        minWidth: 0,
+      },
+    }),
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,

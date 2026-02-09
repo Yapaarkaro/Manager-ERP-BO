@@ -42,10 +42,16 @@ export default function NewSaleScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
-  // Load products from store
+  // Load products from backend and store
   useEffect(() => {
+    const loadProducts = async () => {
+      // Load products from backend first
+      await productStore.loadProductsFromBackend();
+      // Then get products from store
     const products = productStore.getProducts();
     setRecentProducts(products);
+    };
+    loadProducts();
   }, []);
 
   // Subscribe to product store changes

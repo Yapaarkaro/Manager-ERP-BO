@@ -300,7 +300,8 @@ export default function InvoiceDetailsScreen() {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(amount);
   };
 
@@ -350,7 +351,8 @@ export default function InvoiceDetailsScreen() {
       }
     } catch (error) {
       console.error('Download error:', error);
-      Alert.alert('Download Failed', `Error generating invoice file: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Download Failed', `Error generating invoice file: ${errorMessage}`);
     }
   };
 

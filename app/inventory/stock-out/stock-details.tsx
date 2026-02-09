@@ -198,6 +198,7 @@ export default function StockDetailsScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(price);
   };
 

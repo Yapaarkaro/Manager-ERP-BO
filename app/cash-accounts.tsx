@@ -1,9 +1,9 @@
 /**
- * Bank Accounts Screen
- * Shows only Bank Accounts (not cash accounts)
+ * Cash Accounts Screen
+ * Shows only Cash Accounts (not bank accounts)
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,9 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, CreditCard, Banknote, Plus, Building2, Wallet } from 'lucide-react-native';
+import { ArrowLeft, Banknote, Wallet, Plus } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
@@ -38,8 +37,8 @@ const Colors = {
   }
 };
 
-// Interface for backend bank account
-interface BackendBankAccount {
+// Interface for backend account
+interface BackendAccount {
   id: string;
   bank_name?: string;
   bankName?: string;
@@ -65,7 +64,7 @@ interface BackendBankAccount {
   createdAt?: string;
 }
 
-export default function BankAccountsScreen() {
+export default function CashAccountsScreen() {
   const { handleBack } = useWebBackNavigation();
   const { data: businessData, refetch } = useBusinessData();
 
@@ -75,13 +74,19 @@ export default function BankAccountsScreen() {
     return businessData.bankAccounts;
   }, [businessData?.bankAccounts]);
 
-  // Filter only bank accounts (exclude cash accounts)
-  const bankAccounts = useMemo(() => {
+  // Filter only cash accounts (exclude bank accounts)
+  const cashAccounts = useMemo(() => {
     return bankAccountsData.filter((account: any) => {
-      // Exclude cash accounts - only show bank accounts
-      return account.type !== 'cash' && account.account_type !== 'cash';
+      // Only show cash accounts
+      return account.type === 'cash' || account.account_type === 'cash';
     });
   }, [bankAccountsData]);
+
+  // Get cash balance from business data (instant from cache)
+  const cashBalance = useMemo(() => {
+    return businessData?.business?.current_cash_balance || 
+           businessData?.business?.current_total_cash_balance || 0;
+  }, [businessData?.business?.current_cash_balance, businessData?.business?.current_total_cash_balance]);
 
   // Refetch when screen comes into focus
   useFocusEffect(
@@ -102,40 +107,32 @@ export default function BankAccountsScreen() {
   const mapAccountToDisplay = (account: any) => {
     return {
       id: account.id || account.backend_id || '',
-      bankName: account.bank_name || account.bankName || 'Unknown Bank',
+      bankName: account.bank_name || account.bankName || 'Cash Account',
       accountHolderName: account.account_holder_name || account.accountHolderName || '',
       accountNumber: account.account_number || account.accountNumber || '',
       ifscCode: account.ifsc_code || account.ifscCode || '',
-      accountType: account.account_type || account.accountType || 'Savings',
+      accountType: account.account_type || account.accountType || 'Cash',
       currentBalance: account.current_balance || account.currentBalance || account.balance || account.initial_balance || account.initialBalance || 0,
       isPrimary: account.is_primary || account.isPrimary || false,
       upiId: account.upi_id || account.upiId || '',
     };
   };
 
-  const handleViewBankAccount = (accountId: string) => {
+  const handleViewAccount = (accountId: string) => {
     router.push({
       pathname: '/bank-details',
       params: { bankAccountId: accountId }
     });
   };
 
-  const handleAddBankAccount = () => {
-    router.push('/auth/banking-details');
-  };
-
-  const handleAddCashAccount = () => {
-    // For now, cash is managed through the cash balance
-    router.push('/cash-details');
-  };
-
-  // Calculate total bank balance
-  const totalBankBalance = useMemo(() => {
-    return bankAccounts.reduce((sum, acc) => {
+  // Calculate total cash balance
+  const totalCashBalance = useMemo(() => {
+    const cashFromAccounts = cashAccounts.reduce((sum, acc) => {
       const balance = acc.current_balance || acc.currentBalance || acc.balance || acc.initial_balance || acc.initialBalance || 0;
       return sum + (typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0);
     }, 0);
-  }, [bankAccounts]);
+    return cashFromAccounts + (typeof cashBalance === 'number' ? cashBalance : parseFloat(String(cashBalance)) || 0);
+  }, [cashAccounts, cashBalance]);
 
   const webContainerStyles = getWebContainerStyles();
 
@@ -152,7 +149,7 @@ export default function BankAccountsScreen() {
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Bank Accounts</Text>
+          <Text style={styles.headerTitle}>Cash Accounts</Text>
         </View>
 
         <ScrollView 
@@ -163,58 +160,76 @@ export default function BankAccountsScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Bank Accounts Section */}
-          <View style={[styles.section, styles.bankSection]}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionHeaderLeft}>
-                <CreditCard size={24} color={Colors.primary} />
-                <Text style={styles.sectionTitle}>Bank Accounts</Text>
-                {bankAccounts.length > 0 && (
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countBadgeText}>{bankAccounts.length}</Text>
+          {/* Cash Balance Card (if cash balance exists) */}
+          {cashBalance > 0 && (
+            <View style={styles.section}>
+              <View style={styles.cashCard}>
+                <View style={styles.cashCardHeader}>
+                  <Banknote size={32} color={Colors.success} />
+                  <View style={styles.cashDetails}>
+                    <Text style={styles.cashLabel}>Current Cash Balance</Text>
+                    <Text style={styles.cashAmount}>
+                      {formatAmount(cashBalance)}
+                    </Text>
                   </View>
-                )}
+                </View>
+                <TouchableOpacity
+                  style={styles.viewCashButton}
+                  onPress={() => router.push('/cash-details')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.viewCashButtonText}>View Cash Transactions</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={handleAddBankAccount}
-                activeOpacity={0.7}
-              >
-                <Plus size={20} color={Colors.primary} />
-                <Text style={styles.addButtonText}>Add Account</Text>
-              </TouchableOpacity>
             </View>
+          )}
 
-            {bankAccounts.length > 0 ? (
+          {/* Cash Accounts from backend (if any) */}
+          {cashAccounts.length > 0 && (
+            <View style={[styles.section, styles.cashSection]}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLeft}>
+                  <Wallet size={24} color={Colors.success} />
+                  <Text style={[styles.sectionTitle, { color: Colors.success }]}>Cash Accounts</Text>
+                  {cashAccounts.length > 0 && (
+                    <View style={[styles.countBadge, { backgroundColor: Colors.success + '20' }]}>
+                      <Text style={[styles.countBadgeText, { color: Colors.success }]}>
+                        {cashAccounts.length}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
               <View style={styles.accountsList}>
-                {bankAccounts.map((account) => {
+                {cashAccounts.map((account) => {
                   const displayAccount = mapAccountToDisplay(account);
                   return (
                     <TouchableOpacity
                       key={account.id || displayAccount.id}
-                      style={styles.accountCard}
-                      onPress={() => handleViewBankAccount(displayAccount.id)}
+                      style={[styles.accountCard, styles.cashAccountCard]}
+                      onPress={() => handleViewAccount(displayAccount.id)}
                       activeOpacity={0.7}
                     >
                       <View style={styles.accountCardHeader}>
                         <View style={styles.accountInfo}>
-                          <Building2 size={20} color={Colors.primary} />
+                          <Wallet size={20} color={Colors.success} />
                           <View style={styles.accountDetails}>
                             <Text style={styles.accountName}>{displayAccount.bankName}</Text>
                             <Text style={styles.accountNumber}>
-                              {displayAccount.accountNumber ? `****${displayAccount.accountNumber.slice(-4)}` : 'N/A'}
+                              {displayAccount.accountNumber ? `****${displayAccount.accountNumber.slice(-4)}` : 'Cash Account'}
                             </Text>
                           </View>
                         </View>
                         {displayAccount.isPrimary && (
-                          <View style={styles.primaryBadge}>
-                            <Text style={styles.primaryBadgeText}>Primary</Text>
+                          <View style={[styles.primaryBadge, { backgroundColor: Colors.success + '15' }]}>
+                            <Text style={[styles.primaryBadgeText, { color: Colors.success }]}>Primary</Text>
                           </View>
                         )}
                       </View>
                       <View style={styles.accountBalance}>
                         <Text style={styles.balanceLabel}>Balance</Text>
-                        <Text style={styles.balanceAmount}>
+                        <Text style={[styles.balanceAmount, { color: Colors.success }]}>
                           {formatAmount(displayAccount.currentBalance)}
                         </Text>
                       </View>
@@ -222,26 +237,24 @@ export default function BankAccountsScreen() {
                   );
                 })}
               </View>
-            ) : (
+            </View>
+          )}
+
+          {/* Empty state for cash accounts */}
+          {cashAccounts.length === 0 && cashBalance === 0 && (
+            <View style={styles.section}>
               <View style={styles.emptyState}>
-                <CreditCard size={48} color={Colors.grey[300]} />
-                <Text style={styles.emptyStateText}>No bank accounts added</Text>
-                <TouchableOpacity
-                  style={styles.emptyStateButton}
-                  onPress={handleAddBankAccount}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.emptyStateButtonText}>Add Bank Account</Text>
-                </TouchableOpacity>
+                <Wallet size={48} color={Colors.grey[300]} />
+                <Text style={styles.emptyStateText}>No cash accounts</Text>
               </View>
-            )}
-          </View>
+            </View>
+          )}
 
           {/* Summary */}
           <View style={styles.summarySection}>
-            <Text style={styles.summaryTitle}>Total Bank Balance</Text>
-            <Text style={styles.summaryAmount}>
-              {formatAmount(totalBankBalance)}
+            <Text style={styles.summaryTitle}>Total Cash Balance</Text>
+            <Text style={[styles.summaryAmount, { color: Colors.success }]}>
+              {formatAmount(totalCashBalance)}
             </Text>
           </View>
         </ScrollView>
@@ -296,9 +309,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  bankSection: {
+  cashSection: {
     borderLeftWidth: 4,
-    borderLeftColor: Colors.primary,
+    borderLeftColor: Colors.success,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -326,20 +339,6 @@ const styles = StyleSheet.create({
   },
   countBadgeText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: Colors.primary + '15',
-    gap: 6,
-  },
-  addButtonText: {
-    fontSize: 14,
     fontWeight: '600',
     color: Colors.primary,
   },
@@ -427,17 +426,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 24,
   },
-  emptyStateButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: Colors.primary,
-  },
-  emptyStateButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
   cashCard: {
     backgroundColor: Colors.success + '10',
     borderRadius: 12,
@@ -492,23 +480,22 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: Colors.text,
-    marginBottom: 16,
-  },
-  summaryBreakdown: {
-    gap: 12,
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryItemLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  summaryItemValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
   },
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

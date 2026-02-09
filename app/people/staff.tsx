@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX, AlertCircle } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -144,6 +145,7 @@ interface Staff {
 }
 
 export default function StaffScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [allStaff, setAllStaff] = useState<Staff[]>([]);
   const [filteredStaff, setFilteredStaff] = useState<Staff[]>([]);
@@ -756,7 +758,7 @@ export default function StaffScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

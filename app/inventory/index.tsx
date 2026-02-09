@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import { productStore, Product } from '@/utils/productStore';
 import { dataStore } from '@/utils/dataStore';
 import { 
@@ -47,13 +49,21 @@ const Colors = {
 
 
 export default function InventoryScreen() {
+  const { handleBack } = useWebBackNavigation();
+  const { navigateToScreen, isWeb } = useWebNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
 
-  // Refresh products when screen comes into focus
+  // Load products from backend and refresh when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
+      const loadProducts = async () => {
+        // Load products from backend first
+        await productStore.loadProductsFromBackend();
+        // Then refresh the UI
       refreshProducts();
+      };
+      loadProducts();
     }, [])
   );
 
@@ -75,6 +85,12 @@ export default function InventoryScreen() {
   };
 
   const handleProductPress = (product: Product) => {
+    if (isWeb) {
+      // On web, use navigateToScreen to keep sidebar visible
+      const route = `/inventory/product-details?productId=${product.id}&productData=${encodeURIComponent(JSON.stringify(product))}`;
+      navigateToScreen(route);
+    } else {
+      // On mobile, use normal navigation
     router.push({
       pathname: '/inventory/product-details',
       params: {
@@ -82,15 +98,24 @@ export default function InventoryScreen() {
         productData: JSON.stringify(product)
       }
     });
+    }
   };
 
   const handleAddProduct = () => {
+    // Check trial status synchronously (fast, no async operations)
     const { canPerformAction } = require('@/utils/trialUtils');
-    if (!canPerformAction('add product')) return;
-    console.log('=== NAVIGATING DIRECTLY TO MANUAL PRODUCT FORM ===');
-    console.log('Timestamp:', new Date().toISOString());
-    console.log('==================================================');
+    const canPerform = canPerformAction('add product');
+    
+    if (!canPerform) {
+      return; // Trial check will show alert, just return
+    }
+    
+    // Navigate immediately without any blocking operations
+    if (isWeb) {
+      navigateToScreen('/inventory/manual-product');
+    } else {
     router.push('/inventory/manual-product');
+    }
   };
 
   // Function to refresh products (called when returning from add product)
@@ -129,6 +154,7 @@ export default function InventoryScreen() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
+      maximumFractionDigits: 3,
     }).format(price);
   };
 
@@ -294,7 +320,7 @@ export default function InventoryScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+            onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />
@@ -395,18 +421,6 @@ export default function InventoryScreen() {
             <Text style={styles.emptyStateText}>
               {searchQuery ? 'No products match your search criteria' : 'Add your first product to get started'}
             </Text>
-            {productStore.getProductCount() > 0 && (
-              <TouchableOpacity
-                style={[styles.addButton, { backgroundColor: Colors.error, marginTop: 16 }]}
-                onPress={() => {
-                  productStore.clearProducts();
-                  console.log('=== ALL PRODUCTS CLEARED ===');
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.alertButtonText, { color: Colors.background }]}>Clear All Products (Test)</Text>
-              </TouchableOpacity>
-            )}
           </View>
         ) : (
           filteredProducts.map(renderProductCard)
@@ -634,6 +648,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
+    zIndex: 1000, // Ensure button is above other elements
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+      },
+    }),
   },
   fabText: {
     color: '#FFFFFF',

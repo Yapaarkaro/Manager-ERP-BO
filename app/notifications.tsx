@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Bell, BellRing, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle, Info, Users, Package, ShoppingCart, IndianRupee, Eye, Check, X, MessageSquare } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 
@@ -224,6 +225,7 @@ const mockNotifications: Notification[] = [
 ];
 
 export default function NotificationsScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredNotifications, setFilteredNotifications] = useState(mockNotifications);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unread' | 'urgent' | 'action_required'>('all');
@@ -704,7 +706,7 @@ export default function NotificationsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

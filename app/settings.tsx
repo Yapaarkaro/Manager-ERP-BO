@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import {
   View,
@@ -25,10 +25,6 @@ import {
   Warehouse,
   Home,
   Trash2,
-  Sun,
-  Moon,
-  Smartphone,
-  Globe,
   X,
   Bell,
   Mail,
@@ -45,6 +41,9 @@ import {
   XCircle,
   Clock,
   ChevronRight,
+  LogOut,
+  Shield,
+  FileText as FileTextIcon,
 } from 'lucide-react-native';
 import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
@@ -54,6 +53,9 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { showAlert, showConfirm } from '@/utils/webAlert';
 import CustomAlert from '@/components/CustomAlert';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { useWebNavigation } from '@/contexts/WebNavigationContext';
+import { supabase } from '@/lib/supabase';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -138,6 +140,7 @@ export default function SettingsScreen() {
   
   // ✅ Use unified business data hook FIRST (before any useEffects that use it)
   const { data: businessData, refetch } = useBusinessData();
+  const webNav = useWebNavigation(); // For web navigation
   
   // ✅ Initialize userProfile with cached business data if available, otherwise use empty strings (not mock data)
   const getInitialUserProfile = () => {
@@ -197,16 +200,26 @@ export default function SettingsScreen() {
     return unsubscribe;
   }, []);
 
-  // ✅ Update user profile from business data (runs immediately if data is already available)
+  // ✅ Update user profile from business data immediately (runs on every data change)
   // This ensures we update as soon as data loads, even if it wasn't in cache
   useEffect(() => {
     if (businessData?.user || businessData?.business) {
-      setUserProfile(prev => ({
-        ...prev,
-        name: businessData?.user?.full_name || prev.name || '',
-        businessName: businessData?.business?.legal_name || prev.businessName || '',
-        gstin: businessData?.business?.tax_id || prev.gstin || '',
-      }));
+      setUserProfile(prev => {
+        const newName = businessData?.user?.full_name || prev.name || '';
+        const newBusinessName = businessData?.business?.legal_name || prev.businessName || '';
+        const newGstin = businessData?.business?.tax_id || prev.gstin || '';
+        
+        // Only update if values actually changed (prevent unnecessary re-renders)
+        if (newName !== prev.name || newBusinessName !== prev.businessName || newGstin !== prev.gstin) {
+          return {
+            ...prev,
+            name: newName,
+            businessName: newBusinessName,
+            gstin: newGstin,
+          };
+        }
+        return prev;
+      });
     }
   }, [businessData]);
 
@@ -226,9 +239,7 @@ export default function SettingsScreen() {
   const [showFullBankDetails, setShowFullBankDetails] = useState<Set<string>>(new Set());
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'system'>('light');
-  const [selectedLanguage, setSelectedLanguage] = useState<'english' | 'hindi' | 'tamil' | 'kannada' | 'telugu' | 'malayalam'>('english');
-  const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   
   // Notification settings state
   const [notificationSettings, setNotificationSettings] = useState({
@@ -292,98 +303,83 @@ export default function SettingsScreen() {
   const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
   const [showBankAccountsModal, setShowBankAccountsModal] = useState(false);
 
-  // ✅ Update addresses and bank accounts from cached data (instant display)
-  useEffect(() => {
-    if (businessData?.addresses) {
-      const formattedAddresses: BusinessAddress[] = businessData.addresses.map((addr: any) => {
-        const formattedAddress = {
-          id: addr.id, // ✅ Use backend ID as the address ID
-          backendId: addr.id, // ✅ Also store as backendId for consistency
-          name: addr.name,
-          type: addr.type,
-          doorNumber: addr.door_number || '',
-          addressLine1: addr.address_line1 || '',
-          addressLine2: addr.address_line2 || '',
-          additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [], // ✅ Include additionalLines
-          city: addr.city || '',
-          pincode: addr.pincode || '',
-          stateName: addr.state || '',
-          stateCode: addr.state ? getGSTINStateCode(addr.state) : '', // ✅ Get state code from state name
-          isPrimary: addr.is_primary || false,
-          manager: addr.manager_name || '',
-          phone: addr.manager_mobile_number || '',
-          status: 'active' as const,
-          createdAt: addr.created_at || new Date().toISOString(),
-          updatedAt: addr.updated_at || new Date().toISOString(),
-        };
-        
-        // ✅ Sync address to DataStore so edit-address-simple can find it
-        // Check if address already exists in DataStore
-        const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
-        if (!existingAddress) {
-          // Add to DataStore if not present (for editing purposes)
-          dataStore.addAddress(formattedAddress as any);
-        } else {
-          // Update existing address in DataStore to match backend
-          dataStore.updateAddress(existingAddress.id, formattedAddress as any);
-        }
-        
-        return formattedAddress;
-      });
-      setAddresses(formattedAddresses);
-    }
-    if (businessData?.bankAccounts) {
-      const formattedAccounts = businessData.bankAccounts.map((acc: any) => ({
-        id: acc.id,
-        accountHolderName: acc.account_holder_name,
-        bankName: acc.bank_name,
-        bankCode: acc.bank_short_name || '',
-        accountNumber: acc.account_number,
-        ifscCode: acc.ifsc_code,
-        upiId: acc.upi_id || '',
-        accountType: acc.account_type.toLowerCase() as 'savings' | 'current',
-        isPrimary: acc.is_primary || false
-      }));
-      setBankAccounts(formattedAccounts);
-    }
-  }, [businessData]);
-
-  // ✅ Refetch when screen comes into focus to get latest data (especially after edits)
-  useFocusEffect(
-    React.useCallback(() => {
-      // Always clear cache and refetch when coming back from edits
-      // This ensures we show the latest data after editing addresses or bank accounts
-      console.log('🔄 Settings: Screen focused, refetching business data');
+  // ✅ Use useMemo for instant derived data from cached businessData (no delay)
+  const formattedAddresses = useMemo(() => {
+    if (!businessData?.addresses) return [];
+    return businessData.addresses.map((addr: any) => {
+      const formattedAddress = {
+        id: addr.id,
+        backendId: addr.id,
+        name: addr.name,
+        type: addr.type,
+        doorNumber: addr.door_number || '',
+        addressLine1: addr.address_line1 || '',
+        addressLine2: addr.address_line2 || '',
+        additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [],
+        city: addr.city || '',
+        pincode: addr.pincode || '',
+        stateName: addr.state || '',
+        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
+        isPrimary: addr.is_primary || false,
+        manager: addr.manager_name || '',
+        phone: addr.manager_mobile_number || '',
+        status: 'active' as const,
+        createdAt: addr.created_at || new Date().toISOString(),
+        updatedAt: addr.updated_at || new Date().toISOString(),
+      };
       
-      // Since edit screens now await backend sync, wait 500ms, and prefetch data,
-      // we can refetch immediately (data should be ready)
-      // But add a small delay to ensure navigation has completed
-      setTimeout(() => {
-        refetch().then(() => {
-          console.log('✅ Settings: Business data refetched');
-        }).catch((error) => {
-          console.error('❌ Error refetching settings data:', error);
-        });
-      }, 200); // 200ms delay - ensures navigation has completed and screen is ready
-    }, [refetch])
-  );
-  
-  // ✅ Legacy focus effect for backward compatibility (kept for other use cases)
+      // ✅ Sync address to DataStore so edit-address-simple can find it
+      const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
+      if (!existingAddress) {
+        dataStore.addAddress(formattedAddress as any);
+      } else {
+        dataStore.updateAddress(existingAddress.id, formattedAddress as any);
+      }
+      
+      return formattedAddress;
+    });
+  }, [businessData?.addresses]);
+
+  const formattedBankAccounts = useMemo(() => {
+    if (!businessData?.bankAccounts) return [];
+    return businessData.bankAccounts.map((acc: any) => ({
+      id: acc.id,
+      accountHolderName: acc.account_holder_name,
+      bankName: acc.bank_name,
+      bankCode: acc.bank_short_name || '',
+      accountNumber: acc.account_number,
+      ifscCode: acc.ifsc_code,
+      upiId: acc.upi_id || '',
+      accountType: acc.account_type.toLowerCase() as 'savings' | 'current',
+      isPrimary: acc.is_primary || false
+    }));
+  }, [businessData?.bankAccounts]);
+
+  // ✅ Update state only when formatted data changes (instant from cache)
+  useEffect(() => {
+    setAddresses(formattedAddresses);
+  }, [formattedAddresses]);
+
+  useEffect(() => {
+    setBankAccounts(formattedBankAccounts);
+  }, [formattedBankAccounts]);
+
+  // ✅ Only refetch if cache is stale (optimized for instant loading)
   useFocusEffect(
     React.useCallback(() => {
-      // This effect is kept for other use cases but the main refetch happens above
-      // Check if cache is stale (older than 5 seconds) before refetching
       const { __getGlobalCache } = require('@/hooks/useBusinessData');
       const cache = __getGlobalCache();
       const now = Date.now();
-      const CACHE_DURATION = 5000; // 5 seconds - shorter for settings screen
+      const CACHE_DURATION = 30000; // 30 seconds - longer cache for better UX
       
-      // Only refetch if cache is stale or missing (fallback)
+      // Only refetch if cache is stale or missing (data loads instantly from cache)
       if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
-        console.log('🔄 Settings: Cache stale, refetching business data');
-        refetch();
+        console.log('🔄 Settings: Cache stale, refetching in background');
+        refetch().catch((error) => {
+          console.error('❌ Error refetching settings data:', error);
+        });
       } else {
-        console.log('✅ Settings: Using cached data (no refetch needed)');
+        console.log('✅ Settings: Using cached data (instant display)');
       }
     }, [refetch])
   );
@@ -400,9 +396,10 @@ export default function SettingsScreen() {
     return bankAccounts.find(acc => acc.isPrimary) || null;
   };
 
+  const { handleBack } = useWebBackNavigation();
+  
   const handleBackPress = () => {
-    // Navigate to dashboard instead of back (fixes web navigation issue)
-    router.push('/dashboard');
+    handleBack();
   };
 
 
@@ -509,17 +506,41 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
-    setSelectedTheme(theme);
-    // TODO: Implement theme change logic
-    console.log('Theme changed to:', theme);
-  };
-
-  const handleLanguageChange = (language: 'english' | 'hindi' | 'tamil' | 'kannada' | 'telugu' | 'malayalam') => {
-    setSelectedLanguage(language);
-    setShowLanguageModal(false);
-    // TODO: Implement language change logic
-    console.log('Language changed to:', language);
+  const handleLogout = async () => {
+    const confirmed = await showConfirm(
+      'Logout',
+      'Are you sure you want to logout?',
+      async () => {
+        try {
+          setIsLoggingOut(true);
+          // Sign out from Supabase
+          const { error } = await supabase.auth.signOut();
+          if (error) {
+            throw error;
+          }
+          // Clear local data
+          await dataStore.clearAllDataForTesting();
+          await subscriptionStore.clearSubscriptionData();
+          // Navigate to login screen
+          router.replace('/auth/mobile');
+        } catch (error) {
+          console.error('Error logging out:', error);
+          showAlert(
+            'Error',
+            'Failed to logout. Please try again.',
+            [{ text: 'OK' }],
+            undefined,
+            'error'
+          );
+          setIsLoggingOut(false);
+        }
+      },
+      () => {
+        // User cancelled
+      },
+      'Logout',
+      'Cancel'
+    );
   };
 
   const handleNotificationToggle = (key: keyof typeof notificationSettings) => {
@@ -1221,25 +1242,26 @@ export default function SettingsScreen() {
             <Text style={styles.subscriptionSubtitle}>
               {trialProgress.daysRemaining} days remaining
             </Text>
-            {businessData?.business?.trial_start_date && (
-              <Text style={styles.trialDateText}>
-                Started: {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </Text>
-            )}
-            {businessData?.business?.trial_end_date && (
-              <Text style={styles.trialDateText}>
-                Ends: {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </Text>
-            )}
             <View style={styles.progressBarContainer}>
+              {/* Date labels on left and right of progress bar */}
+              <View style={styles.progressBarDateRow}>
+                {businessData?.business?.trial_start_date && (
+                  <Text style={styles.progressBarDateText}>
+                    {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </Text>
+                )}
+                {businessData?.business?.trial_end_date && (
+                  <Text style={styles.progressBarDateText}>
+                    {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </Text>
+                )}
+              </View>
               <View style={styles.progressBar}>
                 <View 
                   style={[
@@ -1260,114 +1282,6 @@ export default function SettingsScreen() {
               <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
             </TouchableOpacity>
             
-            {/* Test Button - Simulate Trial Expiration */}
-            <TouchableOpacity
-              style={styles.testButton}
-              onPress={() => {
-                console.log('🧪 Test button clicked - showing confirmation popup');
-                
-                // Show confirmation using web-compatible alert
-                showConfirm(
-                  '🧪 Simulate Trial Expiration',
-                  'This will activate test mode where your trial appears expired. You will enter read-only mode and all actions will be blocked.\n\nDo you want to continue?',
-                  async () => {
-                    try {
-                      console.log('🧪 Starting trial expiration simulation...');
-                      
-                      // Activate trial expiration
-                      await subscriptionStore.simulateTrialExpiration();
-                      
-                      // Update local state
-                      setSubscription(subscriptionStore.getSubscription());
-                      setTrialProgress(subscriptionStore.getTrialProgress());
-                      
-                      console.log('✅ Trial expiration activated, showing success popup');
-                      
-                      // Show success popup immediately after activation
-                      showAlert(
-                        '✅ Test Trial Expiration Activated!',
-                        'Test trial expiration has been activated and you can start testing.\n\nYou are now in read-only mode:\n\n✅ You CAN:\n• View all your data\n• Browse screens\n• Search and filter\n\n❌ You CANNOT:\n• Create new sales, purchases, or returns\n• Add products, customers, or suppliers\n• Perform stock operations\n• Add income/expense\n• Notify staff\n\n💡 Try clicking any action button (like "New Sale" or "Add Product") to see the trial expiration alert.',
-                        [
-                          {
-                            text: 'View Plans',
-                            onPress: () => router.push('/subscription'),
-                            style: 'default'
-                          },
-                          {
-                            text: 'Start Testing',
-                            style: 'default',
-                            onPress: () => {
-                              console.log('User ready to start testing');
-                            }
-                          }
-                        ],
-                        { cancelable: false },
-                        'success'
-                      );
-                      
-                      console.log('✅ Trial expiration simulation completed');
-                    } catch (error) {
-                      console.error('❌ Error simulating trial expiration:', error);
-                      showAlert(
-                        'Error',
-                        'Failed to activate test trial expiration. Please try again.',
-                        [{ text: 'OK' }],
-                        undefined,
-                        'error'
-                      );
-                    }
-                  },
-                  () => {
-                    console.log('Trial expiration simulation cancelled');
-                  },
-                  'info'
-                );
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.testButtonText}>🧪 Test: Simulate Trial Expiration</Text>
-            </TouchableOpacity>
-            
-            {/* Test Button - Reset Trial */}
-            <TouchableOpacity
-              style={[styles.testButton, { backgroundColor: Colors.success + '15', borderColor: Colors.success }]}
-              onPress={() => {
-                showConfirm(
-                  'Reset Trial',
-                  'This will reset your trial to active status with 30 days remaining. Continue?',
-                  async () => {
-                    try {
-                      await subscriptionStore.resetTrialToActive();
-                      setSubscription(subscriptionStore.getSubscription());
-                      setTrialProgress(subscriptionStore.getTrialProgress());
-                      showAlert(
-                        'Trial Reset',
-                        'Your trial has been reset to active status.',
-                        [{ text: 'OK' }],
-                        undefined,
-                        'success'
-                      );
-                    } catch (error) {
-                      console.error('❌ Error resetting trial:', error);
-                      showAlert(
-                        'Error',
-                        'Failed to reset trial. Please try again.',
-                        [{ text: 'OK' }],
-                        undefined,
-                        'error'
-                      );
-                    }
-                  },
-                  () => {
-                    console.log('Trial reset cancelled');
-                  },
-                  'info'
-                );
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.testButtonText, { color: Colors.success }]}>🔄 Test: Reset Trial to Active</Text>
-            </TouchableOpacity>
           </View>
         )}
         
@@ -1448,72 +1362,6 @@ export default function SettingsScreen() {
                 )}
               </View>
 
-        {/* Appearance Section */}
-        <View style={styles.section}>
-          <View style={styles.mainSectionHeader}>
-            <View style={styles.mainSectionHeaderContent}>
-              <Text style={styles.mainSectionTitle}>Appearance</Text>
-                  </View>
-                  </View>
-                
-          <View style={styles.mainExpandedContent}>
-            {/* Theme Selection */}
-            <View style={styles.appearanceSubsection}>
-              <Text style={styles.appearanceSubtitle}>Theme</Text>
-              <View style={styles.themeSelector}>
-            <TouchableOpacity
-                  style={[styles.themeOption, { backgroundColor: Colors.primary + '15', borderColor: Colors.primary }]}
-                  onPress={() => handleThemeChange('light')}
-              activeOpacity={0.7}
-            >
-                  <Sun size={24} color={Colors.primary} />
-                  <Text style={[styles.themeOptionText, { color: Colors.primary }]}>Light</Text>
-            </TouchableOpacity>
-          
-            <TouchableOpacity 
-                  style={[styles.themeOption, { backgroundColor: Colors.secondary + '15', borderColor: Colors.secondary }]}
-                  onPress={() => handleThemeChange('dark')}
-              activeOpacity={0.7}
-            >
-                  <Moon size={24} color={Colors.secondary} />
-                  <Text style={[styles.themeOptionText, { color: Colors.secondary }]}>Dark</Text>
-            </TouchableOpacity>
-            
-                <TouchableOpacity 
-                  style={styles.themeOption}
-                  onPress={() => handleThemeChange('system')}
-                  activeOpacity={0.7}
-                >
-                  <Smartphone size={24} color={Colors.textLight} />
-                  <Text style={styles.themeOptionText}>System</Text>
-                </TouchableOpacity>
-                  </View>
-                  </View>
-                
-            {/* Language Selection */}
-            <View style={styles.appearanceSubsection}>
-              <Text style={styles.appearanceSubtitle}>Language</Text>
-            <TouchableOpacity
-                style={styles.languageSelector}
-                onPress={() => setShowLanguageModal(true)}
-              activeOpacity={0.7}
-            >
-                <View style={styles.languageSelectorContent}>
-                  <Globe size={20} color={Colors.textLight} />
-                  <Text style={styles.languageSelectorText}>
-                    {selectedLanguage === 'english' ? 'English' :
-                     selectedLanguage === 'hindi' ? 'हिंदी' :
-                     selectedLanguage === 'tamil' ? 'தமிழ்' :
-                     selectedLanguage === 'kannada' ? 'ಕನ್ನಡ' :
-                     selectedLanguage === 'telugu' ? 'తెలుగు' :
-                     selectedLanguage === 'malayalam' ? 'മലയാളം' : 'English'}
-                  </Text>
-                </View>
-                <ChevronDown size={16} color={Colors.textLight} />
-            </TouchableOpacity>
-              </View>
-          </View>
-        </View>
 
         {/* Notification Settings Section */}
         <View style={styles.section}>
@@ -1751,6 +1599,77 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Legal Section */}
+        <View style={styles.section}>
+          <View style={styles.mainSectionHeader}>
+            <View style={styles.mainSectionHeaderContent}>
+              <Shield size={20} color={Colors.primary} />
+              <Text style={styles.mainSectionTitle}>Legal</Text>
+            </View>
+          </View>
+          
+          <View style={styles.mainExpandedContent}>
+            <TouchableOpacity
+              style={styles.legalOption}
+              onPress={() => {
+                // Use web navigation if on web, otherwise normal navigation
+                if (Platform.OS === 'web' && webNav.isWeb) {
+                  webNav.navigateToScreen('/privacy-policy');
+                } else {
+                  router.push('/privacy-policy');
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.legalOptionInfo}>
+                <Shield size={20} color={Colors.primary} />
+                <View style={styles.legalOptionText}>
+                  <Text style={styles.legalOptionTitle}>Privacy Policy</Text>
+                  <Text style={styles.legalOptionDescription}>View our privacy policy and data handling practices</Text>
+                </View>
+              </View>
+              <ChevronRight size={16} color={Colors.textLight} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.legalOption}
+              onPress={() => {
+                // Use web navigation if on web, otherwise normal navigation
+                if (Platform.OS === 'web' && webNav.isWeb) {
+                  webNav.navigateToScreen('/terms-and-conditions');
+                } else {
+                  router.push('/terms-and-conditions');
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.legalOptionInfo}>
+                <FileTextIcon size={20} color={Colors.primary} />
+                <View style={styles.legalOptionText}>
+                  <Text style={styles.legalOptionTitle}>Terms & Conditions</Text>
+                  <Text style={styles.legalOptionDescription}>Read our terms of service and conditions</Text>
+                </View>
+              </View>
+              <ChevronRight size={16} color={Colors.textLight} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Logout Section */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={[styles.logoutButton, isLoggingOut && styles.logoutButtonDisabled]}
+            onPress={handleLogout}
+            activeOpacity={0.8}
+            disabled={isLoggingOut}
+          >
+            <LogOut size={20} color="#ffffff" />
+            <Text style={styles.logoutButtonText}>
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Danger Zone */}
         <View style={[styles.section, styles.dangerZoneSection]}>
           <View style={styles.dangerZoneHeader}>
@@ -1849,51 +1768,6 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
-      {/* Language Selection Modal */}
-      <Modal
-        visible={showLanguageModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowLanguageModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.languageModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Language</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowLanguageModal(false)}
-                activeOpacity={0.7}
-              >
-                <X size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.languageList}>
-              {[
-                { key: 'english', label: 'English', native: 'English' },
-                { key: 'hindi', label: 'हिंदी', native: 'हिंदी' },
-                { key: 'tamil', label: 'தமிழ்', native: 'தமிழ்' },
-                { key: 'kannada', label: 'ಕನ್ನಡ', native: 'ಕನ್ನಡ' },
-                { key: 'telugu', label: 'తెలుగు', native: 'తెలుగు' },
-                { key: 'malayalam', label: 'മലയാളം', native: 'മലയാളം' }
-              ].map((language) => (
-                <TouchableOpacity
-                  key={language.key}
-                  style={styles.languageOption}
-                  onPress={() => handleLanguageChange(language.key as any)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.languageOptionText}>{language.native}</Text>
-                  {selectedLanguage === language.key && (
-                    <Text style={styles.languageOptionCheck}>✓</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* Payment Methods Modal */}
       <Modal
@@ -2435,65 +2309,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: Colors.textLight,
   },
-  appearanceSubsection: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  appearanceSubtitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  themeSelector: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  themeOption: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    backgroundColor: Colors.background,
-  },
-  themeOptionText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.textLight,
-    marginTop: 8,
-  },
-  languageSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    backgroundColor: Colors.background,
-  },
-  languageSelectorContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  languageSelectorText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  languageModal: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '70%',
-    overflow: 'hidden',
-  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2510,26 +2325,6 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 8,
-  },
-  languageList: {
-    padding: 16,
-  },
-  languageOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  languageOptionText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  languageOptionCheck: {
-    fontSize: 18,
-    color: Colors.primary,
-    fontWeight: 'bold',
   },
   notificationItem: {
     flexDirection: 'row',
@@ -2611,6 +2406,35 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   paymentOptionDescription: {
+    fontSize: 14,
+    color: Colors.textLight,
+    lineHeight: 18,
+  },
+  legalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  legalOptionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  legalOptionText: {
+    flex: 1,
+  },
+  legalOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  legalOptionDescription: {
     fontSize: 14,
     color: Colors.textLight,
     lineHeight: 18,
@@ -2917,6 +2741,16 @@ const styles = StyleSheet.create({
   progressBarContainer: {
     marginBottom: 16,
   },
+  progressBarDateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  progressBarDateText: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '500',
+  },
   progressBar: {
     height: 8,
     backgroundColor: '#e9ecef',
@@ -2951,18 +2785,27 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  testButton: {
-    backgroundColor: '#fef2f2',
-    borderWidth: 1,
-    borderColor: '#ef4444',
+  logoutButton: {
+    backgroundColor: Colors.primary,
     borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
+    gap: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 8px rgba(63, 102, 172, 0.3)',
+      },
+    }),
   },
-  testButtonText: {
-    color: '#ef4444',
-    fontSize: 14,
+  logoutButtonDisabled: {
+    opacity: 0.6,
+  },
+  logoutButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

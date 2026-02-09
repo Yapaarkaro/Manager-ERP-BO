@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { 
   ArrowLeft, 
@@ -210,6 +211,7 @@ const mockDailySalesData: DailySalesData[] = [
 ];
 
 export default function ReportsScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set(['2024-01-16']));
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string | null>(null);
   const [selectedDayData, setSelectedDayData] = useState<DailySalesData | null>(null);
@@ -585,7 +587,7 @@ export default function ReportsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

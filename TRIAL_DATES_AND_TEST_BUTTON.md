@@ -133,3 +133,19 @@ Run the SQL from `migrations/add_trial_start_date.sql` directly in your database
 - Trial dates are automatically synced from subscriptions table via trigger
 - Read-only mode is enforced via `useSubscription` hook and `isReadOnlyMode()` method
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

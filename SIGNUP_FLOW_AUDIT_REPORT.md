@@ -294,3 +294,19 @@ The signup flow has several performance issues that need immediate attention. Th
 
 All issues are fixable and will significantly improve user experience when resolved.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

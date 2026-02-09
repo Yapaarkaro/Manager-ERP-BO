@@ -5,14 +5,29 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Image,
   Modal,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import { ArrowLeft, MessageCircle, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share } from 'lucide-react-native';
 import { dataStore } from '@/utils/dataStore';
+import ResponsiveContainer from '@/components/ResponsiveContainer';
+import Sidebar from '@/components/Sidebar';
+
+// Helper function to get initials from name
+const getInitials = (name: string): string => {
+  if (!name || name.trim().length === 0) return 'S';
+  const words = name.trim().split(' ').filter(word => word.length > 0);
+  if (words.length === 0) return 'S';
+  
+  // Get first letter of first word and first letter of last word (if multiple words)
+  if (words.length === 1) {
+    return words[0][0].toUpperCase();
+  }
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+};
 
 const Colors = {
   background: '#FFFFFF',
@@ -116,9 +131,11 @@ const mockTransactionLogs: TransactionLog[] = [
 
 export default function SupplierDetailsScreen() {
   const { supplierId } = useLocalSearchParams();
+  const pathname = usePathname();
   const [supplier, setSupplier] = useState<any>(null);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'products' | 'transactions'>('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
 
   useEffect(() => {
     loadSupplierData();
@@ -351,37 +368,64 @@ export default function SupplierDetailsScreen() {
     );
   };
 
+  const handleMenuNavigation = (route: any) => {
+    router.push(route);
+  };
+
+  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
+    setSidebarWidth(width);
+  };
+
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Supplier Details</Text>
-          
-          <TouchableOpacity
-            style={styles.chatButton}
-            onPress={handleChatPress}
-            activeOpacity={0.7}
-          >
-            <MessageCircle size={24} color={Colors.primary} />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+    <View style={styles.mainContainer}>
+      {/* Sidebar - Only on web */}
+      {Platform.OS === 'web' && (
+        <Sidebar
+          onNavigate={handleMenuNavigation}
+          currentRoute={pathname}
+          onCollapseChange={handleSidebarCollapseChange}
+        />
+      )}
+      
+      <View style={[
+        styles.contentWrapper,
+        Platform.OS === 'web' && {
+          marginLeft: sidebarWidth,
+          flex: 1,
+        }
+      ]}>
+        <ResponsiveContainer>
+          <View style={styles.container}>
+            {/* Header */}
+            <SafeAreaView style={styles.headerSafeArea}>
+              <View style={styles.header}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => router.back()}
+                  activeOpacity={0.7}
+                >
+                  <ArrowLeft size={24} color={Colors.text} />
+                </TouchableOpacity>
+                
+                <Text style={styles.headerTitle}>Supplier Details</Text>
+                
+                <TouchableOpacity
+                  style={styles.chatButton}
+                  onPress={handleChatPress}
+                  activeOpacity={0.7}
+                >
+                  <MessageCircle size={24} color={Colors.primary} />
+                </TouchableOpacity>
+              </View>
+            </SafeAreaView>
 
       {/* Supplier Header */}
       <View style={styles.supplierHeader}>
-        <Image 
-          source={{ uri: supplier.avatar }}
-          style={styles.supplierHeaderAvatar}
-        />
+        <View style={[styles.supplierHeaderAvatar, styles.supplierHeaderAvatarInitials]}>
+          <Text style={styles.supplierHeaderAvatarText}>
+            {getInitials(supplier.supplierType === 'business' ? supplier.businessName || supplier.name : supplier.name)}
+          </Text>
+        </View>
         <View style={styles.supplierHeaderInfo}>
           <Text style={styles.supplierHeaderName}>
             {supplier.supplierType === 'business' ? supplier.businessName : supplier.name}
@@ -646,22 +690,40 @@ export default function SupplierDetailsScreen() {
         )}
       </ScrollView>
 
-      {/* Create PO Button */}
-      <View style={styles.createPOSection}>
-        <TouchableOpacity
-          style={styles.createPOButton}
-          onPress={handleCreatePO}
-          activeOpacity={0.8}
-        >
-          <FileText size={20} color="#ffffff" />
-          <Text style={styles.createPOButtonText}>Create Purchase Order</Text>
-        </TouchableOpacity>
+            {/* Create PO Button */}
+            <View style={styles.createPOSection}>
+              <TouchableOpacity
+                style={styles.createPOButton}
+                onPress={handleCreatePO}
+                activeOpacity={0.8}
+              >
+                <FileText size={20} color="#ffffff" />
+                <Text style={styles.createPOButtonText}>Create Purchase Order</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ResponsiveContainer>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  mainContainer: {
+    flex: 1,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    backgroundColor: Colors.background,
+  },
+  contentWrapper: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    ...Platform.select({
+      web: {
+        transition: 'margin-left 0.3s ease',
+        minWidth: 0,
+      },
+    }),
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -710,6 +772,16 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     marginRight: 16,
+  },
+  supplierHeaderAvatarInitials: {
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  supplierHeaderAvatarText: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: Colors.background,
   },
   supplierHeaderInfo: {
     flex: 1,

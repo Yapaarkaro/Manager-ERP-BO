@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,8 +15,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { productStore, Product } from '@/utils/productStore';
 import { dataStore, Supplier as StoreSupplier } from '@/utils/dataStore';
+import { createProduct, updateProduct, getSuppliers, assignBarcode } from '@/services/backendApi';
+import { getInputFocusStyles } from '@/utils/platformUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { supabase } from '@/lib/supabase';
+import { generateBarcodeImage } from '@/utils/barcodeGenerator';
+import { showSuccess, showError } from '@/utils/notifications';
 import { 
   ArrowLeft, 
   Package, 
@@ -30,8 +37,12 @@ import {
   IndianRupee,
   Percent,
   Plus,
-  Barcode
+  Barcode,
+  Info,
+  Calendar,
+  Wand2
 } from 'lucide-react-native';
+import CustomDatePicker from '@/components/CustomDatePicker';
 
 const Colors = {
   background: '#FFFFFF',
@@ -157,7 +168,8 @@ interface ProductFormData {
   openingStock: string;
   preferredSupplier: string;
   location: string;
-  productImage: string | null;
+  locationId: string | null;
+  productImages: string[];
   // Advanced options
   batchNumber: string;
   expiryDate: string;
@@ -196,6 +208,60 @@ export default function ManualProductScreen() {
   // Track which fields were auto-filled for visual feedback
   const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set());
   
+  // Track focused input field for consistent focus styling
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  
+  // Track focused modal input field for consistent focus styling
+  const [focusedModalField, setFocusedModalField] = useState<string | null>(null);
+  
+  // Get input focus styles for consistent UI
+  const inputFocusStyles = getInputFocusStyles();
+  
+  // Fetch business data for locations
+  const { data: businessData, refetch: refetchBusinessData } = useBusinessData();
+  
+  // Extract locations from business data
+  const locations = useMemo(() => {
+    if (!businessData?.addresses) return [];
+    return businessData.addresses.map((addr: any) => ({
+      id: addr.id,
+      name: addr.name,
+      type: addr.type,
+    }));
+  }, [businessData?.addresses]);
+  
+  // Set initial location when locations are loaded
+  useEffect(() => {
+    if (locations.length > 0) {
+      setFormData(prev => {
+        // Only set if locationId is null (not already set)
+        if (!prev.locationId) {
+          // Find primary location first, otherwise use first location
+          const primaryLocation = locations.find((loc: any) => loc.type === 'primary') || locations[0];
+          if (primaryLocation) {
+            return {
+              ...prev,
+              location: primaryLocation.name,
+              locationId: primaryLocation.id,
+            };
+          }
+        }
+        return prev;
+      });
+    }
+  }, [locations]);
+  
+  // Refetch locations when returning from add branch/warehouse
+  const returnParams = useLocalSearchParams();
+  useFocusEffect(
+    React.useCallback(() => {
+      if (returnParams.returnToAddProduct === 'true') {
+        // Refetch business data to get updated locations
+        refetchBusinessData();
+      }
+    }, [refetchBusinessData, returnParams.returnToAddProduct])
+  );
+  
   const [formData, setFormData] = useState<ProductFormData>({
     name: '',
     category: '',
@@ -225,7 +291,8 @@ export default function ManualProductScreen() {
     openingStock: '',
     preferredSupplier: '',
     location: 'Primary Address',
-    productImage: null,
+    locationId: null,
+    productImages: [],
     // Advanced options
     batchNumber: '',
     expiryDate: '',
@@ -241,6 +308,9 @@ export default function ManualProductScreen() {
   const [showCessTypeModal, setShowCessTypeModal] = useState(false);
   const [showCessAmountModal, setShowCessAmountModal] = useState(false);
   const [showUnitTypeModal, setShowUnitTypeModal] = useState(false);
+  const [showExpiryDatePicker, setShowExpiryDatePicker] = useState(false);
+  const [expiryDateValue, setExpiryDateValue] = useState<Date | null>(null);
+  const [hasSelectedExpiryDate, setHasSelectedExpiryDate] = useState(false);
   const [showConversionModal, setShowConversionModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
@@ -261,9 +331,14 @@ export default function ManualProductScreen() {
   const [tertiaryUnitSearch, setTertiaryUnitSearch] = useState('');
   const [customTertiaryUnit, setCustomTertiaryUnit] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showGenerateBarcodeModal, setShowGenerateBarcodeModal] = useState(false);
+  const [isGeneratingBarcode, setIsGeneratingBarcode] = useState(false);
 
   const categorySearchRef = useRef<TextInput>(null);
   const supplierSearchRef = useRef<TextInput>(null);
+  const primaryUnitSearchRef = useRef<TextInput>(null);
+  const secondaryUnitSearchRef = useRef<TextInput>(null);
+  const tertiaryUnitSearchRef = useRef<TextInput>(null);
 
     // Use useFocusEffect to detect when form comes back into focus
   useFocusEffect(
@@ -368,11 +443,57 @@ export default function ManualProductScreen() {
           openingStock: product.currentStock?.toString() || '',
           preferredSupplier: product.supplier || '',
           location: product.location || 'Primary Address',
-          productImage: product.image || null,
+          locationId: product.locationId || null,
+          productImages: product.images || (product.image ? [product.image] : []),
           batchNumber: product.batchNumber || '',
-          expiryDate: '',
+          expiryDate: product.expiryDate || '',
           showAdvancedOptions: false,
         });
+        
+        // Parse and set expiry date value if it exists
+        if (product.expiryDate) {
+          try {
+            const dateParts = product.expiryDate.split('-');
+            if (dateParts.length === 3) {
+              // Check if it's YYYY-MM-DD format (backend format)
+              const firstPart = parseInt(dateParts[0], 10);
+              if (firstPart > 31) {
+                // First part is year (YYYY-MM-DD format)
+                const year = firstPart;
+                const month = parseInt(dateParts[1], 10);
+                const day = parseInt(dateParts[2], 10);
+                const date = new Date(year, month - 1, day);
+                if (!isNaN(date.getTime())) {
+                  setExpiryDateValue(date);
+                  setHasSelectedExpiryDate(true);
+                  // Convert to DD-MM-YYYY format for display
+                  updateFormData('expiryDate', formatExpiryDate(date));
+                }
+              } else {
+                // First part is day (DD-MM-YYYY format)
+                const day = firstPart;
+                const month = parseInt(dateParts[1], 10);
+                const year = parseInt(dateParts[2], 10);
+                const date = new Date(year, month - 1, day);
+                if (!isNaN(date.getTime())) {
+                  setExpiryDateValue(date);
+                  setHasSelectedExpiryDate(true);
+                }
+              }
+            } else {
+              // Try parsing as ISO date string
+              const date = new Date(product.expiryDate);
+              if (!isNaN(date.getTime())) {
+                setExpiryDateValue(date);
+                setHasSelectedExpiryDate(true);
+                // Convert to DD-MM-YYYY format
+                updateFormData('expiryDate', formatExpiryDate(date));
+              }
+            }
+          } catch (error) {
+            console.error('Error parsing expiry date:', error);
+          }
+        }
       } catch (error) {
         console.error('❌ Error parsing product data for edit:', error);
       }
@@ -389,24 +510,84 @@ export default function ManualProductScreen() {
     }
   }, [supplierId]);
 
-  // Subscribe to data store changes for suppliers
+  // Pre-load suppliers from backend (non-blocking, runs in background)
   useEffect(() => {
-    const unsubscribe = dataStore.subscribe(() => {
+    // Load from dataStore first (instant, cached)
       const allSuppliers = dataStore.getSuppliers();
       mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
         id: supplier.id,
         name: supplier.businessName || supplier.name,
         type: supplier.supplierType,
       }));
-    });
 
-    // Initial load
+    // Then fetch from backend in background to ensure we have latest data
+    const loadSuppliersFromBackend = async () => {
+      try {
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          // Update dataStore with fresh suppliers
+          result.suppliers.forEach((supplier: any) => {
+            const existingSupplier = dataStore.getSuppliers().find(s => s.id === supplier.id);
+            if (!existingSupplier) {
+              // Add to dataStore if not already present
+              dataStore.addSupplier({
+                id: supplier.id,
+                name: supplier.business_name || supplier.contact_person,
+                businessName: supplier.business_name,
+                supplierType: supplier.supplier_type || 'business',
+                contactPerson: supplier.contact_person,
+                mobile: supplier.mobile_number,
+                email: supplier.email,
+                address: `${supplier.address_line_1 || ''} ${supplier.address_line_2 || ''}`.trim(),
+                gstin: supplier.gstin_pan,
+                avatar: '',
+                supplierScore: 0,
+                onTimeDelivery: 0,
+                qualityRating: 0,
+                responseTime: 0,
+                totalOrders: 0,
+                completedOrders: 0,
+                pendingOrders: 0,
+                cancelledOrders: 0,
+                totalValue: 0,
+                lastOrderDate: null,
+                joinedDate: supplier.created_at || new Date().toISOString(),
+                status: supplier.status || 'active',
+                paymentTerms: '',
+                deliveryTime: '',
+                categories: [],
+                productCount: 0,
+                createdAt: supplier.created_at || new Date().toISOString(),
+              });
+            }
+          });
+          
+          // Update mockSuppliers with fresh data
+          const updatedSuppliers = dataStore.getSuppliers();
+          mockSuppliers = updatedSuppliers.map((supplier: StoreSupplier) => ({
+            id: supplier.id,
+            name: supplier.businessName || supplier.name,
+            type: supplier.supplierType,
+          }));
+        }
+      } catch (error) {
+        console.error('Error loading suppliers from backend:', error);
+        // Don't block UI if backend fetch fails, use cached data
+      }
+    };
+
+    // Load in background (non-blocking)
+    loadSuppliersFromBackend();
+
+    // Subscribe to data store changes
+    const unsubscribe = dataStore.subscribe(() => {
     const allSuppliers = dataStore.getSuppliers();
     mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
       id: supplier.id,
       name: supplier.businessName || supplier.name,
       type: supplier.supplierType,
     }));
+    });
 
     return unsubscribe;
   }, []);
@@ -439,6 +620,176 @@ export default function ManualProductScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Format date as DD-MM-YYYY (consistent with PAN date of birth format, but with - instead of /)
+  const formatExpiryDate = (date: Date | null) => {
+    if (!date) return '';
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  };
+
+  // Convert DD-MM-YYYY to YYYY-MM-DD for backend (PostgreSQL format)
+  const convertExpiryDateToBackendFormat = (dateString: string): string | undefined => {
+    if (!dateString || dateString.trim().length === 0) {
+      return undefined;
+    }
+    
+    // Parse DD-MM-YYYY format
+    const parts = dateString.split('-');
+    if (parts.length !== 3) {
+      return undefined;
+    }
+    
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    const year = parseInt(parts[2], 10);
+    
+    // Validate date components
+    if (isNaN(day) || isNaN(month) || isNaN(year)) {
+      return undefined;
+    }
+    
+    // Validate date is valid
+    const date = new Date(year, month - 1, day);
+    if (
+      date.getDate() !== day ||
+      date.getMonth() !== month - 1 ||
+      date.getFullYear() !== year
+    ) {
+      return undefined;
+    }
+    
+    // Convert to YYYY-MM-DD format
+    return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+  };
+
+  // Validate if expiry date is valid (if provided)
+  const isExpiryDateValid = (): boolean => {
+    if (!formData.expiryDate || formData.expiryDate.trim().length === 0) {
+      // Expiry date is optional, so empty is valid
+      return true;
+    }
+    
+    // If the date field has content but is incomplete (not 10 characters for DD-MM-YYYY), it's invalid
+    if (formData.expiryDate.trim().length > 0 && formData.expiryDate.trim().length < 10) {
+      return false;
+    }
+    
+    // Check if date is in correct format and valid
+    const convertedDate = convertExpiryDateToBackendFormat(formData.expiryDate);
+    if (!convertedDate) {
+      return false;
+    }
+    
+    // Check if date is not before today
+    const [year, month, day] = convertedDate.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return date >= today;
+  };
+
+  // Handle expiry date text input with auto-formatting (DD-MM-YYYY)
+  const handleExpiryDateTextChange = (text: string) => {
+    // Remove all non-numeric characters
+    const cleaned = text.replace(/[^0-9]/g, '');
+    
+    // Format as DD-MM-YYYY
+    let formatted = '';
+    if (cleaned.length > 0) {
+      formatted = cleaned.substring(0, 2);
+      if (cleaned.length >= 3) {
+        formatted += '-' + cleaned.substring(2, 4);
+      }
+      if (cleaned.length >= 5) {
+        formatted += '-' + cleaned.substring(4, 8);
+      }
+    }
+    
+    updateFormData('expiryDate', formatted);
+    
+    // Parse and validate complete date
+    if (cleaned.length === 8) {
+      const day = parseInt(cleaned.substring(0, 2), 10);
+      const month = parseInt(cleaned.substring(2, 4), 10);
+      const year = parseInt(cleaned.substring(4, 8), 10);
+      
+      // Validate date components
+      if (
+        day >= 1 && day <= 31 &&
+        month >= 1 && month <= 12 &&
+        year >= new Date().getFullYear()
+      ) {
+        const date = new Date(year, month - 1, day);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset time to start of day
+        
+        // Check if date is valid and not before today
+        if (
+          date.getDate() === day &&
+          date.getMonth() === month - 1 &&
+          date.getFullYear() === year &&
+          date >= today
+        ) {
+          setExpiryDateValue(date);
+          setHasSelectedExpiryDate(true);
+        } else {
+          // Invalid date or before today
+          if (date < today) {
+            Alert.alert('Invalid Date', 'Expiry date cannot be before today');
+            updateFormData('expiryDate', '');
+            setExpiryDateValue(null);
+            setHasSelectedExpiryDate(false);
+          }
+        }
+      }
+    } else {
+      // Clear date if input is incomplete
+      if (expiryDateValue !== null) {
+        setExpiryDateValue(null);
+        setHasSelectedExpiryDate(false);
+      }
+    }
+  };
+
+  // Handle date picker done
+  const handleExpiryDatePickerDone = () => {
+    if (hasSelectedExpiryDate || expiryDateValue) {
+      setShowExpiryDatePicker(false);
+      // Update text field with selected date
+      if (expiryDateValue) {
+        updateFormData('expiryDate', formatExpiryDate(expiryDateValue));
+      }
+    }
+  };
+
+  // Handle open date picker
+  const handleOpenExpiryDatePicker = () => {
+    setShowExpiryDatePicker(true);
+    // If there's already a date and it's valid (not before today), enable the done button
+    if (expiryDateValue) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (expiryDateValue >= today) {
+        setHasSelectedExpiryDate(true);
+      } else {
+        // If date is before today, reset to today
+        const todayDate = new Date();
+        todayDate.setHours(0, 0, 0, 0);
+        setExpiryDateValue(todayDate);
+        setHasSelectedExpiryDate(true);
+      }
+    } else {
+      // If no date, set to today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setExpiryDateValue(today);
+      setHasSelectedExpiryDate(true);
+    }
+  };
+
   const handleCategorySelect = (category: string) => {
     if (category === 'Add New Category') {
       setShowCategoryModal(false);
@@ -468,13 +819,29 @@ export default function ManualProductScreen() {
   };
 
   const handleUnitSelect = (unit: string) => {
-    setFormData(prev => ({ ...prev, primaryUnit: unit }));
+    setFormData(prev => {
+      const updated = { ...prev, primaryUnit: unit };
+      // Reset tertiary unit if primary unit is set to 'None' or if compound UoM is disabled
+      if (unit === 'None' || !prev.useCompoundUnit || !prev.secondaryUnit || prev.secondaryUnit === 'None') {
+        updated.tertiaryUnit = 'None';
+        updated.tertiaryConversionRatio = '';
+      }
+      return updated;
+    });
     setShowUnitModal(false);
     setPrimaryUnitSearch('');
   };
 
   const handleSecondaryUnitSelect = (unit: string) => {
-    setFormData(prev => ({ ...prev, secondaryUnit: unit }));
+    setFormData(prev => {
+      const updated = { ...prev, secondaryUnit: unit };
+      // Reset tertiary unit if secondary unit is set to 'None' or if primary unit is 'None'
+      if (unit === 'None' || !prev.useCompoundUnit || !prev.primaryUnit || prev.primaryUnit === 'None') {
+        updated.tertiaryUnit = 'None';
+        updated.tertiaryConversionRatio = '';
+      }
+      return updated;
+    });
     setShowSecondaryUnitModal(false);
     setSecondaryUnitSearch('');
   };
@@ -508,7 +875,10 @@ export default function ManualProductScreen() {
     setFormData(prev => ({ 
       ...prev, 
       useCompoundUnit: useCompound,
-      secondaryUnit: useCompound ? prev.secondaryUnit : 'None'
+      secondaryUnit: useCompound ? prev.secondaryUnit : 'None',
+      // Reset tertiary unit when compound UoM is disabled
+      tertiaryUnit: useCompound ? prev.tertiaryUnit : 'None',
+      tertiaryConversionRatio: useCompound ? prev.tertiaryConversionRatio : ''
     }));
     setShowUnitTypeModal(false);
   };
@@ -523,23 +893,217 @@ export default function ManualProductScreen() {
     setShowSupplierModal(false);
   };
 
-  const handleLocationSelect = (location: string) => {
-    setFormData(prev => ({ ...prev, location: location }));
+  const handleLocationSelect = (locationId: string, locationName: string) => {
+    setFormData(prev => ({ ...prev, location: locationName, locationId }));
     setShowLocationModal(false);
   };
 
-  const handleImageSelect = (type: 'camera' | 'gallery') => {
-    // Mock image selection
-    const mockImage = 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=400&h=400&dpr=1';
-    setFormData(prev => ({ ...prev, productImage: mockImage }));
+  const handleGenerateBarcodeConfirm = async () => {
+    setIsGeneratingBarcode(true);
+    setShowGenerateBarcodeModal(false);
+    try {
+      const result = await assignBarcode({ locationId: formData.locationId });
+      if (result.success && result.barcode) {
+        updateFormData('barcode', result.barcode);
+        showSuccess('Unique barcode assigned: ' + result.barcode);
+      } else {
+        showError(result.error || 'Failed to generate barcode');
+      }
+    } catch (err: any) {
+      showError(err?.message || 'Failed to generate barcode');
+    } finally {
+      setIsGeneratingBarcode(false);
+    }
+  };
+
+  const handleImageSelect = async (type: 'camera' | 'gallery') => {
+    try {
+      let result;
+      
+      if (type === 'camera') {
+        // Request camera permissions
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+          return;
+        }
+        
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        // Request media library permissions
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Media library permission is required to select photos.');
+          return;
+        }
+        
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsMultipleSelection: true,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (!result.canceled && result.assets) {
+        // Upload images to Supabase Storage
+        const uploadedUrls: string[] = [];
+        const imagesToUpload = result.assets;
+        
+        // Show loading alert
+        Alert.alert('Uploading', 'Please wait while images are being uploaded...');
+        
+        for (const image of imagesToUpload) {
+          if (image.uri) {
+            try {
+              // Create a unique filename
+              const timestamp = Date.now();
+              const randomStr = Math.random().toString(36).substring(7);
+              const filename = `${timestamp}-${randomStr}.jpg`;
+              
+              // Convert image to base64 for upload
+              const response = await fetch(image.uri);
+              const blob = await response.blob();
+              
+              // Try to create bucket if it doesn't exist (this will fail silently if bucket exists)
+              // Then upload to Supabase Storage
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('product-images')
+                .upload(filename, blob, {
+                  contentType: 'image/jpeg',
+                  upsert: false,
+                });
+              
+              if (uploadError) {
+                console.error('Upload error:', uploadError);
+                
+                // If bucket doesn't exist, try to create it (this requires admin access)
+                // For now, we'll convert to base64 and store directly in the database
+                // This is a fallback solution
+                const base64Response = await fetch(image.uri);
+                const base64Blob = await base64Response.blob();
+                const reader = new FileReader();
+                
+                const base64Promise = new Promise<string>((resolve, reject) => {
+                  reader.onloadend = () => {
+                    if (typeof reader.result === 'string') {
+                      resolve(reader.result);
+                    } else {
+                      reject(new Error('Failed to convert to base64'));
+                    }
+                  };
+                  reader.onerror = reject;
+                  reader.readAsDataURL(base64Blob);
+                });
+                
+                const base64String = await base64Promise;
+                uploadedUrls.push(base64String);
+              } else {
+                // Get public URL
+                const { data: urlData } = supabase.storage
+                  .from('product-images')
+                  .getPublicUrl(filename);
+                
+                if (urlData?.publicUrl) {
+                  uploadedUrls.push(urlData.publicUrl);
+                } else {
+                  // Fallback to base64 if public URL fails
+                  const base64Response = await fetch(image.uri);
+                  const base64Blob = await base64Response.blob();
+                  const reader = new FileReader();
+                  
+                  const base64Promise = new Promise<string>((resolve, reject) => {
+                    reader.onloadend = () => {
+                      if (typeof reader.result === 'string') {
+                        resolve(reader.result);
+                      } else {
+                        reject(new Error('Failed to convert to base64'));
+                      }
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(base64Blob);
+                  });
+                  
+                  const base64String = await base64Promise;
+                  uploadedUrls.push(base64String);
+                }
+              }
+            } catch (error) {
+              console.error('Error uploading image:', error);
+              // Fallback to base64 encoding
+              try {
+                const base64Response = await fetch(image.uri);
+                const base64Blob = await base64Response.blob();
+                const reader = new FileReader();
+                
+                const base64Promise = new Promise<string>((resolve, reject) => {
+                  reader.onloadend = () => {
+                    if (typeof reader.result === 'string') {
+                      resolve(reader.result);
+                    } else {
+                      reject(new Error('Failed to convert to base64'));
+                    }
+                  };
+                  reader.onerror = reject;
+                  reader.readAsDataURL(base64Blob);
+                });
+                
+                const base64String = await base64Promise;
+                uploadedUrls.push(base64String);
+              } catch (base64Error) {
+                console.error('Error converting to base64:', base64Error);
+                Alert.alert('Error', `Failed to process image: ${image.uri}`);
+              }
+            }
+          }
+        }
+        
+        if (uploadedUrls.length > 0) {
+          console.log('✅ Images uploaded successfully:', uploadedUrls.length);
+          setFormData(prev => {
+            const newImages = [...prev.productImages, ...uploadedUrls];
+            console.log('📸 Total product images:', newImages.length);
+            return { 
+              ...prev, 
+              productImages: newImages
+            };
+          });
+          Alert.alert('Success', `${uploadedUrls.length} image(s) added successfully`);
+        } else {
+          Alert.alert('Error', 'No images were uploaded. Please try again.');
+        }
+      }
+      
     setShowImageModal(false);
+    } catch (error) {
+      console.error('Error selecting image:', error);
+      Alert.alert('Error', 'Failed to select image. Please try again.');
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      productImages: prev.productImages.filter((_, i) => i !== index),
+    }));
   };
 
   const handlePriceChange = (field: 'purchasePrice' | 'salesPrice' | 'mrp' | 'perUnitPrice', text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
     const parts = cleaned.split('.');
+    // Allow up to 3 decimal places
     if (parts.length <= 2 && parts[0].length <= 8) {
+      if (parts.length === 2 && parts[1].length <= 3) {
+        updateFormData(field, cleaned);
+      } else if (parts.length === 1) {
       updateFormData(field, cleaned);
+      }
     }
   };
 
@@ -595,17 +1159,22 @@ export default function ManualProductScreen() {
         break;
     }
     
-    return Math.max(0, basePrice); // Ensure base price is not negative
+    // Round to 3 decimal places to preserve precision
+    return Math.max(0, Math.round(basePrice * 1000) / 1000); // Ensure base price is not negative
   };
 
   // Helper function to calculate tax-exclusive price from tax-inclusive price (simple GST only)
   const calculateTaxExclusivePrice = (inclusivePrice: number, taxRate: number): number => {
-    return inclusivePrice / (1 + (taxRate / 100));
+    const result = inclusivePrice / (1 + (taxRate / 100));
+    // Round to 3 decimal places to preserve precision
+    return Math.round(result * 1000) / 1000;
   };
 
   // Helper function to calculate tax-inclusive price from tax-exclusive price
   const calculateTaxInclusivePrice = (exclusivePrice: number, taxRate: number): number => {
-    return exclusivePrice * (1 + (taxRate / 100));
+    const result = exclusivePrice * (1 + (taxRate / 100));
+    // Round to 3 decimal places to preserve precision
+    return Math.round(result * 1000) / 1000;
   };
 
   // Helper function to calculate tax and CESS breakdown from base price
@@ -620,37 +1189,37 @@ export default function ManualProductScreen() {
     const gstRate = taxRate / 100;
     const cessRateDecimal = cessRate / 100;
     
-    // Calculate GST
-    const gstAmount = basePrice * gstRate;
-    const cgstAmount = gstAmount / 2;
-    const sgstAmount = gstAmount / 2;
+    // Calculate GST (round to 3 decimal places)
+    const gstAmount = Math.round((basePrice * gstRate) * 1000) / 1000;
+    const cgstAmount = Math.round((gstAmount / 2) * 1000) / 1000;
+    const sgstAmount = Math.round((gstAmount / 2) * 1000) / 1000;
     
-    // Calculate CESS based on type
+    // Calculate CESS based on type (round to 3 decimal places)
     let cessTotal = 0;
     let cessBreakdown = '';
     
     switch (cessType) {
       case 'value':
-        cessTotal = basePrice * cessRateDecimal;
-        cessBreakdown = `Value-based (${cessRate}% of ₹${basePrice.toFixed(2)})`;
+        cessTotal = Math.round((basePrice * cessRateDecimal) * 1000) / 1000;
+        cessBreakdown = `Value-based (${cessRate}% of ₹${basePrice.toFixed(3)})`;
         break;
         
       case 'quantity':
-        cessTotal = cessAmount; // For single unit
-        cessBreakdown = `Quantity-based (₹${cessAmount.toFixed(2)} per unit)`;
+        cessTotal = Math.round(cessAmount * 1000) / 1000; // For single unit
+        cessBreakdown = `Quantity-based (₹${cessAmount.toFixed(3)} per unit)`;
         break;
         
       case 'value_and_quantity':
-        const valueCess = basePrice * cessRateDecimal;
-        const quantityCess = cessAmount; // For single unit
-        cessTotal = valueCess + quantityCess;
-        cessBreakdown = `Value + Quantity (${cessRate}% + ₹${cessAmount.toFixed(2)} per unit)`;
+        const valueCess = Math.round((basePrice * cessRateDecimal) * 1000) / 1000;
+        const quantityCess = Math.round(cessAmount * 1000) / 1000; // For single unit
+        cessTotal = Math.round((valueCess + quantityCess) * 1000) / 1000;
+        cessBreakdown = `Value + Quantity (${cessRate}% + ₹${cessAmount.toFixed(3)} per unit)`;
         break;
         
       case 'mrp':
         const effectiveMRP = mrp > 0 ? mrp : basePrice;
-        cessTotal = effectiveMRP * cessRateDecimal;
-        cessBreakdown = `MRP-based (${cessRate}% of MRP ₹${effectiveMRP.toFixed(2)})`;
+        cessTotal = Math.round((effectiveMRP * cessRateDecimal) * 1000) / 1000;
+        cessBreakdown = `MRP-based (${cessRate}% of MRP ₹${effectiveMRP.toFixed(3)})`;
         break;
         
       default:
@@ -659,7 +1228,7 @@ export default function ManualProductScreen() {
         break;
     }
     
-    const total = basePrice + gstAmount + cessTotal;
+    const total = Math.round((basePrice + gstAmount + cessTotal) * 1000) / 1000;
     
     return {
       basePrice,
@@ -680,7 +1249,7 @@ export default function ManualProductScreen() {
 
   // Helper function to get display prices based on tax inclusion toggle
   const getDisplayPrices = () => {
-    const perUnitPrice = parseFloat(formData.perUnitPrice) || 0;
+    const perUnitPrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
     const salesPrice = parseFloat(formData.salesPrice) || 0;
     const taxRate = formData.taxRate;
     const cessType = formData.cessType || 'none';
@@ -760,7 +1329,7 @@ export default function ManualProductScreen() {
       formData.category.trim().length > 0 &&
       formData.hsnCode.trim().length > 0 &&
       formData.barcode.trim().length > 0 &&
-      formData.perUnitPrice.trim().length > 0 &&
+      (formData.purchasePrice.trim().length > 0 || formData.perUnitPrice.trim().length > 0) &&
       formData.salesPrice.trim().length > 0 &&
       formData.openingStock.trim().length > 0 &&
       formData.minStockLevel.trim().length > 0 &&
@@ -784,6 +1353,11 @@ export default function ManualProductScreen() {
       }
     }
 
+    // Expiry date validation (if provided, must be valid)
+    if (!isExpiryDateValid()) {
+      return false;
+    }
+
     return basicValidation;
   };
 
@@ -793,25 +1367,122 @@ export default function ManualProductScreen() {
       return;
     }
 
-    // Validate per unit price is lower than sale price
-    const perUnitPrice = parseFloat(formData.perUnitPrice);
+    // Validate purchase price is lower than sale price
+    const purchasePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
     const salePrice = parseFloat(formData.salesPrice);
     
-    if (perUnitPrice >= salePrice) {
+    if (purchasePrice >= salePrice) {
       Alert.alert(
         'Invalid Pricing', 
-        'Per unit price must be lower than sale price to ensure profitability.',
+        'Purchase price must be lower than sale price to ensure profitability.',
         [{ text: 'OK' }]
       );
       return;
     }
 
+    // Check for duplicate products before creating (only for new products, not edits)
+    if (editMode !== 'true') {
+      try {
+        const { getProducts } = await import('@/services/backendApi');
+        const productsResult = await getProducts();
+        
+        if (productsResult.success && productsResult.products) {
+          const existingProducts = productsResult.products;
+          const newProductName = formData.name.trim().toLowerCase();
+          const newProductHsn = formData.hsnCode.trim().toLowerCase();
+          const newProductBarcode = formData.barcode.trim().toLowerCase();
+          const newProductCategory = (formData.category || formData.customCategory.trim()).toLowerCase();
+          
+          // Check for similar products (same name, category, HSN, or barcode)
+          const duplicateProducts = existingProducts.filter((product: any) => {
+            const existingName = (product.name || '').toLowerCase();
+            const existingHsn = (product.hsn_code || product.hsnCode || '').toLowerCase();
+            const existingBarcode = (product.barcode || '').toLowerCase();
+            const existingCategory = (product.category || '').toLowerCase();
+            
+            // Check if name, category, HSN, and barcode match (almost all details same)
+            const nameMatch = existingName === newProductName;
+            const categoryMatch = existingCategory === newProductCategory;
+            const hsnMatch = newProductHsn && existingHsn && existingHsn === newProductHsn;
+            const barcodeMatch = newProductBarcode && existingBarcode && existingBarcode === newProductBarcode;
+            
+            // If 3 or more fields match, consider it a duplicate
+            const matchCount = [nameMatch, categoryMatch, hsnMatch, barcodeMatch].filter(Boolean).length;
+            return matchCount >= 3;
+          });
+          
+          if (duplicateProducts.length > 0) {
+            const duplicateProduct = duplicateProducts[0];
+            Alert.alert(
+              'Duplicate Product Detected',
+              `A similar product already exists:\n\nName: ${duplicateProduct.name || 'N/A'}\nCategory: ${duplicateProduct.category || 'N/A'}\nHSN: ${duplicateProduct.hsn_code || duplicateProduct.hsnCode || 'N/A'}\n\nDo you want to add this product anyway?`,
+              [
+                {
+                  text: 'Cancel',
+                  style: 'cancel',
+                  onPress: () => {
+                    setIsSubmitting(false);
+                  }
+                },
+                {
+                  text: 'Add Anyway',
+                  onPress: () => {
+                    // Continue with product creation
+                    proceedWithProductCreation();
+                  }
+                }
+              ]
+            );
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Error checking for duplicates:', error);
+        // Continue with creation if duplicate check fails
+      }
+    }
+
+    // Proceed with product creation
+    proceedWithProductCreation();
+  };
+
+  const proceedWithProductCreation = async () => {
     setIsSubmitting(true);
+
+    // Generate barcode image if barcode is provided
+    let finalProductImages = [...formData.productImages];
+    console.log('📸 Initial product images count:', formData.productImages.length);
+    
+    if (formData.barcode && formData.barcode.trim().length > 0) {
+      try {
+        console.log('📊 Generating barcode image for:', formData.barcode.trim());
+        const barcodeImageUri = await generateBarcodeImage(formData.barcode.trim());
+        console.log('📊 Barcode generation result:', barcodeImageUri ? 'SUCCESS' : 'FAILED');
+        console.log('📊 Barcode URI preview:', barcodeImageUri ? barcodeImageUri.substring(0, 100) + '...' : 'null');
+        
+        if (barcodeImageUri) {
+          // Add barcode image at the end of the images array
+          finalProductImages = [...finalProductImages, barcodeImageUri];
+          console.log('✅ Barcode image generated and added to product images');
+          console.log('📸 Final product images count:', finalProductImages.length);
+          console.log('📸 Final product images preview:', finalProductImages.map((img, idx) => 
+            `${idx + 1}: ${img.substring(0, 50)}...`
+          ));
+        } else {
+          console.warn('⚠️ Failed to generate barcode image - barcode URI is null');
+        }
+      } catch (error) {
+        console.error('❌ Error generating barcode image:', error);
+        // Continue without barcode image if generation fails
+      }
+    } else {
+      console.log('⚠️ No barcode provided, skipping barcode image generation');
+    }
 
     const productData: Product = {
       id: editMode === 'true' && productId ? (productId as string) : `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: formData.name.trim(),
-      image: formData.productImage || 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
+      image: finalProductImages.length > 0 ? finalProductImages[0] : '',
       category: formData.category || formData.customCategory.trim(),
       hsnCode: formData.hsnCode.trim(),
       barcode: formData.barcode.trim(),
@@ -822,7 +1493,7 @@ export default function ManualProductScreen() {
       tertiaryUnit: formData.tertiaryUnit !== 'None' ? formData.tertiaryUnit : undefined,
       conversionRatio: formData.conversionRatio || undefined,
       tertiaryConversionRatio: formData.tertiaryConversionRatio || undefined,
-      unitPrice: parseFloat(formData.perUnitPrice),
+      unitPrice: parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0,
       salesPrice: parseFloat(formData.salesPrice),
       minStockLevel: parseInt(formData.minStockLevel),
       maxStockLevel: parseInt(formData.maxStockLevel),
@@ -830,7 +1501,7 @@ export default function ManualProductScreen() {
       supplier: formData.preferredSupplier,
       location: formData.location,
       lastRestocked: new Date().toISOString(),
-      stockValue: parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock),
+      stockValue: (parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock),
       urgencyLevel: 'normal',
       batchNumber: formData.batchNumber || '',
       openingStock: parseInt(formData.openingStock),
@@ -847,19 +1518,126 @@ export default function ManualProductScreen() {
       cessUnit: formData.cessUnit,
     };
 
-    if (editMode === 'true' && productId) {
-      // Update existing product
-      console.log('Updating existing product:', productData);
-      productStore.updateProduct(productId as string, productData);
-      console.log('Product updated in store');
-    } else {
-      // Create new product
-      console.log('Creating new product:', productData);
-      productStore.addProduct(productData);
-      console.log('Product added to store. Total products:', productStore.getProductCount());
-    }
-    
-    setTimeout(() => {
+    try {
+      let savedProduct: any;
+      
+      if (editMode === 'true' && productId) {
+        // Update existing product in Supabase
+        console.log('Updating existing product:', productData);
+        const updateResult = await updateProduct(productId as string, {
+          name: productData.name,
+          category: productData.category,
+          hsnCode: productData.hsnCode || undefined,
+          barcode: productData.barcode || undefined,
+          productImages: finalProductImages.length > 0 ? finalProductImages : undefined,
+          storageLocationId: formData.locationId || undefined,
+          showAdvancedOptions: formData.showAdvancedOptions,
+          batchNumber: productData.batchNumber || undefined,
+          expiryDate: convertExpiryDateToBackendFormat(formData.expiryDate),
+          useCompoundUnit: formData.useCompoundUnit,
+          unitType: formData.useCompoundUnit ? 'compound' : 'simple',
+          primaryUnit: productData.primaryUnit,
+          secondaryUnit: productData.secondaryUnit || undefined,
+          tertiaryUnit: productData.tertiaryUnit || undefined,
+          conversionRatio: productData.conversionRatio || undefined,
+          tertiaryConversionRatio: productData.tertiaryConversionRatio || undefined,
+          priceUnit: formData.priceUnit,
+          stockUom: formData.stockUoM,
+          taxRate: productData.taxRate,
+          taxInclusive: productData.taxInclusive,
+          cessType: productData.cessType,
+          cessRate: productData.cessRate,
+          cessAmount: productData.cessAmount,
+          cessUnit: productData.cessUnit || undefined,
+          openingStock: productData.openingStock,
+          currentStock: productData.currentStock,
+          minStockLevel: productData.minStockLevel,
+          maxStockLevel: productData.maxStockLevel,
+          stockUnit: formData.stockUoM,
+          perUnitPrice: parseFloat(formData.purchasePrice) || productData.unitPrice,
+          purchasePrice: parseFloat(formData.purchasePrice) || productData.unitPrice,
+          salesPrice: productData.salesPrice,
+          mrpPrice: parseFloat(formData.mrp) || 0,
+          preferredSupplierId: formData.preferredSupplier || undefined,
+          storageLocationName: productData.location || undefined,
+          brand: productData.brand || undefined,
+          description: productData.description || undefined,
+        });
+
+        if (!updateResult.success || !updateResult.product) {
+          Alert.alert('Error', updateResult.error || 'Failed to update product');
+          setIsSubmitting(false);
+          return;
+        }
+
+        savedProduct = updateResult.product;
+        console.log('✅ Product updated in Supabase');
+        
+        // Also update in productStore for backward compatibility
+        productStore.updateProduct(productId as string, productData);
+      } else {
+        // Create new product in Supabase
+        console.log('Creating new product:', productData);
+        console.log('📦 Creating product with:', {
+          name: productData.name,
+          imagesCount: finalProductImages.length,
+          locationId: formData.locationId,
+          locationName: formData.location,
+        });
+        const createResult = await createProduct({
+          name: productData.name,
+          category: productData.category,
+          hsnCode: productData.hsnCode || undefined,
+          barcode: productData.barcode || undefined,
+          productImages: finalProductImages.length > 0 ? finalProductImages : undefined,
+          storageLocationId: formData.locationId || undefined,
+          showAdvancedOptions: formData.showAdvancedOptions,
+          batchNumber: productData.batchNumber || undefined,
+          expiryDate: convertExpiryDateToBackendFormat(formData.expiryDate),
+          useCompoundUnit: formData.useCompoundUnit,
+          unitType: formData.useCompoundUnit ? 'compound' : 'simple',
+          primaryUnit: productData.primaryUnit,
+          secondaryUnit: productData.secondaryUnit || undefined,
+          tertiaryUnit: productData.tertiaryUnit || undefined,
+          conversionRatio: productData.conversionRatio || undefined,
+          tertiaryConversionRatio: productData.tertiaryConversionRatio || undefined,
+          priceUnit: formData.priceUnit,
+          stockUom: formData.stockUoM,
+          taxRate: productData.taxRate,
+          taxInclusive: productData.taxInclusive,
+          cessType: productData.cessType,
+          cessRate: productData.cessRate,
+          cessAmount: productData.cessAmount,
+          cessUnit: productData.cessUnit || undefined,
+          openingStock: productData.openingStock,
+          minStockLevel: productData.minStockLevel,
+          maxStockLevel: productData.maxStockLevel,
+          stockUnit: formData.stockUoM,
+          perUnitPrice: parseFloat(formData.purchasePrice) || productData.unitPrice,
+          purchasePrice: parseFloat(formData.purchasePrice) || productData.unitPrice,
+          salesPrice: productData.salesPrice,
+          mrpPrice: parseFloat(formData.mrp) || 0,
+          preferredSupplierId: formData.preferredSupplier || undefined,
+          storageLocationName: productData.location || undefined,
+          brand: productData.brand || undefined,
+          description: productData.description || undefined,
+        });
+
+        if (!createResult.success || !createResult.product) {
+          Alert.alert('Error', createResult.error || 'Failed to create product');
+          setIsSubmitting(false);
+          return;
+        }
+
+        savedProduct = createResult.product;
+        productData.id = savedProduct.id; // Update productData with the new ID
+        console.log('✅ Product created in Supabase');
+        
+        // Also add to productStore for backward compatibility
+        productStore.addProduct(productData);
+      }
+      
+      // Continue with navigation logic
       if (returnToStockIn === 'true') {
         // Return to stock in with the new product data
         const stockInProductData = {
@@ -926,7 +1704,8 @@ export default function ManualProductScreen() {
                   openingStock: '',
                   preferredSupplier: '',
                   location: 'Primary Address',
-                  productImage: null,
+                  locationId: null,
+                  productImages: [],
                   batchNumber: '',
                   expiryDate: '',
                   showAdvancedOptions: false,
@@ -999,7 +1778,8 @@ export default function ManualProductScreen() {
                   openingStock: '',
                   preferredSupplier: '',
                   location: 'Primary Address',
-                  productImage: null,
+                  locationId: null,
+                  productImages: [],
                   batchNumber: '',
                   expiryDate: '',
                   showAdvancedOptions: false,
@@ -1031,15 +1811,8 @@ export default function ManualProductScreen() {
           }
         ]);
       } else {
-        Alert.alert('Success', editMode === 'true' ? 'Product updated successfully' : 'Product added to inventory successfully', [
-          {
-            text: 'OK',
-            onPress: () => {
-              if (editMode === 'true') {
-                // Go back to product details page after edit
-                router.back();
-              } else {
-                // Clear the form data to prevent showing completed form
+        // Default navigation - go back to the screen user came from
+        // Clear the form data first
                 setFormData({
                   name: '',
                   category: '',
@@ -1069,7 +1842,8 @@ export default function ManualProductScreen() {
                   openingStock: '',
                   preferredSupplier: '',
                   location: 'Primary Address',
-                  productImage: null,
+          productImages: [],
+          locationId: null,
                   batchNumber: '',
                   expiryDate: '',
                   showAdvancedOptions: false,
@@ -1081,21 +1855,27 @@ export default function ManualProductScreen() {
                 // Clear scanned data from store
                 clearScannedData();
                 
-                // Navigate back and trigger refresh
+        // Navigate back immediately without waiting for Alert
+        if (editMode === 'true') {
+          // Go back to product details page after edit
                 router.back();
-                // Add a small delay to ensure navigation completes
+        } else {
+          // Navigate back to the screen user came from
+          router.back();
+        }
+        
+        // Show success message after navigation
                 setTimeout(() => {
-                  console.log('=== PRODUCT ADDED - NAVIGATING BACK ===');
-                  console.log('Total products in store:', productStore.getProductCount());
-                  console.log('==========================================');
-                }, 100);
-              }
-            }
-          }
-        ]);
+          Alert.alert('Success', editMode === 'true' ? 'Product updated successfully' : 'Product added to inventory successfully');
+        }, 300);
       }
+      
       setIsSubmitting(false);
-    }, 1000);
+    } catch (error: any) {
+      console.error('Error saving product:', error);
+      Alert.alert('Error', error.message || 'Failed to save product');
+      setIsSubmitting(false);
+    }
   };
 
   const filteredCategories = categories.filter(cat =>
@@ -1106,9 +1886,13 @@ export default function ManualProductScreen() {
     supplier.name.toLowerCase().includes(supplierSearch.toLowerCase())
   );
 
-  const filteredLocations = storageLocations.filter(location =>
-    location.toLowerCase().includes(locationSearch.toLowerCase())
+  // Filter locations from backend data
+  const filteredLocations = useMemo(() => {
+    if (!locations || locations.length === 0) return [];
+    return locations.filter(location =>
+      location.name.toLowerCase().includes(locationSearch.toLowerCase())
   );
+  }, [locations, locationSearch]);
 
   const getSupplierName = (supplierId: string) => {
     const supplier = mockSuppliers.find(s => s.id === supplierId);
@@ -1189,40 +1973,86 @@ export default function ManualProductScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Storage Location</Text>
-              <View style={styles.locationContainer}>
-                <Text style={styles.locationText}>Primary Address</Text>
-                <Text style={styles.comingSoonText}>Other locations coming soon</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setShowLocationModal(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[
+                  styles.dropdownText,
+                  !formData.locationId && styles.placeholderText
+                ]}>
+                  {formData.location || 'Select storage location'}
+                </Text>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </TouchableOpacity>
             </View>
           </View>
 
           {/* Product Image */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Product Image</Text>
+            <Text style={styles.sectionTitle}>Product Images</Text>
             
-            {formData.productImage ? (
-              <View style={styles.imagePreview}>
+            {formData.productImages && formData.productImages.length > 0 ? (
+              <View style={styles.imagesContainer}>
+                <View style={styles.imagesGrid}>
+                  {formData.productImages.map((imageUri, index) => {
+                    // Check if this is the last image and barcode exists (barcode is always last)
+                    const isBarcodeImage = formData.barcode && formData.barcode.trim().length > 0 && 
+                                          index === formData.productImages.length - 1 &&
+                                          imageUri.startsWith('data:image');
+                    return (
+                      <View key={index} style={[
+                        styles.imagePreviewWrapper,
+                        isBarcodeImage && styles.barcodeImageWrapper
+                      ]}>
                 <Image 
-                  source={{ uri: formData.productImage }}
-                  style={styles.productImagePreview}
+                          source={{ uri: imageUri }}
+                          style={[
+                            styles.productImagePreview,
+                            isBarcodeImage && styles.barcodeImagePreview
+                          ]}
+                          resizeMode={isBarcodeImage ? 'contain' : 'cover'}
                 />
                 <TouchableOpacity
-                  style={styles.changeImageButton}
+                          style={styles.removeImageButton}
+                          onPress={() => handleRemoveImage(index)}
+                          activeOpacity={0.7}
+                        >
+                          <X size={16} color={Colors.background} />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity
+                  style={styles.addMoreImageButton}
                   onPress={() => setShowImageModal(true)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.changeImageText}>Change Image</Text>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addImageText}>Add More Images</Text>
                 </TouchableOpacity>
               </View>
             ) : (
+              <>
               <TouchableOpacity
                 style={styles.addImageButton}
                 onPress={() => setShowImageModal(true)}
                 activeOpacity={0.7}
               >
                 <Camera size={24} color={Colors.primary} />
-                <Text style={styles.addImageText}>Add Product Image</Text>
+                  <Text style={styles.addImageText}>Add Product Images</Text>
               </TouchableOpacity>
+                {formData.barcode && formData.barcode.trim().length > 0 && (
+                  <View style={styles.barcodePreviewIndicator}>
+                    <Barcode size={16} color={Colors.primary} />
+                    <Text style={styles.barcodePreviewText}>
+                      Barcode image will be automatically added for: {formData.barcode}
+                    </Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
 
@@ -1235,15 +2065,18 @@ export default function ManualProductScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Product Name *</Text>
               <View style={[
-                styles.inputContainer,
+                inputFocusStyles.inputContainer,
+                focusedField === 'name' && inputFocusStyles.inputContainerFocused,
                 autoFilledFields.has('name') && styles.autoFilledInput
               ]}>
                 <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
                   key={`name-${forceUpdate}`}
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
                   value={formData.name}
                   onChangeText={(text) => updateFormData('name', text)}
+                  onFocus={() => setFocusedField('name')}
+                  onBlur={() => setFocusedField(null)}
                   placeholder="Enter product name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
@@ -1258,12 +2091,17 @@ export default function ManualProductScreen() {
               <Text style={styles.label}>Category *</Text>
               {formData.category === 'Others' ? (
                 <View style={styles.customInputContainer}>
-                  <View style={styles.inputContainer}>
+                  <View style={[
+                    inputFocusStyles.inputContainer,
+                    focusedField === 'customCategory' && inputFocusStyles.inputContainerFocused
+                  ]}>
                     <TextInput
                       key={`customCategory-${forceUpdate}`}
-                      style={styles.input}
+                      style={inputFocusStyles.input as any}
                       value={formData.customCategory}
                       onChangeText={(text) => updateFormData('customCategory', text)}
+                      onFocus={() => setFocusedField('customCategory')}
+                      onBlur={() => setFocusedField(null)}
                       placeholder="Enter custom category"
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
@@ -1297,12 +2135,17 @@ export default function ManualProductScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>HSN Code *</Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedField === 'hsnCode' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
                   value={formData.hsnCode}
                   onChangeText={(text) => updateFormData('hsnCode', text.replace(/\D/g, '').slice(0, 8))}
+                  onFocus={() => setFocusedField('hsnCode')}
+                  onBlur={() => setFocusedField(null)}
                   placeholder="Enter HSN code"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="numeric"
@@ -1313,24 +2156,84 @@ export default function ManualProductScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Barcode</Text>
-              <View style={[
-                styles.inputContainer,
-                autoFilledFields.has('barcode') && styles.autoFilledInput
-              ]}>
-                <Barcode size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
-                  key={`barcode-${forceUpdate}`}
-                  style={styles.input}
-                  value={formData.barcode}
-                  onChangeText={(text) => updateFormData('barcode', text)}
-                  placeholder="Enter barcode number"
-                  placeholderTextColor={Colors.textLight}
-                />
-                {autoFilledFields.has('barcode') && (
-                  <Text style={styles.autoFilledBadge}>✓ Auto-filled</Text>
-                )}
+              <View style={styles.barcodeRow}>
+                <View style={[
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'barcode' && inputFocusStyles.inputContainerFocused,
+                  autoFilledFields.has('barcode') && styles.autoFilledInput,
+                  styles.barcodeInputWrapper
+                ]}>
+                  <Barcode size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    key={`barcode-${forceUpdate}`}
+                    style={inputFocusStyles.input as any}
+                    value={formData.barcode}
+                    onChangeText={(text) => updateFormData('barcode', text)}
+                    onFocus={() => setFocusedField('barcode')}
+                    onBlur={() => setFocusedField(null)}
+                    placeholder="Enter or scan barcode"
+                    placeholderTextColor={Colors.textLight}
+                    editable={!isGeneratingBarcode}
+                  />
+                  {autoFilledFields.has('barcode') && (
+                    <Text style={styles.autoFilledBadge}>✓ Auto-filled</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[styles.generateBarcodeButton, isGeneratingBarcode && styles.generateBarcodeButtonDisabled]}
+                  onPress={() => setShowGenerateBarcodeModal(true)}
+                  disabled={isGeneratingBarcode}
+                  activeOpacity={0.7}
+                >
+                  <Wand2 size={18} color="#FFF" />
+                  <Text style={styles.generateBarcodeButtonText}>
+                    {isGeneratingBarcode ? '...' : 'Generate'}
+                  </Text>
+                </TouchableOpacity>
               </View>
+              <Text style={styles.barcodeHint}>
+                Scan or enter manufacturer barcode, or tap Generate to assign a unique Manager barcode
+              </Text>
             </View>
+
+            {/* Generate Barcode Confirmation Modal */}
+            <Modal
+              visible={showGenerateBarcodeModal}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowGenerateBarcodeModal(false)}
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.generateBarcodeModalContent}>
+                  <View style={styles.generateBarcodeModalHeader}>
+                    <Barcode size={32} color={Colors.primary} />
+                    <Text style={styles.generateBarcodeModalTitle}>Assign Manager Barcode</Text>
+                  </View>
+                  <Text style={styles.generateBarcodeModalBody}>
+                    Please confirm: This product does <Text style={styles.boldText}>not</Text> have a barcode from the manufacturer or Manager on the physical product.
+                  </Text>
+                  <Text style={styles.generateBarcodeModalSubtext}>
+                    Only proceed if you need to assign a new unique barcode (13-character alphanumeric). Once assigned, this barcode will never be given to any other product.
+                  </Text>
+                  <View style={styles.generateBarcodeModalActions}>
+                    <TouchableOpacity
+                      style={styles.generateBarcodeModalCancelButton}
+                      onPress={() => setShowGenerateBarcodeModal(false)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.generateBarcodeModalCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.generateBarcodeModalConfirmButton}
+                      onPress={handleGenerateBarcodeConfirm}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.generateBarcodeModalConfirmText}>Yes, Generate Barcode</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Modal>
 
 
 
@@ -1352,11 +2255,16 @@ export default function ManualProductScreen() {
               <View style={styles.advancedOptionsContainer}>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Batch Number</Text>
-                  <View style={styles.inputContainer}>
+                  <View style={[
+                    inputFocusStyles.inputContainer,
+                    focusedField === 'batchNumber' && inputFocusStyles.inputContainerFocused
+                  ]}>
                     <TextInput
-                      style={styles.input}
+                      style={inputFocusStyles.input as any}
                       value={formData.batchNumber}
                       onChangeText={(text) => updateFormData('batchNumber', text)}
+                      onFocus={() => setFocusedField('batchNumber')}
+                      onBlur={() => setFocusedField(null)}
                       placeholder="Enter batch number"
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="characters"
@@ -1365,16 +2273,33 @@ export default function ManualProductScreen() {
                 </View>
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Expiry Date</Text>
-                  <View style={styles.inputContainer}>
+                  <View style={styles.dateInputWrapper}>
+                    <View style={[
+                      inputFocusStyles.inputContainer,
+                      focusedField === 'expiryDate' && inputFocusStyles.inputContainerFocused,
+                      { flex: 1, marginRight: 8 }
+                    ]}>
                     <TextInput
-                      style={styles.input}
+                        style={inputFocusStyles.input as any}
                       value={formData.expiryDate}
-                      onChangeText={(text) => updateFormData('expiryDate', text)}
-                      placeholder="YYYY-MM-DD"
+                        onChangeText={handleExpiryDateTextChange}
+                        onFocus={() => setFocusedField('expiryDate')}
+                        onBlur={() => setFocusedField(null)}
+                        placeholder="DD-MM-YYYY"
                       placeholderTextColor={Colors.textLight}
                       keyboardType="numeric"
                       maxLength={10}
-                    />
+                        contextMenuHidden={true}
+                        selectTextOnFocus={false}
+                      />
+                    </View>
+                    <TouchableOpacity
+                      style={styles.calendarButton}
+                      onPress={handleOpenExpiryDatePicker}
+                      activeOpacity={0.7}
+                    >
+                      <Calendar size={20} color={Colors.primary} />
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
@@ -1464,7 +2389,12 @@ export default function ManualProductScreen() {
             {/* Advanced Unit Fields */}
             {formData.showAdvancedOptions && (
               <View style={styles.advancedOptionsContainer}>
-                {/* Tertiary Unit Option */}
+                {/* Tertiary Unit Option - Only available when compound UoM is enabled and primary/secondary units are set */}
+                {formData.useCompoundUnit && 
+                 formData.primaryUnit && 
+                 formData.primaryUnit !== 'None' && 
+                 formData.secondaryUnit && 
+                 formData.secondaryUnit !== 'None' && (
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Tertiary Unit</Text>
                   <TouchableOpacity
@@ -1478,8 +2408,14 @@ export default function ManualProductScreen() {
                     <ChevronDown size={20} color={Colors.textLight} />
                   </TouchableOpacity>
                 </View>
+                )}
                 
-                {formData.tertiaryUnit !== 'None' && (
+                {formData.useCompoundUnit && 
+                 formData.primaryUnit && 
+                 formData.primaryUnit !== 'None' && 
+                 formData.secondaryUnit && 
+                 formData.secondaryUnit !== 'None' && 
+                 formData.tertiaryUnit !== 'None' && (
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>Tertiary Conversion Ratio</Text>
                     <TouchableOpacity
@@ -1581,7 +2517,12 @@ export default function ManualProductScreen() {
                       {formData.secondaryUnit}
                     </Text>
                   </TouchableOpacity>
-                  {formData.tertiaryUnit !== 'None' && (
+                  {formData.useCompoundUnit && 
+                   formData.primaryUnit && 
+                   formData.primaryUnit !== 'None' && 
+                   formData.secondaryUnit && 
+                   formData.secondaryUnit !== 'None' && 
+                   formData.tertiaryUnit !== 'None' && (
                     <TouchableOpacity
                       style={[
                         styles.stockUoMButton,
@@ -1613,11 +2554,16 @@ export default function ManualProductScreen() {
                   })</Text>
                 )}
               </Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedField === 'openingStock' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <TextInput
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
                   value={formData.openingStock}
                   onChangeText={(text) => handleStockChange('openingStock', text)}
+                  onFocus={() => setFocusedField('openingStock')}
+                  onBlur={() => setFocusedField(null)}
                   placeholder="Enter opening stock quantity"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="numeric"
@@ -1628,11 +2574,16 @@ export default function ManualProductScreen() {
             <View style={styles.rowContainer}>
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Min Stock Level *</Text>
-                <View style={styles.inputContainer}>
+                <View style={[
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'minStockLevel' && inputFocusStyles.inputContainerFocused
+                ]}>
                   <TextInput
-                    style={styles.input}
+                    style={inputFocusStyles.input as any}
                     value={formData.minStockLevel}
                     onChangeText={(text) => handleStockChange('minStockLevel', text)}
+                    onFocus={() => setFocusedField('minStockLevel')}
+                    onBlur={() => setFocusedField(null)}
                     placeholder="Min level"
                     placeholderTextColor={Colors.textLight}
                     keyboardType="numeric"
@@ -1642,11 +2593,16 @@ export default function ManualProductScreen() {
 
               <View style={[styles.inputGroup, styles.halfWidth]}>
                 <Text style={styles.label}>Max Stock Level *</Text>
-                <View style={styles.inputContainer}>
+                <View style={[
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'maxStockLevel' && inputFocusStyles.inputContainerFocused
+                ]}>
                   <TextInput
-                    style={styles.input}
+                    style={inputFocusStyles.input as any}
                     value={formData.maxStockLevel}
                     onChangeText={(text) => handleStockChange('maxStockLevel', text)}
+                    onFocus={() => setFocusedField('maxStockLevel')}
+                    onBlur={() => setFocusedField(null)}
                     placeholder="Max level"
                     placeholderTextColor={Colors.textLight}
                     keyboardType="numeric"
@@ -1660,14 +2616,33 @@ export default function ManualProductScreen() {
            <View style={styles.section}>
              <Text style={styles.sectionTitle}>Pricing</Text>
              
-             {/* Tax Inclusion Explanation */}
-             <View style={styles.taxExplanationContainer}>
-               <Text style={styles.taxExplanationTitle}>Tax-Inclusive vs Tax-Exclusive Pricing</Text>
-               <Text style={styles.taxExplanationText}>
-                 <Text style={styles.taxExplanationBold}>Tax-Exclusive:</Text> Enter base price, taxes added on top{'\n'}
-                 <Text style={styles.taxExplanationBold}>Tax-Inclusive:</Text> Enter final price, system calculates base price{'\n\n'}
-                 <Text style={styles.taxExplanationBold}>Note:</Text> All tax calculations are done automatically behind the scenes.
-               </Text>
+             {/* Tax Inclusion Explanation - Info Box */}
+             <View style={styles.taxInfoBox}>
+               <View style={styles.taxInfoHeader}>
+                 <View style={styles.taxInfoIconContainer}>
+                   <Info size={20} color="#3f66ac" />
+                 </View>
+                 <Text style={styles.taxInfoTitle}>Tax-Inclusive vs Tax-Exclusive Pricing</Text>
+               </View>
+               <View style={styles.taxInfoContent}>
+                 <View style={styles.taxInfoItem}>
+                   <View style={styles.taxInfoBullet} />
+                   <Text style={styles.taxInfoText}>
+                     <Text style={styles.taxInfoBold}>Tax-Exclusive:</Text> Enter base price, taxes added on top
+                   </Text>
+                 </View>
+                 <View style={styles.taxInfoItem}>
+                   <View style={styles.taxInfoBullet} />
+                   <Text style={styles.taxInfoText}>
+                     <Text style={styles.taxInfoBold}>Tax-Inclusive:</Text> Enter final price, system calculates base price
+                   </Text>
+                 </View>
+                 <View style={styles.taxInfoNote}>
+                   <Text style={styles.taxInfoNoteText}>
+                     <Text style={styles.taxInfoBold}>Note:</Text> All tax calculations are done automatically behind the scenes.
+                   </Text>
+                 </View>
+               </View>
              </View>
             
             {/* Tax Inclusion Toggle */}
@@ -1707,10 +2682,10 @@ export default function ManualProductScreen() {
               </View>
             </View>
 
-            {/* Per Unit Price Input - Always Show */}
+            {/* Purchase Price Input - Primary Field */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>
-                Per Unit Price * 
+                Purchase Price * 
                 <Text style={styles.unitIndicator}>
                   {formData.useCompoundUnit 
                     ? ` (in ${formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit})`
@@ -1718,18 +2693,57 @@ export default function ManualProductScreen() {
                   }
                 </Text>
               </Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedField === 'purchasePrice' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <Text style={styles.currencySymbol}>₹</Text>
                 <TextInput
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
+                  value={formData.purchasePrice}
+                  onChangeText={(text) => handlePriceChange('purchasePrice', text)}
+                  onFocus={() => setFocusedField('purchasePrice')}
+                  onBlur={() => setFocusedField(null)}
+                  placeholder="0.00"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <Text style={styles.inputHint}>
+                Enter the price at which you purchase this product
+              </Text>
+            </View>
+            
+            {/* Per Unit Price Input - Optional/Secondary (for backward compatibility) */}
+            {!formData.purchasePrice && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  Per Unit Price (Optional)
+                  <Text style={styles.unitIndicator}>
+                    {formData.useCompoundUnit 
+                      ? ` (in ${formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit})`
+                      : ` (in ${formData.primaryUnit})`
+                    }
+                  </Text>
+                </Text>
+                <View style={[
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'perUnitPrice' && inputFocusStyles.inputContainerFocused
+                ]}>
+                  <Text style={styles.currencySymbol}>₹</Text>
+                  <TextInput
+                    style={inputFocusStyles.input as any}
                   value={formData.perUnitPrice}
                   onChangeText={(text) => handlePriceChange('perUnitPrice', text)}
+                    onFocus={() => setFocusedField('perUnitPrice')}
+                    onBlur={() => setFocusedField(null)}
                   placeholder="0.00"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="decimal-pad"
                 />
               </View>
             </View>
+            )}
             
             {formData.useCompoundUnit && (
               <View style={styles.inputGroup}>
@@ -1771,12 +2785,17 @@ export default function ManualProductScreen() {
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Sales Price *</Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedField === 'salesPrice' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <Text style={styles.currencySymbol}>₹</Text>
                 <TextInput
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
                   value={formData.salesPrice}
                   onChangeText={(text) => handlePriceChange('salesPrice', text)}
+                  onFocus={() => setFocusedField('salesPrice')}
+                  onBlur={() => setFocusedField(null)}
                   placeholder="0.00"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="decimal-pad"
@@ -1785,37 +2804,45 @@ export default function ManualProductScreen() {
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>MRP (Maximum Retail Price)</Text>
-              <View style={styles.inputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedField === 'mrp' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <Text style={styles.currencySymbol}>₹</Text>
                 <TextInput
-                  style={styles.input}
+                  style={inputFocusStyles.input as any}
                   value={formData.mrp}
                   onChangeText={(text) => handlePriceChange('mrp', text)}
+                  onFocus={() => setFocusedField('mrp')}
+                  onBlur={() => setFocusedField(null)}
                   placeholder="0.00"
                   placeholderTextColor={Colors.textLight}
                   keyboardType="decimal-pad"
                 />
               </View>
             </View>
-            {formData.perUnitPrice && formData.salesPrice && (
+            {(formData.purchasePrice || formData.perUnitPrice) && formData.salesPrice && (
               <>
-                {parseFloat(formData.perUnitPrice) >= parseFloat(formData.salesPrice) ? (
+                {(() => {
+                  const purchasePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
+                  return purchasePrice >= parseFloat(formData.salesPrice) ? (
                   <View style={[styles.marginContainer, styles.warningContainer]}>
-                    <Text style={styles.warningText}>⚠️ Per unit price should be lower than sale price</Text>
+                      <Text style={styles.warningText}>⚠️ Purchase price should be lower than sale price</Text>
                   </View>
                 ) : (
                   <View style={styles.marginContainer}>
                     <Text style={styles.marginLabel}>Profit Margin:</Text>
                     <Text style={styles.marginValue}>
-                      {((parseFloat(formData.salesPrice) - parseFloat(formData.perUnitPrice)) / parseFloat(formData.perUnitPrice) * 100).toFixed(1)}%
+                        {((parseFloat(formData.salesPrice) - purchasePrice) / purchasePrice * 100).toFixed(1)}%
                     </Text>
                   </View>
-                )}
+                  );
+                })()}
               </>
             )}
 
                          {/* Tax Calculation Display */}
-             {formData.perUnitPrice && formData.taxRate > 0 && (
+             {(formData.purchasePrice || formData.perUnitPrice) && formData.taxRate > 0 && (
                <View style={styles.taxCalculationContainer}>
                  <Text style={styles.taxCalculationTitle}>
                    Tax Calculation Summary
@@ -1827,7 +2854,7 @@ export default function ManualProductScreen() {
                      <View style={styles.taxCalculationRow}>
                        <View style={styles.taxCalculationColumn}>
                          <Text style={styles.taxCalculationLabel}>Price Entered (Tax-Inclusive):</Text>
-                         <Text style={styles.taxCalculationPrimary}>₹{parseFloat(formData.perUnitPrice).toFixed(2)}</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{(parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0).toFixed(2)}</Text>
                        </View>
                      </View>
                      
@@ -1890,7 +2917,7 @@ export default function ManualProductScreen() {
                      <View style={styles.taxCalculationRow}>
                        <View style={styles.taxCalculationColumn}>
                          <Text style={styles.taxCalculationLabel}>Base Price (Tax-Exclusive):</Text>
-                         <Text style={styles.taxCalculationPrimary}>₹{parseFloat(formData.perUnitPrice).toFixed(2)}</Text>
+                         <Text style={styles.taxCalculationPrimary}>₹{(parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0).toFixed(2)}</Text>
                        </View>
                      </View>
                      
@@ -1898,7 +2925,7 @@ export default function ManualProductScreen() {
                        <View style={styles.taxCalculationColumn}>
                          <Text style={styles.taxCalculationLabel}>GST ({formData.taxRate}%):</Text>
                          <Text style={styles.taxCalculationPrimary}>
-                           ₹{((parseFloat(formData.perUnitPrice) * formData.taxRate) / 100).toFixed(2)}
+                           ₹{(((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * formData.taxRate) / 100).toFixed(2)}
                          </Text>
 
                        </View>
@@ -1910,7 +2937,7 @@ export default function ManualProductScreen() {
                            <Text style={styles.taxCalculationLabel}>CESS:</Text>
                            <Text style={styles.taxCalculationPrimary}>
                              ₹{(() => {
-                               const basePrice = parseFloat(formData.perUnitPrice);
+                               const basePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
                                switch (formData.cessType) {
                                  case 'value':
                                    return (basePrice * formData.cessRate / 100).toFixed(2);
@@ -1921,7 +2948,7 @@ export default function ManualProductScreen() {
                                    const quantityCess = parseFloat(formData.cessAmount || '0');
                                    return (valueCess + quantityCess).toFixed(2);
                                  case 'mrp':
-                                   const mrpPrice = parseFloat(formData.mrp) || parseFloat(formData.perUnitPrice);
+                                   const mrpPrice = parseFloat(formData.mrp) || parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
                                    return (mrpPrice * formData.cessRate / 100).toFixed(2);
                                  default:
                                    return '0.00';
@@ -1945,7 +2972,7 @@ export default function ManualProductScreen() {
              )}
             
                          {/* Opening Stock Summary */}
-             {formData.perUnitPrice && formData.openingStock && (
+             {(formData.purchasePrice || formData.perUnitPrice) && formData.openingStock && (
                <View style={styles.summaryContainer}>
                  <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
                  
@@ -1955,7 +2982,7 @@ export default function ManualProductScreen() {
                      <View style={styles.summaryRow}>
                        <Text style={styles.summaryLabel}>Price Entered (Tax-Inclusive):</Text>
                        <Text style={styles.summaryValue}>
-                         ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
+                         ₹{((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock)).toFixed(2)}
                        </Text>
                      </View>
                      <View style={styles.summaryRow}>
@@ -2006,13 +3033,13 @@ export default function ManualProductScreen() {
                      <View style={styles.summaryRow}>
                        <Text style={styles.summaryLabel}>Base Price (Tax-Exclusive):</Text>
                        <Text style={styles.summaryValue}>
-                         ₹{(parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2)}
+                         ₹{((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock)).toFixed(2)}
                        </Text>
                      </View>
                      <View style={styles.summaryRow}>
                        <Text style={styles.summaryLabel}>GST ({formData.taxRate}% of Base Price):</Text>
                        <Text style={styles.summaryValue}>
-                         ₹{((parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
+                         ₹{(((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(2)}
                        </Text>
                      </View>
                      {formData.cessType !== 'none' && (
@@ -2021,7 +3048,7 @@ export default function ManualProductScreen() {
                            <Text style={styles.summaryLabel}>CESS:</Text>
                            <Text style={styles.summaryValue}>
                              ₹{(() => {
-                               const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
+                               const basePrice = (parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock);
                                switch (formData.cessType) {
                                  case 'value':
                                    return (basePrice * formData.cessRate / 100).toFixed(2);
@@ -2056,12 +3083,19 @@ export default function ManualProductScreen() {
                    <Text style={styles.totalLabel}>Total Value:</Text>
                    <Text style={styles.totalValue}>
                      ₹{(() => {
+                       const purchasePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
+                       const openingStock = parseInt(formData.openingStock) || 0;
+                       
+                       if (isNaN(purchasePrice) || isNaN(openingStock) || openingStock === 0) {
+                         return '0.00';
+                       }
+                       
                        if (formData.taxInclusive) {
                          // For tax-inclusive, total is the price entered × quantity
-                         return (parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock)).toFixed(2);
+                         return (purchasePrice * openingStock).toFixed(2);
                        } else {
                          // For tax-exclusive, calculate total including taxes
-                         const basePrice = parseFloat(formData.perUnitPrice) * parseInt(formData.openingStock);
+                         const basePrice = purchasePrice * openingStock;
                          const gstAmount = (basePrice * formData.taxRate) / 100;
                          let cessAmount = 0;
                          
@@ -2070,15 +3104,15 @@ export default function ManualProductScreen() {
                              cessAmount = basePrice * formData.cessRate / 100;
                              break;
                            case 'quantity':
-                             cessAmount = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                             cessAmount = openingStock * parseFloat(formData.cessAmount || '0');
                              break;
                            case 'value_and_quantity':
                              const valueCess = basePrice * formData.cessRate / 100;
-                             const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
+                             const quantityCess = openingStock * parseFloat(formData.cessAmount || '0');
                              cessAmount = valueCess + quantityCess;
                              break;
                            case 'mrp':
-                             const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
+                             const mrpPrice = (parseFloat(formData.mrp) || 0) * openingStock;
                              cessAmount = mrpPrice * formData.cessRate / 100;
                              break;
                          }
@@ -2138,17 +3172,24 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.searchContainer}>
-              <Search size={20} color={Colors.textLight} />
+            <View style={styles.modalSearchWrapper}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'categorySearch' && inputFocusStyles.inputContainerFocused
+              ]}>
+                <Search size={20} color={Colors.textLight} style={styles.inputIcon} />
               <TextInput
                 ref={categorySearchRef}
-                style={styles.searchInput}
+                  style={inputFocusStyles.input as any}
                 placeholder="Search categories..."
                 placeholderTextColor={Colors.textLight}
                 value={categorySearch}
                 onChangeText={setCategorySearch}
+                  onFocus={() => setFocusedModalField('categorySearch')}
+                  onBlur={() => setFocusedModalField(null)}
                 autoFocus={true}
               />
+              </View>
             </View>
 
             <ScrollView style={styles.modalScrollView}>
@@ -2205,12 +3246,17 @@ export default function ManualProductScreen() {
 
             <View style={styles.modalInputGroup}>
               <Text style={styles.modalLabel}>Category Name *</Text>
-              <View style={styles.modalInputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'newCategoryName' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
                 <TextInput
-                  style={styles.modalInput}
+                  style={inputFocusStyles.input as any}
                   value={newCategoryName}
                   onChangeText={setNewCategoryName}
+                  onFocus={() => setFocusedModalField('newCategoryName')}
+                  onBlur={() => setFocusedModalField(null)}
                   placeholder="Enter category name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
@@ -2271,12 +3317,17 @@ export default function ManualProductScreen() {
                   </Text>
                 )}
                 <Text style={styles.modalLabel}>CESS Rate (%)</Text>
-                <View style={styles.modalInputContainer}>
+                <View style={[
+                  inputFocusStyles.inputContainer,
+                  focusedModalField === 'cessRate' && inputFocusStyles.inputContainerFocused
+                ]}>
                   <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
-                    style={styles.modalInput}
+                    style={inputFocusStyles.input as any}
                     value={formData.cessRate.toString()}
                     onChangeText={(text) => updateFormData('cessRate', parseFloat(text) || 0)}
+                    onFocus={() => setFocusedModalField('cessRate')}
+                    onBlur={() => setFocusedModalField(null)}
                     placeholder="0"
                     placeholderTextColor={Colors.textLight}
                     keyboardType="numeric"
@@ -2290,12 +3341,17 @@ export default function ManualProductScreen() {
               <>
                 <View style={styles.modalInputGroup}>
                   <Text style={styles.modalLabel}>CESS Amount (₹ per unit)</Text>
-                  <View style={styles.modalInputContainer}>
+                  <View style={[
+                    inputFocusStyles.inputContainer,
+                    focusedModalField === 'cessAmount' && inputFocusStyles.inputContainerFocused
+                  ]}>
                     <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
-                      style={styles.modalInput}
+                      style={inputFocusStyles.input as any}
                       value={formData.cessAmount}
                       onChangeText={(text) => updateFormData('cessAmount', text.replace(/[^0-9.]/g, ''))}
+                      onFocus={() => setFocusedModalField('cessAmount')}
+                      onBlur={() => setFocusedModalField(null)}
                       placeholder="0.00"
                       placeholderTextColor={Colors.textLight}
                       keyboardType="decimal-pad"
@@ -2304,7 +3360,14 @@ export default function ManualProductScreen() {
                 </View>
                 <View style={styles.modalInputGroup}>
                   <Text style={styles.modalLabel}>CESS Unit</Text>
-                  {formData.showAdvancedOptions && formData.tertiaryUnit && formData.tertiaryUnit !== 'None' && (
+                  {formData.showAdvancedOptions && 
+                   formData.useCompoundUnit && 
+                   formData.primaryUnit && 
+                   formData.primaryUnit !== 'None' && 
+                   formData.secondaryUnit && 
+                   formData.secondaryUnit !== 'None' && 
+                   formData.tertiaryUnit && 
+                   formData.tertiaryUnit !== 'None' && (
                     <Text style={styles.modalDescription}>
                       Note: Selecting different units affects CESS calculation. Tertiary units will use the conversion ratios you've set.
                     </Text>
@@ -2320,7 +3383,15 @@ export default function ManualProductScreen() {
                         availableUnits.push(formData.secondaryUnit);
                       }
                       // Add tertiary unit if available and advanced options are enabled
-                      if (formData.showAdvancedOptions && formData.tertiaryUnit && formData.tertiaryUnit !== 'None') {
+                      // Only if compound UoM is enabled and primary/secondary units are set
+                      if (formData.showAdvancedOptions && 
+                          formData.useCompoundUnit && 
+                          formData.primaryUnit && 
+                          formData.primaryUnit !== 'None' && 
+                          formData.secondaryUnit && 
+                          formData.secondaryUnit !== 'None' && 
+                          formData.tertiaryUnit && 
+                          formData.tertiaryUnit !== 'None') {
                         availableUnits.push(formData.tertiaryUnit);
                       }
                       
@@ -2418,7 +3489,11 @@ export default function ManualProductScreen() {
               </TouchableOpacity>
             </View>
             
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
               {taxRates.map((rate) => (
                 <TouchableOpacity
                   key={rate}
@@ -2429,12 +3504,14 @@ export default function ManualProductScreen() {
                   onPress={() => handleTaxRateSelect(rate)}
                   activeOpacity={0.7}
                 >
+                  <View style={styles.modalOptionContent}>
                   <Text style={[
                     styles.modalOptionText,
                     formData.taxRate === rate && styles.selectedOptionText
                   ]}>
                     {rate}% GST
                   </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -2475,12 +3552,14 @@ export default function ManualProductScreen() {
                   onPress={() => handleCessTypeSelect(type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity' | 'mrp')}
                   activeOpacity={0.7}
                 >
+                  <View style={styles.modalOptionContent}>
                   <Text style={[
                     styles.modalOptionText,
                     formData.cessType === type.value && styles.selectedOptionText
                   ]}>
                     {type.label}
                   </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
@@ -2521,6 +3600,7 @@ export default function ManualProductScreen() {
                 onPress={() => handleUnitTypeSelect(false)}
                 activeOpacity={0.7}
               >
+                <View style={styles.modalOptionContent}>
                 <Text style={[
                   styles.modalOptionText,
                   !formData.useCompoundUnit && styles.selectedOptionText
@@ -2530,6 +3610,7 @@ export default function ManualProductScreen() {
                 <Text style={styles.modalOptionDescription}>
                   Use only one unit (e.g., Pieces, Kilograms)
                 </Text>
+                </View>
               </TouchableOpacity>
               
               <TouchableOpacity
@@ -2540,6 +3621,7 @@ export default function ManualProductScreen() {
                 onPress={() => handleUnitTypeSelect(true)}
                 activeOpacity={0.7}
               >
+                <View style={styles.modalOptionContent}>
                 <Text style={[
                   styles.modalOptionText,
                   formData.useCompoundUnit && styles.selectedOptionText
@@ -2549,6 +3631,7 @@ export default function ManualProductScreen() {
                 <Text style={styles.modalOptionDescription}>
                   Use both primary and secondary units with conversion
                 </Text>
+                </View>
               </TouchableOpacity>
             </View>
           </View>
@@ -2640,20 +3723,27 @@ export default function ManualProductScreen() {
                 }}
                 activeOpacity={0.7}
               >
-                <X size={24} color={Colors.textLight} />
+                <X size={24} color="#666666" />
               </TouchableOpacity>
             </View>
             <View style={styles.searchContainer}>
-              <Search size={18} color={Colors.textLight} />
+              <Search size={18} color="#64748b" />
               <TextInput
+                ref={primaryUnitSearchRef}
                 style={styles.searchInput}
                 value={primaryUnitSearch}
                 onChangeText={setPrimaryUnitSearch}
                 placeholder="Search units..."
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor="#94a3b8"
+                autoFocus={true}
+                autoCapitalize="none"
               />
             </View>
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
               {/* Custom Unit Option */}
               <TouchableOpacity
                 style={styles.modalOption}
@@ -2718,20 +3808,27 @@ export default function ManualProductScreen() {
                 }}
                 activeOpacity={0.7}
               >
-                <X size={24} color={Colors.textLight} />
+                <X size={24} color="#666666" />
               </TouchableOpacity>
             </View>
             <View style={styles.searchContainer}>
-              <Search size={18} color={Colors.textLight} />
+              <Search size={18} color="#64748b" />
               <TextInput
+                ref={secondaryUnitSearchRef}
                 style={styles.searchInput}
                 value={secondaryUnitSearch}
                 onChangeText={setSecondaryUnitSearch}
                 placeholder="Search units..."
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor="#94a3b8"
+                autoFocus={true}
+                autoCapitalize="none"
               />
             </View>
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
               {/* Custom Unit Option */}
               <TouchableOpacity
                 style={styles.modalOption}
@@ -2793,17 +3890,28 @@ export default function ManualProductScreen() {
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            <View style={styles.searchContainer}>
-              <Search size={18} color={Colors.textLight} />
+            <View style={styles.modalSearchWrapper}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'supplierSearch' && inputFocusStyles.inputContainerFocused
+              ]}>
+                <Search size={18} color={Colors.textLight} style={styles.inputIcon} />
               <TextInput
-                style={styles.searchInput}
+                  style={inputFocusStyles.input as any}
                 value={supplierSearch}
                 onChangeText={setSupplierSearch}
+                  onFocus={() => setFocusedModalField('supplierSearch')}
+                  onBlur={() => setFocusedModalField(null)}
                 placeholder="Search suppliers..."
                 placeholderTextColor={Colors.textLight}
               />
             </View>
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            </View>
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
               {/* Add New Supplier Option */}
               <TouchableOpacity
                 style={styles.modalOption}
@@ -2835,12 +3943,14 @@ export default function ManualProductScreen() {
                   onPress={() => handleSupplierSelect(supplier.id)}
                   activeOpacity={0.7}
                 >
+                  <View style={styles.modalOptionContent}>
                   <Text style={[
                     styles.modalOptionText,
                     formData.preferredSupplier === supplier.id && styles.selectedOptionText
                   ]}>
                     {supplier.name}
                   </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -2864,44 +3974,99 @@ export default function ManualProductScreen() {
                 onPress={() => setShowLocationModal(false)}
                 activeOpacity={0.7}
               >
-                <X size={24} color={Colors.textLight} />
+                <X size={24} color="#666666" />
               </TouchableOpacity>
             </View>
             
             <View style={styles.searchContainer}>
-              <Search size={18} color={Colors.textLight} />
+              <Search size={18} color="#64748b" />
               <TextInput
                 style={styles.searchInput}
                 value={locationSearch}
                 onChangeText={setLocationSearch}
                 placeholder="Search locations..."
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor="#94a3b8"
+                autoFocus={false}
+                autoCapitalize="none"
               />
             </View>
             
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              {filteredLocations
-                .filter(location => 
-                  location.toLowerCase().includes(locationSearch.toLowerCase())
-                )
-                .map((location) => (
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Add New Branch Option */}
                 <TouchableOpacity
-                  key={location}
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowLocationModal(false);
+                  router.push({
+                    pathname: '/locations/add-branch',
+                    params: {
+                      returnToAddProduct: 'true',
+                      editMode: 'false',
+                    }
+                  });
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add New Branch</Text>
+                </View>
+              </TouchableOpacity>
+              
+              {/* Add New Warehouse Option */}
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={() => {
+                  setShowLocationModal(false);
+                  router.push({
+                    pathname: '/locations/add-warehouse',
+                    params: {
+                      returnToAddProduct: 'true',
+                      editMode: 'false',
+                    }
+                  });
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addNewItem}>
+                  <Plus size={20} color={Colors.primary} />
+                  <Text style={styles.addNewText}>Add New Warehouse</Text>
+                </View>
+              </TouchableOpacity>
+              
+              {/* Existing locations list */}
+              {filteredLocations.length > 0 ? (
+                filteredLocations.map((location) => (
+                  <TouchableOpacity
+                    key={location.id}
                   style={[
                     styles.modalOption,
-                    formData.location === location && styles.selectedOption
+                      formData.locationId === location.id && styles.selectedOption
                   ]}
-                  onPress={() => handleLocationSelect(location)}
+                    onPress={() => handleLocationSelect(location.id, location.name)}
                   activeOpacity={0.7}
                 >
                   <Text style={[
                     styles.modalOptionText,
-                    formData.location === location && styles.selectedOptionText
+                      formData.locationId === location.id && styles.selectedOptionText
                   ]}>
-                    {location}
+                      {location.name}
                   </Text>
                 </TouchableOpacity>
-              ))}
+                ))
+              ) : locations.length === 0 ? (
+                <View style={styles.modalOption}>
+                  <Text style={styles.modalOptionText}>No locations available. Add a branch or warehouse to get started.</Text>
+                </View>
+              ) : (
+                <View style={styles.modalOption}>
+                  <Text style={styles.modalOptionText}>No locations match your search.</Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -2978,11 +4143,16 @@ export default function ManualProductScreen() {
 
             <View style={styles.modalInputGroup}>
               <Text style={styles.modalLabel}>Custom Unit Name *</Text>
-              <View style={styles.modalInputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'customPrimaryUnit' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[inputFocusStyles.input as any, { paddingVertical: 12 }]}
                   value={customPrimaryUnit}
                   onChangeText={setCustomPrimaryUnit}
+                  onFocus={() => setFocusedModalField('customPrimaryUnit')}
+                  onBlur={() => setFocusedModalField(null)}
                   placeholder="Enter custom unit name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
@@ -3052,11 +4222,16 @@ export default function ManualProductScreen() {
 
             <View style={styles.modalInputGroup}>
               <Text style={styles.modalLabel}>Custom Unit Name *</Text>
-              <View style={styles.modalInputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'customSecondaryUnit' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[inputFocusStyles.input as any, { paddingVertical: 12 }]}
                   value={customSecondaryUnit}
                   onChangeText={setCustomSecondaryUnit}
+                  onFocus={() => setFocusedModalField('customSecondaryUnit')}
+                  onBlur={() => setFocusedModalField(null)}
                   placeholder="Enter custom unit name"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
@@ -3120,21 +4295,28 @@ export default function ManualProductScreen() {
                 }}
                 activeOpacity={0.7}
               >
-                <X size={24} color={Colors.textLight} />
+                <X size={24} color="#666666" />
               </TouchableOpacity>
             </View>
             <View style={styles.searchContainer}>
-              <Search size={18} color={Colors.textLight} />
+              <Search size={18} color="#64748b" />
               <TextInput
+                ref={tertiaryUnitSearchRef}
                 style={styles.searchInput}
                 value={tertiaryUnitSearch}
                 onChangeText={setTertiaryUnitSearch}
                 placeholder="Search units..."
-                placeholderTextColor={Colors.textLight}
+                placeholderTextColor="#94a3b8"
+                autoFocus={true}
+                autoCapitalize="none"
               />
             </View>
             
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.modalContent} 
+              contentContainerStyle={{ paddingBottom: 0 }}
+              showsVerticalScrollIndicator={false}
+            >
               <TouchableOpacity
                 style={[
                   styles.modalOption,
@@ -3218,11 +4400,16 @@ export default function ManualProductScreen() {
             
             <View style={styles.modalInputGroup}>
               <Text style={styles.modalLabel}>Custom Unit Name *</Text>
-              <View style={styles.modalInputContainer}>
+              <View style={[
+                inputFocusStyles.inputContainer,
+                focusedModalField === 'customTertiaryUnit' && inputFocusStyles.inputContainerFocused
+              ]}>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[inputFocusStyles.input as any, { paddingVertical: 12 }]}
                   value={customTertiaryUnit}
                   onChangeText={setCustomTertiaryUnit}
+                  onFocus={() => setFocusedModalField('customTertiaryUnit')}
+                  onBlur={() => setFocusedModalField(null)}
                   placeholder="e.g., Bundle, Pack, Set"
                   placeholderTextColor={Colors.textLight}
                   autoCapitalize="words"
@@ -3327,6 +4514,69 @@ export default function ManualProductScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Expiry Date Picker Modal */}
+      {showExpiryDatePicker && (
+        <Modal
+          transparent={true}
+          animationType="fade"
+          visible={showExpiryDatePicker}
+          onRequestClose={handleExpiryDatePickerDone}
+        >
+          <TouchableOpacity 
+            style={styles.datePickerModal}
+            activeOpacity={1}
+            onPress={() => {
+              // Close modal only if date has been selected
+              if (hasSelectedExpiryDate) {
+                handleExpiryDatePickerDone();
+              }
+            }}
+          >
+            <TouchableOpacity 
+              style={styles.datePickerContainer}
+              activeOpacity={1}
+              onPress={(e) => {
+                // Prevent closing when tapping inside the picker
+                e.stopPropagation();
+              }}
+            >
+              <View style={styles.datePickerHeader}>
+                <Text style={styles.datePickerTitle}>Select Expiry Date</Text>
+                <TouchableOpacity
+                  style={styles.datePickerDone}
+                  onPress={handleExpiryDatePickerDone}
+                >
+                  <Text style={styles.datePickerDoneText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <CustomDatePicker
+                value={expiryDateValue || (() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  return today;
+                })()}
+                onChange={(date) => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  // Ensure date is not before today
+                  if (date >= today) {
+                    setExpiryDateValue(date);
+                    setHasSelectedExpiryDate(true);
+                  }
+                }}
+                minimumDate={(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  return today;
+                })()} // Cannot select dates before today
+                maximumDate={new Date(2100, 11, 31)} // Allow dates up to year 2100
+                textColor={Colors.primary}
+              />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
 
 
     </View>
@@ -3631,6 +4881,164 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '600',
   },
+  imagesContainer: {
+    gap: 12,
+  },
+  imagesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  imagePreviewWrapper: {
+    position: 'relative',
+    width: 120,
+    height: 120,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: Colors.error,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.background,
+  },
+  addMoreImageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 16,
+    gap: 8,
+  },
+  barcodeImageWrapper: {
+    backgroundColor: Colors.grey[50],
+    padding: 16,
+    borderRadius: 12,
+  },
+  barcodeImagePreview: {
+    backgroundColor: Colors.background,
+    padding: 8,
+  },
+  barcodePreviewIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary + '15',
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+    gap: 8,
+  },
+  barcodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  barcodeInputWrapper: {
+    flex: 1,
+  },
+  generateBarcodeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    minWidth: 100,
+  },
+  generateBarcodeButtonDisabled: {
+    opacity: 0.6,
+  },
+  generateBarcodeButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  barcodeHint: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 6,
+    marginLeft: 2,
+  },
+  generateBarcodeModalContent: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 24,
+    margin: 24,
+    maxWidth: 400,
+  },
+  generateBarcodeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  generateBarcodeModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  generateBarcodeModalBody: {
+    fontSize: 15,
+    color: Colors.text,
+    lineHeight: 22,
+    marginBottom: 12,
+  },
+  generateBarcodeModalSubtext: {
+    fontSize: 13,
+    color: Colors.textLight,
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  boldText: {
+    fontWeight: '700',
+  },
+  generateBarcodeModalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+  },
+  generateBarcodeModalCancelButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: Colors.grey[200],
+  },
+  generateBarcodeModalCancelText: {
+    fontSize: 15,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  generateBarcodeModalConfirmButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+  },
+  generateBarcodeModalConfirmText: {
+    fontSize: 15,
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  barcodePreviewText: {
+    fontSize: 13,
+    color: Colors.primary,
+    fontWeight: '500',
+    flex: 1,
+  },
   submitSection: {
     position: 'absolute',
     bottom: 20,
@@ -3687,20 +5095,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 18,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
+    borderBottomColor: '#e9ecef',
   },
   modalTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
   },
   modalCloseButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.grey[100],
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -3710,14 +5118,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
+    borderBottomColor: '#e9ecef',
+    backgroundColor: '#ffffff',
   },
   searchInput: {
     flex: 1,
     marginLeft: 12,
     fontSize: 16,
-    color: Colors.text,
+    color: '#334155',
     paddingVertical: 8,
+    ...(Platform.select({
+      web: {
+        outlineWidth: 0,
+        outlineColor: 'transparent',
+      },
+    }) as any),
   },
   modalScrollView: {
     maxHeight: 300,
@@ -3732,6 +5147,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 20,
   },
   addNewText: {
     fontSize: 16,
@@ -3789,14 +5206,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   selectedOption: {
-    backgroundColor: '#f0f4ff',
+    backgroundColor: '#f0f7ff',
+  },
+  modalOptionContent: {
+    width: '100%',
+    flex: 1,
   },
   modalOptionText: {
     fontSize: 16,
-    color: Colors.text,
+    color: '#334155',
+    fontWeight: '500',
   },
   selectedOptionText: {
-    color: Colors.primary,
+    color: '#3f66ac',
     fontWeight: '600',
   },
   modalOptionDescription: {
@@ -3835,16 +5257,22 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   modalContent: {
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-    width: '100%',
-    maxWidth: 350,
+    maxHeight: 400,
   },
   modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[100],
+    borderBottomColor: '#f1f5f9',
+  },
+  modalSearchWrapper: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   conversionContainer: {
     flexDirection: 'row',
@@ -4261,29 +5689,136 @@ const styles = StyleSheet.create({
      borderColor: Colors.grey[200],
    },
    
-   // Tax Explanation Styles
-   taxExplanationContainer: {
-     backgroundColor: Colors.grey[50],
+   // Tax Info Box Styles - Prominent Info Section
+   taxInfoBox: {
+     backgroundColor: '#EFF6FF', // Light blue background
      borderRadius: 12,
      padding: 16,
-     marginBottom: 16,
-     borderWidth: 1,
-     borderColor: Colors.grey[200],
+     marginBottom: 20,
+     borderWidth: 2,
+     borderColor: '#3f66ac', // Primary blue border
+     ...Platform.select({
+       web: {
+         boxShadow: '0 2px 8px rgba(63, 102, 172, 0.15)',
+       },
+     }),
    },
-   taxExplanationTitle: {
-     fontSize: 16,
-     fontWeight: '600',
+   taxInfoHeader: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     marginBottom: 12,
+   },
+   taxInfoIconContainer: {
+     width: 32,
+     height: 32,
+     borderRadius: 16,
+     backgroundColor: '#DBEAFE', // Lighter blue for icon background
+     justifyContent: 'center',
+     alignItems: 'center',
+     marginRight: 12,
+   },
+   taxInfoTitle: {
+     fontSize: 17,
+     fontWeight: '700',
+     color: '#3f66ac',
+     flex: 1,
+   },
+   taxInfoContent: {
+     paddingLeft: 4,
+   },
+   taxInfoItem: {
+     flexDirection: 'row',
+     alignItems: 'flex-start',
+     marginBottom: 10,
+   },
+   // Date Input Wrapper Styles
+   dateInputWrapper: {
+     flexDirection: 'row',
+     alignItems: 'center',
+   },
+   calendarButton: {
+     padding: 8,
+     marginLeft: 8,
+   },
+   // Date Picker Modal styles
+   datePickerModal: {
+     flex: 1,
+     justifyContent: 'center',
+     alignItems: 'center',
+     backgroundColor: 'rgba(0, 0, 0, 0.6)',
+     paddingHorizontal: 20,
+   },
+   datePickerContainer: {
+     backgroundColor: Colors.background,
+     borderRadius: 20,
+     paddingBottom: Platform.select({
+       web: 40,
+       ios: 20,
+       android: 20,
+       default: 20,
+     }),
+     paddingTop: Platform.select({
+       web: 20,
+       default: 16,
+     }),
+     maxWidth: 400,
+     width: '100%',
+     maxHeight: '80%',
+   },
+   datePickerHeader: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     alignItems: 'center',
+     paddingHorizontal: 20,
+     paddingVertical: 16,
+     borderBottomWidth: 1,
+     borderBottomColor: Colors.grey[200],
+   },
+   datePickerTitle: {
+     fontSize: 18,
+     fontWeight: '700',
      color: Colors.primary,
-     marginBottom: 8,
    },
-   taxExplanationText: {
+   datePickerDone: {
+     paddingHorizontal: 16,
+     paddingVertical: 8,
+     backgroundColor: Colors.grey[100],
+     borderRadius: 8,
+   },
+   datePickerDoneText: {
+     fontSize: 16,
+     fontWeight: '700',
+     color: Colors.primary,
+   },
+   taxInfoBullet: {
+     width: 6,
+     height: 6,
+     borderRadius: 3,
+     backgroundColor: '#3f66ac',
+     marginTop: 6,
+     marginRight: 10,
+   },
+   taxInfoText: {
      fontSize: 14,
-     color: Colors.textLight,
-     lineHeight: 20,
+     color: Colors.text,
+     lineHeight: 22,
+     flex: 1,
    },
-   taxExplanationBold: {
+   taxInfoBold: {
      fontWeight: '600',
      color: Colors.text,
+   },
+   taxInfoNote: {
+     marginTop: 8,
+     paddingTop: 12,
+     borderTopWidth: 1,
+     borderTopColor: '#BFDBFE', // Light blue border
+   },
+   taxInfoNoteText: {
+     fontSize: 13,
+     color: Colors.textLight,
+     fontStyle: 'italic',
+     lineHeight: 18,
    },
   taxBreakdownTitle: {
     fontSize: 14,

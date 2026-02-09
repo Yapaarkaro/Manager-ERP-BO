@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
@@ -299,6 +300,7 @@ const mockAllInvoices: Invoice[] = [
 type TimeRange = 'today' | 'week' | 'month' | 'custom';
 
 export default function AllInvoicesScreen() {
+  const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(mockAllInvoices);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns' | 'purchases'>('all');
@@ -680,7 +682,7 @@ export default function AllInvoicesScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />

@@ -146,3 +146,19 @@ All major action points are now protected. The read-only mode is fully functiona
 - Allow viewing of all existing data
 - Guide users to subscription page to upgrade
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
