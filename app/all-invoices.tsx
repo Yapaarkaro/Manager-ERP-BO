@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { getInvoices } from '@/services/backendApi';
 
 import { 
   ArrowLeft, 
@@ -71,238 +72,19 @@ interface Invoice {
   supplierName?: string;
 }
 
-const mockAllInvoices: Invoice[] = [
-  // Sales Invoices
-  {
-    id: '1',
-    invoiceNumber: 'INV-2024-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 15500,
-    itemCount: 2,
-    date: '2024-01-16',
-    time: '09:30 AM',
-    status: 'sale'
-  },
-  {
-    id: '2',
-    invoiceNumber: 'INV-2024-002',
-    customerName: 'TechCorp Solutions',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 35000,
-    itemCount: 5,
-    date: '2024-01-16',
-    time: '11:45 AM',
-    status: 'sale'
-  },
-  {
-    id: '3',
-    invoiceNumber: 'INV-2024-003',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'card',
-    amount: 22000,
-    itemCount: 3,
-    date: '2024-01-16',
-    time: '03:20 PM',
-    status: 'sale'
-  },
-  {
-    id: '4',
-    invoiceNumber: 'INV-2024-004',
-    customerName: 'Metro Retail Chain',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 45000,
-    itemCount: 8,
-    date: '2024-01-15',
-    time: '10:15 AM',
-    status: 'sale'
-  },
-  {
-    id: '5',
-    invoiceNumber: 'INV-2024-005',
-    customerName: 'Vikram Patel',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 28000,
-    itemCount: 4,
-    date: '2024-01-15',
-    time: '01:30 PM',
-    status: 'sale'
-  },
-  {
-    id: '6',
-    invoiceNumber: 'INV-2024-006',
-    customerName: 'Global Enterprises',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'pending',
-    paymentMethod: 'others',
-    amount: 67000,
-    itemCount: 10,
-    date: '2024-01-14',
-    time: '02:45 PM',
-    status: 'sale'
-  },
-  
-  // Return Invoices
-  {
-    id: '7',
-    invoiceNumber: 'RET-2024-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 5500,
-    itemCount: 1,
-    date: '2024-01-16',
-    time: '02:15 PM',
-    status: 'return',
-    originalInvoice: 'INV-2024-001'
-  },
-  {
-    id: '8',
-    invoiceNumber: 'RET-2024-002',
-    customerName: 'Global Enterprises',
-    customerType: 'business',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 3000,
-    itemCount: 1,
-    date: '2024-01-16',
-    time: '04:30 PM',
-    status: 'return',
-    originalInvoice: 'INV-2024-002'
-  },
-  {
-    id: '9',
-    invoiceNumber: 'RET-2024-003',
-    customerName: 'TechCorp Solutions',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'card',
-    amount: 8000,
-    itemCount: 2,
-    date: '2024-01-15',
-    time: '04:20 PM',
-    status: 'return',
-    originalInvoice: 'INV-2024-004'
-  },
-  {
-    id: '10',
-    invoiceNumber: 'RET-2024-004',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 12000,
-    itemCount: 3,
-    date: '2024-01-14',
-    time: '11:30 AM',
-    status: 'return',
-    originalInvoice: 'INV-2024-003'
-  },
-  
-  // Purchase Invoices
-  {
-    id: '11',
-    invoiceNumber: 'PUR-2024-001',
-    customerName: 'Apple India Pvt Ltd',
-    customerType: 'business',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 125000,
-    itemCount: 25,
-    date: '2024-01-16',
-    time: '08:45 AM',
-    status: 'purchase',
-    supplierName: 'Apple India Pvt Ltd'
-  },
-  {
-    id: '12',
-    invoiceNumber: 'PUR-2024-002',
-    customerName: 'Samsung Electronics',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'pending',
-    paymentMethod: 'card',
-    amount: 85000,
-    itemCount: 15,
-    date: '2024-01-15',
-    time: '02:30 PM',
-    status: 'purchase',
-    supplierName: 'Samsung Electronics'
-  },
-  {
-    id: '13',
-    invoiceNumber: 'PUR-2024-003',
-    customerName: 'OnePlus Technology',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 45000,
-    itemCount: 8,
-    date: '2024-01-14',
-    time: '10:15 AM',
-    status: 'purchase',
-    supplierName: 'OnePlus Technology'
-  },
-  {
-    id: '14',
-    invoiceNumber: 'PUR-2024-004',
-    customerName: 'Xiaomi India',
-    customerType: 'business',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 32000,
-    itemCount: 12,
-    date: '2024-01-13',
-    time: '03:45 PM',
-    status: 'purchase',
-    supplierName: 'Xiaomi India'
-  },
-];
-
 type TimeRange = 'today' | 'week' | 'month' | 'custom';
+
+function mapPaymentStatus(dbStatus: string): 'paid' | 'partially_paid' | 'pending' {
+  if (dbStatus === 'paid') return 'paid';
+  if (dbStatus === 'partial') return 'partially_paid';
+  return 'pending';
+}
 
 export default function AllInvoicesScreen() {
   const { handleBack } = useWebBackNavigation();
+  const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredInvoices, setFilteredInvoices] = useState(mockAllInvoices);
+  const [filteredInvoices, setFilteredInvoices] = useState<Invoice[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns' | 'purchases'>('all');
   const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('today');
   const [showTimeRangeModal, setShowTimeRangeModal] = useState(false);
@@ -313,6 +95,39 @@ export default function AllInvoicesScreen() {
   
   // Use debounced navigation for FAB buttons
   const debouncedNavigate = useDebounceNavigation(500);
+
+  useEffect(() => {
+    (async () => {
+      const { success, invoices } = await getInvoices();
+      if (success && invoices) {
+        const mapped: Invoice[] = invoices.map((inv: any) => {
+          const invoiceDate = inv.invoice_date ? new Date(inv.invoice_date) : new Date();
+          const dateStr = invoiceDate.toISOString().split('T')[0];
+          const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+          return {
+            id: inv.id,
+            invoiceNumber: inv.invoice_number ?? '',
+            customerName: inv.customer_name ?? '',
+            customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+            staffName: inv.staff_name ?? '',
+            staffAvatar: 'https://via.placeholder.com/40',
+            paymentStatus: mapPaymentStatus(inv.payment_status ?? 'unpaid'),
+            paymentMethod: (inv.payment_method ?? 'others') as 'cash' | 'upi' | 'card' | 'others',
+            amount: Number(inv.total_amount ?? 0),
+            itemCount: 0,
+            date: dateStr,
+            time: timeStr,
+            status: 'sale' as const,
+          };
+        });
+        setAllInvoices(mapped);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    applyFilters(searchQuery, selectedFilter, selectedTimeRange);
+  }, [allInvoices, searchQuery, selectedFilter, selectedTimeRange, customFromDate, customToDate]);
 
   const timeRangeOptions = [
     { value: 'today', label: 'Today' },
@@ -375,7 +190,7 @@ export default function AllInvoicesScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter, timeRange: TimeRange) => {
-    let filtered = mockAllInvoices;
+    let filtered = allInvoices;
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -448,7 +263,7 @@ export default function AllInvoicesScreen() {
         customerDetails: {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
@@ -476,7 +291,7 @@ export default function AllInvoicesScreen() {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
           businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
@@ -809,7 +624,7 @@ export default function AllInvoicesScreen() {
                 styles.filterTabCount,
                 selectedFilter === 'all' && styles.activeFilterTabCount
               ]}>
-                {mockAllInvoices.length}
+                {allInvoices.length}
               </Text>
             </View>
           </TouchableOpacity>

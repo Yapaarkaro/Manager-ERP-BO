@@ -19,7 +19,7 @@ import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
 import { dataStore, getGSTINStateCode, toTitleCase, type BusinessAddress } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { submitBusinessDetails } from '@/services/backendApi';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 import { optimisticAddAddress, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
 
 const COLORS = {
@@ -322,38 +322,36 @@ export default function BusinessDetailsScreen() {
     setIsNavigating(true);
     
     try {
-      // Step 1: Get authenticated user (should already have JWT from mobile OTP)
-      // Get current session (user should be authenticated from mobile OTP step)
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'Business details: getSession'
+      );
       
-      // Get mobile from params or from user's phone metadata
       const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
       if (!mobileNumber) {
-        console.warn('⚠️ Mobile number not available for business details submission');
         Alert.alert('Error', 'Mobile number is required. Please try again.');
         setIsCompleting(false);
         setIsNavigating(false);
         return;
       }
       
-      if (!session || !session.user) {
-        // If no session, try to create one (fallback)
-        console.warn('⚠️ No session found, attempting to authenticate...');
+      if (!session?.user) {
         const phoneNumber = `+91${mobileNumber}`;
         const tempPassword = `Temp@${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
         
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          phone: phoneNumber,
-          password: tempPassword,
-        });
+        const { data: signUpData, error: signUpError } = await withTimeout(
+          supabase.auth.signUp({ phone: phoneNumber, password: tempPassword }),
+          15000,
+          'Business details: signUp'
+        );
         
         if (signUpError && signUpError.message.includes('already registered')) {
-          // User exists, try to sign in
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-            phone: phoneNumber,
-            password: tempPassword,
-          });
-          
+          const { error: signInError } = await withTimeout(
+            supabase.auth.signInWithPassword({ phone: phoneNumber, password: tempPassword }),
+            15000,
+            'Business details: signIn'
+          );
           if (signInError) {
             throw new Error('Authentication required. Please complete mobile OTP verification first.');
           }
@@ -361,30 +359,32 @@ export default function BusinessDetailsScreen() {
           throw signUpError;
         }
         
-        // Get session again
-        const { data: { session: newSession } } = await supabase.auth.getSession();
-        if (!newSession || !newSession.user) {
+        const { data: { session: newSession } } = await withTimeout(
+          supabase.auth.getSession(),
+          10000,
+          'Business details: getSession retry'
+        );
+        if (!newSession?.user) {
           throw new Error('User authentication failed. Please try again.');
         }
-        
-        console.log('✅ User authenticated successfully');
-        console.log('👤 User ID:', newSession.user.id);
-      } else {
-        console.log('✅ Using existing authenticated session');
-        console.log('👤 User ID:', session.user.id);
       }
 
-      // Step 2: Get current user ID (from session)
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await withTimeout(
+        supabase.auth.getUser(),
+        10000,
+        'Business details: getUser'
+      );
       
       if (!user) {
         throw new Error('User not authenticated. Please complete mobile OTP verification first.');
       }
 
-      console.log('👤 Submitting business details for user:', user.id);
-
-      // Step 3: Submit business details to backend
-      const parsedGstinData = type === 'GSTIN' && gstinData ? JSON.parse(gstinData as string) : null;
+      let parsedGstinData = null;
+      try {
+        parsedGstinData = type === 'GSTIN' && gstinData ? JSON.parse(gstinData as string) : null;
+      } catch {
+        parsedGstinData = null;
+      }
       const finalBusinessType = businessType !== 'Others' ? businessType : customBusinessType;
       
       // ✅ CRITICAL: For GSTIN users, we MUST await business creation before creating address
@@ -428,7 +428,8 @@ export default function BusinessDetailsScreen() {
       // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
       // ✅ CRITICAL: Business must be created first (we already awaited it above)
       if (type === 'GSTIN' && gstinData && businessResult.success) {
-        const parsedGstinDataForAddress = JSON.parse(gstinData as string);
+        let parsedGstinDataForAddress: any = null;
+        try { parsedGstinDataForAddress = JSON.parse(gstinData as string); } catch { /* malformed */ }
       
         // Check if a primary address already exists
         const existingAddresses = dataStore.getAddresses();

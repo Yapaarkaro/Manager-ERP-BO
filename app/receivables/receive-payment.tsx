@@ -34,20 +34,19 @@ const Colors = {
   }
 };
 
-// Mock customers with receivables
-const mockCustomersWithReceivables = [];
+const customersWithReceivables: any[] = [];
 
 export default function ReceivePaymentScreen() {
   const { customerId, customerData } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredCustomers, setFilteredCustomers] = useState(mockCustomersWithReceivables);
+  const [filteredCustomers, setFilteredCustomers] = useState(customersWithReceivables);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredCustomers(mockCustomersWithReceivables);
+      setFilteredCustomers(customersWithReceivables);
     } else {
-      const filtered = mockCustomersWithReceivables.filter(customer =>
+      const filtered = customersWithReceivables.filter(customer =>
         customer.customerName.toLowerCase().includes(query.toLowerCase()) ||
         customer.businessName?.toLowerCase().includes(query.toLowerCase()) ||
         customer.mobile.includes(query) ||

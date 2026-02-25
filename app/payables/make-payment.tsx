@@ -34,20 +34,19 @@ const Colors = {
   }
 };
 
-// Mock suppliers with payables
-const mockSuppliersWithPayables = [];
+const suppliersWithPayables = [];
 
 export default function MakePaymentScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredSuppliers, setFilteredSuppliers] = useState(mockSuppliersWithPayables);
+  const [filteredSuppliers, setFilteredSuppliers] = useState(suppliersWithPayables);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredSuppliers(mockSuppliersWithPayables);
+      setFilteredSuppliers(suppliersWithPayables);
     } else {
-      const filtered = mockSuppliersWithPayables.filter(supplier =>
+      const filtered = suppliersWithPayables.filter(supplier =>
         supplier.supplierName.toLowerCase().includes(query.toLowerCase()) ||
         supplier.businessName?.toLowerCase().includes(query.toLowerCase()) ||
         supplier.mobile.includes(query) ||

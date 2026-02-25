@@ -44,77 +44,7 @@ interface ChatMessage {
   };
 }
 
-const mockMessages: ChatMessage[] = [
-  {
-    id: '1',
-    text: 'Hello! Thank you for your recent order. How was your experience with our products?',
-    timestamp: '2024-01-16T09:30:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '2',
-    text: 'Hi! The products are excellent quality. Very satisfied with the iPhone 14 Pro.',
-    timestamp: '2024-01-16T09:35:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '3',
-    text: 'That\'s great to hear! We have some new MacBook models coming in next week. Would you be interested?',
-    timestamp: '2024-01-16T09:40:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '4',
-    text: 'Yes, definitely! Can you send me the specifications and pricing?',
-    timestamp: '2024-01-16T09:42:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '5',
-    text: 'Sure! I\'ll send you the complete product catalog with pricing.',
-    timestamp: '2024-01-16T09:45:00Z',
-    isFromMe: true,
-    status: 'delivered',
-    type: 'text'
-  },
-  {
-    id: '6',
-    text: 'MacBook_Catalog_January_2024.pdf',
-    timestamp: '2024-01-16T09:47:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'file',
-    attachment: {
-      url: 'https://example.com/catalog.pdf',
-      name: 'MacBook_Catalog_January_2024.pdf',
-      size: '3.2 MB'
-    }
-  },
-  {
-    id: '7',
-    text: 'Perfect! I\'ll review this and place an order soon. Also, do you offer bulk discounts?',
-    timestamp: '2024-01-16T10:00:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '8',
-    text: 'Yes, we offer 5% discount for orders above ₹5 lakhs and 8% for orders above ₹10 lakhs.',
-    timestamp: '2024-01-16T10:05:00Z',
-    isFromMe: true,
-    status: 'sent',
-    type: 'text'
-  },
-];
+const mockMessages: ChatMessage[] = [];
 
 export default function CustomerChatScreen() {
   const { customerId, customerName, customerAvatar } = useLocalSearchParams();

@@ -89,7 +89,6 @@ export default function PODetailsScreen() {
       }
     }
     
-    // Fallback to mock data if parsing fails
     return {
       id: poId as string,
       poNumber: 'PO-2024-001',

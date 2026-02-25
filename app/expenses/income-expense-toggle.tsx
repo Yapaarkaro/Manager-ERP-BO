@@ -126,9 +126,8 @@ export default function IncomeExpenseToggleScreen() {
   };
 
   const handleImageCapture = () => {
-    // Mock image capture
-    updateFormData('proofImage', 'https://images.pexels.com/photos/1234567/pexels-photo-1234567.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1');
-    Alert.alert('Success', 'Proof image captured successfully');
+    // TODO: Implement actual image capture (camera or photo picker)
+    updateFormData('proofImage', '');
   };
 
   const removeImage = () => {

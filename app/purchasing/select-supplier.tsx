@@ -37,19 +37,18 @@ const Colors = {
   }
 };
 
-// Mock suppliers data
-const mockSuppliers = [];
+const suppliers: any[] = [];
 
 export default function SelectSupplierScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredSuppliers, setFilteredSuppliers] = useState(mockSuppliers);
+  const [filteredSuppliers, setFilteredSuppliers] = useState(suppliers);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
-      setFilteredSuppliers(mockSuppliers);
+      setFilteredSuppliers(suppliers);
     } else {
-      const filtered = mockSuppliers.filter(supplier =>
+      const filtered = suppliers.filter(supplier =>
         supplier.name.toLowerCase().includes(query.toLowerCase()) ||
         supplier.businessName?.toLowerCase().includes(query.toLowerCase()) ||
         supplier.contactPerson.toLowerCase().includes(query.toLowerCase()) ||

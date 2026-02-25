@@ -9,55 +9,43 @@ import { dataStore } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import { productStore } from '@/utils/productStore';
 import { prefetchBusinessData } from '@/hooks/useBusinessData';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 
-// Extend global type
 declare global {
   var clearAllData: (() => Promise<void>) | undefined;
 }
 
-// Global function to clear all data - call this when needed for testing
 global.clearAllData = async () => {
-  console.log('🧹 MANUALLY CLEARING ALL DATA...');
   await dataStore.clearAllDataForTesting();
   await subscriptionStore.clearSubscriptionData();
-  console.log('✅ ALL DATA CLEARED MANUALLY!');
 };
 
 export default function RootLayout() {
   useFrameworkReady();
 
-  // ✅ Reset dataStore on app reload/refresh (backend is source of truth)
   useEffect(() => {
     const initializeData = async () => {
-      console.log('🔄 Resetting dataStore on app reload...');
-      
-      // Clear all local signup data (backend is source of truth)
-      dataStore.clearSignupProgress();
-      
-      // Load products from backend
+      // 1. Load local cached data first (fast, from AsyncStorage)
+      await dataStore.loadData();
+
+      // 2. Check auth session before any backend calls (with timeout to prevent hanging)
       try {
-        await productStore.loadProductsFromBackend();
-      } catch (error) {
-        console.error('Error loading products on app startup:', error);
-      }
-      
-      // Only load non-signup data (addresses, bank accounts for completed users)
-      // Signup progress will be fetched from backend after OTP verification
-      console.log('✅ DataStore reset - signup progress will be fetched from backend');
-      
-      // ✅ Prefetch business data early to warm up cache for instant loading
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          10000,
+          'Layout: getSession'
+        );
         if (session?.user) {
-          console.log('🚀 Prefetching business data for instant loading...');
-          await prefetchBusinessData();
-          console.log('✅ Business data prefetched and cached');
+          await Promise.allSettled([
+            withTimeout(productStore.loadProductsFromBackend(), 15000, 'Products prefetch'),
+            withTimeout(prefetchBusinessData(), 15000, 'Business data prefetch'),
+          ]);
         }
-      } catch (error) {
-        console.warn('⚠️ Failed to prefetch business data (non-blocking):', error);
+      } catch {
+        // Auth check failed or timed out - user will be directed to login
       }
     };
+
     initializeData();
   }, []);
 

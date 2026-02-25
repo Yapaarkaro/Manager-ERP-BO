@@ -57,13 +57,7 @@ interface NotificationData {
   audioUrl?: string;
 }
 
-const mockStaff: Staff[] = [
-  { id: 'staff_1', name: 'John Doe', role: 'Sales Manager' },
-  { id: 'staff_2', name: 'Jane Smith', role: 'Accountant' },
-  { id: 'staff_3', name: 'Mike Johnson', role: 'Inventory Manager' },
-  { id: 'staff_4', name: 'Sarah Wilson', role: 'Customer Service' },
-  { id: 'staff_5', name: 'David Brown', role: 'Warehouse Supervisor' },
-];
+const mockStaff: Staff[] = [];
 
 const notificationTypes = [
   'Sale',

@@ -20,7 +20,6 @@ import { useStatusBar } from '@/contexts/StatusBarContext';
 import { dataStore } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { supabase } from '@/lib/supabase';
-import { saveSignupProgress } from '@/services/backendApi';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 
 const COLORS = {
@@ -93,42 +92,15 @@ export default function MobileScreen() {
     if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber) && !isNavigating) {
       setIsValid(true);
       setIsNavigating(true);
-      
-      // Send OTP via Supabase Auth
-      const sendOTP = async () => {
-        try {
-          const phoneNumber = `+91${mobileNumber}`;
-          const { error } = await supabase.auth.signInWithOtp({
-            phone: phoneNumber,
-          });
-          
-          if (error && !error.message.includes('already sent')) {
-            console.error('Error sending OTP:', error);
-            Alert.alert('Error', 'Failed to send OTP. Please try again.');
-            setIsNavigating(false);
-            setIsValid(false);
-            return;
-          }
-          
-          console.log('✅ OTP sent successfully to', phoneNumber);
-          
-          // Note: Can't save signup progress here - user not authenticated yet
-          // Progress will be saved after OTP verification in otp.tsx
-          
-          // Navigate to OTP screen
-          router.push({
-            pathname: '/auth/otp',
-            params: { mobile: mobileNumber }
-          });
-        } catch (error: any) {
-          console.error('Error in sendOTP:', error);
-          Alert.alert('Error', 'Failed to send OTP. Please try again.');
-          setIsNavigating(false);
-          setIsValid(false);
-        }
-      };
-      
-      sendOTP();
+
+      console.log('✅ Valid mobile number entered, navigating to OTP screen');
+
+      // Navigate to OTP screen. OTP verification is handled by the
+      // verify-mobile-otp edge function. Supabase Auth session is created after verification.
+      router.push({
+        pathname: '/auth/otp',
+        params: { mobile: mobileNumber }
+      });
     } else if (mobileNumber.length !== 10) {
       setIsValid(false);
       setIsNavigating(false);

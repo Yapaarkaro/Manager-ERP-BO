@@ -70,16 +70,7 @@ export default function SubscriptionInvoiceDetailsScreen() {
     amount: invoice.amount
   });
 
-  // Mock subscription invoice items
-  const invoiceItems: SubscriptionInvoiceItem[] = [
-    {
-      id: '1',
-      name: invoice.subscriptionName,
-      description: invoice.description,
-      amount: invoice.amount,
-      type: invoice.subscriptionType
-    }
-  ];
+  const invoiceItems: SubscriptionInvoiceItem[] = [];
 
   const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
   const grandTotal = subtotal;
@@ -155,7 +146,6 @@ export default function SubscriptionInvoiceDetailsScreen() {
 
   const handleDownload = async () => {
     try {
-      // Mock download functionality
       Alert.alert('Download', 'Invoice download started...');
     } catch (error) {
       Alert.alert('Error', 'Failed to download invoice');
@@ -164,7 +154,6 @@ export default function SubscriptionInvoiceDetailsScreen() {
 
   const handleShare = async () => {
     try {
-      // Mock share functionality
       Alert.alert('Share', 'Invoice sharing...');
     } catch (error) {
       Alert.alert('Error', 'Failed to share invoice');

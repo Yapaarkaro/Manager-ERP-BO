@@ -6,6 +6,7 @@
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface DeviceSnapshot {
   // Device Information
@@ -90,25 +91,31 @@ export async function collectDeviceSnapshot(): Promise<DeviceSnapshot> {
       snapshot.manufacturer = Device.manufacturer;
     }
     
-    // Device ID (using installation ID from Constants, with fallback for web)
+    // Device ID (using installation ID from Constants, with fallback)
     if (Constants.installationId) {
       snapshot.deviceId = Constants.installationId;
-    } else if (Platform.OS === 'web') {
-      // Generate a persistent device ID for web using localStorage
+    } else {
       try {
         const storageKey = 'expo_device_id';
-        let deviceId = null;
-        if (typeof window !== 'undefined' && window.localStorage) {
-          deviceId = window.localStorage.getItem(storageKey);
+        if (Platform.OS === 'web') {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            let deviceId = window.localStorage.getItem(storageKey);
+            if (!deviceId) {
+              deviceId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+              window.localStorage.setItem(storageKey, deviceId);
+            }
+            snapshot.deviceId = deviceId;
+          }
+        } else {
+          let deviceId = await AsyncStorage.getItem(storageKey);
           if (!deviceId) {
-            // Generate a unique ID
-            deviceId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            window.localStorage.setItem(storageKey, deviceId);
+            deviceId = `${Platform.OS}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await AsyncStorage.setItem(storageKey, deviceId);
           }
           snapshot.deviceId = deviceId;
         }
-      } catch (error) {
-        console.warn('⚠️ Could not generate device ID for web:', error);
+      } catch {
+        // Non-critical: device ID generation failed
       }
     }
     

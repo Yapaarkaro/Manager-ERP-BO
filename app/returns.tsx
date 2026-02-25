@@ -29,6 +29,7 @@ import {
 } from 'lucide-react-native';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
 import { getInputFocusStyles } from '@/utils/platformUtils';
+import { getReturns } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import Sidebar from '@/components/Sidebar';
 
@@ -73,98 +74,12 @@ interface ReturnInvoice {
   };
 }
 
-const mockReturnInvoices: ReturnInvoice[] = [
-  {
-    id: '1',
-    returnNumber: 'RET-2024-001',
-    originalInvoiceNumber: 'INV-2024-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    refundStatus: 'refunded',
-    amount: 5500,
-    itemCount: 1,
-    date: '2024-01-16',
-    reason: 'Defective product',
-    customerDetails: {
-      name: 'Rajesh Kumar',
-      mobile: '+91 98765 43210',
-      address: '123, MG Road, Bangalore, Karnataka - 560001'
-    }
-  },
-  {
-    id: '2',
-    returnNumber: 'RET-2024-002',
-    originalInvoiceNumber: 'INV-2024-002',
-    customerName: 'TechCorp Solutions Pvt Ltd',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    refundStatus: 'pending',
-    amount: 2750,
-    itemCount: 1,
-    date: '2024-01-15',
-    reason: 'Wrong specification',
-    customerDetails: {
-      name: 'Amit Singh',
-      mobile: '+91 87654 32109',
-      businessName: 'TechCorp Solutions Pvt Ltd',
-      gstin: '29ABCDE1234F2Z6',
-      address: '456, Electronic City, Phase 2, Bangalore, Karnataka - 560100',
-      shipToAddress: '789, Whitefield, ITPL Road, Bangalore, Karnataka - 560066',
-      paymentTerms: 'Net 30 Days'
-    }
-  },
-  {
-    id: '3',
-    returnNumber: 'RET-2024-003',
-    originalInvoiceNumber: 'INV-2024-003',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    refundStatus: 'partially_refunded',
-    amount: 8300,
-    itemCount: 2,
-    date: '2024-01-14',
-    reason: 'Customer changed mind',
-    customerDetails: {
-      name: 'Sunita Devi',
-      mobile: '+91 76543 21098',
-      address: '321, Jayanagar, 4th Block, Bangalore, Karnataka - 560011'
-    }
-  },
-  {
-    id: '4',
-    returnNumber: 'RET-2024-004',
-    originalInvoiceNumber: 'INV-2024-004',
-    customerName: 'Global Enterprises Ltd',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    refundStatus: 'refunded',
-    amount: 4200,
-    itemCount: 1,
-    date: '2024-01-13',
-    reason: 'Damaged during shipping',
-    customerDetails: {
-      name: 'Vikram Patel',
-      mobile: '+91 99887 76655',
-      businessName: 'Global Enterprises Ltd',
-      gstin: '27FGHIJ5678K3L9',
-      address: '567, Bandra West, Mumbai, Maharashtra - 400050',
-      shipToAddress: '567, Bandra West, Mumbai, Maharashtra - 400050',
-      paymentTerms: 'Net 15 Days'
-    }
-  },
-];
-
 export default function ReturnsScreen() {
   const { handleBack } = useWebBackNavigation();
   const pathname = usePathname();
+  const [returnInvoices, setReturnInvoices] = useState<ReturnInvoice[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredReturns, setFilteredReturns] = useState(mockReturnInvoices);
+  const [filteredReturns, setFilteredReturns] = useState<ReturnInvoice[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
@@ -182,13 +97,42 @@ export default function ReturnsScreen() {
   // Use debounced navigation for FAB button
   const debouncedNavigate = useDebounceNavigation(500);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { success, returns: data } = await getReturns();
+      if (cancelled || !success || !data) return;
+      const mapped: ReturnInvoice[] = data.map((r: any) => ({
+        id: r.id,
+        returnNumber: r.return_number || '',
+        originalInvoiceNumber: r.original_invoice_number || '',
+        customerName: r.customer_name || '',
+        customerType: (r.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+        staffName: r.staff_name || '',
+        staffAvatar: 'https://via.placeholder.com/20',
+        refundStatus: (r.refund_status || 'pending') as 'refunded' | 'partially_refunded' | 'pending',
+        amount: Number(r.total_amount) || 0,
+        itemCount: 1,
+        date: r.return_date || '',
+        reason: r.reason || '',
+        customerDetails: {
+          name: r.customer_name || '',
+          mobile: '',
+          address: '',
+        },
+      }));
+      setReturnInvoices(mapped);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     applyFilters(query);
   };
 
   const applyFilters = (searchQuery: string = '') => {
-    let filtered = mockReturnInvoices;
+    let filtered = returnInvoices;
 
     // Apply search filter
     if (searchQuery.trim() !== '') {
@@ -370,16 +314,16 @@ export default function ReturnsScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or returnInvoices change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters]);
+  }, [activeFilters, returnInvoices]);
 
   // Calculate summary data
   const getSummaryData = () => {
-    const totalReturns = mockReturnInvoices.length;
-    const totalItems = mockReturnInvoices.reduce((sum, returnItem) => sum + returnItem.itemCount, 0);
-    const totalAmount = mockReturnInvoices.reduce((sum, returnItem) => sum + returnItem.amount, 0);
+    const totalReturns = returnInvoices.length;
+    const totalItems = returnInvoices.reduce((sum, returnItem) => sum + returnItem.itemCount, 0);
+    const totalAmount = returnInvoices.reduce((sum, returnItem) => sum + returnItem.amount, 0);
 
     return {
       totalReturns,

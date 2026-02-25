@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowUpRight, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
 import { Payable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { getPayables } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -35,116 +36,42 @@ const Colors = {
 
 // Using Payable interface from dataStore
 
-const mockPayables: Payable[] = [
-  {
-    id: 'PAY-001',
-    supplierId: 'SUP-001',
-    supplierName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    mobile: '+91 98765 43210',
-    gstin: '27AABCA1234Z1Z5',
-    address: '123, Apple Store, Bangalore - 560001',
-    totalPayable: 250000,
+function mapPayableFromBackend(raw: {
+  id: string;
+  supplierId?: string;
+  supplierName: string;
+  totalPayable: number;
+  billCount: number;
+  oldestBillDate: string;
+  status?: string;
+}): Payable {
+  return {
+    id: raw.id,
+    supplierId: raw.supplierId ?? raw.id,
+    supplierName: raw.supplierName ?? '',
+    supplierType: 'individual',
+    totalPayable: raw.totalPayable ?? 0,
+    billCount: raw.billCount ?? 0,
+    oldestBillDate: raw.oldestBillDate ?? '',
+    status: (raw.status === 'overdue' || raw.status === 'critical' ? raw.status : 'current') as 'current' | 'overdue' | 'critical',
     overdueAmount: 0,
-    billCount: 2,
-    oldestBillDate: '2024-01-20',
     daysPastDue: 0,
-    creditLimit: 500000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-25',
-    lastPaymentAmount: 100000,
-    supplierAvatar: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-  {
-    id: 'PAY-002',
-    supplierId: 'SUP-002',
-    supplierName: 'Samsung Electronics',
-    supplierType: 'business',
-    businessName: 'Samsung Electronics India',
-    mobile: '+91 87654 32109',
-    gstin: '29AABCS9876Z2Z6',
-    address: '456, Samsung Plaza, Mumbai - 400001',
-    totalPayable: 180000,
-    overdueAmount: 100000,
-    billCount: 1,
-    oldestBillDate: '2024-01-15',
-    daysPastDue: 3,
-    creditLimit: 300000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-20',
-    lastPaymentAmount: 80000,
-    supplierAvatar: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: 'PAY-003',
-    supplierId: 'SUP-003',
-    supplierName: 'Dell Technologies',
-    supplierType: 'business',
-    businessName: 'Dell Technologies India',
-    mobile: '+91 76543 21098',
-    gstin: '33AABCD5678Z3Z7',
-    address: '789, Dell Tower, Delhi - 110001',
-    totalPayable: 95000,
-    overdueAmount: 95000,
-    billCount: 1,
-    oldestBillDate: '2024-01-10',
-    daysPastDue: 10,
-    creditLimit: 200000,
-    paymentTerms: 'Net 15',
-    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'critical'
-  },
-  {
-    id: 'PAY-004',
-    supplierId: 'SUP-004',
-    supplierName: 'HP India',
-    supplierType: 'business',
-    businessName: 'HP India Pvt Ltd',
-    mobile: '+91 65432 10987',
-    gstin: '24AABCH2345Z4Z8',
-    address: '321, HP Complex, Chennai - 600001',
-    totalPayable: 120000,
-    overdueAmount: 80000,
-    billCount: 1,
-    oldestBillDate: '2024-01-08',
-    daysPastDue: 7,
-    creditLimit: 250000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-15',
-    lastPaymentAmount: 40000,
-    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: 'PAY-005',
-    supplierId: 'SUP-005',
-    supplierName: 'Lenovo India',
-    supplierType: 'business',
-    businessName: 'Lenovo India Pvt Ltd',
-    mobile: '+91 54321 09876',
-    gstin: '27AABCL3456Z5Z9',
-    address: '654, Lenovo Park, Ahmedabad - 380001',
-    totalPayable: 75000,
-    overdueAmount: 0,
-    billCount: 2,
-    oldestBillDate: '2024-01-12',
-    daysPastDue: 0,
-    creditLimit: 150000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-25',
-    lastPaymentAmount: 25000,
-    supplierAvatar: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  }
-];
+    mobile: '',
+    address: '',
+    supplierAvatar: '',
+    businessName: undefined,
+    gstin: undefined,
+    paymentTerms: undefined,
+    lastPaymentDate: undefined,
+    lastPaymentAmount: undefined,
+    creditLimit: undefined,
+  };
+}
 
 export default function PayablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [payables, setPayables] = useState<Payable[]>(mockPayables);
-  const [filteredPayables, setFilteredPayables] = useState<Payable[]>(mockPayables);
+  const [payables, setPayables] = useState<Payable[]>([]);
+  const [filteredPayables, setFilteredPayables] = useState<Payable[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
@@ -159,12 +86,16 @@ export default function PayablesScreen() {
   // Use debounced navigation for supplier cards
   const debouncedNavigate = useDebounceNavigation(500);
 
-  // Use mock data instead of dataStore
-  React.useEffect(() => {
-    // Set initial data from mock
-    console.log('Loading mock payables:', mockPayables.length);
-    setPayables(mockPayables);
-    setFilteredPayables(mockPayables);
+  useEffect(() => {
+    (async () => {
+      const { success, payables: data } = await getPayables();
+      if (success && data) {
+        const mapped = data.map(mapPayableFromBackend);
+        setPayables(mapped);
+      } else {
+        setPayables([]);
+      }
+    })();
   }, []);
 
   const handleSearch = (query: string) => {
@@ -338,10 +269,10 @@ export default function PayablesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or payables change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters]);
+  }, [activeFilters, payables]);
 
   const handleSupplierDetails = (payable: Payable) => {
     if (isNavigating) return;

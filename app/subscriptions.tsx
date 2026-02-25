@@ -38,7 +38,6 @@ const Colors = {
 };
 
 export default function SubscriptionsScreen() {
-  // Mock subscription data
   const [subscriptions] = useState([
     {
       id: '1',
@@ -140,7 +139,7 @@ export default function SubscriptionsScreen() {
         name: 'Business Owner',
         mobile: '+91 98765 43210',
         businessName: 'Your Business Name',
-        address: '123, Sample Address, City - 560001'
+        address: ''
       }
     };
 

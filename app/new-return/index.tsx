@@ -71,7 +71,6 @@ interface Invoice {
   }[];
 }
 
-// Mock recent invoices for return processing
 const recentInvoices: Invoice[] = [
   {
     id: '1',

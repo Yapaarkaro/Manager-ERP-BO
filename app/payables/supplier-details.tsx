@@ -40,61 +40,7 @@ interface TransactionLog {
   balanceAfter: number;
 }
 
-const mockTransactionLogs: TransactionLog[] = [
-  {
-    id: '1',
-    type: 'bill',
-    billNumber: 'BILL-2024-001',
-    amount: 250000,
-    date: '2024-01-20',
-    description: 'iPhone 14 Pro - 10 units',
-    status: 'pending',
-    dueDate: '2024-02-19',
-    balanceAfter: 850000
-  },
-  {
-    id: '2',
-    type: 'payment',
-    amount: -200000,
-    date: '2024-01-18',
-    description: 'Payment made via Bank Transfer',
-    paymentMethod: 'Bank Transfer',
-    status: 'paid',
-    balanceAfter: 600000
-  },
-  {
-    id: '3',
-    type: 'bill',
-    billNumber: 'BILL-2024-002',
-    amount: 300000,
-    date: '2024-01-15',
-    description: 'MacBook Air M2 - 5 units',
-    status: 'overdue',
-    dueDate: '2024-02-14',
-    balanceAfter: 800000
-  },
-  {
-    id: '4',
-    type: 'payment',
-    amount: -150000,
-    date: '2024-01-10',
-    description: 'Partial payment via UPI',
-    paymentMethod: 'UPI',
-    status: 'paid',
-    balanceAfter: 500000
-  },
-  {
-    id: '5',
-    type: 'bill',
-    billNumber: 'BILL-2024-003',
-    amount: 400000,
-    date: '2024-01-05',
-    description: 'AirPods Pro - 20 units',
-    status: 'overdue',
-    dueDate: '2024-02-04',
-    balanceAfter: 650000
-  },
-];
+const mockTransactionLogs: TransactionLog[] = [];
 
 export default function SupplierDetailsScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();
@@ -150,8 +96,7 @@ export default function SupplierDetailsScreen() {
 
   const handleTransactionPress = (transaction: TransactionLog) => {
     if (transaction.billNumber) {
-      // Create mock bill data for navigation
-      const mockBill = {
+      const billData = {
         id: transaction.billNumber.replace('BILL-', ''),
         billNumber: transaction.billNumber,
         supplierName: supplier.supplierName,
@@ -175,8 +120,8 @@ export default function SupplierDetailsScreen() {
       router.push({
         pathname: '/bill-details',
         params: {
-          billId: mockBill.id,
-          billData: JSON.stringify(mockBill)
+          billId: billData.id,
+          billData: JSON.stringify(billData)
         }
       });
     }

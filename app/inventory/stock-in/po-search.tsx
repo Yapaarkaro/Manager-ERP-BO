@@ -72,74 +72,7 @@ interface PurchaseOrder {
   products: POProduct[];
 }
 
-const mockPOs: PurchaseOrder[] = [
-  {
-    id: 'po_001',
-    poNumber: 'PO-2024-001',
-    supplierName: 'ABC Suppliers Pvt Ltd',
-    supplierGSTIN: '27ABCDE1234F1Z5',
-    supplierAddress: '123, Industrial Area, Mumbai - 400001',
-    supplierPhone: '+91 98765 43210',
-    supplierEmail: 'contact@abcsuppliers.com',
-    orderDate: '2024-01-15',
-    expectedDelivery: '2024-01-25',
-    totalAmount: 50000,
-    status: 'partial',
-    products: [
-      {
-        id: 'prod_1',
-        name: 'Laptop',
-        billedQuantity: 10,
-        receivedQuantity: 8,
-        unitPrice: 45000,
-        totalPrice: 450000,
-        status: 'partial',
-      },
-      {
-        id: 'prod_2',
-        name: 'Mouse',
-        billedQuantity: 20,
-        receivedQuantity: 20,
-        unitPrice: 500,
-        totalPrice: 10000,
-        status: 'received',
-      },
-      {
-        id: 'prod_3',
-        name: 'Keyboard',
-        billedQuantity: 15,
-        receivedQuantity: 0,
-        unitPrice: 2000,
-        totalPrice: 30000,
-        status: 'pending',
-      },
-    ],
-  },
-  {
-    id: 'po_002',
-    poNumber: 'PO-2024-002',
-    supplierName: 'XYZ Electronics',
-    supplierGSTIN: '29XYZABC5678G9H0',
-    supplierAddress: '456, Tech Park, Bangalore - 560001',
-    supplierPhone: '+91 87654 32109',
-    supplierEmail: 'info@xyzelectronics.com',
-    orderDate: '2024-01-20',
-    expectedDelivery: '2024-01-30',
-    totalAmount: 75000,
-    status: 'pending',
-    products: [
-      {
-        id: 'prod_4',
-        name: 'Monitor',
-        billedQuantity: 5,
-        receivedQuantity: 0,
-        unitPrice: 15000,
-        totalPrice: 75000,
-        status: 'pending',
-      },
-    ],
-  },
-];
+const mockPOs: PurchaseOrder[] = [];
 
 export default function POSearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');

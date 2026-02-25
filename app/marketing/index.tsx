@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { getCampaigns } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   Search, 
@@ -60,78 +61,67 @@ interface MarketingCampaign {
   createdAt: string;
 }
 
-const mockCampaigns: MarketingCampaign[] = [
-  {
-    id: 'CAMP-001',
-    name: 'Summer Sale WhatsApp Campaign',
-    platform: 'WhatsApp',
-    startDate: '2024-06-01',
-    endDate: '2024-06-30',
-    budget: 15000,
-    status: 'active',
-    targetAudience: ['my existing customers', 'my business city'],
-    objective: 'Increase sales and customer engagement',
-    impressions: 25000,
-    clicks: 3200,
-    conversions: 450,
-    spend: 12000,
-    createdAt: '2024-05-15',
-  },
-  {
-    id: 'CAMP-002',
-    name: 'Instagram Brand Awareness',
-    platform: 'Instagram',
-    startDate: '2024-05-15',
-    endDate: '2024-06-15',
-    budget: 25000,
-    status: 'completed',
-    targetAudience: ['young adults 18-24', 'female audience'],
-    objective: 'Brand awareness and reach',
-    impressions: 45000,
-    clicks: 5200,
-    conversions: 280,
-    spend: 25000,
-    createdAt: '2024-05-01',
-  },
-  {
-    id: 'CAMP-003',
-    name: 'Google Search Ads',
-    platform: 'Google',
-    startDate: '2024-07-01',
-    endDate: '2024-07-31',
-    budget: 10000,
-    status: 'pending',
-    targetAudience: ['professionals 25-34', 'male audience'],
-    objective: 'Drive website traffic and leads',
-    impressions: 0,
-    clicks: 0,
-    conversions: 0,
-    spend: 0,
-    createdAt: '2024-06-20',
-  },
-  {
-    id: 'CAMP-004',
-    name: 'Facebook Lead Generation',
-    platform: 'Facebook',
-    startDate: '2024-04-01',
-    endDate: '2024-04-30',
-    budget: 20000,
-    status: 'cancelled',
-    targetAudience: ['my business city'],
-    objective: 'Generate qualified leads',
-    impressions: 15000,
-    clicks: 1800,
-    conversions: 120,
-    spend: 8500,
-    createdAt: '2024-03-15',
-  },
-];
+const mapCampaignFromDb = (c: any): MarketingCampaign => {
+  const parseTargetAudience = (v: any): string[] => {
+    if (Array.isArray(v)) return v.map(String);
+    if (typeof v === 'string') {
+      try {
+        const parsed = JSON.parse(v);
+        return Array.isArray(parsed) ? parsed.map(String) : [v];
+      } catch {
+        return v ? [v] : [];
+      }
+    }
+    return [];
+  };
+  return {
+    id: c.id,
+    name: c.name || '',
+    platform: c.platform || '',
+    startDate: c.start_date || '',
+    endDate: c.end_date || '',
+    budget: c.budget ?? 0,
+    spend: c.spend ?? 0,
+    status: (c.status || 'pending') as MarketingCampaign['status'],
+    targetAudience: parseTargetAudience(c.target_audience),
+    objective: c.objective || '',
+    impressions: c.impressions ?? 0,
+    clicks: c.clicks ?? 0,
+    conversions: c.conversions ?? 0,
+    createdAt: c.created_at || '',
+  };
+};
 
 export default function MarketingScreen() {
   const { handleBack } = useWebBackNavigation();
+  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredCampaigns, setFilteredCampaigns] = useState(mockCampaigns);
+  const [filteredCampaigns, setFilteredCampaigns] = useState<MarketingCampaign[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'completed' | 'pending' | 'cancelled'>('all');
+
+  useEffect(() => {
+    (async () => {
+      const { success, campaigns: data } = await getCampaigns();
+      if (success && data) {
+        setCampaigns(data.map(mapCampaignFromDb));
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    let filtered = campaigns;
+    if (searchQuery.trim() !== '') {
+      filtered = filtered.filter(campaign =>
+        campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        campaign.platform.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        campaign.objective.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    if (selectedFilter !== 'all') {
+      filtered = filtered.filter(campaign => campaign.status === selectedFilter);
+    }
+    setFilteredCampaigns(filtered);
+  }, [campaigns, searchQuery, selectedFilter]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -144,7 +134,7 @@ export default function MarketingScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockCampaigns;
+    let filtered = campaigns;
 
     // Apply search filter
     if (query.trim() !== '') {

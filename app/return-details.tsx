@@ -41,24 +41,12 @@ interface ReturnItem {
 
 export default function ReturnDetailsScreen() {
   const { returnId, returnData } = useLocalSearchParams();
-  const returnInvoice = JSON.parse(returnData as string);
-  const customer = returnInvoice.customerDetails;
-  const isBusinessCustomer = returnInvoice.customerType === 'business';
+  let returnInvoice: any = {};
+  try { returnInvoice = returnData ? JSON.parse(returnData as string) : {}; } catch { returnInvoice = {}; }
+  const customer = returnInvoice?.customerDetails;
+  const isBusinessCustomer = returnInvoice?.customerType === 'business';
 
-  // Mock return items
-  const returnItems: ReturnItem[] = [
-    {
-      id: '1',
-      name: 'iPhone 14 Pro 128GB',
-      quantity: 1,
-      rate: 129900,
-      amount: 129900,
-      taxRate: 18,
-      taxAmount: 23382,
-      total: 153282,
-      reason: 'Defective screen'
-    },
-  ];
+  const returnItems: ReturnItem[] = [];
 
   const subtotal = returnItems.reduce((sum, item) => sum + item.amount, 0);
   const totalTax = returnItems.reduce((sum, item) => sum + item.taxAmount, 0);
@@ -120,19 +108,18 @@ export default function ReturnDetailsScreen() {
   };
 
   const handleViewOriginalInvoice = () => {
-    // Create mock original invoice data based on the return invoice
     const originalInvoice = {
-      id: returnInvoice.originalInvoiceNumber.replace('INV-', ''),
-      invoiceNumber: returnInvoice.originalInvoiceNumber,
-      customerName: returnInvoice.customerName,
-      customerType: returnInvoice.customerType,
-      staffName: returnInvoice.staffName,
-      staffAvatar: returnInvoice.staffAvatar,
+      id: returnInvoice.originalInvoiceNumber?.replace('INV-', '') || '',
+      invoiceNumber: returnInvoice.originalInvoiceNumber || '',
+      customerName: returnInvoice.customerName || '',
+      customerType: returnInvoice.customerType || 'individual',
+      staffName: returnInvoice.staffName || '',
+      staffAvatar: returnInvoice.staffAvatar || '',
       paymentStatus: 'paid',
-      amount: returnInvoice.amount + 5000, // Original amount would be higher
-      itemCount: returnInvoice.itemCount + 1,
-      date: new Date(new Date(returnInvoice.date).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Day before return
-      customerDetails: returnInvoice.customerDetails,
+      amount: returnInvoice.amount || 0,
+      itemCount: returnInvoice.itemCount || 0,
+      date: returnInvoice.date || '',
+      customerDetails: returnInvoice.customerDetails || {},
     };
 
     router.push({

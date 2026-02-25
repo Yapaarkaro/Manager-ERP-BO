@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Bell, BellRing, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle, Info, Users, Package, ShoppingCart, IndianRupee, Eye, Check, X, MessageSquare } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { getNotifications } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -62,172 +63,61 @@ interface Notification {
   };
 }
 
-const mockNotifications: Notification[] = [
-  {
-    id: 'NOTIF-001',
-    type: 'urgent',
-    category: 'order',
-    title: 'New High-Value Order Received',
-    message: 'New order received from TechCorp Solutions Pvt Ltd worth ₹2,45,000. Requires immediate processing and stock verification.',
-    timestamp: '2024-01-16T10:30:00Z',
-    status: 'unread',
-    priority: 'critical',
-    actionRequired: true,
-    relatedEntity: {
-      type: 'customer',
-      id: 'CUST-001',
-      name: 'TechCorp Solutions Pvt Ltd'
-    },
+function mapNotificationFromBackend(raw: {
+  id: string;
+  type?: string;
+  category?: string;
+  title?: string;
+  message?: string;
+  status?: string;
+  priority?: string;
+  action_required?: boolean;
+  related_entity_type?: string;
+  related_entity_id?: string;
+  related_entity_name?: string;
+  created_by_name?: string;
+  assigned_to_name?: string;
+  created_at?: string;
+}): Notification {
+  const validType = ['urgent', 'warning', 'info', 'success'].includes(raw.type || '') ? raw.type as Notification['type'] : 'info';
+  const validCategory = ['order', 'stock', 'payment', 'staff', 'system', 'customer'].includes(raw.category || '') ? raw.category as Notification['category'] : 'system';
+  const validStatus = ['unread', 'read', 'acknowledged', 'resolved'].includes(raw.status || '') ? raw.status as Notification['status'] : 'unread';
+  const validPriority = ['low', 'medium', 'high', 'critical'].includes(raw.priority || '') ? raw.priority as Notification['priority'] : 'medium';
+
+  return {
+    id: raw.id,
+    type: validType,
+    category: validCategory,
+    title: raw.title ?? '',
+    message: raw.message ?? '',
+    timestamp: raw.created_at ?? '',
+    status: validStatus,
+    priority: validPriority,
+    actionRequired: raw.action_required ?? false,
+    relatedEntity: (raw.related_entity_type && raw.related_entity_id)
+      ? {
+          type: raw.related_entity_type as 'customer' | 'supplier' | 'product' | 'invoice' | 'staff',
+          id: raw.related_entity_id,
+          name: raw.related_entity_name ?? '',
+        }
+      : undefined,
     createdBy: {
-      id: 'SYSTEM',
-      name: 'System',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Automated System'
-    }
-  },
-  {
-    id: 'NOTIF-002',
-    type: 'warning',
-    category: 'stock',
-    title: 'Critical Stock Alert',
-    message: 'iPhone 14 Pro stock has dropped to 3 units. Minimum threshold is 10 units. Immediate restocking required.',
-    timestamp: '2024-01-16T09:15:00Z',
-    status: 'read',
-    priority: 'high',
-    actionRequired: true,
-    relatedEntity: {
-      type: 'product',
-      id: 'PROD-001',
-      name: 'iPhone 14 Pro 128GB'
+      id: '',
+      name: raw.created_by_name ?? '',
+      avatar: '',
+      role: '',
     },
-    createdBy: {
-      id: 'SYSTEM',
-      name: 'Inventory System',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Automated System'
-    },
-    assignedTo: {
-      id: 'STAFF-001',
-      name: 'Rajesh Kumar',
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-    }
-  },
-  {
-    id: 'NOTIF-003',
-    type: 'success',
-    category: 'payment',
-    title: 'Payment Received',
-    message: 'Payment of ₹1,25,000 received from Global Enterprises Ltd via UPI. Invoice INV-2024-002 has been marked as paid.',
-    timestamp: '2024-01-16T08:45:00Z',
-    status: 'acknowledged',
-    priority: 'medium',
-    actionRequired: false,
-    relatedEntity: {
-      type: 'invoice',
-      id: 'INV-002',
-      name: 'INV-2024-002'
-    },
-    createdBy: {
-      id: 'STAFF-002',
-      name: 'Priya Sharma',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Sales Executive'
-    }
-  },
-  {
-    id: 'NOTIF-004',
-    type: 'info',
-    category: 'staff',
-    title: 'Staff Attendance Update',
-    message: 'Amit Singh has marked attendance for today. Current attendance rate: 95%. All staff members are present.',
-    timestamp: '2024-01-16T08:00:00Z',
-    status: 'read',
-    priority: 'low',
-    actionRequired: false,
-    relatedEntity: {
-      type: 'staff',
-      id: 'STAFF-003',
-      name: 'Amit Singh'
-    },
-    createdBy: {
-      id: 'SYSTEM',
-      name: 'HR System',
-      avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Automated System'
-    }
-  },
-  {
-    id: 'NOTIF-005',
-    type: 'warning',
-    category: 'customer',
-    title: 'Overdue Payment Reminder',
-    message: 'Customer Rajesh Kumar has an overdue payment of ₹35,000 for invoice INV-2024-001. Payment is 15 days past due.',
-    timestamp: '2024-01-15T16:20:00Z',
-    status: 'unread',
-    priority: 'high',
-    actionRequired: true,
-    relatedEntity: {
-      type: 'customer',
-      id: 'CUST-002',
-      name: 'Rajesh Kumar'
-    },
-    createdBy: {
-      id: 'SYSTEM',
-      name: 'Accounts System',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Automated System'
-    }
-  },
-  {
-    id: 'NOTIF-006',
-    type: 'info',
-    category: 'system',
-    title: 'Daily Sales Report Generated',
-    message: 'Daily sales report for January 15, 2024 has been generated. Total sales: ₹88,000 from 12 orders.',
-    timestamp: '2024-01-15T23:59:00Z',
-    status: 'resolved',
-    priority: 'low',
-    actionRequired: false,
-    createdBy: {
-      id: 'SYSTEM',
-      name: 'Reporting System',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Automated System'
-    }
-  },
-  {
-    id: 'NOTIF-007',
-    type: 'urgent',
-    category: 'stock',
-    title: 'Stock Discrepancy Detected',
-    message: 'Stock discrepancy found for MacBook Air M2. Expected: 25 units, Actual: 22 units. Shortage of 3 units detected.',
-    timestamp: '2024-01-15T14:30:00Z',
-    status: 'acknowledged',
-    priority: 'critical',
-    actionRequired: true,
-    relatedEntity: {
-      type: 'product',
-      id: 'PROD-003',
-      name: 'MacBook Air M2'
-    },
-    createdBy: {
-      id: 'STAFF-003',
-      name: 'Amit Singh',
-      avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Store Manager'
-    },
-    assignedTo: {
-      id: 'STAFF-001',
-      name: 'Rajesh Kumar',
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-    }
-  },
-];
+    assignedTo: raw.assigned_to_name
+      ? { id: '', name: raw.assigned_to_name, avatar: '' }
+      : undefined,
+  };
+}
 
 export default function NotificationsScreen() {
   const { handleBack } = useWebBackNavigation();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredNotifications, setFilteredNotifications] = useState(mockNotifications);
+  const [filteredNotifications, setFilteredNotifications] = useState<Notification[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unread' | 'urgent' | 'action_required'>('all');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
@@ -245,6 +135,18 @@ export default function NotificationsScreen() {
   
   // Use debounced navigation for related entity buttons
   const debouncedNavigate = useDebounceNavigation(500);
+
+  useEffect(() => {
+    (async () => {
+      const { success, notifications: data } = await getNotifications();
+      if (success && data) {
+        const mapped = data.map(mapNotificationFromBackend);
+        setNotifications(mapped);
+      } else {
+        setNotifications([]);
+      }
+    })();
+  }, []);
 
   const statusOptions = [
     { value: 'unread', label: 'Unread', color: Colors.error },
@@ -264,7 +166,7 @@ export default function NotificationsScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockNotifications;
+    let filtered = notifications;
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -452,10 +354,10 @@ export default function NotificationsScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters, notifications, searchQuery or selectedFilter change
   useEffect(() => {
     applyFilters(searchQuery, selectedFilter);
-  }, [activeFilters]);
+  }, [activeFilters, notifications, searchQuery, selectedFilter]);
 
   const formatDateTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -482,7 +384,7 @@ export default function NotificationsScreen() {
   const handleStatusUpdate = (newStatus: string) => {
     if (!selectedNotification) return;
 
-    setFilteredNotifications(prev =>
+    setNotifications(prev =>
       prev.map(notif =>
         notif.id === selectedNotification.id
           ? { ...notif, status: newStatus as Notification['status'] }
@@ -691,10 +593,10 @@ export default function NotificationsScreen() {
 
   const getFilterCounts = () => {
     return {
-      all: mockNotifications.length,
-      unread: mockNotifications.filter(n => n.status === 'unread').length,
-      urgent: mockNotifications.filter(n => n.type === 'urgent' || n.priority === 'critical').length,
-      action_required: mockNotifications.filter(n => n.actionRequired).length,
+      all: notifications.length,
+      unread: notifications.filter(n => n.status === 'unread').length,
+      urgent: notifications.filter(n => n.type === 'urgent' || n.priority === 'critical').length,
+      action_required: notifications.filter(n => n.actionRequired).length,
     };
   };
 

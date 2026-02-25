@@ -282,7 +282,7 @@ export default function InvoiceDetailsScreen() {
   const invoiceItems: InvoiceItem[] = invoice.items || [
     {
       id: `fallback-item-${Date.now()}`,
-      name: 'Sample Item',
+      name: '',
       quantity: 1,
       rate: invoice.totalAmount || 0,
       amount: invoice.totalAmount || 0,
@@ -624,9 +624,7 @@ export default function InvoiceDetailsScreen() {
           <View style={styles.irnCard}>
             <View style={styles.irnRow}>
               <Text style={styles.irnLabel}>IRN (Invoice Reference Number):</Text>
-              <Text style={styles.irnValue}>
-                01234567890123456789012345678901234567890123456789012345678901234
-              </Text>
+              <Text style={styles.irnValue}></Text>
             </View>
             
             <View style={styles.irnRow}>

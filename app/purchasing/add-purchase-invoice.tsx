@@ -98,28 +98,7 @@ interface Supplier {
   email: string;
 }
 
-const mockSuppliers: Supplier[] = [
-  {
-    id: '1',
-    name: 'Apple India Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    type: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    address: '123 Business Park, Mumbai, Maharashtra 400001',
-    phone: '+91 9876543210',
-    email: 'contact@apple.in'
-  },
-  {
-    id: '2',
-    name: 'Samsung Electronics',
-    gstin: '27FGHIJ5678K3L9',
-    type: 'business',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    address: '456 Tech Hub, Bangalore, Karnataka 560001',
-    phone: '+91 9876543211',
-    email: 'contact@samsung.in'
-  }
-];
+const mockSuppliers: Supplier[] = [];
 
 export default function AddPurchaseInvoiceScreen() {
   const [products, setProducts] = useState<PurchaseInvoiceProduct[]>([]);

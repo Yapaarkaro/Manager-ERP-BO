@@ -66,68 +66,9 @@ interface TransactionLog {
   description: string;
 }
 
-const mockSupplierProducts: SupplierProduct[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro 128GB',
-    category: 'Smartphones',
-    price: 115000,
-    minOrderQty: 5,
-    unit: 'Piece',
-    availability: 'in_stock',
-    lastOrderDate: '2024-01-10'
-  },
-  {
-    id: '2',
-    name: 'MacBook Air M2',
-    category: 'Laptops',
-    price: 100000,
-    minOrderQty: 2,
-    unit: 'Piece',
-    availability: 'in_stock',
-    lastOrderDate: '2024-01-05'
-  },
-  {
-    id: '3',
-    name: 'AirPods Pro 2nd Gen',
-    category: 'Audio',
-    price: 22000,
-    minOrderQty: 10,
-    unit: 'Piece',
-    availability: 'limited',
-    lastOrderDate: '2024-01-12'
-  },
-];
+const mockSupplierProducts: SupplierProduct[] = [];
 
-const mockTransactionLogs: TransactionLog[] = [
-  {
-    id: '1',
-    type: 'po',
-    number: 'PO-2024-001',
-    amount: 850000,
-    date: '2024-01-15',
-    status: 'completed',
-    description: 'iPhone 14 Pro - 10 units'
-  },
-  {
-    id: '2',
-    type: 'invoice',
-    number: 'INV-SUP-001',
-    amount: 850000,
-    date: '2024-01-16',
-    status: 'pending',
-    description: 'Invoice for PO-2024-001'
-  },
-  {
-    id: '3',
-    type: 'payment',
-    number: 'PAY-001',
-    amount: 500000,
-    date: '2024-01-18',
-    status: 'completed',
-    description: 'Partial payment for INV-SUP-001'
-  },
-];
+const mockTransactionLogs: TransactionLog[] = [];
 
 export default function SupplierDetailsScreen() {
   const { supplierId } = useLocalSearchParams();

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, ShoppingCart, FileText, X } from 'lucide-react-native';
 import { dataStore, Sale, SaleItem } from '@/utils/dataStore';
+import { createInvoice, getNextInvoiceNumber } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -28,10 +29,22 @@ const Colors = {
   }
 };
 
+const generateInvoiceNumber = () => {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `INV-${year}${month}${day}-${random}`;
+};
+
 export default function SaleSuccessScreen() {
   const { paymentData } = useLocalSearchParams();
-  const payment = JSON.parse(paymentData as string);
+  let payment: any = null;
+  try { payment = paymentData ? JSON.parse(paymentData as string) : null; } catch { payment = null; }
   const [showInvoice, setShowInvoice] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState(() => generateInvoiceNumber());
+  const hasSavedRef = useRef(false);
 
   // Safety check for payment data
   if (!payment || !payment.customer || !payment.cartItems || !Array.isArray(payment.cartItems)) {
@@ -89,7 +102,7 @@ export default function SaleSuccessScreen() {
     console.log('====================================');
   }, []);
 
-  // Log successful sale completion and add to data store
+  // Log successful sale completion, add to data store, and create backend invoice
   React.useEffect(() => {
     // Safety check for customer data
     if (!payment.customer) {
@@ -108,71 +121,130 @@ export default function SaleSuccessScreen() {
       return;
     }
 
-    console.log('=== SALE COMPLETED SUCCESSFULLY ===');
-    console.log('Invoice Number:', invoiceNumber);
-    console.log('Customer:', payment.customer.name);
-    console.log('Customer Type:', payment.customer.customerType);
-    console.log('Total Amount:', formatAmount(payment.amount || payment.total || 0));
-    console.log('Payment Method:', getPaymentMethodText());
-    console.log('Items Count:', payment.cartItems.length);
-    console.log('Completed at:', new Date().toISOString());
-    payment.cartItems.forEach((item: any, index: number) => {
-      console.log(`Item ${index + 1}:`);
-      console.log('  Product Name:', item.name);
-      console.log('  Quantity:', item.quantity);
-      console.log('  Unit Price:', formatAmount(item.price));
-      console.log('  Total:', formatAmount(item.price * item.quantity));
-      console.log('  Tax Rate:', item.taxRate + '%');
-      console.log('  HSN Code:', item.hsnCode);
-      console.log('  Batch Number:', item.batchNumber);
-      console.log('  Primary Unit:', item.primaryUnit);
-    });
-    console.log('==================================');
+    if (hasSavedRef.current) return;
+    hasSavedRef.current = true;
 
-    // Create sale data and add to data store
-    const saleItems: SaleItem[] = payment.cartItems.map((item: any) => ({
-      productId: item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      productName: item.name,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      totalPrice: item.price * item.quantity,
-      taxRate: item.taxRate || 0,
-      taxAmount: (item.price * item.quantity) * ((item.taxRate || 0) / 100),
-      cessType: item.cessType || 'none',
-      cessRate: item.cessRate || 0,
-      cessAmount: item.cessAmount ?? 0,
-      hsnCode: item.hsnCode || item.category,
-      batchNumber: item.batchNumber,
-      primaryUnit: item.primaryUnit || 'unit',
-    }));
+    const runSave = async () => {
+      // Try to get invoice number from backend first; fallback to local
+      let finalInvoiceNumber = invoiceNumber;
+      const nextResult = await getNextInvoiceNumber();
+      if (nextResult.success && nextResult.invoiceNumber) {
+        finalInvoiceNumber = nextResult.invoiceNumber;
+        setInvoiceNumber(finalInvoiceNumber);
+      }
 
-    const subtotal = saleItems.reduce((sum, item) => sum + item.totalPrice, 0);
-    const taxAmount = saleItems.reduce((sum, item) => sum + item.taxAmount, 0);
-    const cessAmount = saleItems.reduce((sum, item) => sum + (item.cessAmount ?? 0), 0);
-    const totalAmount = subtotal + taxAmount + cessAmount;
+      console.log('=== SALE COMPLETED SUCCESSFULLY ===');
+      console.log('Invoice Number:', finalInvoiceNumber);
+      console.log('Customer:', payment.customer.name);
+      console.log('Customer Type:', payment.customer.customerType);
+      console.log('Total Amount:', formatAmount(payment.amount || payment.total || 0));
+      console.log('Payment Method:', getPaymentMethodText());
+      console.log('Items Count:', payment.cartItems.length);
+      console.log('Completed at:', new Date().toISOString());
+      payment.cartItems.forEach((item: any, index: number) => {
+        console.log(`Item ${index + 1}:`);
+        console.log('  Product Name:', item.name);
+        console.log('  Quantity:', item.quantity);
+        console.log('  Unit Price:', formatAmount(item.price));
+        console.log('  Total:', formatAmount(item.price * item.quantity));
+        console.log('  Tax Rate:', item.taxRate + '%');
+        console.log('  HSN Code:', item.hsnCode);
+        console.log('  Batch Number:', item.batchNumber);
+        console.log('  Primary Unit:', item.primaryUnit);
+      });
+      console.log('==================================');
 
-    const sale: Sale = {
-      id: `SALE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      invoiceNumber: invoiceNumber,
-      customerId: payment.customer.id || `CUST_${Date.now()}`,
-      customerName: payment.customer.name,
-      customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
-      items: saleItems,
-      subtotal: subtotal,
-      taxAmount: taxAmount,
-      cessAmount: cessAmount,
-      totalAmount: totalAmount,
-      paidAmount: payment.amount || payment.total || 0,
-      balanceAmount: payment.balance || 0,
-      paymentMethod: payment.method,
-      othersMethod: payment.othersMethod,
-      saleDate: new Date().toISOString(),
-      status: 'completed',
-      createdAt: new Date().toISOString(),
+      // Create sale data
+      const saleItems: SaleItem[] = payment.cartItems.map((item: any) => ({
+        productId: item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        productName: item.name,
+        quantity: item.quantity,
+        unitPrice: item.price,
+        totalPrice: item.price * item.quantity,
+        taxRate: item.taxRate || 0,
+        taxAmount: (item.price * item.quantity) * ((item.taxRate || 0) / 100),
+        cessType: item.cessType || 'none',
+        cessRate: item.cessRate || 0,
+        cessAmount: item.cessAmount ?? 0,
+        hsnCode: item.hsnCode || item.category,
+        batchNumber: item.batchNumber,
+        primaryUnit: item.primaryUnit || 'unit',
+      }));
+
+      const subtotal = saleItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      const taxAmountTotal = saleItems.reduce((sum, item) => sum + item.taxAmount, 0);
+      const cessAmountTotal = saleItems.reduce((sum, item) => sum + (item.cessAmount ?? 0), 0);
+      const totalAmount = subtotal + taxAmountTotal + cessAmountTotal;
+      const paidAmount = payment.amount || payment.total || 0;
+      const balanceAmount = payment.balance || 0;
+
+      const sale: Sale = {
+        id: `SALE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        invoiceNumber: finalInvoiceNumber,
+        customerId: payment.customer.id || `CUST_${Date.now()}`,
+        customerName: payment.customer.name,
+        customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
+        items: saleItems,
+        subtotal: subtotal,
+        taxAmount: taxAmountTotal,
+        cessAmount: cessAmountTotal,
+        totalAmount: totalAmount,
+        paidAmount: paidAmount,
+        balanceAmount: balanceAmount,
+        paymentMethod: payment.method,
+        othersMethod: payment.othersMethod,
+        saleDate: new Date().toISOString(),
+        status: 'completed',
+        createdAt: new Date().toISOString(),
+      };
+
+      // Add sale to data store (local fallback)
+      dataStore.addSale(sale);
+
+      // Create invoice in backend (primary)
+      const paymentStatus: 'paid' | 'partial' | 'unpaid' =
+        paidAmount >= totalAmount ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+      const paymentMethodStr =
+        payment.method === 'others' ? (payment.othersMethod || 'others') : payment.method;
+
+      const createResult = await createInvoice({
+        invoiceNumber: finalInvoiceNumber,
+        customerId: payment.customer.id,
+        customerName: payment.customer.name,
+        customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
+        items: saleItems.map(item => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          taxRate: item.taxRate,
+          taxAmount: item.taxAmount,
+          cessType: item.cessType,
+          cessRate: item.cessRate,
+          cessAmount: item.cessAmount,
+          hsnCode: item.hsnCode,
+          batchNumber: item.batchNumber,
+          primaryUnit: item.primaryUnit,
+          discountType: (payment.cartItems as any[]).find((c: any) => c.name === item.productName)?.discountType,
+          discountValue: (payment.cartItems as any[]).find((c: any) => c.name === item.productName)?.discountValue,
+        })),
+        subtotal,
+        taxAmount: taxAmountTotal,
+        cessAmount: cessAmountTotal,
+        totalAmount,
+        paidAmount,
+        balanceAmount,
+        paymentMethod: paymentMethodStr,
+        paymentStatus,
+        invoiceDate: new Date().toISOString(),
+      });
+      if (!createResult.success) {
+        console.error('Backend createInvoice failed:', createResult.error);
+      }
     };
 
-    // Add sale to data store
-    dataStore.addSale(sale);
+    runSave();
   }, []);
 
   const formatAmount = (amount: number) => {
@@ -207,18 +279,6 @@ export default function SaleSuccessScreen() {
         return 'Payment';
     }
   };
-
-  const generateInvoiceNumber = () => {
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    return `INV-${year}${month}${day}-${random}`;
-  };
-
-  // Use useMemo to ensure invoice number is generated only once
-  const invoiceNumber = React.useMemo(() => generateInvoiceNumber(), []);
 
   const handleDownloadInvoice = () => {
     console.log('Download invoice:', invoiceNumber);

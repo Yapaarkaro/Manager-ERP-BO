@@ -38,6 +38,7 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import Sidebar from '@/components/Sidebar';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { usePathname } from 'expo-router';
+import { getInvoices } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -73,126 +74,15 @@ interface SalesInvoice {
 }
 
 // Only sales invoices (no returns)
-const mockSalesInvoices: SalesInvoice[] = [
-  {
-    id: '1',
-    invoiceNumber: 'INV-2024-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 15500,
-    itemCount: 2,
-    date: '2024-01-16',
-    time: '09:30 AM'
-  },
-  {
-    id: '2',
-    invoiceNumber: 'INV-2024-002',
-    customerName: 'TechCorp Solutions',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 35000,
-    itemCount: 5,
-    date: '2024-01-16',
-    time: '11:45 AM'
-  },
-  {
-    id: '3',
-    invoiceNumber: 'INV-2024-003',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'card',
-    amount: 22000,
-    itemCount: 3,
-    date: '2024-01-16',
-    time: '03:20 PM'
-  },
-  {
-    id: '4',
-    invoiceNumber: 'INV-2024-004',
-    customerName: 'Metro Retail Chain',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 45000,
-    itemCount: 8,
-    date: '2024-01-15',
-    time: '10:15 AM'
-  },
-  {
-    id: '5',
-    invoiceNumber: 'INV-2024-005',
-    customerName: 'Vikram Patel',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 28000,
-    itemCount: 4,
-    date: '2024-01-15',
-    time: '01:30 PM'
-  },
-  {
-    id: '6',
-    invoiceNumber: 'INV-2024-006',
-    customerName: 'Global Enterprises',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'pending',
-    paymentMethod: 'others',
-    amount: 67000,
-    itemCount: 10,
-    date: '2024-01-14',
-    time: '02:45 PM'
-  },
-  {
-    id: '7',
-    invoiceNumber: 'INV-2024-007',
-    customerName: 'Tech Solutions Ltd',
-    customerType: 'business',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 89000,
-    itemCount: 12,
-    date: '2024-01-14',
-    time: '04:15 PM'
-  },
-  {
-    id: '8',
-    invoiceNumber: 'INV-2024-008',
-    customerName: 'Ravi Gupta',
-    customerType: 'individual',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'partially_paid',
-    paymentMethod: 'card',
-    amount: 34500,
-    itemCount: 6,
-    date: '2024-01-13',
-    time: '11:20 AM'
-  },
-];
+const initialInvoices: SalesInvoice[] = [];
 
 export default function SalesInvoicesScreen() {
   const { handleBack } = useWebBackNavigation();
   const pathname = usePathname();
+  const [invoices, setInvoices] = useState<SalesInvoice[]>(initialInvoices);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredInvoices, setFilteredInvoices] = useState(mockSalesInvoices);
+  const [filteredInvoices, setFilteredInvoices] = useState(initialInvoices);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -208,13 +98,48 @@ export default function SalesInvoicesScreen() {
   // Use debounced navigation for invoice cards
   const debouncedNavigate = useDebounceNavigation(500);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchInvoices() {
+      setIsLoading(true);
+      const res = await getInvoices();
+      if (cancelled) return;
+      setIsLoading(false);
+      if (res.success && res.invoices) {
+        const mapped: SalesInvoice[] = res.invoices.map((inv: any) => {
+          const invoiceDate = inv.invoice_date || inv.created_at || '';
+          const createdAt = inv.created_at || '';
+          const dateObj = createdAt ? new Date(createdAt) : new Date();
+          const timeStr = dateObj.toTimeString().slice(0, 5);
+          return {
+            id: inv.id ?? '',
+            invoiceNumber: inv.invoice_number ?? '',
+            customerName: inv.customer_name ?? '',
+            customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+            staffName: inv.staff_name ?? '',
+            staffAvatar: '',
+            paymentStatus: (inv.payment_status ?? 'pending') as 'paid' | 'partially_paid' | 'pending',
+            paymentMethod: (inv.payment_method ?? 'cash') as 'cash' | 'upi' | 'card' | 'others',
+            amount: Number(inv.total_amount ?? inv.subtotal ?? 0),
+            itemCount: 0,
+            date: invoiceDate,
+            time: timeStr,
+          };
+        });
+        setInvoices(mapped);
+      }
+    }
+    fetchInvoices();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     applyFilters(query);
   };
 
   const applyFilters = (searchQuery: string = '') => {
-    let filtered = mockSalesInvoices;
+    let filtered = invoices;
 
     // Apply search filter
     if (searchQuery.trim() !== '') {
@@ -337,10 +262,10 @@ export default function SalesInvoicesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or invoices change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters]);
+  }, [activeFilters, invoices]);
 
   const handleInvoicePress = (invoice: SalesInvoice) => {
     if (isNavigating) return;
@@ -362,7 +287,7 @@ export default function SalesInvoicesScreen() {
         name: invoice.customerName,
         mobile: '+91 98765 43210',
         businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-        address: '123, Sample Address, City - 560001'
+        address: ''
       }
     };
 

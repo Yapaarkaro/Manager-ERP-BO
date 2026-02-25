@@ -54,58 +54,7 @@ interface SelectedProduct extends SupplierProduct {
   orderQuantity: number;
 }
 
-const mockSupplierProducts: SupplierProduct[] = [
-  {
-    id: '1',
-    name: 'iPhone 14 Pro 128GB',
-    category: 'Smartphones',
-    price: 115000,
-    minOrderQty: 5,
-    unit: 'Piece',
-    availability: 'in_stock',
-    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1'
-  },
-  {
-    id: '2',
-    name: 'MacBook Air M2',
-    category: 'Laptops',
-    price: 100000,
-    minOrderQty: 2,
-    unit: 'Piece',
-    availability: 'in_stock',
-    image: 'https://images.pexels.com/photos/205421/pexels-photo-205421.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1'
-  },
-  {
-    id: '3',
-    name: 'AirPods Pro 2nd Gen',
-    category: 'Audio',
-    price: 22000,
-    minOrderQty: 10,
-    unit: 'Piece',
-    availability: 'limited',
-    image: 'https://images.pexels.com/photos/3780681/pexels-photo-3780681.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1'
-  },
-  {
-    id: '4',
-    name: 'iPad Pro 11"',
-    category: 'Tablets',
-    price: 81900,
-    minOrderQty: 3,
-    unit: 'Piece',
-    availability: 'in_stock',
-    image: 'https://images.pexels.com/photos/1334597/pexels-photo-1334597.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1'
-  },
-  {
-    id: '5',
-    name: 'Apple Watch Series 8',
-    category: 'Wearables',
-    price: 45900,
-    minOrderQty: 5,
-    unit: 'Piece',
-    availability: 'in_stock',
-    image: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1'
-  },
-];
+const mockSupplierProducts: SupplierProduct[] = [];
 
 export default function CreatePOScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();

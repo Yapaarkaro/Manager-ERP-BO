@@ -125,12 +125,7 @@ interface ManualStockInData {
   notes: string;
 }
 
-const mockProducts = [
-  { id: '1', name: 'Laptop', category: 'Electronics' },
-  { id: '2', name: 'Mouse', category: 'Electronics' },
-  { id: '3', name: 'Keyboard', category: 'Electronics' },
-  { id: '4', name: 'Monitor', category: 'Electronics' },
-];
+const mockProducts = [];
 
 export default function ManualStockInScreen() {
   const { newProduct: newProductParam, newSupplier: newSupplierParam } = useLocalSearchParams();
@@ -285,13 +280,13 @@ export default function ManualStockInScreen() {
   const handleScanProduct = () => {
     // Simulate scanning and auto-fill product details
     const scannedProduct = {
-      name: 'Scanned Product',
-      category: 'Electronics',
-      barcode: '1234567890123',
-      hsnCode: '8471',
-      purchasePrice: '1500',
-      salePrice: '1800',
-      mrp: '2000',
+      name: '',
+      category: '',
+      barcode: '',
+      hsnCode: '',
+      purchasePrice: '',
+      salePrice: '',
+      mrp: '',
       priceUnit: 'primary' as 'primary' | 'secondary',
       gstRate: 18,
       cessRate: 0,

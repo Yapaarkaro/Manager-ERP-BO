@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -15,11 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
-import { dataStore, BusinessAddress, getGSTINStateCode } from '../../utils/dataStore';
+import { getGSTINStateCode } from '../../utils/dataStore';
+import { getAddresses } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { useBusinessData } from '@/hooks/useBusinessData';
-
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -78,117 +76,7 @@ interface WarehouseData {
   nearLowStockItems?: number;
 }
 
-// Mock warehouse data
-const mockWarehouses: WarehouseData[] = [
-  {
-    id: 'warehouse_001',
-    name: 'Main Warehouse - Gurgaon',
-    type: 'warehouse',
-    doorNumber: 'Plot 45',
-    addressLine1: 'Sector 18',
-    addressLine2: 'Industrial Area',
-    city: 'Gurgaon',
-    pincode: '122015',
-    stateName: 'Haryana',
-    stateCode: '06',
-    isPrimary: true,
-    createdAt: '2024-01-01',
-    manager: 'Vikram Patel',
-    phone: '+91 99887 76655',
-    status: 'active',
-    capacity: '10,000 sq ft',
-    currentStock: 2500,
-    stockValue: 12500000,
-    usesManager: true,
-    staffCount: 32,
-    staffAttendance: 94,
-    dailySales: 620000,
-    weeklySales: 4250000,
-    monthlySales: 18500000,
-    dailyGrowth: 12.8,
-    weeklyGrowth: 18.5,
-    monthlyGrowth: 15.2,
-    cashInHand: 680000,
-    receivables: 3200000,
-    payables: 2100000,
-    stockInToday: 450000,
-    stockOutToday: 320000,
-    lowStockItems: 15,
-    nearLowStockItems: 12
-  },
-  {
-    id: 'warehouse_002',
-    name: 'Regional Warehouse - Chennai',
-    type: 'warehouse',
-    doorNumber: '67',
-    addressLine1: 'Ambattur Industrial Estate',
-    addressLine2: 'Phase 2',
-    city: 'Chennai',
-    pincode: '600058',
-    stateName: 'Tamil Nadu',
-    stateCode: '33',
-    isPrimary: false,
-    createdAt: '2024-01-20',
-    manager: 'Meera Joshi',
-    phone: '+91 88776 65544',
-    status: 'active',
-    capacity: '7,500 sq ft',
-    currentStock: 1800,
-    stockValue: 8900000,
-    usesManager: true,
-    staffCount: 24,
-    staffAttendance: 89,
-    dailySales: 420000,
-    weeklySales: 2950000,
-    monthlySales: 12800000,
-    dailyGrowth: 8.9,
-    weeklyGrowth: 14.2,
-    monthlyGrowth: 9.8,
-    cashInHand: 450000,
-    receivables: 2100000,
-    payables: 1500000,
-    stockInToday: 320000,
-    stockOutToday: 280000,
-    lowStockItems: 10,
-    nearLowStockItems: 7
-  },
-  {
-    id: 'warehouse_003',
-    name: 'Distribution Center - Pune',
-    type: 'warehouse',
-    doorNumber: '89',
-    addressLine1: 'Pimpri-Chinchwad',
-    addressLine2: 'MIDC Area',
-    city: 'Pune',
-    pincode: '411019',
-    stateName: 'Maharashtra',
-    stateCode: '27',
-    isPrimary: false,
-    createdAt: '2024-02-10',
-    manager: 'Suresh Kumar',
-    phone: '+91 77665 54433',
-    status: 'inactive',
-    capacity: '5,000 sq ft',
-    currentStock: 0,
-    stockValue: 0,
-    usesManager: false,
-    staffCount: 0,
-    staffAttendance: 0,
-    dailySales: 0,
-    weeklySales: 0,
-    monthlySales: 0,
-    dailyGrowth: 0,
-    weeklyGrowth: 0,
-    monthlyGrowth: 0,
-    cashInHand: 0,
-    receivables: 0,
-    payables: 0,
-    stockInToday: 0,
-    stockOutToday: 0,
-    lowStockItems: 0,
-    nearLowStockItems: 0
-  },
-];
+const mockWarehouses: WarehouseData[] = [];
 
 export default function WarehousesScreen() {
   const { handleBack } = useWebBackNavigation();
@@ -201,74 +89,52 @@ export default function WarehousesScreen() {
   const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseData | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
-  // ✅ Use unified business data hook (fast, cached, parallel)
-  const { data: businessData, refetch } = useBusinessData();
+  const mapAddressToWarehouse = (addr: any): WarehouseData => ({
+    id: addr.id,
+    name: addr.name,
+    type: 'warehouse' as const,
+    doorNumber: addr.door_number || '',
+    addressLine1: addr.address_line1 || '',
+    addressLine2: addr.address_line2 || '',
+    city: addr.city || '',
+    pincode: addr.pincode || '',
+    stateName: addr.state || '',
+    stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
+    isPrimary: addr.is_primary || false,
+    createdAt: addr.created_at || new Date().toISOString(),
+    manager: addr.manager_name || '',
+    phone: addr.manager_mobile_number || '',
+    status: 'active' as const,
+    usesManager: !!addr.manager_name,
+    staffCount: 0,
+    staffAttendance: 0,
+    dailySales: 0,
+    weeklySales: 0,
+    monthlySales: 0,
+    dailyGrowth: 0,
+    weeklyGrowth: 0,
+    monthlyGrowth: 0,
+    cashInHand: 0,
+    stockValue: 0,
+    receivables: 0,
+    payables: 0,
+    stockInToday: 0,
+    stockOutToday: 0,
+    lowStockItems: 0,
+    nearLowStockItems: 0,
+  });
 
-  // ✅ Update warehouses from cached data (instant display)
   useEffect(() => {
-    if (businessData.addresses) {
-      // Filter only warehouse addresses
-      const warehouseAddresses = businessData.addresses.filter((addr: any) => addr.type === 'warehouse');
-      
-      // Convert backend format to WarehouseData format
-      const warehouseData: WarehouseData[] = warehouseAddresses.map((addr: any) => ({
-        id: addr.id,
-        name: addr.name,
-        type: 'warehouse' as const,
-        doorNumber: addr.door_number || '',
-        addressLine1: addr.address_line1 || '',
-        addressLine2: addr.address_line2 || '',
-        city: addr.city || '',
-        pincode: addr.pincode || '',
-        stateName: addr.state || '',
-        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-        isPrimary: addr.is_primary || false,
-        createdAt: addr.created_at || new Date().toISOString(),
-        manager: addr.manager_name || '',
-        phone: addr.manager_mobile_number || '',
-        status: 'active' as const,
-        usesManager: !!addr.manager_name,
-        staffCount: 0,
-        staffAttendance: 0,
-        dailySales: 0,
-        weeklySales: 0,
-        monthlySales: 0,
-        dailyGrowth: 0,
-        weeklyGrowth: 0,
-        monthlyGrowth: 0,
-        cashInHand: 0,
-        stockValue: 0,
-        receivables: 0,
-        payables: 0,
-        overdueReceivables: 0,
-        overduePayables: 0,
-        lowStockItems: 0,
-        nearLowStockItems: 0,
-      }));
-      
-      setWarehouses(warehouseData);
-      setFilteredWarehouses(warehouseData);
-    }
-  }, [businessData]);
-
-  // ✅ Only refetch when screen comes into focus if cache is stale
-  useFocusEffect(
-    React.useCallback(() => {
-      // Check if cache is stale (older than 10 seconds) before refetching
-      const { __getGlobalCache } = require('@/hooks/useBusinessData');
-      const cache = __getGlobalCache();
-      const now = Date.now();
-      const CACHE_DURATION = 10000; // 10 seconds
-      
-      // Only refetch if cache is stale or missing
-      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
-        console.log('🔄 Warehouses: Cache stale, refetching business data');
-        refetch();
-      } else {
-        console.log('✅ Warehouses: Using cached data (no refetch needed)');
+    (async () => {
+      const { success, addresses } = await getAddresses();
+      if (success && addresses) {
+        const warehouseAddresses = addresses.filter((addr: any) => addr.type === 'warehouse');
+        const warehouseData = warehouseAddresses.map(mapAddressToWarehouse);
+        setWarehouses(warehouseData);
+        setFilteredWarehouses(warehouseData);
       }
-    }, [refetch])
-  );
+    })();
+  }, []);
 
   useEffect(() => {
     // Filter warehouses based on search query
@@ -347,7 +213,6 @@ export default function WarehousesScreen() {
   };
 
   const getStockTrend = (currentStock: number) => {
-    // Mock trend calculation
     const trend = Math.random() > 0.5 ? 'up' : 'down';
     const percentage = (Math.random() * 20).toFixed(1);
     return { trend, percentage };

@@ -32,7 +32,7 @@ export interface Subscription {
   isOnTrial: boolean;
   trialStartDate?: string;
   trialEndDate?: string;
-  planId?: string; // 'monthly', 'yearly'
+  planId?: string;
   status: 'active' | 'inactive' | 'trialing' | 'cancelled';
   currentPeriodEnd?: string;
   addons?: {
@@ -66,7 +66,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     name: 'Monthly Plan',
     type: 'monthly',
     price: 750,
-    locations: 2, // 1 primary location + 2 location overview
+    locations: 2,
     staffAccounts: 3,
     description: 'Perfect for small businesses',
     features: [
@@ -88,7 +88,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     name: 'Yearly Plan',
     type: 'yearly',
     price: 7500,
-    locations: 5, // 1 primary address + 5 location overview
+    locations: 5,
     staffAccounts: 10,
     description: 'Best value for growing businesses',
     features: [
@@ -108,80 +108,23 @@ export const subscriptionPlans: SubscriptionPlan[] = [
 ];
 
 export const addOns: AddOn[] = [
-  {
-    id: 'staff_monthly',
-    name: 'Additional Staff',
-    type: 'monthly',
-    price: 100,
-    category: 'staff',
-    description: 'Add more staff accounts to your plan (₹100/month per staff)'
-  },
-  {
-    id: 'staff_yearly',
-    name: 'Additional Staff',
-    type: 'yearly',
-    price: 1000, // ₹100/month * 10 months (yearly discount)
-    category: 'staff',
-    description: 'Add more staff accounts to your plan (₹100/month per staff)'
-  },
-  {
-    id: 'location_monthly',
-    name: 'Additional Location',
-    type: 'monthly',
-    price: 150,
-    category: 'location',
-    description: 'Add more locations to your plan (₹150/month per location)'
-  },
-  {
-    id: 'location_yearly',
-    name: 'Additional Location',
-    type: 'yearly',
-    price: 1500, // ₹150/month * 10 months (yearly discount)
-    category: 'location',
-    description: 'Add more locations to your plan (₹150/month per location)'
-  },
-  {
-    id: 'gst_filing_monthly',
-    name: 'GST Filing',
-    type: 'monthly',
-    price: 499,
-    category: 'gst_filing',
-    description: 'Monthly GST filing service (subject to change based on sales/purchase reconciliation)'
-  },
-  {
-    id: 'gst_filing_yearly',
-    name: 'GST Filing',
-    type: 'yearly',
-    price: 4999,
-    category: 'gst_filing',
-    description: 'Yearly GST filing service (subject to change based on sales/purchase reconciliation)'
-  }
+  { id: 'staff_monthly', name: 'Additional Staff', type: 'monthly', price: 100, category: 'staff', description: 'Add more staff accounts to your plan (₹100/month per staff)' },
+  { id: 'staff_yearly', name: 'Additional Staff', type: 'yearly', price: 1000, category: 'staff', description: 'Add more staff accounts to your plan (₹100/month per staff)' },
+  { id: 'location_monthly', name: 'Additional Location', type: 'monthly', price: 150, category: 'location', description: 'Add more locations to your plan (₹150/month per location)' },
+  { id: 'location_yearly', name: 'Additional Location', type: 'yearly', price: 1500, category: 'location', description: 'Add more locations to your plan (₹150/month per location)' },
+  { id: 'gst_filing_monthly', name: 'GST Filing', type: 'monthly', price: 499, category: 'gst_filing', description: 'Monthly GST filing service (subject to change based on sales/purchase reconciliation)' },
+  { id: 'gst_filing_yearly', name: 'GST Filing', type: 'yearly', price: 4999, category: 'gst_filing', description: 'Yearly GST filing service (subject to change based on sales/purchase reconciliation)' },
 ];
 
 export const oneTimeServices: OneTimeService[] = [
-  {
-    id: 'marketing_basic',
-    name: 'Marketing Services',
-    price: 1000,
-    category: 'marketing',
-    description: 'Professional marketing services for your business'
-  },
-  {
-    id: 'consultation_basic',
-    name: 'Business Consultation',
-    price: 4999,
-    category: 'consultation',
-    description: 'Expert business consultation and strategy planning'
-  }
+  { id: 'marketing_basic', name: 'Marketing Services', price: 1000, category: 'marketing', description: 'Professional marketing services for your business' },
+  { id: 'consultation_basic', name: 'Business Consultation', price: 4999, category: 'consultation', description: 'Expert business consultation and strategy planning' },
 ];
 
 const SUBSCRIPTION_KEY = 'appSubscription';
 
 class SubscriptionStore {
-  private subscription: Subscription = {
-    isOnTrial: false,
-    status: 'inactive',
-  };
+  private subscription: Subscription = { isOnTrial: false, status: 'inactive' };
   private listeners: (() => void)[] = [];
 
   constructor() {
@@ -189,229 +132,137 @@ class SubscriptionStore {
   }
 
   private notifyListeners() {
-    this.listeners.forEach(listener => listener());
+    this.listeners.forEach(fn => fn());
   }
 
   addListener(listener: () => void) {
     this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
+    return () => { this.listeners = this.listeners.filter(l => l !== listener); };
   }
 
   async loadSubscription() {
     try {
-      const storedSubscription = await AsyncStorage.getItem(SUBSCRIPTION_KEY);
-      if (storedSubscription) {
-        this.subscription = JSON.parse(storedSubscription);
-        console.log('📥 Loaded subscription:', this.subscription);
-      } else {
-        console.log('📭 No subscription found in storage');
-      }
+      const stored = await AsyncStorage.getItem(SUBSCRIPTION_KEY);
+      if (stored) this.subscription = JSON.parse(stored);
       this.notifyListeners();
-    } catch (error) {
-      console.error('Error loading subscription from storage:', error);
+    } catch {
+      // Failed to load subscription
     }
   }
 
   async saveSubscription() {
     try {
       await AsyncStorage.setItem(SUBSCRIPTION_KEY, JSON.stringify(this.subscription));
-      console.log('✅ Subscription saved:', this.subscription);
       this.notifyListeners();
-    } catch (error) {
-      console.error('Error saving subscription to storage:', error);
+    } catch {
+      // Failed to save subscription
     }
   }
 
   async startTrial() {
-    const trialDurationDays = 30;
-    const trialStartDate = new Date();
-    const trialEndDate = new Date();
-    trialEndDate.setDate(trialStartDate.getDate() + trialDurationDays);
+    const trialStart = new Date();
+    const trialEnd = new Date();
+    trialEnd.setDate(trialStart.getDate() + 30);
 
     this.subscription = {
       isOnTrial: true,
-      trialStartDate: trialStartDate.toISOString(),
-      trialEndDate: trialEndDate.toISOString(),
+      trialStartDate: trialStart.toISOString(),
+      trialEndDate: trialEnd.toISOString(),
       planId: undefined,
       status: 'trialing',
-      addons: {
-        staff: 0, // Free trial has 0 staff accounts
-        locations: 1, // Free trial has 1 primary location
-        gstFiling: false,
-      },
+      addons: { staff: 0, locations: 1, gstFiling: false },
     };
     this.saveSubscription();
-    console.log(`🚀 Started 30-day free trial. Ends on: ${trialEndDate.toDateString()}`);
 
-    // Sync to database
     try {
       const { createOrUpdateSubscription } = await import('@/services/backendApi');
-      const result = await createOrUpdateSubscription({
+      await createOrUpdateSubscription({
         isOnTrial: true,
-        trialStartDate: trialStartDate.toISOString(),
-        trialEndDate: trialEndDate.toISOString(),
+        trialStartDate: trialStart.toISOString(),
+        trialEndDate: trialEnd.toISOString(),
         status: 'trialing',
       });
-      if (result.success) {
-        console.log('✅ Trial synced to database');
-      } else {
-        console.warn('⚠️ Failed to sync trial to database:', result.error);
-      }
-    } catch (error) {
-      console.error('⚠️ Error syncing trial to database:', error);
+    } catch {
+      // DB sync failed silently
     }
   }
 
-  getSubscription(): Subscription {
-    return this.subscription;
-  }
+  getSubscription(): Subscription { return this.subscription; }
 
   getTrialProgress(): TrialProgress {
     if (!this.subscription.isOnTrial || !this.subscription.trialStartDate || !this.subscription.trialEndDate) {
       return { daysUsed: 0, daysRemaining: 0, percentage: 0 };
     }
-
-    const startDate = new Date(this.subscription.trialStartDate);
-    const endDate = new Date(this.subscription.trialEndDate);
+    const start = new Date(this.subscription.trialStartDate);
+    const end = new Date(this.subscription.trialEndDate);
     const now = new Date();
-
-    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-    const daysUsed = Math.ceil((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-    const daysRemaining = Math.max(0, totalDays - daysUsed);
-    const percentage = Math.min(100, (daysUsed / totalDays) * 100);
-
-    return { daysUsed, daysRemaining, percentage };
+    const total = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const used = Math.ceil((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    return { daysUsed: used, daysRemaining: Math.max(0, total - used), percentage: Math.min(100, (used / total) * 100) };
   }
 
   isTrialExpired(): boolean {
-    if (!this.subscription.isOnTrial || !this.subscription.trialEndDate) {
-      return false;
-    }
-
-    const trialEnd = new Date(this.subscription.trialEndDate);
-    const now = new Date();
-    return now > trialEnd;
+    if (!this.subscription.isOnTrial || !this.subscription.trialEndDate) return false;
+    return new Date() > new Date(this.subscription.trialEndDate);
   }
 
-  subscribeToPlan(plan: SubscriptionPlan, addOns: AddOn[] = []) {
-    this.subscription = {
-      ...this.subscription,
-      isOnTrial: false,
-      planId: plan.id,
-      status: 'active',
-    } as any; // Using 'as any' to allow extended properties for internal use
-
+  subscribeToPlan(plan: SubscriptionPlan, _addOns: AddOn[] = []) {
+    this.subscription = { ...this.subscription, isOnTrial: false, planId: plan.id, status: 'active' } as any;
     this.saveSubscription();
   }
 
   cancelSubscription() {
-    this.subscription = {
-      ...this.subscription,
-      planId: undefined,
-      status: 'cancelled',
-    };
-
+    this.subscription = { ...this.subscription, planId: undefined, status: 'cancelled' };
     this.saveSubscription();
   }
 
-  addOneTimeService(service: OneTimeService) {
-    // Note: oneTimeServices is not part of Subscription interface
-    // This would need to be stored separately or the interface extended
+  addOneTimeService(_service: OneTimeService) {
     this.saveSubscription();
   }
 
   getAvailableLocations(): number {
-    // Monthly plan: 1 primary + 2 overview = 3 total locations
-    // Yearly plan: 1 primary + 5 overview = 6 total locations
-    // Trial: 1 primary location only
-    let baseLocations = 1; // Free trial only includes primary location
-
-    // Note: currentPlan is not part of Subscription interface
-    // This logic would need to be refactored to use planId and lookup the plan
-    const locationAddOns = (this.subscription.addons?.locations || 0);
-    const additionalLocations = locationAddOns;
-
-    return baseLocations + additionalLocations;
+    return 1 + (this.subscription.addons?.locations || 0);
   }
 
   getAvailableStaffAccounts(): number {
-    let baseStaff = 0; // Free trial doesn't include staff accounts
-
-    // Note: currentPlan is not part of Subscription interface
-    // This logic would need to be refactored to use planId and lookup the plan
-    const staffAddOns = (this.subscription.addons?.staff || 0);
-    const additionalStaff = staffAddOns;
-
-    return baseStaff + additionalStaff;
+    return this.subscription.addons?.staff || 0;
   }
-  
-  // Check if user has active subscription (not expired trial)
+
   hasActiveSubscription(): boolean {
-    if (this.subscription.isOnTrial) {
-      return !this.isTrialExpired();
-    }
+    if (this.subscription.isOnTrial) return !this.isTrialExpired();
     return this.subscription.status === 'active' && this.subscription.planId !== undefined;
   }
-  
-  // Check if user is in read-only mode (trial expired, no active subscription)
+
   isReadOnlyMode(): boolean {
-    // If subscription data hasn't been loaded yet (default state), allow actions
-    // This prevents blocking actions when subscription data is still loading or hasn't been initialized
-    const hasNoSubscriptionData = 
-      !this.subscription.isOnTrial && 
-      this.subscription.status === 'inactive' && 
+    const hasNoData =
+      !this.subscription.isOnTrial &&
+      this.subscription.status === 'inactive' &&
       !this.subscription.trialEndDate &&
       !this.subscription.trialStartDate &&
       !this.subscription.planId;
-    
-    if (hasNoSubscriptionData) {
-      // No subscription data loaded yet - allow actions (will be checked once data loads from backend)
-      return false;
-    }
-    
-    // If user is on trial, check if it's expired
-    if (this.subscription.isOnTrial && this.isTrialExpired()) {
-      return true; // Trial expired, read-only
-    }
-    
-    // If user has an active subscription, allow actions
-    if (this.hasActiveSubscription()) {
-      return false;
-    }
-    
-    // If we have subscription data but no active subscription, check status
-    // Only block if status explicitly indicates expired/cancelled
-    if (this.subscription.status === 'cancelled') {
-      return true;
-    }
-    
-    // Default: allow actions (for new users or during initial setup)
+
+    if (hasNoData) return false;
+    if (this.subscription.isOnTrial && this.isTrialExpired()) return true;
+    if (this.hasActiveSubscription()) return false;
+    if (this.subscription.status === 'cancelled') return true;
     return false;
   }
 
-  canAddLocation(): boolean {
-    return this.getAvailableLocations() > 0;
-  }
+  canAddLocation(): boolean { return this.getAvailableLocations() > 0; }
+  canAddStaff(): boolean { return this.getAvailableStaffAccounts() > 0; }
 
-  canAddStaff(): boolean {
-    return this.getAvailableStaffAccounts() > 0;
-  }
-
-  // Placeholder for future upgrade logic
   upgradeToPlan(planId: 'monthly' | 'yearly') {
     this.subscription.isOnTrial = false;
     this.subscription.planId = planId;
     this.subscription.status = 'active';
     this.subscription.trialStartDate = undefined;
     this.subscription.trialEndDate = undefined;
-    this.subscription.currentPeriodEnd = new Date(new Date().setFullYear(new Date().getFullYear() + (planId === 'yearly' ? 1 : 0))).toISOString(); // Example
+    this.subscription.currentPeriodEnd = new Date(
+      new Date().setFullYear(new Date().getFullYear() + (planId === 'yearly' ? 1 : 0))
+    ).toISOString();
     this.saveSubscription();
-    console.log(`🎉 Upgraded to ${planId} plan!`);
   }
 
-  // Placeholder for future addon logic
   addAddon(type: 'staff' | 'locations' | 'gstFiling', quantity?: number) {
     if (!this.subscription.addons) {
       this.subscription.addons = { staff: 0, locations: 0, gstFiling: false };
@@ -422,103 +273,67 @@ class SubscriptionStore {
       this.subscription.addons.gstFiling = true;
     }
     this.saveSubscription();
-    console.log(`➕ Added addon: ${type}`);
   }
 
-  // Clear subscription data for fresh testing
   async clearSubscriptionData() {
+    this.subscription = { isOnTrial: false, status: 'inactive' };
     try {
-      console.log('🧹 CLEARING SUBSCRIPTION DATA FOR FRESH TESTING...');
-      
-      this.subscription = {
-        isOnTrial: false,
-        status: 'inactive',
-      };
-      
-      await AsyncStorage.multiRemove([SUBSCRIPTION_KEY, 'subscription_data']);
-      console.log('✅ SUBSCRIPTION DATA CLEARED SUCCESSFULLY!');
-      
-      this.notifyListeners();
-    } catch (error) {
-      console.error('❌ Error clearing subscription data:', error);
+      await AsyncStorage.multiRemove([SUBSCRIPTION_KEY, SUBSCRIPTION_STORAGE_KEY]);
+    } catch {
+      // clearing failed
     }
+    this.notifyListeners();
   }
 
-  // Test method: Simulate trial expiration (for testing purposes)
   async simulateTrialExpiration() {
-    if (!this.subscription.isOnTrial || !this.subscription.trialEndDate) {
-      console.warn('⚠️ Cannot simulate trial expiration: Not on trial or no trial end date');
-      return;
-    }
+    if (!this.subscription.isOnTrial || !this.subscription.trialEndDate) return;
 
-    // Set trial end date to 1 second ago to simulate expiration
-    const expiredDate = new Date();
-    expiredDate.setSeconds(expiredDate.getSeconds() - 1);
-    
-    this.subscription = {
-      ...this.subscription,
-      trialEndDate: expiredDate.toISOString(),
-      status: 'inactive',
-    };
-    
+    const expired = new Date();
+    expired.setSeconds(expired.getSeconds() - 1);
+
+    this.subscription = { ...this.subscription, trialEndDate: expired.toISOString(), status: 'inactive' };
     this.saveSubscription();
-    console.log('🧪 Trial expiration simulated. Trial ended at:', expiredDate.toISOString());
     this.notifyListeners();
 
-    // Sync to database
     try {
       const { createOrUpdateSubscription } = await import('@/services/backendApi');
-      const result = await createOrUpdateSubscription({
+      await createOrUpdateSubscription({
         isOnTrial: false,
         trialStartDate: this.subscription.trialStartDate,
-        trialEndDate: expiredDate.toISOString(),
+        trialEndDate: expired.toISOString(),
         status: 'inactive',
       });
-      if (result.success) {
-        console.log('✅ Trial expiration synced to database');
-      } else {
-        console.warn('⚠️ Failed to sync trial expiration to database:', result.error);
-      }
-    } catch (error) {
-      console.error('⚠️ Error syncing trial expiration to database:', error);
+    } catch {
+      // sync failed
     }
   }
 
-  // Test method: Reset trial to active (for testing purposes)
   async resetTrialToActive() {
-    const trialDurationDays = 30;
-    const trialStartDate = new Date();
-    const trialEndDate = new Date();
-    trialEndDate.setDate(trialStartDate.getDate() + trialDurationDays);
+    const start = new Date();
+    const end = new Date();
+    end.setDate(start.getDate() + 30);
 
     this.subscription = {
       ...this.subscription,
       isOnTrial: true,
-      trialStartDate: trialStartDate.toISOString(),
-      trialEndDate: trialEndDate.toISOString(),
+      trialStartDate: start.toISOString(),
+      trialEndDate: end.toISOString(),
       status: 'trialing',
     };
-    
+
     this.saveSubscription();
-    console.log('🧪 Trial reset to active. Trial ends on:', trialEndDate.toISOString());
     this.notifyListeners();
 
-    // Sync to database
     try {
       const { createOrUpdateSubscription } = await import('@/services/backendApi');
-      const result = await createOrUpdateSubscription({
+      await createOrUpdateSubscription({
         isOnTrial: true,
-        trialStartDate: trialStartDate.toISOString(),
-        trialEndDate: trialEndDate.toISOString(),
+        trialStartDate: start.toISOString(),
+        trialEndDate: end.toISOString(),
         status: 'trialing',
       });
-      if (result.success) {
-        console.log('✅ Trial reset synced to database');
-      } else {
-        console.warn('⚠️ Failed to sync trial reset to database:', result.error);
-      }
-    } catch (error) {
-      console.error('⚠️ Error syncing trial reset to database:', error);
+    } catch {
+      // sync failed
     }
   }
 }

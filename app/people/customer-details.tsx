@@ -39,38 +39,7 @@ interface TransactionLog {
   paymentMethod?: string;
 }
 
-const mockTransactionLogs: TransactionLog[] = [
-  {
-    id: '1',
-    type: 'invoice',
-    number: 'INV-2024-001',
-    amount: 125000,
-    date: '2024-01-15',
-    status: 'completed',
-    description: 'iPhone 14 Pro, MacBook Air M2',
-    paymentMethod: 'UPI'
-  },
-  {
-    id: '2',
-    type: 'payment',
-    number: 'PAY-001',
-    amount: 125000,
-    date: '2024-01-16',
-    status: 'completed',
-    description: 'Payment for INV-2024-001',
-    paymentMethod: 'UPI'
-  },
-  {
-    id: '3',
-    type: 'return',
-    number: 'RET-2024-001',
-    amount: 25000,
-    date: '2024-01-18',
-    status: 'completed',
-    description: 'Return - Defective AirPods',
-    paymentMethod: 'Cash'
-  },
-];
+const mockTransactionLogs: TransactionLog[] = [];
 
 export default function CustomerDetailsScreen() {
   const { customerId } = useLocalSearchParams();

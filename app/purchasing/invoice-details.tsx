@@ -30,7 +30,6 @@ const Colors = {
 export default function InvoiceDetailsScreen() {
   const { invoiceId } = useLocalSearchParams();
 
-  // Mock invoice data - in real app, fetch based on invoiceId
   const invoice = {
     id: invoiceId,
     poNumber: 'PO-2024-001',

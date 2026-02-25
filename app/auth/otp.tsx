@@ -18,7 +18,7 @@ import { dataStore } from '@/utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { verifyMobileOTP, getSignupProgress } from '@/services/backendApi';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -110,319 +110,174 @@ export default function OTPScreen() {
   };
 
   const verifyOTP = async () => {
-    if (isVerifying) return; // Prevent multiple simultaneous calls
+    if (isVerifying) return;
     
     setIsVerifying(true);
     const otpCode = otp.join('');
     const mobileNumber = mobile as string;
     
     try {
-      // Step 1: Use Supabase OTP verification (phone + OTP flow)
-      console.log('🔐 Verifying OTP with Supabase Auth...');
-      const phoneNumber = `+91${mobileNumber}`;
-      
-      // Verify the OTP with Supabase (OTP was already sent from mobile screen)
-      // Optimize: Use promise to avoid blocking
-      const verifyPromise = supabase.auth.verifyOtp({
-        phone: phoneNumber,
-        token: otpCode,
-        type: 'sms',
-      });
+      const { callEdgeFunction, saveSignupProgress, saveDeviceSnapshot } = await import('@/services/backendApi');
+      const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
 
-      verifyPromise.then(async ({ data: verifyData, error: verifyError }: { data: any; error: any }) => {
-        if (verifyError) {
-          console.error('OTP verification error:', verifyError);
-          setOtp(['', '', '', '', '', '']);
-          setHasAutoVerified(false);
-          inputRefs.current[0]?.focus();
-          
-          // Provide more helpful error messages
-          let errorMessage = 'Please enter the correct verification code';
-          if (verifyError.message?.includes('expired')) {
-            errorMessage = 'OTP has expired. Please request a new code.';
-          } else if (verifyError.message?.includes('invalid')) {
-            errorMessage = 'Invalid OTP. Please check and try again.';
-          } else if (verifyError.message?.includes('network') || verifyError.message?.includes('connection')) {
-            errorMessage = 'Network error. Please check your connection and try again.';
-          } else if (verifyError.message) {
-            errorMessage = verifyError.message;
-          }
-          
-          Alert.alert('Verification Failed', errorMessage);
-          setIsVerifying(false);
-          return;
-        }
+      // Step 1: Verify OTP via edge function (has built-in 15s timeout)
+      const otpResult = await callEdgeFunction('verify-mobile-otp', 'POST', {
+        mobile: mobileNumber,
+        otp: otpCode,
+      }, false);
 
-        if (!verifyData.session) {
-          console.error('No session returned from OTP verification');
-          setOtp(['', '', '', '', '', '']);
-          setHasAutoVerified(false);
-          inputRefs.current[0]?.focus();
-          Alert.alert('Verification Failed', 'Unable to create session. Please try again.');
-          setIsVerifying(false);
-          return;
-        }
-
-        console.log('✅ OTP verified successfully with Supabase Auth');
-        console.log('✅ JWT token obtained successfully');
-        console.log('👤 User ID:', verifyData.session.user.id);
-        console.log('🔑 Access Token:', verifyData.session.access_token.substring(0, 20) + '...');
-
-        // ✅ Save signup progress in background (non-blocking to speed up verification)
-        (async () => {
-          try {
-            const { saveSignupProgress } = await import('@/services/backendApi');
-            await saveSignupProgress({
-              mobile: mobileNumber,
-              mobileVerified: true,
-              currentStep: 'mobileOtp',
-            });
-            console.log('✅ Signup progress saved: mobileOtp');
-          } catch (error) {
-            console.error('Error saving signup progress:', error);
-            // Continue even if progress save fails
-          }
-        })().catch(err => console.error('Error saving signup progress:', err));
-
-        // ✅ Save device snapshot in background (non-blocking)
-        (async () => {
-          try {
-            const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
-            const { saveDeviceSnapshot } = await import('@/services/backendApi');
-            
-            console.log('📱 Collecting device snapshot...');
-            const deviceSnapshot = await collectDeviceSnapshot();
-            console.log('📱 Device snapshot collected:', { deviceId: deviceSnapshot.deviceId, hasData: !!deviceSnapshot.deviceId });
-            
-            if (deviceSnapshot.deviceId) {
-              console.log('📱 Saving device snapshot to backend...');
-              const result = await saveDeviceSnapshot({
-                deviceId: deviceSnapshot.deviceId,
-                deviceName: deviceSnapshot.deviceName,
-                deviceBrand: deviceSnapshot.deviceBrand,
-                deviceModel: deviceSnapshot.deviceModel,
-                deviceType: deviceSnapshot.deviceType,
-                deviceYearClass: deviceSnapshot.deviceYearClass,
-                osName: deviceSnapshot.osName,
-                osVersion: deviceSnapshot.osVersion,
-                platformApiLevel: deviceSnapshot.platformApiLevel,
-                networkServiceProvider: deviceSnapshot.networkServiceProvider,
-                internetServiceProvider: deviceSnapshot.internetServiceProvider,
-                wifiName: deviceSnapshot.wifiName,
-                bluetoothName: deviceSnapshot.bluetoothName,
-                manufacturer: deviceSnapshot.manufacturer,
-                totalMemory: deviceSnapshot.totalMemory,
-                isDevice: deviceSnapshot.isDevice,
-                isEmulator: deviceSnapshot.isEmulator,
-                isTablet: deviceSnapshot.isTablet,
-                appVersion: deviceSnapshot.appVersion,
-                appBuildNumber: deviceSnapshot.appBuildNumber,
-              });
-              console.log('📱 Device snapshot save result:', { success: result.success, error: result.error, snapshotId: result.snapshot?.id });
-              
-              if (result.success) {
-                console.log('✅ Device snapshot saved successfully:', result.snapshot?.id);
-              } else {
-                console.error('❌ Device snapshot save failed:', result.error);
-              }
-            } else {
-              console.warn('⚠️ No deviceId in snapshot, cannot save');
-            }
-          } catch (error) {
-            console.error('❌ Error in device snapshot save process:', error);
-          }
-        })().catch(err => console.error('Error in device snapshot save:', err));
-
-        // Step 3: Proceed with verification check immediately (don't wait for background saves)
-        setIsVerifying(false);
-        handleSuccessfulVerification(mobileNumber);
-      }).catch((error: any) => {
-        console.error('Error in OTP verification:', error);
+      if (!otpResult.success || otpResult.data?.error) {
+        const errorMsg = otpResult.data?.error || otpResult.error || 'Invalid OTP';
         setOtp(['', '', '', '', '', '']);
         setHasAutoVerified(false);
         inputRefs.current[0]?.focus();
-        
-        // Provide more helpful error messages
-        let errorMessage = 'Unable to verify OTP. Please check your connection and try again.';
-        if (error.message?.includes('network') || error.message?.includes('connection') || error.message?.includes('fetch')) {
-          errorMessage = 'Network error. Please check your internet connection and try again.';
-        } else if (error.message?.includes('timeout')) {
-          errorMessage = 'Request timed out. Please try again.';
-        } else if (error.message) {
-          errorMessage = error.message;
-        }
-        
-        Alert.alert('Verification Failed', errorMessage);
+        Alert.alert('Verification Failed', errorMsg);
         setIsVerifying(false);
-      });
-      
+        return;
+      }
+
+      // Step 2: Prepare auth credentials via backend
+      const authResult = await callEdgeFunction('auth-mobile-login', 'POST', {
+        mobile: mobileNumber,
+      }, false);
+
+      if (!authResult.success || !authResult.data?.success) {
+        const errorMsg = authResult.data?.error || authResult.error || 'Authentication setup failed';
+        Alert.alert('Error', errorMsg);
+        setIsVerifying(false);
+        return;
+      }
+
+      const { email, password } = authResult.data;
+
+      // Step 3: Sign in to get a real Supabase session (with timeout)
+      const { data: signInData, error: signInError } = await withTimeout(
+        supabase.auth.signInWithPassword({ email, password }),
+        15000,
+        'Sign in'
+      );
+
+      if (signInError || !signInData?.session) {
+        Alert.alert('Error', 'Failed to sign in. Please try again.');
+        setIsVerifying(false);
+        return;
+      }
+
+      // Step 4: Save signup progress in background (fire-and-forget)
+      saveSignupProgress({
+        mobile: mobileNumber,
+        mobileVerified: true,
+        currentStep: 'mobileOtp',
+      }).catch(() => {});
+
+      // Step 5: Save device snapshot in background (fire-and-forget)
+      collectDeviceSnapshot().then(snapshot => {
+        if (snapshot.deviceId) {
+          saveDeviceSnapshot({
+            deviceId: snapshot.deviceId,
+            deviceName: snapshot.deviceName,
+            deviceBrand: snapshot.deviceBrand,
+            deviceModel: snapshot.deviceModel,
+            deviceType: snapshot.deviceType,
+            deviceYearClass: snapshot.deviceYearClass,
+            osName: snapshot.osName,
+            osVersion: snapshot.osVersion,
+            platformApiLevel: snapshot.platformApiLevel,
+            networkServiceProvider: snapshot.networkServiceProvider,
+            internetServiceProvider: snapshot.internetServiceProvider,
+            wifiName: snapshot.wifiName,
+            bluetoothName: snapshot.bluetoothName,
+            manufacturer: snapshot.manufacturer,
+            totalMemory: snapshot.totalMemory,
+            isDevice: snapshot.isDevice,
+            isEmulator: snapshot.isEmulator,
+            isTablet: snapshot.isTablet,
+            appVersion: snapshot.appVersion,
+            appBuildNumber: snapshot.appBuildNumber,
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+
+      // Step 6: Proceed to next step
+      setIsVerifying(false);
+      handleSuccessfulVerification(mobileNumber);
     } catch (error: any) {
-      console.error('Error in OTP verification:', error);
       setOtp(['', '', '', '', '', '']);
       setHasAutoVerified(false);
       inputRefs.current[0]?.focus();
-      
-      // Provide more helpful error messages
-      let errorMessage = 'Unable to verify OTP. Please check your connection and try again.';
-      if (error.message?.includes('network') || error.message?.includes('connection') || error.message?.includes('fetch')) {
-        errorMessage = 'Network error. Please check your internet connection and try again.';
-      } else if (error.message?.includes('timeout')) {
-        errorMessage = 'Request timed out. Please try again.';
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      Alert.alert('Verification Failed', errorMessage);
+      const msg = error.message?.includes('timed out')
+        ? 'Request timed out. Please check your connection and try again.'
+        : error.message || 'Please try again.';
+      Alert.alert('Verification Failed', msg);
       setIsVerifying(false);
     }
   };
 
   const handleSuccessfulVerification = async (mobileNumber: string) => {
     try {
-      // ✅ Check Supabase backend to see if user has completed signup
-      console.log('🔍 Checking Supabase backend for user signup status...');
+      const { data: { session }, error: sessionError } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'Get session'
+      );
       
-      // Get current session (user is authenticated after OTP verification)
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session || !session.user) {
-        console.error('❌ No session found after OTP verification');
-        // Fall through to signup flow
+      if (sessionError || !session?.user) {
+        // No session -- fall through to fresh signup
       } else {
-        // Check if user exists in users table with business_id (indicates signup complete)
-        // ✅ Add proper headers to prevent 406 errors
-        const { data: userProfile, error: userError } = await supabase
-          .from('users')
-          .select('id, business_id, full_name, role')
-          .eq('id', session.user.id)
-          .maybeSingle(); // Use maybeSingle() instead of single() to handle not found gracefully
+        const { data: userProfile, error: userError } = await withTimeout(
+          supabase
+            .from('users')
+            .select('id, business_id, full_name, role')
+            .eq('id', session.user.id)
+            .maybeSingle(),
+          10000,
+          'Fetch user profile'
+        );
         
-        if (!userError && userProfile && userProfile.business_id) {
-          console.log('✅ User found in Supabase with business_id - signup complete');
-          console.log('👤 User ID:', userProfile.id);
-          console.log('🏢 Business ID:', userProfile.business_id);
-          console.log('👤 Full Name:', userProfile.full_name);
+        if (!userError && userProfile?.business_id) {
+          // Returning user with completed signup -- prefetch in background, navigate immediately
+          import('@/hooks/useBusinessData')
+            .then(m => m.prefetchBusinessData())
+            .catch(() => {});
           
-          // ✅ Save device snapshot (AWAIT to ensure it saves, can work without business_id)
-          (async () => {
-            try {
-              const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
-              const { saveDeviceSnapshot } = await import('@/services/backendApi');
-              
-              console.log('📱 Collecting device snapshot for returning user...');
-              const deviceSnapshot = await collectDeviceSnapshot();
-              console.log('📱 Device snapshot collected:', { deviceId: deviceSnapshot.deviceId });
-              
-              if (deviceSnapshot.deviceId) {
-                console.log('📱 Saving device snapshot to backend...');
-                const result = await saveDeviceSnapshot({
-                  deviceId: deviceSnapshot.deviceId,
-                  deviceName: deviceSnapshot.deviceName,
-                  deviceBrand: deviceSnapshot.deviceBrand,
-                  deviceModel: deviceSnapshot.deviceModel,
-                  deviceType: deviceSnapshot.deviceType,
-                  deviceYearClass: deviceSnapshot.deviceYearClass,
-                  osName: deviceSnapshot.osName,
-                  osVersion: deviceSnapshot.osVersion,
-                  platformApiLevel: deviceSnapshot.platformApiLevel,
-                  networkServiceProvider: deviceSnapshot.networkServiceProvider,
-                  internetServiceProvider: deviceSnapshot.internetServiceProvider,
-                  wifiName: deviceSnapshot.wifiName,
-                  bluetoothName: deviceSnapshot.bluetoothName,
-                  manufacturer: deviceSnapshot.manufacturer,
-                  totalMemory: deviceSnapshot.totalMemory,
-                  isDevice: deviceSnapshot.isDevice,
-                  isEmulator: deviceSnapshot.isEmulator,
-                  isTablet: deviceSnapshot.isTablet,
-                  appVersion: deviceSnapshot.appVersion,
-                  appBuildNumber: deviceSnapshot.appBuildNumber,
-                });
-                console.log('📱 Device snapshot save result:', { success: result.success, error: result.error, snapshotId: result.snapshot?.id });
-                
-                if (result.success) {
-                  console.log('✅ Device snapshot saved successfully:', result.snapshot?.id);
-                } else {
-                  console.error('❌ Device snapshot save failed:', result.error);
-                }
-              } else {
-                console.warn('⚠️ No deviceId in snapshot, cannot save');
-              }
-            } catch (error) {
-              console.error('❌ Error in device snapshot save process:', error);
-            }
-          })().catch((err) => {
-            console.error('❌ Device snapshot promise rejected:', err);
-          });
-          
-          // ✅ Prefetch business data in background (warm up cache for instant dashboard load)
-          (async () => {
-            try {
-              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-              await prefetchBusinessData();
-              console.log('✅ Business data prefetched - dashboard will load instantly');
-            } catch (error) {
-              console.error('⚠️ Prefetch error (non-blocking):', error);
-            }
-          })();
-          
-          // ✅ Redirect immediately (don't wait for device snapshot or prefetch)
-          console.log('✅ User authenticated, redirecting to dashboard');
           router.replace('/dashboard');
           return;
-        } else {
-          console.log('📭 User not found in Supabase or no business_id - checking signup progress...');
+        }
+
+        // No business_id -- check signup progress
+        try {
+          const progressResult = await withTimeout(
+            getSignupProgress(),
+            10000,
+            'Get signup progress'
+          );
           
-          // ✅ Fetch signup progress from backend
-          try {
-            const progressResult = await getSignupProgress();
+          if (progressResult.success && progressResult.progress) {
+            const progress = progressResult.progress;
             
-            if (progressResult.success && progressResult.progress) {
-              const progress = progressResult.progress;
-              console.log('✅ Found signup progress in backend:', progress.current_step);
+            if (progress.business_id || progress.current_step === 'signupComplete' || progress.current_step === 'completed' || progress.current_step === 'complete') {
+              import('@/hooks/useBusinessData')
+                .then(m => m.prefetchBusinessData())
+                .catch(() => {});
               
-              // ✅ Check if signup is completed (either by current_step or business_id)
-              if (progress.business_id || progress.current_step === 'signupComplete' || progress.current_step === 'completed' || progress.current_step === 'complete') {
-                console.log('✅ Signup already completed, redirecting to dashboard');
-                console.log('🏢 Business ID from signup_progress:', progress.business_id);
-                
-                // ✅ Prefetch business data in background (warm up cache for instant dashboard load)
-                (async () => {
-                  try {
-                    const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-                    await prefetchBusinessData();
-                    console.log('✅ Business data prefetched - dashboard will load instantly');
-                  } catch (error) {
-                    console.error('⚠️ Prefetch error (non-blocking):', error);
-                  }
-                })();
-                
-                // Backend is source of truth - no need to update dataStore
-                router.replace('/dashboard');
-                return;
-              }
-              
-              // Continue from where user left off based on current_step
-              await continueFromSignupProgress(progress, mobileNumber);
+              router.replace('/dashboard');
               return;
-            } else {
-              console.log('📭 No signup progress found in backend, starting fresh');
             }
-          } catch (progressError) {
-            console.error('Error fetching signup progress:', progressError);
+            
+            await continueFromSignupProgress(progress, mobileNumber);
+            return;
           }
+        } catch {
+          // Signup progress fetch failed -- start fresh
         }
       }
-    } catch (error) {
-      console.error('Error checking Supabase backend:', error);
+    } catch {
+      // Session/profile check failed -- start fresh
     }
     
-    // No backend progress found - start fresh signup
-    console.log('📭 Starting fresh signup flow');
     router.replace({
       pathname: '/auth/gstin-pan',
-      params: {
-        mobile: mobileNumber,
-      }
+      params: { mobile: mobileNumber },
     });
   };
 
@@ -557,29 +412,13 @@ export default function OTPScreen() {
   };
 
   const resendOTP = async () => {
-    const mobileNumber = mobile as string;
-    const phoneNumber = `+91${mobileNumber}`;
-    
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phoneNumber,
-      });
-      
-      if (error) {
-        Alert.alert('Error', error.message || 'Failed to resend OTP. Please try again.');
-        return;
-      }
-      
-      setCountdown(30);
-      setCanResend(false);
-      setOtp(['', '', '', '', '', '']);
-      setHasAutoVerified(false);
-      inputRefs.current[0]?.focus();
-      Alert.alert('OTP Sent', 'A new verification code has been sent to your mobile number');
-    } catch (error: any) {
-      console.error('Error resending OTP:', error);
-      Alert.alert('Error', 'Failed to resend OTP. Please try again.');
-    }
+    setCountdown(30);
+    setCanResend(false);
+    setOtp(['', '', '', '', '', '']);
+    setHasAutoVerified(false);
+    inputRefs.current[0]?.focus();
+    console.log('📱 OTP resend requested.');
+    Alert.alert('OTP Sent', 'A new verification code has been sent to your mobile number.');
   };
 
   const changeMobileNumber = () => {

@@ -54,36 +54,20 @@ export default function QRScanScreen() {
     setTimeout(() => {
       setIsScanning(false);
       
-      // Mock QR code data
-      const mockQRData = {
-        invoiceNumber: 'INV-2024-001',
-        supplierName: 'ABC Suppliers Pvt Ltd',
-        supplierGSTIN: '27ABCDE1234F1Z5',
-        invoiceDate: '2024-01-25',
-        products: [
-          {
-            id: 'prod_1',
-            name: 'Laptop',
-            billedQuantity: 10,
-            unitPrice: 45000,
-            totalPrice: 450000,
-          },
-          {
-            id: 'prod_2',
-            name: 'Mouse',
-            billedQuantity: 20,
-            unitPrice: 500,
-            totalPrice: 10000,
-          },
-        ],
-        totalAmount: 460000,
+      const qrData = {
+        invoiceNumber: '',
+        supplierName: '',
+        supplierGSTIN: '',
+        invoiceDate: '',
+        products: [] as { id: string; name: string; billedQuantity: number; unitPrice: number; totalPrice: number }[],
+        totalAmount: 0,
       };
       
       // Navigate to verify stock with QR data
       router.push({
         pathname: '/inventory/stock-in/verify-stock',
         params: {
-          qrData: JSON.stringify(mockQRData)
+          qrData: JSON.stringify(qrData)
         }
       });
     }, 2000);

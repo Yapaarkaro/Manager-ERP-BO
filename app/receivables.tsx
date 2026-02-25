@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowDownLeft, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
 import { Receivable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { getReceivables } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -35,114 +36,43 @@ const Colors = {
 
 // Using Receivable interface from dataStore
 
-const mockReceivables: Receivable[] = [
-  {
-    id: 'REC-001',
-    customerId: 'CUST-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'business',
-    businessName: 'TechCorp Solutions',
-    mobile: '+91 98765 43210',
-    gstin: '27AABCT1234Z1Z5',
-    address: '123, Tech Park, Bangalore - 560001',
-    totalReceivable: 45000,
+function mapReceivableFromBackend(raw: {
+  id: string;
+  customerId?: string;
+  customerName: string;
+  customerType?: string;
+  totalReceivable: number;
+  invoiceCount: number;
+  oldestInvoiceDate: string;
+  status?: string;
+}): Receivable {
+  return {
+    id: raw.id,
+    customerId: raw.customerId ?? raw.id,
+    customerName: raw.customerName ?? '',
+    customerType: (raw.customerType === 'business' ? 'business' : 'individual') as 'business' | 'individual',
+    totalReceivable: raw.totalReceivable ?? 0,
+    invoiceCount: raw.invoiceCount ?? 0,
+    oldestInvoiceDate: raw.oldestInvoiceDate ?? '',
+    status: (raw.status === 'overdue' || raw.status === 'critical' ? raw.status : 'current') as 'current' | 'overdue' | 'critical',
     overdueAmount: 0,
-    invoiceCount: 3,
-    oldestInvoiceDate: '2024-01-15',
     daysPastDue: 0,
-    creditLimit: 100000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-25',
-    lastPaymentAmount: 20000,
-    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  },
-  {
-    id: 'REC-002',
-    customerId: 'CUST-002',
-    customerName: 'Metro Retail Chain',
-    customerType: 'business',
-    businessName: 'Metro Retail Chain',
-    mobile: '+91 87654 32109',
-    gstin: '29AABCM9876Z2Z6',
-    address: '456, Retail Plaza, Mumbai - 400001',
-    totalReceivable: 125000,
-    overdueAmount: 75000,
-    invoiceCount: 2,
-    oldestInvoiceDate: '2024-01-10',
-    daysPastDue: 5,
-    creditLimit: 200000,
-    paymentTerms: 'Net 45',
-    lastPaymentDate: '2024-01-15',
-    lastPaymentAmount: 50000,
-    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: 'REC-003',
-    customerId: 'CUST-003',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    mobile: '+91 76543 21098',
-    address: '789, Residential Area, Delhi - 110001',
-    totalReceivable: 28000,
-    overdueAmount: 28000,
-    invoiceCount: 1,
-    oldestInvoiceDate: '2024-01-08',
-    daysPastDue: 12,
-    creditLimit: 50000,
-    paymentTerms: 'Net 15',
-    customerAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'critical'
-  },
-  {
-    id: 'REC-004',
-    customerId: 'CUST-004',
-    customerName: 'Global Enterprises',
-    customerType: 'business',
-    businessName: 'Global Enterprises Ltd',
-    mobile: '+91 65432 10987',
-    gstin: '33AABCG5678Z3Z7',
-    address: '321, Corporate Tower, Chennai - 600001',
-    totalReceivable: 89000,
-    overdueAmount: 59000,
-    invoiceCount: 2,
-    oldestInvoiceDate: '2024-01-05',
-    daysPastDue: 8,
-    creditLimit: 150000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-12',
-    lastPaymentAmount: 30000,
-    customerAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'overdue'
-  },
-  {
-    id: 'REC-005',
-    customerId: 'CUST-005',
-    customerName: 'Vikram Patel',
-    customerType: 'business',
-    businessName: 'Patel Electronics',
-    mobile: '+91 54321 09876',
-    gstin: '24AABCP2345Z4Z8',
-    address: '654, Electronics Market, Ahmedabad - 380001',
-    totalReceivable: 67000,
-    overdueAmount: 0,
-    invoiceCount: 3,
-    oldestInvoiceDate: '2024-01-12',
-    daysPastDue: 0,
-    creditLimit: 100000,
-    paymentTerms: 'Net 30',
-    lastPaymentDate: '2024-01-25',
-    lastPaymentAmount: 20000,
-    customerAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'current'
-  }
-];
+    mobile: '',
+    address: '',
+    customerAvatar: '',
+    businessName: undefined,
+    gstin: undefined,
+    paymentTerms: undefined,
+    lastPaymentDate: undefined,
+    lastPaymentAmount: undefined,
+    creditLimit: undefined,
+  };
+}
 
 export default function ReceivablesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [receivables, setReceivables] = useState<Receivable[]>(mockReceivables);
-  const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>(mockReceivables);
+  const [receivables, setReceivables] = useState<Receivable[]>([]);
+  const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
@@ -157,12 +87,16 @@ export default function ReceivablesScreen() {
   // Use debounced navigation for customer cards
   const debouncedNavigate = useDebounceNavigation(500);
 
-  // Use mock data instead of dataStore
-  React.useEffect(() => {
-    // Set initial data from mock
-    console.log('Loading mock receivables:', mockReceivables.length);
-    setReceivables(mockReceivables);
-    setFilteredReceivables(mockReceivables);
+  useEffect(() => {
+    (async () => {
+      const { success, receivables: data } = await getReceivables();
+      if (success && data) {
+        const mapped = data.map(mapReceivableFromBackend);
+        setReceivables(mapped);
+      } else {
+        setReceivables([]);
+      }
+    })();
   }, []);
 
   const handleSearch = (query: string) => {
@@ -336,10 +270,10 @@ export default function ReceivablesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or receivables change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters]);
+  }, [activeFilters, receivables]);
 
   const handleCustomerDetails = (receivable: Receivable) => {
     if (isNavigating) return;

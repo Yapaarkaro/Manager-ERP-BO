@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { getPurchaseInvoices, getPurchaseOrders } from '@/services/backendApi';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ShoppingCart, Plus, FileText, User, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, ChevronDown } from 'lucide-react-native';
 
 const Colors = {
@@ -71,151 +72,103 @@ interface PurchaseOrder {
   customerId?: string;
 }
 
-const mockPurchaseInvoices: PurchaseInvoice[] = [
-  {
-    id: '1',
-    poNumber: 'PO-2024-001',
-    invoiceNumber: 'PINV-2024-001',
-    supplierName: 'Apple India Pvt Ltd',
-    supplierType: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'received',
-    paymentStatus: 'paid',
-    paymentMethod: 'bank_transfer',
-    amount: 850000,
-    itemCount: 10,
-    date: '2024-01-15',
-    expectedDelivery: '2024-01-20',
-    actualDelivery: '2024-01-19',
-    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-  },
-  {
-    id: '2',
-    poNumber: 'PO-2024-002',
-    invoiceNumber: 'PINV-2024-002',
-    supplierName: 'Samsung Electronics',
-    supplierType: 'business',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'pending',
-    paymentStatus: 'pending',
-    paymentMethod: 'bank_transfer',
-    amount: 650000,
-    itemCount: 8,
-    date: '2024-01-18',
-    expectedDelivery: '2024-01-25',
-    supplierAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-  },
-  {
-    id: '3',
-    poNumber: 'PO-2024-003',
-    invoiceNumber: 'PINV-2024-003',
-    supplierName: 'Dell Technologies',
-    supplierType: 'business',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    staffName: 'Amit Patel',
-    staffAvatar: 'https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'partial',
-    paymentStatus: 'overdue',
-    paymentMethod: 'card',
-    amount: 450000,
-    itemCount: 5,
-    date: '2024-01-20',
-    expectedDelivery: '2024-01-30',
-    supplierAvatar: 'https://images.pexels.com/photos/1222272/pexels-photo-1222272.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-  }
-];
+const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=3f66ac&color=fff&name=S';
 
-const mockPurchaseOrders: PurchaseOrder[] = [
-  {
-    id: '1',
-    poNumber: 'PO-2024-001',
-    supplierName: 'Apple India Pvt Ltd',
+function mapDbInvoiceToLocal(db: any): PurchaseInvoice {
+  const deliveryStatus = (db.delivery_status || 'pending').toLowerCase();
+  const paymentStatus = (db.payment_status || 'pending').toLowerCase();
+  const statusMap: Record<string, PurchaseInvoice['status']> = {
+    pending: 'pending',
+    received: 'received',
+    partial: 'partial',
+    cancelled: 'cancelled',
+  };
+  const paymentStatusMap: Record<string, PurchaseInvoice['paymentStatus']> = {
+    paid: 'paid',
+    pending: 'pending',
+    overdue: 'overdue',
+  };
+  const paymentMethodMap: Record<string, PurchaseInvoice['paymentMethod']> = {
+    cash: 'cash',
+    upi: 'upi',
+    card: 'card',
+    bank_transfer: 'bank_transfer',
+  };
+  return {
+    id: db.id,
+    poNumber: db.po_number || '',
+    invoiceNumber: db.invoice_number || '',
+    supplierName: db.supplier_name || '',
     supplierType: 'business',
-    businessName: 'Apple India Pvt Ltd',
-    gstin: '29ABCDE1234F2Z6',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'received',
-    type: 'created',
-    amount: 850000,
-    itemCount: 10,
-    date: '2024-01-15',
-    expectedDelivery: '2024-01-20',
-    supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    supplierId: 'supplier_apple_001',
-    customerId: 'customer_001'
-  },
-  {
-    id: '2',
-    poNumber: 'PO-2024-002',
-    supplierName: 'Samsung Electronics',
+    staffName: db.staff_name || '',
+    staffAvatar: DEFAULT_AVATAR,
+    status: statusMap[deliveryStatus] ?? 'pending',
+    paymentStatus: paymentStatusMap[paymentStatus] ?? 'pending',
+    paymentMethod: paymentMethodMap[(db.payment_method || 'cash').toLowerCase()] ?? 'cash',
+    amount: Number(db.total_amount) || 0,
+    itemCount: 0,
+    date: db.invoice_date || db.created_at || new Date().toISOString(),
+    expectedDelivery: db.expected_delivery ? String(db.expected_delivery) : '',
+    actualDelivery: db.actual_delivery ? String(db.actual_delivery) : undefined,
+    supplierAvatar: DEFAULT_AVATAR,
+  };
+}
+
+function mapDbOrderToLocal(db: any): PurchaseOrder {
+  const status = (db.status || 'draft').toLowerCase();
+  const statusMap: Record<string, PurchaseOrder['status']> = {
+    draft: 'draft',
+    sent: 'sent',
+    confirmed: 'confirmed',
+    received: 'received',
+    cancelled: 'cancelled',
+  };
+  const type: PurchaseOrder['type'] = status === 'received' || db.actual_delivery ? 'received' : 'created';
+  return {
+    id: db.id,
+    poNumber: db.po_number || '',
+    supplierName: db.supplier_name || '',
     supplierType: 'business',
-    businessName: 'Samsung Electronics India Pvt Ltd',
-    gstin: '27FGHIJ5678K3L9',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'sent',
-    type: 'created',
-    amount: 650000,
-    itemCount: 8,
-    date: '2024-01-18',
-    expectedDelivery: '2024-01-25',
-    supplierAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    supplierId: 'supplier_samsung_002',
-    customerId: 'customer_002'
-  },
-  {
-    id: '3',
-    poNumber: 'PO-2024-003',
-    supplierName: 'Dell Technologies',
-    supplierType: 'business',
-    businessName: 'Dell Technologies India Pvt Ltd',
-    gstin: '07KLMNO9012P3Q4',
-    staffName: 'Amit Patel',
-    staffAvatar: 'https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'confirmed',
-    type: 'received',
-    amount: 450000,
-    itemCount: 5,
-    date: '2024-01-20',
-    expectedDelivery: '2024-01-30',
-    supplierAvatar: 'https://images.pexels.com/photos/1222272/pexels-photo-1222272.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    supplierId: 'supplier_dell_003',
-    customerId: 'customer_003'
-  },
-  {
-    id: '4',
-    poNumber: 'PO-2024-004',
-    supplierName: 'HP India',
-    supplierType: 'business',
-    businessName: 'HP India Pvt Ltd',
-    gstin: '12PQRST5678U9V0',
-    staffName: 'Neha Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1239292/pexels-photo-1239292.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    status: 'draft',
-    type: 'created',
-    amount: 320000,
-    itemCount: 4,
-    date: '2024-01-22',
-    expectedDelivery: '2024-02-05',
-    supplierAvatar: 'https://images.pexels.com/photos/1222273/pexels-photo-1222273.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    supplierId: 'supplier_hp_004',
-    customerId: 'customer_004'
-  }
-];
+    staffName: db.staff_name || '',
+    staffAvatar: DEFAULT_AVATAR,
+    status: statusMap[status] ?? 'draft',
+    type,
+    amount: Number(db.total_amount) || 0,
+    itemCount: 0,
+    date: db.order_date || db.created_at || new Date().toISOString(),
+    expectedDelivery: db.expected_delivery ? String(db.expected_delivery) : '',
+    supplierAvatar: DEFAULT_AVATAR,
+    supplierId: db.supplier_id,
+  };
+}
 
 export default function PurchasesScreen() {
   const { handleBack } = useWebBackNavigation();
   const [activeTab, setActiveTab] = useState<'invoices' | 'orders'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
   const [poFilter, setPoFilter] = useState<'all' | 'created' | 'received'>('all');
+  const [purchaseInvoices, setPurchaseInvoices] = useState<PurchaseInvoice[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [invoicesResult, ordersResult] = await Promise.all([
+          getPurchaseInvoices(),
+          getPurchaseOrders(),
+        ]);
+        if (invoicesResult.success && invoicesResult.invoices) {
+          setPurchaseInvoices(invoicesResult.invoices.map(mapDbInvoiceToLocal));
+        }
+        if (ordersResult.success && ordersResult.orders) {
+          setPurchaseOrders(ordersResult.orders.map(mapDbOrderToLocal));
+        }
+      } catch (error) {
+        console.error('Error loading purchases:', error);
+      }
+    };
+    loadData();
+  }, []);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -230,13 +183,13 @@ export default function PurchasesScreen() {
     setPoFilter(filter);
   };
 
-  const filteredInvoices = mockPurchaseInvoices.filter(invoice =>
+  const filteredInvoices = purchaseInvoices.filter(invoice =>
     invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     invoice.supplierName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     invoice.poNumber.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredOrders = mockPurchaseOrders.filter(order => {
+  const filteredOrders = purchaseOrders.filter(order => {
     const matchesSearch = order.poNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
       order.supplierName.toLowerCase().includes(searchQuery.toLowerCase());
     

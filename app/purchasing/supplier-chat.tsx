@@ -50,118 +50,7 @@ interface ChatMessage {
   audioDuration?: number;
 }
 
-const mockMessages: ChatMessage[] = [
-  {
-    id: '1',
-    text: 'Hello! I wanted to discuss the latest purchase order PO-2024-001.',
-    timestamp: '2024-01-16T09:30:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '2',
-    text: 'Hi! Yes, I received the PO. We can deliver all items within 3-5 business days.',
-    timestamp: '2024-01-16T09:35:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '3',
-    text: 'Great! What about the pricing for bulk orders? Any discounts available?',
-    timestamp: '2024-01-16T09:40:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '4',
-    text: 'For orders above ₹5 lakhs, we offer 3% discount. For above ₹10 lakhs, it\'s 5%.',
-    timestamp: '2024-01-16T09:42:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '5',
-    text: 'Perfect! Can you send me the updated price list?',
-    timestamp: '2024-01-16T09:45:00Z',
-    isFromMe: true,
-    status: 'delivered',
-    type: 'text'
-  },
-  {
-    id: '6',
-    text: 'Sure, sending the latest price list now.',
-    timestamp: '2024-01-16T09:47:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '7',
-    text: 'INV-035.PDF',
-    timestamp: '2024-01-16T09:48:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'file',
-    attachment: {
-      url: 'https://example.com/invoice-035.pdf',
-      name: 'INV-035.PDF',
-      size: '1.8 MB'
-    }
-  },
-  {
-    id: '8',
-    text: 'Here\'s the product catalog with latest images.',
-    timestamp: '2024-01-16T10:05:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'image',
-    attachment: {
-      url: 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400&h=300&fit=crop',
-      name: 'product_catalog.jpg',
-      size: '1.2 MB'
-    }
-  },
-  {
-    id: '9',
-    text: 'Perfect! The quality looks great.',
-    timestamp: '2024-01-16T10:08:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'text'
-  },
-  {
-    id: '10',
-    text: 'Thank you! I\'ll review this and get back to you.',
-    timestamp: '2024-01-16T10:00:00Z',
-    isFromMe: true,
-    status: 'sent',
-    type: 'text'
-  },
-  {
-    id: '11',
-    text: 'Voice message',
-    timestamp: '2024-01-16T10:05:00Z',
-    isFromMe: true,
-    status: 'read',
-    type: 'audio',
-    audioUri: 'mock-audio-1.m4a',
-    audioDuration: 15
-  },
-  {
-    id: '12',
-    text: 'Voice message',
-    timestamp: '2024-01-16T10:06:00Z',
-    isFromMe: false,
-    status: 'read',
-    type: 'audio',
-    audioUri: 'mock-audio-2.m4a',
-    audioDuration: 8
-  },
-];
+const mockMessages: ChatMessage[] = [];
 
 export default function SupplierChatScreen() {
   const { supplierId, supplierName, supplierAvatar, supplierPhoneNumber } = useLocalSearchParams();
@@ -362,12 +251,6 @@ export default function SupplierChatScreen() {
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
       });
-      
-      // Check if it's a mock URI (for testing)
-      if (audioUri.includes('mock-audio')) {
-        console.log('Skipping mock audio playback');
-        return;
-      }
       
       // Load and play the audio
       const { sound: newSound } = await Audio.Sound.createAsync(

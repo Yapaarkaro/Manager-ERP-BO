@@ -9,6 +9,7 @@ import {
   Alert,
   Modal,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -85,8 +86,7 @@ export default function ProductDetailsScreen() {
       parsedProductId = params.get('productId') || null;
     }
     
-    // Fallback to window.location.search
-    if (!parsedProductData && typeof window !== 'undefined' && window.location.search) {
+    if (!parsedProductData && Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.search) {
       const urlParams = new URLSearchParams(window.location.search);
       parsedProductData = urlParams.get('productData');
       if (!parsedProductId) {
@@ -390,22 +390,21 @@ export default function ProductDetailsScreen() {
 
   const handleLogPress = (log: InventoryLog) => {
     if (log.invoiceNumber) {
-      // Create mock invoice data for navigation
-      const mockInvoice = {
+      const invoiceData = {
         id: log.invoiceNumber.replace(/[A-Z-]/g, ''),
         invoiceNumber: log.invoiceNumber,
         customerName: log.customerName || log.supplierName || 'N/A',
         customerType: 'individual',
         staffName: log.staffName,
-        staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+        staffAvatar: '',
         paymentStatus: 'paid',
         amount: Math.abs(log.quantity) * (product.salesPrice || 0),
         itemCount: Math.abs(log.quantity),
         date: log.date,
         customerDetails: {
           name: log.customerName || log.supplierName || 'N/A',
-          mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          mobile: '',
+          address: ''
         }
       };
 
@@ -414,11 +413,11 @@ export default function ProductDetailsScreen() {
         const returnInvoice = {
           id: log.invoiceNumber.replace('RET-', ''),
           returnNumber: log.invoiceNumber,
-          originalInvoiceNumber: 'INV-2024-001',
+          originalInvoiceNumber: '',
           customerName: log.customerName || 'N/A',
           customerType: 'individual',
           staffName: log.staffName,
-          staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+          staffAvatar: '',
           refundStatus: 'refunded',
           amount: Math.abs(log.quantity) * (product.salesPrice || 0),
           itemCount: Math.abs(log.quantity),
@@ -426,8 +425,8 @@ export default function ProductDetailsScreen() {
           reason: log.reason || 'Customer return',
           customerDetails: {
             name: log.customerName || 'N/A',
-            mobile: '+91 98765 43210',
-            address: '123, Sample Address, City - 560001'
+            mobile: '',
+            address: ''
           }
         };
 
@@ -443,8 +442,8 @@ export default function ProductDetailsScreen() {
         router.push({
           pathname: '/invoice-details',
           params: {
-            invoiceId: mockInvoice.id,
-            invoiceData: JSON.stringify(mockInvoice)
+            invoiceId: invoiceData.id,
+            invoiceData: JSON.stringify(invoiceData)
           }
         });
       }

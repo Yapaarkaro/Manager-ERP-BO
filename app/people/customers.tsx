@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -10,12 +10,13 @@ import {
   Image,
   Linking,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
-import { dataStore, Customer } from '@/utils/dataStore';
+import { getCustomers } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -64,7 +65,46 @@ interface Customer {
   categories: string[];
 }
 
-// Mock customer data removed - now using real data only
+const DEFAULT_AVATAR = 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1';
+
+function mapDbCustomerToLocal(db: any): Customer {
+  const custType = (db.customer_type === 'business' || db.customer_type === 'individual')
+    ? db.customer_type
+    : 'individual';
+  const status = (db.status === 'active' || db.status === 'inactive' || db.status === 'suspended')
+    ? db.status
+    : 'active';
+  return {
+    id: String(db.id),
+    name: db.name ?? '',
+    businessName: db.business_name ?? undefined,
+    customerType: custType,
+    contactPerson: db.contact_person ?? db.name ?? '',
+    mobile: db.mobile ?? '',
+    email: db.email ?? undefined,
+    address: db.address ?? '',
+    gstin: db.gstin ?? undefined,
+    avatar: db.avatar ?? DEFAULT_AVATAR,
+    customerScore: 0,
+    onTimePayment: 0,
+    satisfactionRating: 0,
+    responseTime: 0,
+    totalOrders: 0,
+    completedOrders: 0,
+    pendingOrders: 0,
+    cancelledOrders: 0,
+    returnedOrders: 0,
+    totalValue: 0,
+    averageOrderValue: 0,
+    returnRate: 0,
+    lastOrderDate: null,
+    joinedDate: db.created_at ? new Date(db.created_at).toISOString() : new Date().toISOString(),
+    status,
+    paymentTerms: db.payment_terms ?? undefined,
+    creditLimit: db.credit_limit != null ? Number(db.credit_limit) : undefined,
+    categories: Array.isArray(db.categories) ? db.categories : [],
+  };
+}
 
 export default function CustomersScreen() {
   const { handleBack } = useWebBackNavigation();
@@ -72,29 +112,28 @@ export default function CustomersScreen() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'business' | 'individual' | 'high_score'>('all');
+  const [loading, setLoading] = useState(true);
 
-  // Subscribe to data store changes
-  React.useEffect(() => {
-    const unsubscribe = dataStore.subscribe(() => {
-      const allCustomers = dataStore.getCustomers();
-      setCustomers(allCustomers);
-    });
-
-    // Initial load - get customers from data store
-    const allCustomers = dataStore.getCustomers();
-    setCustomers(allCustomers);
-
-    return unsubscribe;
+  const fetchCustomers = useCallback(async () => {
+    setLoading(true);
+    const { success, customers: apiCustomers, error } = await getCustomers();
+    if (success && apiCustomers) {
+      setCustomers(apiCustomers.map(mapDbCustomerToLocal));
+    } else {
+      if (error) console.error('Failed to fetch customers:', error);
+      setCustomers([]);
+    }
+    setLoading(false);
   }, []);
 
-  // Refresh customer data when screen comes into focus
+  useEffect(() => {
+    fetchCustomers();
+  }, [fetchCustomers]);
+
   useFocusEffect(
     useCallback(() => {
-      console.log('Customers screen focused, refreshing data...');
-      const allCustomers = dataStore.getCustomers();
-      console.log('Customers loaded:', allCustomers.length);
-      setCustomers(allCustomers);
-    }, []) // Remove dependencies to prevent infinite re-renders
+      fetchCustomers();
+    }, [fetchCustomers])
   );
 
   // Apply filters whenever customers or filter changes
@@ -541,11 +580,20 @@ export default function CustomersScreen() {
       >
         {filteredCustomers.length === 0 ? (
           <View style={styles.emptyState}>
-            <User size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Customers Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No customers match your search criteria' : 'No customers available'}
-            </Text>
+            {loading ? (
+              <>
+                <ActivityIndicator size="large" color={Colors.primary} />
+                <Text style={styles.emptyStateTitle}>Loading customers...</Text>
+              </>
+            ) : (
+              <>
+                <User size={64} color={Colors.textLight} />
+                <Text style={styles.emptyStateTitle}>No Customers Found</Text>
+                <Text style={styles.emptyStateText}>
+                  {searchQuery ? 'No customers match your search criteria' : 'No customers available'}
+                </Text>
+              </>
+            )}
           </View>
         ) : (
           filteredCustomers.map(renderCustomerCard)

@@ -41,61 +41,7 @@ interface TransactionLog {
   balanceAfter: number;
 }
 
-const mockTransactionLogs: TransactionLog[] = [
-  {
-    id: '1',
-    type: 'invoice',
-    invoiceNumber: 'INV-2024-001',
-    amount: 75000,
-    date: '2024-01-20',
-    description: 'iPhone 14 Pro, AirPods Pro',
-    status: 'pending',
-    dueDate: '2024-02-19',
-    balanceAfter: 125000
-  },
-  {
-    id: '2',
-    type: 'payment',
-    amount: -50000,
-    date: '2024-01-18',
-    description: 'Payment received via UPI',
-    paymentMethod: 'UPI',
-    status: 'paid',
-    balanceAfter: 50000
-  },
-  {
-    id: '3',
-    type: 'invoice',
-    invoiceNumber: 'INV-2024-002',
-    amount: 45000,
-    date: '2024-01-15',
-    description: 'MacBook Air M2',
-    status: 'overdue',
-    dueDate: '2024-02-14',
-    balanceAfter: 100000
-  },
-  {
-    id: '4',
-    type: 'payment',
-    amount: -25000,
-    date: '2024-01-10',
-    description: 'Partial payment via Cash',
-    paymentMethod: 'Cash',
-    status: 'paid',
-    balanceAfter: 55000
-  },
-  {
-    id: '5',
-    type: 'invoice',
-    invoiceNumber: 'INV-2024-003',
-    amount: 80000,
-    date: '2024-01-05',
-    description: 'Samsung Galaxy S23, Accessories',
-    status: 'overdue',
-    dueDate: '2024-02-04',
-    balanceAfter: 80000
-  },
-];
+const mockTransactionLogs: TransactionLog[] = [];
 
 export default function CustomerDetailsScreen() {
   const { customerId, customerData } = useLocalSearchParams();
@@ -151,8 +97,7 @@ export default function CustomerDetailsScreen() {
 
   const handleTransactionPress = (transaction: TransactionLog) => {
     if (transaction.invoiceNumber) {
-      // Create mock invoice data for navigation
-      const mockInvoice = {
+      const invoiceData = {
         id: transaction.invoiceNumber.replace('INV-', ''),
         invoiceNumber: transaction.invoiceNumber,
         customerName: customer.customerName,
@@ -176,8 +121,8 @@ export default function CustomerDetailsScreen() {
       router.push({
         pathname: '/invoice-details',
         params: {
-          invoiceId: mockInvoice.id,
-          invoiceData: JSON.stringify(mockInvoice)
+          invoiceId: invoiceData.id,
+          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }

@@ -40,24 +40,24 @@ export default function ScanProductScreen() {
     
     // Simulate finding a product after a short delay
     setTimeout(() => {
-      const mockProduct = {
-        id: '1',
-        name: 'iPhone 14 Pro 128GB',
-        image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-        category: 'Smartphones',
-        currentStock: 25,
-        unitPrice: 115000,
-        barcode: '1234567890123',
-        supplier: 'Apple India Pvt Ltd',
-        location: 'Main Warehouse - A1',
-        primaryUnit: 'Piece',
+      const scannedProduct = {
+        id: '',
+        name: '',
+        image: '',
+        category: '',
+        currentStock: 0,
+        unitPrice: 0,
+        barcode: '',
+        supplier: '',
+        location: '',
+        primaryUnit: '',
       };
 
       router.push({
         pathname: '/inventory/stock-out/stock-details',
         params: {
           reason,
-          selectedProducts: JSON.stringify([mockProduct])
+          selectedProducts: JSON.stringify([scannedProduct])
         }
       });
     }, 1500);

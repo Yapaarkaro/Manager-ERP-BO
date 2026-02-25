@@ -60,52 +60,30 @@ export default function ScanInvoiceScreen() {
     if (scanned) return;
     
     setScanned(true);
-    
-    // Mock invoice lookup based on scanned data
-    const mockInvoice = {
-      id: data,
-      invoiceNumber: `INV-2024-${data.slice(-3)}`,
-      customerName: 'Scanned Customer',
-      customerType: 'individual',
-      staffName: 'Current User',
-      staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      paymentStatus: 'paid',
-      paymentMethod: 'cash',
-      amount: 25000,
-      itemCount: 2,
+
+    const scannedInvoice = {
+      id: data || '',
+      invoiceNumber: data ? `INV-${data.slice(-6)}` : '',
+      customerName: '',
+      customerType: 'individual' as const,
+      staffName: '',
+      staffAvatar: '',
+      paymentStatus: 'paid' as const,
+      paymentMethod: 'cash' as const,
+      amount: 0,
+      itemCount: 0,
       date: new Date().toISOString().split('T')[0],
       customerDetails: {
-        name: 'Scanned Customer',
-        mobile: '+91 98765 43210',
-        address: '123, Sample Address, City - 560001'
+        name: '',
+        mobile: '',
+        address: ''
       },
-      items: [
-        {
-          id: '1',
-          name: 'Scanned Product 1',
-          quantity: 1,
-          rate: 15000,
-          amount: 15000,
-          taxRate: 18,
-          taxAmount: 2700,
-          total: 17700
-        },
-        {
-          id: '2',
-          name: 'Scanned Product 2',
-          quantity: 1,
-          rate: 8000,
-          amount: 8000,
-          taxRate: 18,
-          taxAmount: 1440,
-          total: 9440
-        }
-      ]
+      items: [] as { id: string; name: string; quantity: number; rate: number; amount: number; taxRate: number; taxAmount: number; total: number }[]
     };
 
     Alert.alert(
       'Invoice Found',
-      `Invoice: ${mockInvoice.invoiceNumber}\nCustomer: ${mockInvoice.customerName}\nAmount: ₹${mockInvoice.amount.toLocaleString('en-IN')}`,
+      `Invoice: ${scannedInvoice.invoiceNumber}\nCustomer: ${scannedInvoice.customerName}\nAmount: ₹${scannedInvoice.amount.toLocaleString('en-IN')}`,
       [
         {
           text: 'Scan Again',
@@ -118,7 +96,7 @@ export default function ScanInvoiceScreen() {
             router.push({
               pathname: '/new-return/select-items',
               params: {
-                invoiceData: JSON.stringify(mockInvoice)
+                invoiceData: JSON.stringify(scannedInvoice)
               }
             });
           },

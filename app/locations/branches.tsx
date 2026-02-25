@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -15,11 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lucide-react-native';
-import { dataStore, BusinessAddress, getGSTINStateCode } from '../../utils/dataStore';
+import { getGSTINStateCode } from '../../utils/dataStore';
+import { getAddresses } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { useBusinessData } from '@/hooks/useBusinessData';
-
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -75,93 +73,36 @@ interface Branch {
   nearLowStockItems?: number;
 }
 
-// Mock branch data
-const mockBranches: Branch[] = [
-  {
-    id: 'branch_001',
-    name: 'Main Branch - Delhi',
-    type: 'branch',
-    doorNumber: '123',
-    addressLine1: 'Connaught Place',
-    addressLine2: 'Central Delhi',
-    city: 'New Delhi',
-    pincode: '110001',
-    stateName: 'Delhi',
-    stateCode: '07',
-    isPrimary: true,
-    createdAt: '2024-01-01',
-    manager: 'Rajesh Kumar',
-    phone: '+91 98765 43210',
-    status: 'active',
-    usesManager: true,
-    staffCount: 25,
-    staffAttendance: 92,
-    dailySales: 285000,
-    weeklySales: 1950000,
-    monthlySales: 8500000,
-    dailyGrowth: 8.5,
-    weeklyGrowth: 15.2,
-    monthlyGrowth: 12.5,
-    cashInHand: 450000,
-    stockValue: 3200000,
-    receivables: 1800000,
-    payables: 950000,
-    overdueReceivables: 320000,
-    overduePayables: 180000,
-    lowStockItems: 12,
-    nearLowStockItems: 8
-  },
-  {
-    id: 'branch_002',
-    name: 'Branch Office - Mumbai',
-    type: 'branch',
-    doorNumber: '456',
-    addressLine1: 'Bandra West',
-    addressLine2: 'Near Linking Road',
-    city: 'Mumbai',
-    pincode: '400050',
-    stateName: 'Maharashtra',
-    stateCode: '27',
-    isPrimary: false,
-    createdAt: '2024-01-15',
-    manager: 'Priya Sharma',
-    phone: '+91 87654 32109',
-    status: 'active',
-    usesManager: true,
-    staffCount: 18,
-    staffAttendance: 88,
-    dailySales: 210000,
-    weeklySales: 1450000,
-    monthlySales: 6200000,
-    dailyGrowth: 5.8,
-    weeklyGrowth: 12.1,
-    monthlyGrowth: 8.3,
-    cashInHand: 320000,
-    stockValue: 2400000,
-    receivables: 1200000,
-    payables: 680000,
-    overdueReceivables: 180000,
-    overduePayables: 95000,
-    lowStockItems: 8,
-    nearLowStockItems: 5
-  },
-  {
-    id: 'branch_003',
-    name: 'Regional Office - Bangalore',
-    type: 'branch',
-    doorNumber: '789',
-    addressLine1: 'Koramangala',
-    addressLine2: '5th Block',
-    city: 'Bangalore',
-    pincode: '560095',
-    stateName: 'Karnataka',
-    stateCode: '29',
-    isPrimary: false,
-    createdAt: '2024-02-01',
-    manager: 'Amit Singh',
-    phone: '+91 76543 21098',
-    status: 'active',
-    usesManager: false,
+const mockBranches: Branch[] = [];
+
+export default function BranchesScreen() {
+  const { handleBack } = useWebBackNavigation();
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredBranches, setFilteredBranches] = useState<Branch[]>([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [branchToDelete, setBranchToDelete] = useState<string | null>(null);
+  const [showOverviewModal, setShowOverviewModal] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
+  const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+
+  const mapAddressToBranch = (addr: any): Branch => ({
+    id: addr.id,
+    name: addr.name,
+    type: 'branch' as const,
+    doorNumber: addr.door_number || '',
+    addressLine1: addr.address_line1 || '',
+    addressLine2: addr.address_line2 || '',
+    city: addr.city || '',
+    pincode: addr.pincode || '',
+    stateName: addr.state || '',
+    stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
+    isPrimary: addr.is_primary || false,
+    createdAt: addr.created_at || new Date().toISOString(),
+    manager: addr.manager_name || '',
+    phone: addr.manager_mobile_number || '',
+    status: 'active' as const,
+    usesManager: !!addr.manager_name,
     staffCount: 0,
     staffAttendance: 0,
     dailySales: 0,
@@ -177,89 +118,20 @@ const mockBranches: Branch[] = [
     overdueReceivables: 0,
     overduePayables: 0,
     lowStockItems: 0,
-    nearLowStockItems: 0
-  },
-];
+    nearLowStockItems: 0,
+  });
 
-export default function BranchesScreen() {
-  const { handleBack } = useWebBackNavigation();
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filteredBranches, setFilteredBranches] = useState<Branch[]>([]);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [branchToDelete, setBranchToDelete] = useState<string | null>(null);
-  const [showOverviewModal, setShowOverviewModal] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
-  const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
-
-  // ✅ Use unified business data hook (fast, cached, parallel)
-  const { data: businessData, refetch } = useBusinessData();
-
-  // ✅ Update branches from cached data (instant display)
   useEffect(() => {
-    if (businessData.addresses) {
-      // Filter only branch addresses
-      const branchAddresses = businessData.addresses.filter((addr: any) => addr.type === 'branch');
-      
-      // Convert backend format to Branch format
-      const branchData: Branch[] = branchAddresses.map((addr: any) => ({
-        id: addr.id,
-        name: addr.name,
-        type: 'branch' as const,
-        doorNumber: addr.door_number || '',
-        addressLine1: addr.address_line1 || '',
-        addressLine2: addr.address_line2 || '',
-        city: addr.city || '',
-        pincode: addr.pincode || '',
-        stateName: addr.state || '',
-        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-        isPrimary: addr.is_primary || false,
-        createdAt: addr.created_at || new Date().toISOString(),
-        manager: addr.manager_name || '',
-        phone: addr.manager_mobile_number || '',
-        status: 'active' as const,
-        usesManager: !!addr.manager_name,
-        staffCount: 0,
-        staffAttendance: 0,
-        dailySales: 0,
-        weeklySales: 0,
-        monthlySales: 0,
-        dailyGrowth: 0,
-        weeklyGrowth: 0,
-        monthlyGrowth: 0,
-        cashInHand: 0,
-        stockValue: 0,
-        receivables: 0,
-        payables: 0,
-        overdueReceivables: 0,
-        overduePayables: 0,
-        lowStockItems: 0,
-        nearLowStockItems: 0,
-      }));
-      
-      setBranches(branchData);
-      setFilteredBranches(branchData);
-    }
-  }, [businessData]);
-
-  // ✅ Only refetch when screen comes into focus if cache is stale
-  useFocusEffect(
-    React.useCallback(() => {
-      // Check if cache is stale (older than 10 seconds) before refetching
-      const { __getGlobalCache } = require('@/hooks/useBusinessData');
-      const cache = __getGlobalCache();
-      const now = Date.now();
-      const CACHE_DURATION = 10000; // 10 seconds
-      
-      // Only refetch if cache is stale or missing
-      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
-        console.log('🔄 Branches: Cache stale, refetching business data');
-        refetch();
-      } else {
-        console.log('✅ Branches: Using cached data (no refetch needed)');
+    (async () => {
+      const { success, addresses } = await getAddresses();
+      if (success && addresses) {
+        const branchAddresses = addresses.filter((addr: any) => addr.type === 'branch');
+        const branchData = branchAddresses.map(mapAddressToBranch);
+        setBranches(branchData);
+        setFilteredBranches(branchData);
       }
-    }, [refetch])
-  );
+    })();
+  }, []);
 
   useEffect(() => {
     // Filter branches based on search query

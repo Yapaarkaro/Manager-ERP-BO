@@ -137,7 +137,7 @@ interface Supplier {
 }
 
 // Get suppliers from data store - will be updated via useEffect
-let mockSuppliers: Supplier[] = [];
+let suppliersList: Supplier[] = [];
 
 interface ProductFormData {
   name: string;
@@ -514,7 +514,7 @@ export default function ManualProductScreen() {
   useEffect(() => {
     // Load from dataStore first (instant, cached)
       const allSuppliers = dataStore.getSuppliers();
-      mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
+      suppliersList = allSuppliers.map((supplier: StoreSupplier) => ({
         id: supplier.id,
         name: supplier.businessName || supplier.name,
         type: supplier.supplierType,
@@ -562,9 +562,9 @@ export default function ManualProductScreen() {
             }
           });
           
-          // Update mockSuppliers with fresh data
+          // Update suppliersList with fresh data from data store
           const updatedSuppliers = dataStore.getSuppliers();
-          mockSuppliers = updatedSuppliers.map((supplier: StoreSupplier) => ({
+          suppliersList = updatedSuppliers.map((supplier: StoreSupplier) => ({
             id: supplier.id,
             name: supplier.businessName || supplier.name,
             type: supplier.supplierType,
@@ -582,7 +582,7 @@ export default function ManualProductScreen() {
     // Subscribe to data store changes
     const unsubscribe = dataStore.subscribe(() => {
     const allSuppliers = dataStore.getSuppliers();
-    mockSuppliers = allSuppliers.map((supplier: StoreSupplier) => ({
+    suppliersList = allSuppliers.map((supplier: StoreSupplier) => ({
       id: supplier.id,
       name: supplier.businessName || supplier.name,
       type: supplier.supplierType,
@@ -598,8 +598,7 @@ export default function ManualProductScreen() {
     if (newSupplier && typeof newSupplier === 'string') {
       try {
         const supplierData = JSON.parse(newSupplier);
-        // Add the new supplier to the mock suppliers list
-        mockSuppliers.push({
+        suppliersList.push({
           id: supplierData.id,
           name: supplierData.businessName,
           type: 'business'
@@ -1882,7 +1881,7 @@ export default function ManualProductScreen() {
     cat.toLowerCase().includes(categorySearch.toLowerCase())
   );
 
-  const filteredSuppliers = mockSuppliers.filter(supplier =>
+  const filteredSuppliers = suppliersList.filter(supplier =>
     supplier.name.toLowerCase().includes(supplierSearch.toLowerCase())
   );
 
@@ -1895,7 +1894,7 @@ export default function ManualProductScreen() {
   }, [locations, locationSearch]);
 
   const getSupplierName = (supplierId: string) => {
-    const supplier = mockSuppliers.find(s => s.id === supplierId);
+    const supplier = suppliersList.find(s => s.id === supplierId);
     return supplier ? supplier.name : 'Unknown Supplier';
   };
 

@@ -133,10 +133,8 @@ export default function CollectPaymentScreen() {
 
   const handleProofSelect = (type: 'camera' | 'gallery') => {
     setShowProofModal(false);
-    // Mock proof of payment - in real app this would open camera/gallery
-    const mockProofUrl = 'https://images.pexels.com/photos/4386321/pexels-photo-4386321.jpeg?auto=compress&cs=tinysrgb&w=300&h=200&dpr=1';
-    setProofOfPayment(mockProofUrl);
-    Alert.alert('Proof Added', 'Payment proof has been attached for your reference');
+    // TODO: Implement camera/gallery capture to set proofOfPayment
+    setProofOfPayment('');
   };
 
   const renderPaymentMethodCard = (

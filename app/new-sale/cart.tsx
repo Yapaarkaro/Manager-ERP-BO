@@ -372,13 +372,15 @@ export default function CartScreen() {
     }
   }, [selectedProducts, processedSelectedProducts]);
 
-  // Persist cart items to AsyncStorage whenever they change
   useEffect(() => {
-    if (cartItems.length > 0) {
-      AsyncStorage.setItem('cartItems', JSON.stringify(cartItems));
-    } else {
-      // Clear persistence when cart is empty
-      AsyncStorage.removeItem('cartItems');
+    try {
+      if (cartItems.length > 0) {
+        AsyncStorage.setItem('cartItems', JSON.stringify(cartItems)).catch(() => {});
+      } else {
+        AsyncStorage.removeItem('cartItems').catch(() => {});
+      }
+    } catch {
+      // Non-critical: cart persistence failed
     }
   }, [cartItems]);
 

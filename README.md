@@ -1,569 +1,334 @@
-# Manager ERP Business Owner App
+# Manager
 
-A comprehensive Enterprise Resource Planning (ERP) application designed specifically for Indian business owners to manage their entire business operations from a single mobile application.
+**Your entire business, in your pocket.**
 
-## 🚀 Overview
+Manager is a mobile app that helps small and medium business owners in India run their shops and businesses from their phone. Think of it like a super-smart assistant that remembers everything about your business -- what you sold, what you bought, who owes you money, how much stock you have, and who works for you. Instead of writing things in notebooks or spreadsheets, you just use Manager, and it keeps everything organized, safe, and easy to find.
 
-The Manager ERP Business Owner App is a React Native application built with Expo that provides a complete business management solution. It enables business owners to handle sales, inventory, customer management, supplier relationships, financial tracking, and more through an intuitive mobile interface.
+## What Does Manager Do?
 
-## ✨ Key Features
+Imagine you own a shop. Every day, you need to:
 
-### 📊 **Dashboard & Analytics**
-- Real-time business overview with key metrics
-- Sales performance tracking
-- Revenue and expense summaries
-- Quick action buttons for common tasks
-- Visual charts and progress indicators
+- **Sell things** to customers and give them a bill
+- **Keep track** of what items you have left on your shelves
+- **Remember** which customers owe you money
+- **Order more items** from your suppliers when you run low
+- **Pay your suppliers** for the things they send you
+- **Know how much money** you made today, this week, or this month
+- **Manage your staff** -- who works where and what they do
 
-### 🛒 **Sales Management**
-- **New Sale Flow**: Product selection → Cart → Customer details → Payment
-- **Customer Pre-selection**: Direct sales from customer profiles
-- **Barcode Scanning**: Quick product identification
-- **Payment Processing**: Multiple payment methods support
-- **Invoice Generation**: Professional tax invoice creation with GST/CESS breakdown
-- **Sales History**: Complete transaction records
-- **Editable Quantity Input**: Type quantities directly for faster input
-- **Round-off Calculations**: Automatic rounding for precise billing
-- **Business Customer Support**: Full business details on invoices (GSTIN, business name, address)
+Manager does ALL of this for you, in one app. No paper, no mess, no forgetting.
 
-### 📦 **Inventory Management**
-- **Product Catalog**: Comprehensive product database
-- **Stock Tracking**: Real-time inventory levels
-- **Low Stock Alerts**: Automatic notifications
-- **Product Categories**: Organized product classification
-- **Barcode Integration**: Scan-based product management
-- **Stock Discrepancies**: Identify and resolve inventory issues
-- **Manual Product Entry**: Add products with detailed specifications
-- **Stock Out Management**: Comprehensive stock removal workflow
-  - **Reason Selection**: Expired, Damaged, Sample Given, Internal Use, Inventory Shrinkage, Disposed, Recalled, Other
-  - **Product Search & Scan**: Find products by search or barcode scanning
-  - **Quantity Management**: Dynamic stock calculation with "will remain" updates
-  - **Proof Documentation**: Mandatory proof images for each stocked-out product
-  - **Notes & Documentation**: Detailed notes for each stock out item
-  - **Confirmation Flow**: Review all details before final confirmation
-- **HSN/SAC Code Management**: 8-digit numeric codes for tax compliance
-- **Batch Number Tracking**: Product batch identification for quality control
-- **Unit Management**: Primary and compound unit support with conversion ratios
+### For the Simplest Understanding
 
-### 👥 **Customer Management**
-- **Customer Database**: Complete customer profiles
-- **Business & Individual**: Support for both customer types
-- **GSTIN Integration**: Automatic business information lookup
-- **Payment Terms**: Flexible payment arrangements
-- **Credit Limits**: Customer credit management
-- **Sales History**: Track customer purchase patterns
-- **Direct Sales**: Quick sales from customer profiles
-- **Address Autocomplete**: Fast address entry with suggestions
+- **Sales**: You tap, you sell, you get a bill. Done.
+- **Inventory**: Manager tells you "Hey, you're running low on rice!" before you even realize it.
+- **Customers**: Remember every customer's name, phone number, what they bought, and how much they owe.
+- **Suppliers**: Keep track of everyone you buy from, what you ordered, and what you paid.
+- **Money**: See exactly how much cash you have, how much is in your bank, and where it all went.
+- **Staff**: Know who's working at which branch and how they're doing.
+- **Reports**: Beautiful charts that show you if your business is growing or needs attention.
+- **Multiple Locations**: Got 2 shops? 5 warehouses? Manager handles them all.
 
-### 🤝 **Supplier Management**
-- **Supplier Database**: Comprehensive supplier profiles
-- **GSTIN Verification**: Automatic business information lookup
-- **Category Management**: Organized supplier classification
-- **Purchase Orders**: Streamlined procurement process
-- **Payment Tracking**: Supplier payment management
-- **Communication**: Direct supplier messaging
+---
 
-### 💰 **Financial Management**
-- **Receivables**: Customer payment collection
-- **Payables**: Supplier payment processing
-- **Expense Tracking**: Business expense management
-- **Bank Account Management**: Multiple account support
-- **Payment Methods**: UPI, Card, Bank Transfer support
-- **Financial Reports**: Comprehensive reporting
-- **CESS Calculation**: Advanced CESS support (value-based, quantity-based, combined)
-- **GST Breakdown**: CGST/SGST split display and calculation
+## Features
 
-### 📍 **Location Management**
-- **Branch Management**: Multi-location business support
-- **Warehouse Tracking**: Inventory location management
-- **Address Management**: Complete address handling
-- **Map Integration**: Location-based services
+### Sales and Billing
+- Create professional GST-compliant invoices with tax breakdown (CGST/SGST/CESS)
+- Support for both individual and business customers
+- Multiple payment methods -- Cash, UPI, Card, Bank Transfer
+- Barcode scanning for fast product lookup
+- Cart management with quantity editing and round-off
+- Invoice history and payment tracking
+- Return and refund processing
 
-### 📈 **Marketing & Campaigns**
-- **Campaign Management**: Marketing campaign creation
-- **Multi-Platform Support**: WhatsApp, Email, Instagram, Facebook, Google, Offline
-- **Budget Management**: Campaign budget tracking
-- **Target Audience**: Precise audience targeting
-- **Performance Analytics**: Campaign effectiveness tracking
-- **Payment Integration**: Campaign payment processing
+### Inventory Management
+- Complete product catalog with categories, HSN codes, and batch numbers
+- Real-time stock tracking across multiple locations
+- Low stock alerts with urgency levels (normal, low, critical)
+- Stock-in from purchase invoices with discrepancy reporting
+- Stock-out with reason tracking and mandatory proof photos
+- Custom barcode generation (unique 13-character alphanumeric codes)
+- Compound unit support (e.g., Box of 12 Pieces)
+- Per-location stock tracking
 
-### 👨‍💼 **Staff Management**
-- **Staff Notifications**: Bulk staff communication
-- **Role-based Access**: Different permission levels
-- **Staff Directory**: Complete staff profiles
-- **Communication Tools**: Direct messaging capabilities
+### Customer Management
+- Individual and business customer profiles
+- GSTIN verification and auto-fill for business customers
+- Credit limits and payment terms
+- Purchase history and spending patterns
+- Direct sales from customer profile
 
-### 🔄 **Returns & Refunds**
-- **Return Processing**: Streamlined return handling
-- **Refund Management**: Multiple refund methods
-- **Return Reasons**: Categorized return tracking
-- **Customer Communication**: Automated notifications
+### Supplier and Purchasing
+- Supplier database with GSTIN/PAN verification
+- Purchase order creation and tracking
+- Purchase invoice management with delivery status
+- Payment tracking (paid, pending, overdue)
 
-### 📋 **Reports & Analytics**
-- **Sales Reports**: Daily, weekly, monthly sales data
-- **Payment Reports**: Payment collection tracking
-- **Inventory Reports**: Stock level analytics
-- **Customer Reports**: Customer behavior insights
-- **Financial Reports**: Comprehensive financial analytics
+### Financial Management
+- Cash and bank balance tracking
+- Multiple bank account support
+- Receivables dashboard (who owes you)
+- Payables dashboard (who you owe)
+- Financial year configuration (Apr-Mar or Jan-Dec)
+- Invoice numbering with custom prefix and patterns
 
-### 🔔 **Notification System**
-- **In-App Notifications**: Consistent toast message system
-- **Success Notifications**: Green toast for successful operations
-- **Error Notifications**: Red toast for error messages
-- **Info Notifications**: Yellow toast for informational messages
-- **Auto-dismiss**: Notifications disappear after 3 seconds
-- **Swipeable**: Users can swipe to dismiss notifications
+### Location Management
+- Primary business address with Google Maps integration
+- Branch management with manager assignment
+- Warehouse management with stock tracking
+- Staff assignment per location
 
-## 🛠️ Technical Stack
+### Staff Management
+- Staff profiles with roles, departments, and salary info
+- Location assignment
+- Sales and invoice target setting
+- Emergency contact tracking
+- Permission management
 
-### **Frontend Framework**
-- **React Native**: Cross-platform mobile development
-- **Expo**: Development platform and tools
-- **TypeScript**: Type-safe JavaScript development
+### Marketing Campaigns
+- Create campaigns across WhatsApp, Email, Instagram, Facebook, Google, and Offline
+- Budget and spend tracking
+- Audience targeting
+- Performance metrics (impressions, clicks, conversions)
 
-### **Navigation & Routing**
-- **Expo Router**: File-based routing system
-- **Deep Linking**: Seamless app navigation
+### Notifications
+- Real-time in-app notifications (urgent, warning, info, success)
+- Category filtering (orders, stock, payments, staff, system, customer)
+- Priority levels and action tracking
 
-### **UI/UX Components**
-- **Lucide React Native**: Modern icon library
-- **React Native Safe Area**: Safe area handling
-- **Custom Components**: Tailored business components
-- **React Native Toast Message**: Consistent notification system
+### Reports and Analytics
+- Daily, weekly, and monthly sales reports
+- Payment method breakdown
+- Stock level analytics
+- Customer and supplier insights
 
-### **State Management**
-- **React Hooks**: Local state management
-- **Context API**: Global state sharing
-- **AsyncStorage**: Local data persistence
+---
 
-### **External Integrations**
-- **GSTIN API**: Business verification services
-- **MapLibre GL JS**: Map functionality
-- **Camera Integration**: Barcode scanning
-- **Payment Gateways**: Financial transaction processing
+## Tech Stack
 
-## 📱 App Architecture
+| Layer | Technology |
+|---|---|
+| **Mobile App** | React Native 0.79 + Expo SDK 53 |
+| **Language** | TypeScript (strict mode) |
+| **Navigation** | Expo Router (file-based routing) |
+| **Backend** | Supabase (PostgreSQL + Auth + Edge Functions + Storage) |
+| **State** | React Hooks + AsyncStorage (debounced, batched writes) |
+| **Maps** | MapLibre GL + Google Maps Geocoding |
+| **Icons** | Lucide React Native |
+| **Notifications** | React Native Toast Message |
 
-### **Directory Structure**
+---
+
+## Architecture
+
 ```
 Manager-ERP-BO/
-├── app/                    # Main application screens
-│   ├── auth/              # Authentication flow
-│   ├── dashboard.tsx      # Main dashboard
-│   ├── inventory/         # Inventory management
-│   │   ├── stock-out/     # Stock out workflow
-│   │   └── stock-management.tsx
-│   ├── new-sale/         # Sales process
-│   ├── new-return/       # Returns management
-│   ├── people/           # Customer & staff management
-│   ├── purchasing/        # Supplier management
-│   ├── receivables/       # Payment collection
-│   ├── payables/         # Payment processing
-│   ├── marketing/        # Marketing campaigns
-│   ├── expenses/         # Expense management
-│   ├── locations/        # Branch & warehouse management
-│   └── reports/          # Analytics & reporting
-├── components/            # Reusable UI components
-├── hooks/                # Custom React hooks
-├── services/             # API services
-├── utils/                # Utility functions
-│   └── notifications.ts  # Toast notification system
-├── data/                 # Static data files
-└── assets/               # Images and static assets
+├── app/                          # Screens (file-based routing)
+│   ├── auth/                     # Signup and login flow
+│   │   ├── mobile.tsx            # Phone number entry
+│   │   ├── otp.tsx               # OTP verification
+│   │   ├── gstin-pan.tsx         # Tax ID verification
+│   │   ├── business-details.tsx  # Business info
+│   │   ├── business-address*.tsx # Address setup
+│   │   ├── business-bank*.tsx    # Bank account setup
+│   │   └── business-summary.tsx  # Onboarding summary
+│   ├── dashboard.tsx             # Main dashboard
+│   ├── new-sale/                 # Sales workflow
+│   │   ├── index.tsx             # Product selection
+│   │   ├── cart.tsx              # Cart and checkout
+│   │   └── success.tsx           # Invoice generation
+│   ├── inventory/                # Inventory management
+│   │   ├── index.tsx             # Product list
+│   │   ├── manual-product.tsx    # Add/edit product
+│   │   ├── product-details.tsx   # Product detail view
+│   │   ├── stock-in/             # Stock receiving
+│   │   └── stock-out/            # Stock removal
+│   ├── people/                   # People management
+│   │   ├── customers.tsx         # Customer list
+│   │   └── staff.tsx             # Staff list
+│   ├── purchasing/               # Procurement
+│   │   ├── suppliers.tsx         # Supplier list
+│   │   ├── purchases.tsx         # Purchase orders/invoices
+│   │   └── add-supplier.tsx      # Add supplier
+│   ├── locations/                # Multi-location
+│   │   ├── branches.tsx          # Branch management
+│   │   └── warehouses.tsx        # Warehouse management
+│   ├── marketing/                # Marketing campaigns
+│   ├── sales.tsx                 # Sales history
+│   ├── returns.tsx               # Returns list
+│   ├── reports.tsx               # Business reports
+│   ├── settings.tsx              # App settings
+│   ├── notifications.tsx         # Notification center
+│   ├── bank-accounts.tsx         # Bank accounts
+│   ├── privacy-policy.tsx        # Privacy policy
+│   └── terms-and-conditions.tsx  # Terms of service
+├── components/                   # Reusable UI components
+│   ├── CustomAlert.tsx           # Alert dialogs
+│   ├── FAB.tsx                   # Floating action button
+│   ├── HamburgerMenu.tsx         # Navigation drawer
+│   └── Sidebar.tsx               # Desktop sidebar
+├── hooks/                        # Custom React hooks
+│   ├── useBusinessData.ts        # Business data fetching + caching
+│   └── useSubscription.ts        # Subscription management
+├── services/                     # API layer
+│   └── backendApi.ts             # 70+ API functions for Supabase
+├── utils/                        # Utilities
+│   ├── dataStore.ts              # AsyncStorage with batched I/O
+│   ├── productStore.ts           # Product state management
+│   ├── subscriptionStore.ts      # Subscription state
+│   ├── barcodeGenerator.ts       # Barcode generation
+│   ├── numberToWords.ts          # Number-to-words conversion
+│   └── shadowUtils.ts            # Shadow styling helpers
+├── lib/
+│   └── supabase.ts               # Supabase client configuration
+└── app.json                      # Expo configuration
 ```
 
-### **Key Components**
+---
 
-#### **FAB (Floating Action Button)**
-- Central action hub for quick access
-- Animated expansion with multiple options
-- Context-aware actions based on current screen
-- Stock management integration
+## Backend (Supabase)
 
-#### **Hamburger Menu**
-- Navigation to all major sections
-- Organized by business function
-- Quick access to key features
+### Database Schema -- 29 Tables
 
-#### **Form Components**
-- Consistent input styling
-- Validation and error handling
-- Modal-based complex inputs
-- Address autocomplete integration
+| Category | Tables |
+|---|---|
+| **Core** | `businesses`, `users`, `locations`, `user_locations`, `bank_accounts`, `business_settings` |
+| **Auth** | `signup_progress`, `device_snapshots` |
+| **Commerce** | `invoices`, `invoice_items`, `returns`, `return_items` |
+| **Inventory** | `products`, `inventory_logs`, `location_stock`, `assigned_barcodes` |
+| **People** | `customers`, `staff`, `suppliers` |
+| **Purchasing** | `purchase_orders`, `purchase_order_items`, `purchase_invoices`, `purchase_invoice_items` |
+| **Subscription** | `subscription_plans`, `subscriptions`, `subscription_addons`, `subscription_history` |
+| **Engagement** | `notifications`, `marketing_campaigns` |
 
-#### **Notification System**
-- Toast-based notifications
-- Three types: success, error, info
-- Auto-dismiss functionality
-- Swipeable on mobile devices
+All 29 tables have **Row Level Security (RLS) enabled** with policies that enforce tenant isolation through `business_id`.
 
-## 🚀 Getting Started
+### Edge Functions -- 15 Deployed
 
-### **Prerequisites**
-- Node.js (v18 or higher)
-- npm or yarn package manager
-- Expo CLI
-- iOS Simulator or Android Emulator (optional)
+| Function | Auth | Purpose |
+|---|---|---|
+| `verify-mobile-otp` | Pre-auth | Mobile OTP verification |
+| `auth-mobile-login` | Pre-auth | User authentication and session creation |
+| `verify-gstin` | JWT | GSTIN verification via external API |
+| `verify-gstin-otp` | JWT | GSTIN OTP verification |
+| `verify-pan` | JWT | PAN verification |
+| `submit-business-details` | JWT | Business creation with identity verification |
+| `manage-addresses` | JWT | CRUD for business addresses |
+| `manage-bank-accounts` | JWT | CRUD for bank accounts |
+| `complete-onboarding` | JWT | Finalize business setup |
+| `manage-signup-progress` | JWT | Track signup steps |
+| `manage-device-snapshots` | JWT | Device fingerprinting |
+| `manage-staff` | JWT | Staff CRUD operations |
+| `update-business-cash-balance` | JWT | Cash balance updates |
+| `generate-barcode` | JWT | Barcode image generation |
+| `google-maps-geocode` | JWT | Address geocoding |
 
-### **Installation**
+### Security Features
+- All database functions have immutable `search_path` (prevents hijacking)
+- Single consolidated RLS helper function (`get_user_business_id`)
+- Tenant isolation on every table via `business_id` filtering
+- JWT verification on all authenticated edge functions
+- Barcode generation with uniqueness guarantees and business ownership verification
+- SECURITY DEFINER functions with explicit schema references
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Manager-ERP-BO
-   ```
+---
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+## Getting Started
 
-3. **Start the development server**
-   ```bash
-   npx expo start
-   ```
+### Prerequisites
+- Node.js 18+
+- npm or yarn
+- Expo CLI (`npm install -g expo-cli`)
+- iOS Simulator (Mac) or Android Emulator
 
-4. **Run on device/simulator**
-   - Press `i` for iOS simulator
-   - Press `a` for Android emulator
-   - Scan QR code with Expo Go app on physical device
+### Installation
 
-### **Environment Setup**
-
-#### **Development Environment**
-- **Expo Development Build**: For testing native features
-- **Expo Go**: For rapid prototyping and testing
-- **Metro Bundler**: JavaScript bundler for React Native
-
-#### **Production Build**
 ```bash
-# Build for iOS
-npx expo build:ios
-
-# Build for Android
-npx expo build:android
+git clone <repository-url>
+cd Manager-ERP-BO
+npm install
 ```
 
-## 📋 Business Workflows
+### Environment Variables
 
-### **Sales Process**
-1. **Product Selection**: Browse or scan products
-2. **Cart Management**: Add/remove items, adjust quantities with editable input
-3. **Customer Details**: Select existing or add new customer (business/individual)
-4. **Payment Processing**: Choose payment method and complete transaction
-5. **Invoice Generation**: Create and send professional tax invoice with GST/CESS breakdown
+Create a `.env` file (not committed to git):
 
-### **Inventory Management**
-1. **Product Addition**: Manual entry or barcode scanning with HSN/SAC codes
-2. **Category Management**: Organize products by categories
-3. **Stock Tracking**: Monitor inventory levels
-4. **Low Stock Alerts**: Automatic notifications for reordering
-5. **Stock Reconciliation**: Identify and resolve discrepancies
-6. **Stock Out Process**: 
-   - Select reason for stock removal
-   - Search or scan products
-   - Specify quantities and add proof images
-   - Review and confirm stock out
-
-### **Customer Management**
-1. **Customer Registration**: Business or individual customer setup
-2. **GSTIN Verification**: Automatic business information lookup
-3. **Profile Management**: Complete customer profiles
-4. **Sales History**: Track customer purchase patterns
-5. **Direct Sales**: Quick sales from customer profiles
-6. **Address Management**: Autocomplete address entry
-
-### **Supplier Management**
-1. **Supplier Registration**: Add new suppliers with verification
-2. **Purchase Orders**: Create and manage purchase orders
-3. **Payment Tracking**: Monitor supplier payments
-4. **Communication**: Direct messaging with suppliers
-
-### **Financial Management**
-1. **Payment Collection**: Track customer payments
-2. **Expense Tracking**: Record and categorize business expenses
-3. **Bank Account Management**: Multiple account support
-4. **Financial Reporting**: Comprehensive financial analytics
-5. **Tax Calculations**: Advanced GST and CESS calculations
-
-## 🔧 Configuration
-
-### **App Configuration**
-- **app.json**: Expo configuration file
-- **TypeScript**: Type definitions and interfaces
-- **Navigation**: File-based routing with Expo Router
-
-### **API Integration**
-- **GSTIN API**: Business verification services
-- **Payment Gateways**: Financial transaction processing
-- **Map Services**: Location-based functionality
-
-### **Data Management**
-- **Local Storage**: AsyncStorage for offline data
-- **State Management**: React hooks for local state
-- **Data Validation**: TypeScript interfaces for data integrity
-
-## 📊 Data Models
-
-### **Core Entities**
-
-#### **Product**
-```typescript
-interface Product {
-  id: string;
-  name: string;
-  category: string;
-  hsnCode: string;
-  barcode: string;
-  price: number;
-  stock: number;
-  supplier: string;
-  location: string;
-  batchNumber?: string;
-  primaryUnit?: string;
-  cessType: 'none' | 'value' | 'quantity' | 'value_and_quantity';
-  cessRate?: number;
-  cessAmount?: number;
-  cessUnit?: string;
-}
+```env
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 ```
 
-#### **Stock Out Item**
-```typescript
-interface StockOutItem {
-  productId: string;
-  productName: string;
-  currentStock: number;
-  quantityToRemove: number;
-  willRemain: number;
-  notes: string;
-  proofImage?: string;
-}
-```
+### Running the App
 
-#### **Customer**
-```typescript
-interface Customer {
-  id: string;
-  name: string;
-  customerType: 'business' | 'individual';
-  mobile: string;
-  email?: string;
-  address: string;
-  gstin?: string;
-  businessName?: string;
-  businessAddress?: string;
-  contactPerson?: string;
-  paymentTerms?: string;
-  creditLimit?: string;
-}
-```
-
-#### **Supplier**
-```typescript
-interface Supplier {
-  id: string;
-  name: string;
-  businessName: string;
-  gstin: string;
-  mobile: string;
-  email?: string;
-  address: string;
-  categories: string[];
-  customCategory?: string;
-}
-```
-
-#### **Bank Account**
-```typescript
-interface BankAccount {
-  id: string;
-  bankId: string;
-  bankName: string;
-  accountHolderName: string;
-  accountNumber: string;
-  ifscCode: string;
-  accountType: string;
-  initialBalance: number;
-  isPrimary: boolean;
-}
-```
-
-## 🎨 UI/UX Features
-
-### **Design System**
-- **Consistent Color Scheme**: Primary blue (#3f66ac) with supporting colors
-- **Typography**: Clear hierarchy with proper font weights
-- **Spacing**: Consistent padding and margins
-- **Icons**: Lucide React Native icons for consistency
-
-### **User Experience**
-- **Intuitive Navigation**: Easy-to-use interface
-- **Form Validation**: Real-time input validation
-- **Loading States**: Visual feedback during operations
-- **Error Handling**: User-friendly error messages with toast notifications
-- **Responsive Design**: Works across different screen sizes
-- **Consistent Button Layout**: Floating action buttons with proper positioning
-
-### **Accessibility**
-- **Touch Targets**: Properly sized interactive elements
-- **Color Contrast**: High contrast for readability
-- **Screen Reader Support**: Proper accessibility labels
-
-## 🔒 Security Features
-
-### **Data Protection**
-- **Input Validation**: Prevent malicious input
-- **Data Encryption**: Secure storage of sensitive information
-- **Session Management**: Proper authentication handling
-
-### **Business Security**
-- **GSTIN Verification**: Authentic business information
-- **Payment Security**: Secure payment processing
-- **Access Control**: Role-based permissions
-
-## 📈 Performance Optimization
-
-### **App Performance**
-- **Lazy Loading**: Load components on demand
-- **Image Optimization**: Compressed images for faster loading
-- **State Management**: Efficient state updates
-- **Memory Management**: Proper cleanup of resources
-
-### **Network Optimization**
-- **API Caching**: Reduce redundant API calls
-- **Offline Support**: Basic functionality without internet
-- **Data Synchronization**: Sync when connection restored
-
-## 🧪 Testing
-
-### **Testing Strategy**
-- **Unit Testing**: Component-level testing
-- **Integration Testing**: Workflow testing
-- **User Acceptance Testing**: Business requirement validation
-
-### **Quality Assurance**
-- **TypeScript**: Compile-time error checking
-- **ESLint**: Code quality enforcement
-- **Prettier**: Code formatting consistency
-
-## 📚 API Documentation
-
-### **External APIs**
-
-#### **GSTIN Verification API**
-```typescript
-// Service: services/gstinApi.ts
-export const verifyGSTIN = async (gstin: string) => {
-  // Returns business information from GSTIN
-}
-```
-
-### **Internal APIs**
-
-#### **Notification System**
-```typescript
-// Utils: utils/notifications.ts
-export const showSuccess = (message: string, title?: string) => {
-  // Shows success toast notification
-}
-
-export const showError = (message: string, title?: string) => {
-  // Shows error toast notification
-}
-
-export const showInfo = (message: string, title?: string) => {
-  // Shows info toast notification
-}
-```
-
-#### **Data Management**
-- **Local Storage**: AsyncStorage for persistent data
-- **State Management**: React hooks for application state
-- **Navigation**: Expo Router for screen navigation
-
-## 🚀 Deployment
-
-### **Development**
 ```bash
 # Start development server
 npx expo start
 
-# Run on specific platform
+# iOS
 npx expo start --ios
+
+# Android
 npx expo start --android
+
+# Web
+npx expo start --web
 ```
 
-### **Production**
+### Building for Production
+
 ```bash
-# Build for production
-npx expo build:ios
-npx expo build:android
+# Install EAS CLI
+npm install -g eas-cli
 
-# Publish to Expo
-npx expo publish
+# Configure EAS
+eas build:configure
+
+# Build for Android
+eas build --platform android --profile production
+
+# Build for iOS
+eas build --platform ios --profile production
+
+# Submit to stores
+eas submit --platform android
+eas submit --platform ios
 ```
-
-## 🤝 Contributing
-
-### **Development Guidelines**
-1. **Code Style**: Follow TypeScript and ESLint rules
-2. **Component Structure**: Use functional components with hooks
-3. **State Management**: Use React hooks for local state
-4. **Testing**: Write tests for new features
-5. **Documentation**: Update README for new features
-
-### **Pull Request Process**
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-### **Getting Help**
-- **Documentation**: Check this README for common issues
-- **Issues**: Report bugs through GitHub issues
-- **Discussions**: Use GitHub discussions for questions
-
-### **Business Support**
-- **Feature Requests**: Submit through GitHub issues
-- **Bug Reports**: Include detailed reproduction steps
-- **Enhancement Suggestions**: Provide business context
-
-## 🔄 Version History
-
-### **Current Version**: 1.1.0
-- **Stock Out Management**: Complete workflow for stock removal with proof documentation
-- **Enhanced Invoice System**: Professional tax invoices with GST/CESS breakdown
-- **Notification System**: Consistent in-app toast notifications
-- **HSN/SAC Code Support**: 8-digit numeric codes for tax compliance
-- **Batch Number Tracking**: Product batch identification
-- **Business Customer Support**: Full business details on invoices
-- **Address Autocomplete**: Fast address entry with suggestions
-- **Editable Quantity Input**: Direct quantity typing for faster input
-- **Round-off Calculations**: Automatic rounding for precise billing
-
-### **Previous Version**: 1.0.0
-- **Initial Release**: Complete ERP functionality
-- **Core Features**: Sales, inventory, customer, supplier management
-- **Financial Tools**: Payment processing, expense tracking
-- **Marketing**: Campaign management and analytics
-- **Reporting**: Comprehensive business analytics
-
-## 📞 Contact
-
-For business inquiries or technical support:
-- **Email**: support@getmanager.in
-- **Website**: getmanager.in
-- **GitHub**: [https://github.com/your-org/manager-erp-bo]
-- **Documentation**: [https://docs.getmanager.in]
 
 ---
 
-**Built with ❤️ for Indian Business Owners**
+## API Layer
+
+The `services/backendApi.ts` file contains 70+ functions organized by domain:
+
+| Domain | Functions | Operations |
+|---|---|---|
+| Products | 9 | Full CRUD + inventory logs, location stock, barcode |
+| Customers | 4 | Full CRUD |
+| Suppliers | 4 | Full CRUD |
+| Staff | 4 | Full CRUD |
+| Addresses | 4 | Full CRUD |
+| Bank Accounts | 4 | Full CRUD |
+| Invoices | 4 | Create, read, read-with-items, update payment |
+| Returns | 2 | Create, read |
+| Purchase Orders | 3 | Create, read, update status |
+| Purchase Invoices | 2 | Create, read |
+| Notifications | 3 | Create, read, update status |
+| Marketing | 2 | Create, read |
+| Financial | 3 | Receivables, payables, invoice numbering |
+| Auth/Signup | 8 | OTP, business details, signup progress, device |
+| Business | 5 | Onboarding, cash balance, primary address/bank |
+| Subscription | 1 | Create/update subscription |
+
+All functions use a cached `getUserBusinessId()` helper to avoid repeated database lookups (5-minute TTL).
+
+---
+
+## Contact
+
+- **Website**: [getmanager.in](https://getmanager.in)
+- **Email**: support@getmanager.in
+
+---
+
+Built for Indian business owners.

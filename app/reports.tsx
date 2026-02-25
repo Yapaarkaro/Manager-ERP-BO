@@ -74,141 +74,7 @@ interface DailySalesData {
   }[];
 }
 
-const mockDailySalesData: DailySalesData[] = [
-  {
-    date: '2024-01-16',
-    totalSales: 125000,
-    totalReturns: 8500,
-    netSales: 116500,
-    invoiceCount: 12,
-    returnCount: 2,
-    paymentBreakdown: {
-      cash: { gross: 45000, returns: 5500, net: 39500 },
-      upi: { gross: 50000, returns: 3000, net: 47000 },
-      card: { gross: 25000, returns: 0, net: 25000 },
-      others: { gross: 5000, returns: 0, net: 5000 }
-    },
-    invoices: [
-      {
-        id: '1',
-        invoiceNumber: 'INV-2024-001',
-        customerName: 'Rajesh Kumar',
-        customerType: 'individual',
-        amount: 15500,
-        paymentMethod: 'cash',
-        staffName: 'Priya Sharma',
-        staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '09:30 AM',
-        status: 'sale'
-      },
-      {
-        id: '2',
-        invoiceNumber: 'RET-2024-001',
-        customerName: 'Rajesh Kumar',
-        customerType: 'individual',
-        amount: 5500,
-        paymentMethod: 'cash',
-        staffName: 'Priya Sharma',
-        staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '02:15 PM',
-        status: 'return',
-        originalInvoice: 'INV-2024-001'
-      },
-      {
-        id: '3',
-        invoiceNumber: 'INV-2024-002',
-        customerName: 'TechCorp Solutions',
-        customerType: 'business',
-        amount: 35000,
-        paymentMethod: 'upi',
-        staffName: 'Rajesh Kumar',
-        staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '11:45 AM',
-        status: 'sale'
-      },
-      {
-        id: '4',
-        invoiceNumber: 'INV-2024-003',
-        customerName: 'Sunita Devi',
-        customerType: 'individual',
-        amount: 22000,
-        paymentMethod: 'card',
-        staffName: 'Amit Singh',
-        staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '03:20 PM',
-        status: 'sale'
-      },
-      {
-        id: '5',
-        invoiceNumber: 'RET-2024-002',
-        customerName: 'Global Enterprises',
-        customerType: 'business',
-        amount: 3000,
-        paymentMethod: 'upi',
-        staffName: 'Priya Sharma',
-        staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '04:30 PM',
-        status: 'return',
-        originalInvoice: 'INV-2024-002'
-      }
-    ]
-  },
-  {
-    date: '2024-01-15',
-    totalSales: 98000,
-    totalReturns: 12000,
-    netSales: 86000,
-    invoiceCount: 8,
-    returnCount: 3,
-    paymentBreakdown: {
-      cash: { gross: 35000, returns: 8000, net: 27000 },
-      upi: { gross: 40000, returns: 4000, net: 36000 },
-      card: { gross: 18000, returns: 0, net: 18000 },
-      others: { gross: 5000, returns: 0, net: 5000 }
-    },
-    invoices: [
-      {
-        id: '6',
-        invoiceNumber: 'INV-2024-004',
-        customerName: 'Metro Retail Chain',
-        customerType: 'business',
-        amount: 45000,
-        paymentMethod: 'upi',
-        staffName: 'Rajesh Kumar',
-        staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '10:15 AM',
-        status: 'sale'
-      },
-      {
-        id: '7',
-        invoiceNumber: 'INV-2024-005',
-        customerName: 'Vikram Patel',
-        customerType: 'individual',
-        amount: 28000,
-        paymentMethod: 'cash',
-        staffName: 'Priya Sharma',
-        staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-        time: '01:30 PM',
-        status: 'sale'
-      }
-    ]
-  },
-  {
-    date: '2024-01-14',
-    totalSales: 156000,
-    totalReturns: 15000,
-    netSales: 141000,
-    invoiceCount: 15,
-    returnCount: 4,
-    paymentBreakdown: {
-      cash: { gross: 60000, returns: 10000, net: 50000 },
-      upi: { gross: 70000, returns: 5000, net: 65000 },
-      card: { gross: 20000, returns: 0, net: 20000 },
-      others: { gross: 6000, returns: 0, net: 6000 }
-    },
-    invoices: []
-  }
-];
+const mockDailySalesData: DailySalesData[] = [];
 
 export default function ReportsScreen() {
   const { handleBack } = useWebBackNavigation();
@@ -267,7 +133,7 @@ export default function ReportsScreen() {
         customerDetails: {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
@@ -295,7 +161,7 @@ export default function ReportsScreen() {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
           businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 

@@ -55,7 +55,7 @@ import { showAlert, showConfirm } from '@/utils/webAlert';
 import CustomAlert from '@/components/CustomAlert';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useWebNavigation } from '@/contexts/WebNavigationContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -189,7 +189,7 @@ export default function SettingsScreen() {
   // Subscribe to alert state changes
   useEffect(() => {
     const { subscribeToAlert, getAlertState } = require('@/utils/webAlert');
-    const unsubscribe = subscribeToAlert((state) => {
+    const unsubscribe = subscribeToAlert((state: any) => {
       setAlertState(state);
     });
     // Check initial state
@@ -261,7 +261,7 @@ export default function SettingsScreen() {
     digitalWallet: true,
   });
 
-  const [activeBankAccounts, setActiveBankAccounts] = useState<Set<string>>(new Set(['1'])); // Mock active account
+  const [activeBankAccounts, setActiveBankAccounts] = useState<Set<string>>(new Set());
 
   // Subscription state
   const [subscriptions, setSubscriptions] = useState([
@@ -507,21 +507,24 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = async () => {
-    const confirmed = await showConfirm(
+    showConfirm(
       'Logout',
       'Are you sure you want to logout?',
       async () => {
         try {
           setIsLoggingOut(true);
-          // Sign out from Supabase
-          const { error } = await supabase.auth.signOut();
+          const { error } = await withTimeout(
+            supabase.auth.signOut(),
+            10000,
+            'Settings: signOut'
+          );
           if (error) {
             throw error;
           }
-          // Clear local data
           await dataStore.clearAllDataForTesting();
           await subscriptionStore.clearSubscriptionData();
-          // Navigate to login screen
+          const { clearBusinessContext } = await import('@/services/backendApi');
+          clearBusinessContext();
           router.replace('/auth/mobile');
         } catch (error) {
           console.error('Error logging out:', error);
@@ -537,9 +540,7 @@ export default function SettingsScreen() {
       },
       () => {
         // User cancelled
-      },
-      'Logout',
-      'Cancel'
+      }
     );
   };
 
@@ -1133,8 +1134,7 @@ export default function SettingsScreen() {
               onPress={() => {
                 // Set primary in data store
                 dataStore.setPrimaryBankAccount(account.id);
-                // Reload bank accounts to refresh UI
-                loadBankAccounts();
+                setBankAccounts([...dataStore.getBankAccounts()] as any);
               }}
               activeOpacity={0.7}
             >
@@ -1196,7 +1196,7 @@ export default function SettingsScreen() {
                 <View style={styles.profileImage}>
                   <Text style={styles.profileImageText}>
                     {userProfile.name 
-                      ? userProfile.name.split(' ').map(n => n[0]).join('').toUpperCase() 
+                      ? userProfile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() 
                       : 'U'}
                   </Text>
                 </View>
@@ -1204,7 +1204,7 @@ export default function SettingsScreen() {
                 <View style={[styles.profileImage, { backgroundColor: Colors.primary }]}>
                   <Text style={styles.profileImageText}>
                     {userProfile.name 
-                      ? userProfile.name.split(' ').map(n => n[0]).join('').toUpperCase() 
+                      ? userProfile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() 
                       : 'U'}
                   </Text>
                 </View>
@@ -2721,11 +2721,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 2,
     borderColor: '#3f66ac',
-  },
-  subscriptionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
   },
   subscriptionTitle: {
     fontSize: 18,

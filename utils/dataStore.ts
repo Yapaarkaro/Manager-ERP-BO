@@ -1,21 +1,12 @@
-// Comprehensive data store for the ERP app
-// Manages customers, suppliers, sales, invoices, and inventory
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Title case conversion utility
-// Converts "EXANITE TECHNOLOGIES PRIVATE LIMITED" to "Exanite Technologies Private Limited"
 export function toTitleCase(str: string | undefined | null): string {
   if (!str) return '';
-  
-  // Words that should remain lowercase (unless at start of string)
   const minorWords = ['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'with'];
-  
   return str
     .toLowerCase()
     .split(' ')
     .map((word, index) => {
-      // Always capitalize first word, or if not a minor word
       if (index === 0 || !minorWords.includes(word)) {
         return word.charAt(0).toUpperCase() + word.slice(1);
       }
@@ -24,97 +15,42 @@ export function toTitleCase(str: string | undefined | null): string {
     .join(' ');
 }
 
-// State code mapping function
 export function getStateCode(stateName: string): string {
   const stateCodeMap: { [key: string]: string } = {
-    'Andhra Pradesh': 'AP',
-    'Arunachal Pradesh': 'AR',
-    'Assam': 'AS',
-    'Bihar': 'BR',
-    'Chhattisgarh': 'CG',
-    'Goa': 'GA',
-    'Gujarat': 'GJ',
-    'Haryana': 'HR',
-    'Himachal Pradesh': 'HP',
-    'Jharkhand': 'JH',
-    'Karnataka': 'KA',
-    'Kerala': 'KL',
-    'Madhya Pradesh': 'MP',
-    'Maharashtra': 'MH',
-    'Manipur': 'MN',
-    'Meghalaya': 'ML',
-    'Mizoram': 'MZ',
-    'Nagaland': 'NL',
-    'Odisha': 'OD',
-    'Punjab': 'PB',
-    'Rajasthan': 'RJ',
-    'Sikkim': 'SK',
-    'Tamil Nadu': 'TN',
-    'Telangana': 'TS',
-    'Tripura': 'TR',
-    'Uttar Pradesh': 'UP',
-    'Uttarakhand': 'UK',
-    'West Bengal': 'WB',
-    'Delhi': 'DL',
-    'Jammu and Kashmir': 'JK',
-    'Ladakh': 'LA',
-    'Chandigarh': 'CH',
-    'Dadra and Nagar Haveli': 'DN',
-    'Daman and Diu': 'DD',
-    'Lakshadweep': 'LD',
-    'Puducherry': 'PY',
-    'Andaman and Nicobar Islands': 'AN'
+    'Andhra Pradesh': 'AP', 'Arunachal Pradesh': 'AR', 'Assam': 'AS', 'Bihar': 'BR',
+    'Chhattisgarh': 'CG', 'Goa': 'GA', 'Gujarat': 'GJ', 'Haryana': 'HR',
+    'Himachal Pradesh': 'HP', 'Jharkhand': 'JH', 'Karnataka': 'KA', 'Kerala': 'KL',
+    'Madhya Pradesh': 'MP', 'Maharashtra': 'MH', 'Manipur': 'MN', 'Meghalaya': 'ML',
+    'Mizoram': 'MZ', 'Nagaland': 'NL', 'Odisha': 'OD', 'Punjab': 'PB',
+    'Rajasthan': 'RJ', 'Sikkim': 'SK', 'Tamil Nadu': 'TN', 'Telangana': 'TS',
+    'Tripura': 'TR', 'Uttar Pradesh': 'UP', 'Uttarakhand': 'UK', 'West Bengal': 'WB',
+    'Delhi': 'DL', 'Jammu and Kashmir': 'JK', 'Ladakh': 'LA', 'Chandigarh': 'CH',
+    'Dadra and Nagar Haveli': 'DN', 'Daman and Diu': 'DD', 'Lakshadweep': 'LD',
+    'Puducherry': 'PY', 'Andaman and Nicobar Islands': 'AN',
   };
-  
   return stateCodeMap[stateName] || stateName.substring(0, 2).toUpperCase();
 }
 
-// GSTIN State code mapping function
 export function getGSTINStateCode(stateName: string): string {
   const gstinStateCodeMap: { [key: string]: string } = {
-    'Andhra Pradesh': '37',
-    'Arunachal Pradesh': '12',
-    'Assam': '18',
-    'Bihar': '10',
-    'Chhattisgarh': '22',
-    'Goa': '30',
-    'Gujarat': '24',
-    'Haryana': '06',
-    'Himachal Pradesh': '02',
-    'Jharkhand': '20',
-    'Karnataka': '29',
-    'Kerala': '32',
-    'Madhya Pradesh': '23',
-    'Maharashtra': '27',
-    'Manipur': '14',
-    'Meghalaya': '17',
-    'Mizoram': '15',
-    'Nagaland': '13',
-    'Odisha': '21',
-    'Punjab': '03',
-    'Rajasthan': '08',
-    'Sikkim': '11',
-    'Tamil Nadu': '33',
-    'Telangana': '36',
-    'Tripura': '16',
-    'Uttar Pradesh': '09',
-    'Uttarakhand': '05',
-    'West Bengal': '19',
-    'Andaman and Nicobar Islands': '35',
-    'Chandigarh': '04',
-    'Dadra and Nagar Haveli': '26',
-    'Daman and Diu': '25',
-    'Delhi': '07',
-    'Jammu and Kashmir': '01',
-    'Ladakh': '38',
-    'Lakshadweep': '31',
-    'Puducherry': '34'
+    'Andhra Pradesh': '37', 'Arunachal Pradesh': '12', 'Assam': '18', 'Bihar': '10',
+    'Chhattisgarh': '22', 'Goa': '30', 'Gujarat': '24', 'Haryana': '06',
+    'Himachal Pradesh': '02', 'Jharkhand': '20', 'Karnataka': '29', 'Kerala': '32',
+    'Madhya Pradesh': '23', 'Maharashtra': '27', 'Manipur': '14', 'Meghalaya': '17',
+    'Mizoram': '15', 'Nagaland': '13', 'Odisha': '21', 'Punjab': '03',
+    'Rajasthan': '08', 'Sikkim': '11', 'Tamil Nadu': '33', 'Telangana': '36',
+    'Tripura': '16', 'Uttar Pradesh': '09', 'Uttarakhand': '05', 'West Bengal': '19',
+    'Andaman and Nicobar Islands': '35', 'Chandigarh': '04',
+    'Dadra and Nagar Haveli': '26', 'Daman and Diu': '25', 'Delhi': '07',
+    'Jammu and Kashmir': '01', 'Ladakh': '38', 'Lakshadweep': '31', 'Puducherry': '34',
   };
-  
   return gstinStateCodeMap[stateName] || '00';
 }
 
-// Business Address interface
+// ============================================
+// Interfaces
+// ============================================
+
 export interface BusinessAddress {
   id: string;
   name: string;
@@ -133,7 +69,7 @@ export interface BusinessAddress {
   status: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;
-  backendId?: string; // Optional backend ID for syncing with Supabase
+  backendId?: string;
 }
 
 export interface Customer {
@@ -320,7 +256,7 @@ export interface Payable {
 
 export interface BankAccount {
   id: string;
-  backendId?: string; // Backend ID for API operations
+  backendId?: string;
   bankId: string;
   bankName: string;
   bankShortName: string;
@@ -344,13 +280,12 @@ export interface Staff {
   department?: string;
   address?: string;
   employeeId?: string;
-  locationId?: string; // ID of branch/warehouse this staff is assigned to
-  locationType?: 'branch' | 'warehouse' | 'primary'; // Type of location
-  locationName?: string; // Name of the location for display
+  locationId?: string;
+  locationType?: 'branch' | 'warehouse' | 'primary';
+  locationName?: string;
   status: 'active' | 'inactive' | 'on_leave';
   joinDate?: string;
   avatar?: string;
-  // Additional details (may be incomplete)
   basicSalary?: number;
   allowances?: number;
   emergencyContactName?: string;
@@ -359,30 +294,11 @@ export interface Staff {
   permissions?: string[];
   monthlySalesTarget?: number;
   monthlyInvoiceTarget?: number;
-  // Performance data (optional, may be added later)
-  attendance?: {
-    percentage: number;
-    presentDays: number;
-    totalDays: number;
-    lastCheckIn: string;
-  };
-  performance?: {
-    score: number;
-    salesAmount: number;
-    invoicesProcessed: number;
-    customersServed: number;
-    returnsHandled: number;
-    rating: number;
-  };
-  targets?: {
-    monthlySalesTarget: number;
-    achievedSales: number;
-    monthlyInvoiceTarget: number;
-    achievedInvoices: number;
-  };
+  attendance?: { percentage: number; presentDays: number; totalDays: number; lastCheckIn: string };
+  performance?: { score: number; salesAmount: number; invoicesProcessed: number; customersServed: number; returnsHandled: number; rating: number };
+  targets?: { monthlySalesTarget: number; achievedSales: number; monthlyInvoiceTarget: number; achievedInvoices: number };
   createdAt: string;
   updatedAt: string;
-  // Flag to indicate if staff info is incomplete
   isIncomplete?: boolean;
 }
 
@@ -401,14 +317,12 @@ export interface BankTransaction {
   relatedCustomerId?: string;
   relatedSupplierId?: string;
   createdAt: string;
-  // Cheque specific fields
   chequeNumber?: string;
   chequeDate?: string;
   isCleared?: boolean;
   clearanceDate?: string;
 }
 
-// Signup Progress Tracking
 export interface SignupProgress {
   mobile?: string;
   mobileVerified?: boolean;
@@ -431,7 +345,6 @@ export interface SignupProgress {
   lastUpdated?: string;
 }
 
-// User Account for Login
 export interface UserAccount {
   id: string;
   mobile: string;
@@ -446,23 +359,16 @@ export interface UserAccount {
   createdAt: string;
   lastLoginAt: string;
   isActive: boolean;
-  // Business data
   addresses: BusinessAddress[];
   bankAccounts: BankAccount[];
   initialCashBalance: number;
-  invoiceConfig: {
-    prefix: string;
-    pattern: string;
-    startingNumber: string;
-    fiscalYear: string;
-  };
+  invoiceConfig: { prefix: string; pattern: string; startingNumber: string; fiscalYear: string };
 }
 
-// Change Log
 export interface ChangeLog {
   id: string;
   timestamp: string;
-  changeType: 'address_add' | 'address_edit' | 'address_delete' | 'address_primary_change' | 
+  changeType: 'address_add' | 'address_edit' | 'address_delete' | 'address_primary_change' |
               'bank_add' | 'bank_edit' | 'bank_delete' | 'bank_primary_change' |
               'business_info_update' | 'invoice_config_update' | 'signup_step';
   description: string;
@@ -471,201 +377,28 @@ export interface ChangeLog {
   metadata?: any;
 }
 
+// ============================================
+// AsyncStorage keys
+// ============================================
+const STORAGE_KEYS = {
+  ADDRESSES: 'addresses',
+  BANK_ACCOUNTS: 'bankAccounts',
+  STAFF: 'staff',
+  SIGNUP_COMPLETE: 'isSignupComplete',
+  SIGNUP_PROGRESS: 'signupProgress',
+  CHANGE_LOGS: 'changeLogs',
+  USER_ACCOUNTS: 'userAccounts',
+} as const;
+
+// Debounce helper to prevent excessive AsyncStorage writes
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+const SAVE_DEBOUNCE_MS = 300;
+
 class DataStore {
-  private customers: Customer[] = [
-    // Mock customers for demonstration
-    {
-      id: 'cust_001',
-      name: 'ABC Electronics',
-      businessName: 'ABC Electronics Pvt Ltd',
-      customerType: 'business',
-      contactPerson: 'John Doe',
-      mobile: '+91-9876543210',
-      email: 'contact@abcelectronics.com',
-      address: 'Plot 123, Industrial Area, New Delhi, 110001',
-      gstin: '07AABCU9603R1ZX',
-      avatar: '🏢',
-      customerScore: 85,
-      onTimePayment: 95,
-      satisfactionRating: 4.5,
-      responseTime: 2,
-      totalOrders: 25,
-      completedOrders: 24,
-      pendingOrders: 1,
-      cancelledOrders: 0,
-      returnedOrders: 0,
-      totalValue: 2500000,
-      averageOrderValue: 100000,
-      returnRate: 0,
-      lastOrderDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      joinedDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'active',
-      paymentTerms: 'Net 30',
-      creditLimit: 500000,
-      categories: ['Electronics', 'Hardware'],
-      createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'cust_002',
-      name: 'XYZ Solutions',
-      businessName: 'XYZ Solutions India Ltd',
-      customerType: 'business',
-      contactPerson: 'Jane Smith',
-      mobile: '+91-9876543211',
-      email: 'info@xyzsolutions.com',
-      address: 'Tower B, Tech Park, Bangalore, 560001',
-      gstin: '29AABCU9603R1ZY',
-      avatar: '💻',
-      customerScore: 92,
-      onTimePayment: 98,
-      satisfactionRating: 4.8,
-      responseTime: 1,
-      totalOrders: 15,
-      completedOrders: 15,
-      pendingOrders: 0,
-      cancelledOrders: 0,
-      returnedOrders: 0,
-      totalValue: 1200000,
-      averageOrderValue: 80000,
-      returnRate: 0,
-      lastOrderDate: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-      joinedDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'active',
-      paymentTerms: 'Net 15',
-      creditLimit: 300000,
-      categories: ['Software', 'Services'],
-      createdAt: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'cust_003',
-      name: 'Tech Innovators',
-      businessName: 'Tech Innovators Pvt Ltd',
-      customerType: 'business',
-      contactPerson: 'Mike Johnson',
-      mobile: '+91-9876543212',
-      email: 'contact@techinnovators.com',
-      address: 'Floor 5, Business Center, Mumbai, 400001',
-      gstin: '27AABCU9603R1ZZ',
-      avatar: '🚀',
-      customerScore: 78,
-      onTimePayment: 85,
-      satisfactionRating: 4.2,
-      responseTime: 3,
-      totalOrders: 8,
-      completedOrders: 7,
-      pendingOrders: 1,
-      cancelledOrders: 0,
-      returnedOrders: 0,
-      totalValue: 600000,
-      averageOrderValue: 75000,
-      returnRate: 0,
-      lastOrderDate: new Date(Date.now() - 168 * 60 * 60 * 1000).toISOString(),
-      joinedDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'active',
-      paymentTerms: 'Net 45',
-      creditLimit: 200000,
-      categories: ['Technology', 'Innovation'],
-      createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
-    }
-  ];
+  private customers: Customer[] = [];
   private suppliers: Supplier[] = [];
   private sales: Sale[] = [];
-  private invoices: Invoice[] = [
-    // Mock invoices for demonstration
-    {
-      id: 'INV_001',
-      invoiceNumber: 'INV-2024-001',
-      customerId: 'cust_001',
-      customerName: 'ABC Electronics',
-      customerType: 'business',
-      items: [
-        {
-          productId: 'prod_001',
-          productName: 'Laptop',
-          quantity: 2,
-          unitPrice: 45000,
-          totalPrice: 90000,
-          taxRate: 18,
-          taxAmount: 16200,
-          hsnCode: '8471',
-          primaryUnit: 'pieces'
-        }
-      ],
-      subtotal: 90000,
-      taxAmount: 16200,
-      cessAmount: 0,
-      totalAmount: 106200,
-      paidAmount: 106200,
-      balanceAmount: 0,
-      paymentMethod: 'UPI',
-      invoiceDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'paid',
-      notes: 'Payment received via UPI',
-      createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'INV_002',
-      invoiceNumber: 'INV-2024-002',
-      customerId: 'cust_002',
-      customerName: 'XYZ Solutions',
-      customerType: 'business',
-      items: [
-        {
-          productId: 'prod_002',
-          productName: 'Software License',
-          quantity: 5,
-          unitPrice: 12000,
-          totalPrice: 60000,
-          taxRate: 18,
-          taxAmount: 10800,
-          hsnCode: '998314',
-          primaryUnit: 'licenses'
-        }
-      ],
-      subtotal: 60000,
-      taxAmount: 10800,
-      cessAmount: 0,
-      totalAmount: 70800,
-      paidAmount: 70800,
-      balanceAmount: 0,
-      paymentMethod: 'Bank Transfer',
-      invoiceDate: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'paid',
-      notes: 'Payment received via bank transfer',
-      createdAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString()
-    },
-    {
-      id: 'INV_003',
-      invoiceNumber: 'INV-2024-003',
-      customerId: 'cust_003',
-      customerName: 'Tech Innovators',
-      customerType: 'business',
-      items: [
-        {
-          productId: 'prod_003',
-          productName: 'Cloud Services',
-          quantity: 1,
-          unitPrice: 25000,
-          totalPrice: 25000,
-          taxRate: 18,
-          taxAmount: 4500,
-          hsnCode: '998314',
-          primaryUnit: 'subscription'
-        }
-      ],
-      subtotal: 25000,
-      taxAmount: 4500,
-      cessAmount: 0,
-      totalAmount: 29500,
-      paidAmount: 0,
-      balanceAmount: 29500,
-      paymentMethod: 'Cheque',
-      invoiceDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'unpaid',
-      notes: 'Payment pending via cheque',
-      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    }
-  ];
+  private invoices: Invoice[] = [];
   private receivables: Receivable[] = [];
   private payables: Payable[] = [];
   private addresses: BusinessAddress[] = [];
@@ -677,97 +410,36 @@ class DataStore {
   private signupProgress: SignupProgress = {};
   private changeLogs: ChangeLog[] = [];
   private userAccounts: UserAccount[] = [];
+  private isSaving = false;
+  private pendingSave = false;
 
-  constructor() {
-    // Data will be loaded manually in _layout.tsx after clearing
-    // this.loadData(); // Removed automatic loading
-  }
+  // ============================================
+  // Persistence: batched reads/writes
+  // ============================================
 
-  // Persistence methods
   async loadData() {
     try {
-      console.log('🔄 Loading data from AsyncStorage...');
-      
-      // Debug AsyncStorage contents
-      await this.debugAsyncStorage();
-      
-      const addressesData = await AsyncStorage.getItem('addresses');
-      if (addressesData) {
-        this.addresses = JSON.parse(addressesData);
-        console.log('📥 Loaded addresses:', this.addresses.length);
-      } else {
-        console.log('📭 No addresses found in storage');
-      }
-      
-      const bankAccountsData = await AsyncStorage.getItem('bankAccounts');
-      if (bankAccountsData) {
-        this.bankAccounts = JSON.parse(bankAccountsData);
-        console.log('📥 Loaded bank accounts:', this.bankAccounts.length);
-      } else {
-        console.log('📭 No bank accounts found in storage');
-      }
-      
-      const staffData = await AsyncStorage.getItem('staff');
-      if (staffData) {
-        this.staff = JSON.parse(staffData);
-        console.log('📥 Loaded staff:', this.staff.length);
-      } else {
-        console.log('📭 No staff found in storage');
-      }
-      
-      const signupCompleteData = await AsyncStorage.getItem('isSignupComplete');
-      if (signupCompleteData) {
-        this.isSignupComplete = signupCompleteData === 'true';
-        console.log('📥 Loaded signup complete status:', this.isSignupComplete);
-      }
-      
-      const signupProgressData = await AsyncStorage.getItem('signupProgress');
-      if (signupProgressData) {
-        this.signupProgress = JSON.parse(signupProgressData);
-        console.log('📥 Loaded signup progress:', this.signupProgress);
-      } else {
-        console.log('📭 No signup progress found in storage');
-      }
-      
-      const changeLogsData = await AsyncStorage.getItem('changeLogs');
-      if (changeLogsData) {
-        this.changeLogs = JSON.parse(changeLogsData);
-        console.log('📥 Loaded change logs:', this.changeLogs.length);
-      } else {
-        console.log('📭 No change logs found in storage');
-      }
-      
-      const userAccountsData = await AsyncStorage.getItem('userAccounts');
-      console.log('🔍 Raw userAccountsData from AsyncStorage:', userAccountsData);
-      if (userAccountsData) {
-        try {
-          this.userAccounts = JSON.parse(userAccountsData);
-          console.log('📥 Loaded user accounts:', this.userAccounts.length);
-          console.log('📋 User account details:', this.userAccounts.map(acc => ({
-            id: acc.id,
-            mobile: acc.mobile,
-            businessName: acc.businessName,
-            isActive: acc.isActive
-          })));
-        } catch (parseError) {
-          console.error('❌ Error parsing user accounts data:', parseError);
-          console.log('Raw data that failed to parse:', userAccountsData);
-          this.userAccounts = [];
-        }
-      } else {
-        console.log('📭 No user accounts found in storage');
-      }
-      
-      console.log('Data loaded from storage:', {
-        addresses: this.addresses.length,
-        bankAccounts: this.bankAccounts.length,
-        isSignupComplete: this.isSignupComplete,
-        signupProgress: this.signupProgress.currentStep || 'none',
-        changeLogs: this.changeLogs.length,
-        userAccounts: this.userAccounts.length
-      });
-      
-      // Notify listeners after loading data
+      const keys = Object.values(STORAGE_KEYS);
+      const results = await AsyncStorage.multiGet(keys);
+
+      const map = new Map(results as [string, string | null][]);
+
+      const parse = <T>(key: string, fallback: T): T => {
+        const raw = map.get(key);
+        if (!raw) return fallback;
+        try { return JSON.parse(raw); } catch { return fallback; }
+      };
+
+      this.addresses = parse(STORAGE_KEYS.ADDRESSES, []);
+      this.bankAccounts = parse(STORAGE_KEYS.BANK_ACCOUNTS, []);
+      this.staff = parse(STORAGE_KEYS.STAFF, []);
+      this.changeLogs = parse(STORAGE_KEYS.CHANGE_LOGS, []);
+      this.userAccounts = parse(STORAGE_KEYS.USER_ACCOUNTS, []);
+      this.signupProgress = parse(STORAGE_KEYS.SIGNUP_PROGRESS, {});
+
+      const signupComplete = map.get(STORAGE_KEYS.SIGNUP_COMPLETE);
+      this.isSignupComplete = signupComplete === 'true';
+
       this.notifyListeners();
     } catch (error) {
       console.error('Error loading data from storage:', error);
@@ -775,110 +447,110 @@ class DataStore {
   }
 
   async saveData() {
+    // Prevent concurrent writes; queue if already saving
+    if (this.isSaving) {
+      this.pendingSave = true;
+      return;
+    }
+
+    this.isSaving = true;
     try {
-      await AsyncStorage.setItem('addresses', JSON.stringify(this.addresses));
-      await AsyncStorage.setItem('bankAccounts', JSON.stringify(this.bankAccounts));
-      await AsyncStorage.setItem('staff', JSON.stringify(this.staff));
-      await AsyncStorage.setItem('isSignupComplete', this.isSignupComplete.toString());
-      await AsyncStorage.setItem('signupProgress', JSON.stringify(this.signupProgress));
-      await AsyncStorage.setItem('changeLogs', JSON.stringify(this.changeLogs));
-      await AsyncStorage.setItem('userAccounts', JSON.stringify(this.userAccounts));
-      console.log('Data saved to storage');
-      console.log('💾 User accounts saved:', this.userAccounts.length);
-      console.log('💾 User accounts data:', this.userAccounts.map(acc => ({ id: acc.id, mobile: acc.mobile, isActive: acc.isActive })));
+      const pairs: [string, string][] = [
+        [STORAGE_KEYS.ADDRESSES, JSON.stringify(this.addresses)],
+        [STORAGE_KEYS.BANK_ACCOUNTS, JSON.stringify(this.bankAccounts)],
+        [STORAGE_KEYS.STAFF, JSON.stringify(this.staff)],
+        [STORAGE_KEYS.SIGNUP_COMPLETE, this.isSignupComplete.toString()],
+        [STORAGE_KEYS.SIGNUP_PROGRESS, JSON.stringify(this.signupProgress)],
+        [STORAGE_KEYS.CHANGE_LOGS, JSON.stringify(this.changeLogs)],
+        [STORAGE_KEYS.USER_ACCOUNTS, JSON.stringify(this.userAccounts)],
+      ];
+      await AsyncStorage.multiSet(pairs);
     } catch (error) {
       console.error('Error saving data to storage:', error);
+    } finally {
+      this.isSaving = false;
+      if (this.pendingSave) {
+        this.pendingSave = false;
+        this.saveData();
+      }
     }
   }
 
-  // Customer methods
+  /** Debounced save - coalesces rapid sequential saves into one */
+  private debouncedSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => { this.saveData(); }, SAVE_DEBOUNCE_MS);
+  }
+
+  // ============================================
+  // Customer methods (local cache, backend is source of truth)
+  // ============================================
+
   addCustomer(customer: Customer) {
     this.customers.push(customer);
-    console.log('=== CUSTOMER ADDED TO STORE ===');
-    console.log('Customer ID:', customer.id);
-    console.log('Customer Name:', customer.name);
-    console.log('Customer Type:', customer.customerType);
-    console.log('Mobile:', customer.mobile);
-    console.log('Total customers in store:', this.customers.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('================================');
     this.notifyListeners();
   }
 
-  getCustomers(): Customer[] {
-    return [...this.customers];
-  }
-
-  getCustomerById(id: string): Customer | undefined {
-    return this.customers.find(customer => customer.id === id);
-  }
+  getCustomers(): Customer[] { return [...this.customers]; }
+  getCustomerById(id: string): Customer | undefined { return this.customers.find(c => c.id === id); }
 
   searchCustomers(query: string): Customer[] {
-    const lowercaseQuery = query.toLowerCase();
-    return this.customers.filter(customer =>
-      customer.name.toLowerCase().includes(lowercaseQuery) ||
-      customer.businessName?.toLowerCase().includes(lowercaseQuery) ||
-      customer.contactPerson.toLowerCase().includes(lowercaseQuery) ||
-      customer.mobile.includes(query) ||
-      customer.gstin?.toLowerCase().includes(lowercaseQuery)
+    const q = query.toLowerCase();
+    return this.customers.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      c.businessName?.toLowerCase().includes(q) ||
+      c.contactPerson.toLowerCase().includes(q) ||
+      c.mobile.includes(query) ||
+      c.gstin?.toLowerCase().includes(q)
     );
   }
 
   updateCustomer(id: string, updates: Partial<Customer>) {
-    const index = this.customers.findIndex(customer => customer.id === id);
-    if (index !== -1) {
-      this.customers[index] = { ...this.customers[index], ...updates };
+    const idx = this.customers.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      this.customers[idx] = { ...this.customers[idx], ...updates };
       this.notifyListeners();
     }
   }
 
+  // ============================================
   // Supplier methods
+  // ============================================
+
   addSupplier(supplier: Supplier) {
     this.suppliers.push(supplier);
-    console.log('=== SUPPLIER ADDED TO STORE ===');
-    console.log('Supplier ID:', supplier.id);
-    console.log('Supplier Name:', supplier.name);
-    console.log('Business Name:', supplier.businessName);
-    console.log('Contact Person:', supplier.contactPerson);
-    console.log('Mobile:', supplier.mobile);
-    console.log('Total suppliers in store:', this.suppliers.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('================================');
     this.notifyListeners();
   }
 
-  getSuppliers(): Supplier[] {
-    return [...this.suppliers];
-  }
-
-  getSupplierById(id: string): Supplier | undefined {
-    return this.suppliers.find(supplier => supplier.id === id);
-  }
+  getSuppliers(): Supplier[] { return [...this.suppliers]; }
+  getSupplierById(id: string): Supplier | undefined { return this.suppliers.find(s => s.id === id); }
 
   searchSuppliers(query: string): Supplier[] {
-    const lowercaseQuery = query.toLowerCase();
-    return this.suppliers.filter(supplier =>
-      supplier.name.toLowerCase().includes(lowercaseQuery) ||
-      supplier.businessName?.toLowerCase().includes(lowercaseQuery) ||
-      supplier.contactPerson.toLowerCase().includes(lowercaseQuery) ||
-      supplier.mobile.includes(query) ||
-      supplier.gstin?.toLowerCase().includes(lowercaseQuery)
+    const q = query.toLowerCase();
+    return this.suppliers.filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      s.businessName?.toLowerCase().includes(q) ||
+      s.contactPerson.toLowerCase().includes(q) ||
+      s.mobile.includes(query) ||
+      s.gstin?.toLowerCase().includes(q)
     );
   }
 
   updateSupplier(id: string, updates: Partial<Supplier>) {
-    const index = this.suppliers.findIndex(supplier => supplier.id === id);
-    if (index !== -1) {
-      this.suppliers[index] = { ...this.suppliers[index], ...updates };
+    const idx = this.suppliers.findIndex(s => s.id === id);
+    if (idx !== -1) {
+      this.suppliers[idx] = { ...this.suppliers[idx], ...updates };
       this.notifyListeners();
     }
   }
 
-  // Sale methods
+  // ============================================
+  // Sale / Invoice methods (local cache)
+  // ============================================
+
   addSale(sale: Sale) {
     this.sales.push(sale);
-    
-    // Create invoice from sale
+
     const invoice: Invoice = {
       id: sale.id,
       invoiceNumber: sale.invoiceNumber,
@@ -886,705 +558,264 @@ class DataStore {
       customerName: sale.customerName,
       customerType: sale.customerType,
       items: sale.items.map(item => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        totalPrice: item.totalPrice,
-        taxRate: item.taxRate,
-        taxAmount: item.taxAmount,
-        cessType: item.cessType,
-        cessRate: item.cessRate,
-        cessAmount: item.cessAmount,
-        hsnCode: item.hsnCode,
-        batchNumber: item.batchNumber,
-        primaryUnit: item.primaryUnit,
+        productId: item.productId, productName: item.productName,
+        quantity: item.quantity, unitPrice: item.unitPrice, totalPrice: item.totalPrice,
+        taxRate: item.taxRate, taxAmount: item.taxAmount,
+        cessType: item.cessType, cessRate: item.cessRate, cessAmount: item.cessAmount,
+        hsnCode: item.hsnCode, batchNumber: item.batchNumber, primaryUnit: item.primaryUnit,
       })),
-      subtotal: sale.subtotal,
-      taxAmount: sale.taxAmount,
-      cessAmount: sale.cessAmount,
-      totalAmount: sale.totalAmount,
-      paidAmount: sale.paidAmount,
-      balanceAmount: sale.balanceAmount,
-      paymentMethod: sale.paymentMethod,
-      invoiceDate: sale.saleDate,
-      status: sale.balanceAmount > 0 ? 'partial' : 'paid',
-      createdAt: sale.createdAt,
+      subtotal: sale.subtotal, taxAmount: sale.taxAmount, cessAmount: sale.cessAmount,
+      totalAmount: sale.totalAmount, paidAmount: sale.paidAmount, balanceAmount: sale.balanceAmount,
+      paymentMethod: sale.paymentMethod, invoiceDate: sale.saleDate,
+      status: sale.balanceAmount > 0 ? 'partial' : 'paid', createdAt: sale.createdAt,
     };
-    
+
     this.invoices.push(invoice);
-    
-    // Update customer stats
-    this.updateCustomerStats(sale.customerId, sale);
-    
-    // Update receivables if there's a balance
-    if (sale.balanceAmount > 0) {
-      this.updateReceivables(sale);
-    }
-    
-    console.log('=== SALE ADDED TO STORE ===');
-    console.log('Sale ID:', sale.id);
-    console.log('Invoice Number:', sale.invoiceNumber);
-    console.log('Customer:', sale.customerName);
-    console.log('Total Amount:', sale.totalAmount);
-    console.log('Paid Amount:', sale.paidAmount);
-    console.log('Balance Amount:', sale.balanceAmount);
-    console.log('Total sales in store:', this.sales.length);
-    console.log('Total invoices in store:', this.invoices.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('================================');
     this.notifyListeners();
   }
 
-  getSales(): Sale[] {
-    return [...this.sales];
-  }
+  getSales(): Sale[] { return [...this.sales]; }
+  getInvoices(): Invoice[] { return [...this.invoices]; }
+  getInvoicesByCustomer(customerId: string): Invoice[] { return this.invoices.filter(i => i.customerId === customerId); }
+  getInvoiceById(invoiceId: string): Invoice | undefined { return this.invoices.find(i => i.id === invoiceId); }
+  getReceivables(): Receivable[] { return [...this.receivables]; }
+  getPayables(): Payable[] { return [...this.payables]; }
 
-  getInvoices(): Invoice[] {
-    return [...this.invoices];
-  }
+  // ============================================
+  // Address methods (persisted to AsyncStorage)
+  // ============================================
 
-  getInvoicesByCustomer(customerId: string): Invoice[] {
-    return this.invoices.filter(invoice => invoice.customerId === customerId);
-  }
-
-  getInvoiceById(invoiceId: string): Invoice | undefined {
-    return this.invoices.find(invoice => invoice.id === invoiceId);
-  }
-
-  // Receivables methods
-  getReceivables(): Receivable[] {
-    return [...this.receivables];
-  }
-
-  private updateCustomerStats(customerId: string, sale: Sale) {
-    const customer = this.getCustomerById(customerId);
-    if (customer) {
-      const updatedCustomer = { ...customer };
-      
-      // Update order counts
-      updatedCustomer.totalOrders += 1;
-      updatedCustomer.completedOrders += 1;
-      
-      // Update total value
-      updatedCustomer.totalValue += sale.totalAmount;
-      updatedCustomer.averageOrderValue = updatedCustomer.totalValue / updatedCustomer.totalOrders;
-      
-      // Update last order date
-      updatedCustomer.lastOrderDate = sale.saleDate;
-      
-      this.updateCustomer(customerId, updatedCustomer);
-    }
-  }
-
-  private updateReceivables(sale: Sale) {
-    const customer = this.getCustomerById(sale.customerId);
-    if (!customer) return;
-
-    const existingReceivable = this.receivables.find(r => r.customerId === sale.customerId);
-    
-    if (existingReceivable) {
-      // Update existing receivable
-      existingReceivable.totalReceivable += sale.balanceAmount;
-      existingReceivable.invoiceCount += 1;
-      
-      if (sale.balanceAmount > 0) {
-        existingReceivable.overdueAmount += sale.balanceAmount;
-        existingReceivable.status = existingReceivable.overdueAmount > 0 ? 'overdue' : 'current';
-      }
-    } else {
-      // Create new receivable
-      const receivable: Receivable = {
-        id: `REC_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        customerId: sale.customerId,
-        customerName: customer.name,
-        customerType: customer.customerType,
-        businessName: customer.businessName,
-        gstin: customer.gstin,
-        mobile: customer.mobile,
-        email: customer.email,
-        address: customer.address,
-        totalReceivable: sale.balanceAmount,
-        overdueAmount: sale.balanceAmount,
-        invoiceCount: 1,
-        oldestInvoiceDate: sale.saleDate,
-        daysPastDue: 0,
-        creditLimit: customer.creditLimit,
-        paymentTerms: customer.paymentTerms,
-        customerAvatar: customer.avatar,
-        status: 'current',
-      };
-      
-      this.receivables.push(receivable);
-    }
-  }
-
-  // Payables methods
-  getPayables(): Payable[] {
-    return [...this.payables];
-  }
-
-  // Address methods
   addAddress(address: BusinessAddress) {
     this.addresses.push(address);
-    this.saveData(); // Save to persistent storage
-    
-    // ✅ Create staff if manager info is provided
+    this.debouncedSave();
     if (address.manager && address.phone) {
-      // Create staff from manager info (async, non-blocking)
-      this.createStaffFromAddress(address).catch(error => {
-        console.error('Error creating staff from new address:', error);
-      });
+      this.createStaffFromAddress(address).catch(() => {});
     }
-    
-    // Log the change
-    this.logChange(
-      'address_add',
-      `Added ${address.type} address: ${address.name}`,
-      null,
-      {
-        id: address.id,
-        type: address.type,
-        name: address.name,
-        isPrimary: address.isPrimary,
-        city: address.city,
-        state: address.stateName
-      }
-    );
-    
     this.notifyListeners();
   }
 
-  getAddresses(): BusinessAddress[] {
-    return [...this.addresses];
-  }
-
-  getAddressById(id: string): BusinessAddress | undefined {
-    return this.addresses.find(addr => addr.id === id || addr.backendId === id);
-  }
-
-  getAddressesByType(type: 'primary' | 'branch' | 'warehouse'): BusinessAddress[] {
-    return this.addresses.filter(address => address.type === type);
-  }
+  getAddresses(): BusinessAddress[] { return [...this.addresses]; }
+  getAddressById(id: string): BusinessAddress | undefined { return this.addresses.find(a => a.id === id || a.backendId === id); }
+  getAddressesByType(type: 'primary' | 'branch' | 'warehouse'): BusinessAddress[] { return this.addresses.filter(a => a.type === type); }
+  getPrimaryAddress(): BusinessAddress | undefined { return this.addresses.find(a => a.isPrimary); }
+  getAddressCountByType(type: 'primary' | 'branch' | 'warehouse'): number { return this.addresses.filter(a => a.type === type).length; }
 
   updateAddress(id: string, updates: Partial<BusinessAddress>) {
-    const index = this.addresses.findIndex(address => address.id === id);
-    if (index !== -1) {
-      const oldAddress = { ...this.addresses[index] };
-      this.addresses[index] = { ...this.addresses[index], ...updates, updatedAt: new Date().toISOString() };
-      this.saveData(); // Save to persistent storage
-      
-      // ✅ Create or update staff if manager info is provided
-      const updatedAddress = this.addresses[index];
-      if (updatedAddress.manager && updatedAddress.phone) {
-        // Create/update staff from manager info (async, non-blocking)
-        this.createStaffFromAddress(updatedAddress).catch(error => {
-          console.error('Error creating/updating staff from address update:', error);
-        });
+    const idx = this.addresses.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      this.addresses[idx] = { ...this.addresses[idx], ...updates, updatedAt: new Date().toISOString() };
+      this.debouncedSave();
+      const addr = this.addresses[idx];
+      if (addr.manager && addr.phone) {
+        this.createStaffFromAddress(addr).catch(() => {});
       }
-      
-      // Log the change
-      this.logChange(
-        'address_edit',
-        `Updated ${this.addresses[index].type} address: ${this.addresses[index].name}`,
-        {
-          id: oldAddress.id,
-          type: oldAddress.type,
-          name: oldAddress.name,
-          city: oldAddress.city,
-          state: oldAddress.stateName
-        },
-        {
-          id: this.addresses[index].id,
-          type: this.addresses[index].type,
-          name: this.addresses[index].name,
-          city: this.addresses[index].city,
-          state: this.addresses[index].stateName
-        },
-        { updatedFields: Object.keys(updates).join(', ') }
-      );
-      
       this.notifyListeners();
     }
   }
 
   deleteAddress(id: string) {
-    const index = this.addresses.findIndex(address => address.id === id);
-    if (index !== -1) {
-      const deletedAddress = { ...this.addresses[index] };
-      this.addresses.splice(index, 1);
-      this.saveData(); // Save to persistent storage
-      
-      // Log the change
-      this.logChange(
-        'address_delete',
-        `Deleted ${deletedAddress.type} address: ${deletedAddress.name}`,
-        {
-          id: deletedAddress.id,
-          type: deletedAddress.type,
-          name: deletedAddress.name,
-          city: deletedAddress.city,
-          state: deletedAddress.stateName
-        },
-        null
-      );
-      
+    const idx = this.addresses.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      this.addresses.splice(idx, 1);
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
   setPrimaryAddress(id: string) {
-    // Find the current primary and the new primary
-    const currentPrimary = this.addresses.find(addr => addr.isPrimary);
-    const newPrimary = this.addresses.find(addr => addr.id === id);
-    
-    // Remove primary status from all addresses
-    this.addresses.forEach(address => {
-      address.isPrimary = false;
-    });
-    
-    // Set the specified address as primary
-    const address = this.addresses.find(addr => addr.id === id);
-    if (address) {
-      address.isPrimary = true;
-      this.saveData(); // Save to persistent storage
-      
-      // Log the change
-      this.logChange(
-        'address_primary_change',
-        `Changed primary address from ${currentPrimary?.name || 'none'} to ${newPrimary?.name}`,
-        currentPrimary ? {
-          id: currentPrimary.id,
-          type: currentPrimary.type,
-          name: currentPrimary.name
-        } : null,
-        {
-          id: newPrimary?.id,
-          type: newPrimary?.type,
-          name: newPrimary?.name
-        }
-      );
-      
+    this.addresses.forEach(a => { a.isPrimary = false; });
+    const addr = this.addresses.find(a => a.id === id);
+    if (addr) {
+      addr.isPrimary = true;
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
-  getPrimaryAddress(): BusinessAddress | undefined {
-    return this.addresses.find(address => address.isPrimary);
-  }
+  // ============================================
+  // Bank Account methods (persisted to AsyncStorage)
+  // ============================================
 
-  getAddressCountByType(type: 'primary' | 'branch' | 'warehouse'): number {
-    return this.addresses.filter(address => address.type === type).length;
-  }
-
-  // Bank Account methods
   addBankAccount(bankAccount: BankAccount) {
     this.bankAccounts.push(bankAccount);
-    this.saveData(); // Save to persistent storage
-    console.log('=== BANK ACCOUNT ADDED TO STORE ===');
-    console.log('Bank Account ID:', bankAccount.id);
-    console.log('Bank Name:', bankAccount.bankName);
-    console.log('Account Holder:', bankAccount.accountHolderName);
-    console.log('Account Number:', bankAccount.accountNumber);
-    console.log('UPI ID:', bankAccount.upiId);
-    console.log('Is Primary:', bankAccount.isPrimary);
-    console.log('Total bank accounts in store:', this.bankAccounts.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('====================================');
-    
-    // Log the change
-    this.logChange(
-      'bank_add',
-      `Added bank account: ${bankAccount.bankName} - ${bankAccount.accountHolderName}`,
-      null,
-      {
-        id: bankAccount.id,
-        bankName: bankAccount.bankName,
-        accountNumber: bankAccount.accountNumber,
-        isPrimary: bankAccount.isPrimary,
-        initialBalance: bankAccount.initialBalance
-      }
-    );
-    
+    this.debouncedSave();
     this.notifyListeners();
   }
 
-  getBankAccounts(): BankAccount[] {
-    return [...this.bankAccounts];
-  }
-
-  getBankAccountById(id: string): BankAccount | undefined {
-    return this.bankAccounts.find(account => account.id === id);
-  }
-
-  getPrimaryBankAccount(): BankAccount | undefined {
-    return this.bankAccounts.find(account => account.isPrimary);
-  }
+  getBankAccounts(): BankAccount[] { return [...this.bankAccounts]; }
+  getBankAccountById(id: string): BankAccount | undefined { return this.bankAccounts.find(a => a.id === id); }
+  getPrimaryBankAccount(): BankAccount | undefined { return this.bankAccounts.find(a => a.isPrimary); }
+  getBankAccountCount(): number { return this.bankAccounts.length; }
 
   updateBankAccount(id: string, updates: Partial<BankAccount>) {
-    const index = this.bankAccounts.findIndex(account => account.id === id);
-    if (index !== -1) {
-      const oldAccount = { ...this.bankAccounts[index] };
-      this.bankAccounts[index] = { ...this.bankAccounts[index], ...updates };
-      this.saveData(); // Save to persistent storage
-      console.log('=== BANK ACCOUNT UPDATED ===');
-      console.log('Bank Account ID:', id);
-      console.log('Updated at:', new Date().toISOString());
-      console.log('============================');
-      
-      // Log the change
-      this.logChange(
-        'bank_edit',
-        `Updated bank account: ${this.bankAccounts[index].bankName} - ${this.bankAccounts[index].accountHolderName}`,
-        {
-          id: oldAccount.id,
-          bankName: oldAccount.bankName,
-          accountNumber: oldAccount.accountNumber,
-          isPrimary: oldAccount.isPrimary
-        },
-        {
-          id: this.bankAccounts[index].id,
-          bankName: this.bankAccounts[index].bankName,
-          accountNumber: this.bankAccounts[index].accountNumber,
-          isPrimary: this.bankAccounts[index].isPrimary
-        },
-        { updatedFields: Object.keys(updates).join(', ') }
-      );
-      
+    const idx = this.bankAccounts.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      this.bankAccounts[idx] = { ...this.bankAccounts[idx], ...updates };
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
   deleteBankAccount(id: string) {
-    const index = this.bankAccounts.findIndex(account => account.id === id);
-    if (index !== -1) {
-      const deletedAccount = this.bankAccounts[index];
-      this.bankAccounts.splice(index, 1);
-      this.saveData(); // Save to persistent storage
-      console.log('=== BANK ACCOUNT DELETED ===');
-      console.log('Bank Account ID:', id);
-      console.log('Bank Name:', deletedAccount.bankName);
-      console.log('Total bank accounts remaining:', this.bankAccounts.length);
-      console.log('Deleted at:', new Date().toISOString());
-      console.log('============================');
-      
-      // Log the change
-      this.logChange(
-        'bank_delete',
-        `Deleted bank account: ${deletedAccount.bankName} - ${deletedAccount.accountHolderName}`,
-        {
-          id: deletedAccount.id,
-          bankName: deletedAccount.bankName,
-          accountNumber: deletedAccount.accountNumber,
-          isPrimary: deletedAccount.isPrimary
-        },
-        null
-      );
-      
+    const idx = this.bankAccounts.findIndex(a => a.id === id);
+    if (idx !== -1) {
+      this.bankAccounts.splice(idx, 1);
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
   setPrimaryBankAccount(id: string) {
-    // Find the current primary and the new primary
-    const currentPrimary = this.bankAccounts.find(acc => acc.isPrimary);
-    const newPrimary = this.bankAccounts.find(acc => acc.id === id);
-    
-    // Remove primary status from all bank accounts
-    this.bankAccounts.forEach(account => {
-      account.isPrimary = false;
-    });
-    
-    // Set the specified account as primary
-    const account = this.bankAccounts.find(acc => acc.id === id);
+    this.bankAccounts.forEach(a => { a.isPrimary = false; });
+    const account = this.bankAccounts.find(a => a.id === id);
     if (account) {
       account.isPrimary = true;
-      this.saveData(); // Save to persistent storage
-      console.log('=== PRIMARY BANK ACCOUNT SET ===');
-      console.log('Bank Account ID:', id);
-      console.log('Bank Name:', account.bankName);
-      console.log('Set at:', new Date().toISOString());
-      console.log('=================================');
-      
-      // Log the change
-      this.logChange(
-        'bank_primary_change',
-        `Changed primary bank from ${currentPrimary?.bankName || 'none'} to ${newPrimary?.bankName}`,
-        currentPrimary ? {
-          id: currentPrimary.id,
-          bankName: currentPrimary.bankName,
-          accountNumber: currentPrimary.accountNumber
-        } : null,
-        {
-          id: newPrimary?.id,
-          bankName: newPrimary?.bankName,
-          accountNumber: newPrimary?.accountNumber
-        }
-      );
-      
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
-  getBankAccountCount(): number {
-    return this.bankAccounts.length;
-  }
+  // ============================================
+  // Staff methods (persisted to AsyncStorage)
+  // ============================================
 
-  // Staff methods
   addStaff(staff: Staff) {
     this.staff.push(staff);
-    this.saveData();
-    console.log('=== STAFF ADDED TO STORE ===');
-    console.log('Staff ID:', staff.id);
-    console.log('Staff Name:', staff.name);
-    console.log('Role:', staff.role);
-    console.log('Mobile:', staff.mobile);
-    console.log('Total staff in store:', this.staff.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('================================');
+    this.debouncedSave();
     this.notifyListeners();
   }
 
-  getStaff(): Staff[] {
-    return [...this.staff];
-  }
-
-  getStaffById(id: string): Staff | undefined {
-    return this.staff.find(s => s.id === id);
-  }
-
-  getStaffByMobile(mobile: string): Staff | undefined {
-    return this.staff.find(s => s.mobile === mobile);
-  }
-
-  getStaffByLocation(locationId: string): Staff[] {
-    return this.staff.filter(s => s.locationId === locationId);
-  }
+  getStaff(): Staff[] { return [...this.staff]; }
+  getStaffById(id: string): Staff | undefined { return this.staff.find(s => s.id === id); }
+  getStaffByMobile(mobile: string): Staff | undefined { return this.staff.find(s => s.mobile === mobile); }
+  getStaffByLocation(locationId: string): Staff[] { return this.staff.filter(s => s.locationId === locationId); }
 
   updateStaff(id: string, updates: Partial<Staff>) {
-    const index = this.staff.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.staff[index] = { ...this.staff[index], ...updates, updatedAt: new Date().toISOString() };
-      this.saveData();
+    const idx = this.staff.findIndex(s => s.id === id);
+    if (idx !== -1) {
+      this.staff[idx] = { ...this.staff[idx], ...updates, updatedAt: new Date().toISOString() };
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
   deleteStaff(id: string) {
-    const index = this.staff.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.staff.splice(index, 1);
-      this.saveData();
+    const idx = this.staff.findIndex(s => s.id === id);
+    if (idx !== -1) {
+      this.staff.splice(idx, 1);
+      this.debouncedSave();
       this.notifyListeners();
     }
   }
 
-  // Extract staff from branch/warehouse managers
   extractStaffFromLocations() {
     const allAddresses = this.getAddresses();
-    const existingStaff = this.getStaff();
-    const existingMobileNumbers = new Set(existingStaff.map(s => s.mobile));
-    
+    const existingMobiles = new Set(this.staff.map(s => s.mobile));
     const newStaff: Staff[] = [];
-    
+
     allAddresses.forEach(address => {
-      // Only extract if manager name and phone exist
       if (address.manager && address.phone) {
         const mobile = address.phone.replace(/\D/g, '').slice(0, 10);
-        
-        // Check if staff with this mobile already exists
-        const existingStaffByMobile = existingStaff.find(s => s.mobile === mobile);
-        
-        if (existingStaffByMobile) {
-          // Update existing staff's location info if it changed
-          if (existingStaffByMobile.locationId !== address.id) {
-            this.updateStaff(existingStaffByMobile.id, {
-              locationId: address.id,
-              locationType: address.type,
-              locationName: address.name,
-            });
+        const existing = this.staff.find(s => s.mobile === mobile);
+
+        if (existing) {
+          if (existing.locationId !== address.id) {
+            this.updateStaff(existing.id, { locationId: address.id, locationType: address.type, locationName: address.name });
           }
           return;
         }
-        
-        // Determine role based on location type
+
         let role = 'Store Manager';
-        if (address.type === 'branch') {
-          role = 'Branch Manager';
-        } else if (address.type === 'warehouse') {
-          role = 'Warehouse Manager';
-        } else if (address.type === 'primary') {
-          role = 'Store Manager';
-        }
-        
-        const staff: Staff = {
+        if (address.type === 'branch') role = 'Branch Manager';
+        else if (address.type === 'warehouse') role = 'Warehouse Manager';
+
+        const s: Staff = {
           id: `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          name: address.manager,
-          mobile: mobile,
-          role: role,
-          locationId: address.id,
-          locationType: address.type,
-          locationName: address.name,
-          status: 'active',
-          isIncomplete: true, // Mark as incomplete since only name, mobile, and role are known
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          name: address.manager, mobile, role,
+          locationId: address.id, locationType: address.type, locationName: address.name,
+          status: 'active', isIncomplete: true,
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         };
-        
-        newStaff.push(staff);
-        existingMobileNumbers.add(mobile); // Track to avoid duplicates
+        newStaff.push(s);
+        existingMobiles.add(mobile);
       }
     });
-    
-    // Add new staff to store
-    newStaff.forEach(staff => {
-      this.addStaff(staff);
-    });
-    
+
+    newStaff.forEach(s => this.addStaff(s));
     return newStaff;
   }
 
-  // Create or update staff from address manager info
   async createStaffFromAddress(address: BusinessAddress) {
-    if (!address.manager || !address.phone) {
-      return null;
-    }
-
+    if (!address.manager || !address.phone) return null;
     const mobile = address.phone.replace(/\D/g, '').slice(0, 10);
-    if (mobile.length !== 10) {
-      return null;
-    }
+    if (mobile.length !== 10) return null;
 
-    // Check if staff with this mobile already exists
-    const existingStaff = this.getStaffByMobile(mobile);
-    
-    // Determine role based on location type
+    const existing = this.getStaffByMobile(mobile);
     let role = 'Store Manager';
-    if (address.type === 'branch') {
-      role = 'Branch Manager';
-    } else if (address.type === 'warehouse') {
-      role = 'Warehouse Manager';
-    } else if (address.type === 'primary') {
-      role = 'Store Manager';
-    }
+    if (address.type === 'branch') role = 'Branch Manager';
+    else if (address.type === 'warehouse') role = 'Warehouse Manager';
 
-    const staffData: Staff = {
-      id: existingStaff?.id || `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: address.manager,
-      mobile: mobile,
-      role: role,
-      locationId: address.id,
-      locationType: address.type,
-      locationName: address.name,
-      status: 'active',
-      isIncomplete: true, // Mark as incomplete since only name, mobile, and role are known
-      createdAt: existingStaff?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (existingStaff) {
-      // Update existing staff
-      this.updateStaff(existingStaff.id, {
-        name: address.manager,
-        role: role,
-        locationId: address.id,
-        locationType: address.type,
-        locationName: address.name,
-        updatedAt: new Date().toISOString(),
+    if (existing) {
+      this.updateStaff(existing.id, {
+        name: address.manager, role,
+        locationId: address.id, locationType: address.type, locationName: address.name,
       });
-      return existingStaff.id;
-    } else {
-      // Create new staff
-      this.addStaff(staffData);
-      return staffData.id;
+      return existing.id;
     }
+
+    const s: Staff = {
+      id: `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: address.manager, mobile, role,
+      locationId: address.id, locationType: address.type, locationName: address.name,
+      status: 'active', isIncomplete: true,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    this.addStaff(s);
+    return s.id;
   }
 
+  // ============================================
   // Bank Transaction methods
+  // ============================================
+
   addBankTransaction(transaction: BankTransaction) {
     this.bankTransactions.push(transaction);
-    
-    // Update bank account balance
-    const bankAccount = this.getBankAccountById(transaction.bankAccountId);
-    if (bankAccount) {
-      if (transaction.type === 'credit') {
-        bankAccount.balance += transaction.amount;
-      } else {
-        bankAccount.balance -= transaction.amount;
-      }
+    const account = this.getBankAccountById(transaction.bankAccountId);
+    if (account) {
+      account.balance += transaction.type === 'credit' ? transaction.amount : -transaction.amount;
     }
-    
-    console.log('=== BANK TRANSACTION ADDED ===');
-    console.log('Transaction ID:', transaction.id);
-    console.log('Bank Account ID:', transaction.bankAccountId);
-    console.log('Type:', transaction.type);
-    console.log('Amount:', transaction.amount);
-    console.log('Description:', transaction.description);
-    console.log('Total transactions in store:', this.bankTransactions.length);
-    console.log('Added at:', new Date().toISOString());
-    console.log('================================');
     this.notifyListeners();
   }
 
   getBankTransactions(bankAccountId?: string): BankTransaction[] {
-    if (bankAccountId) {
-      return this.bankTransactions.filter(t => t.bankAccountId === bankAccountId);
-    }
-    return [...this.bankTransactions];
+    return bankAccountId ? this.bankTransactions.filter(t => t.bankAccountId === bankAccountId) : [...this.bankTransactions];
   }
 
-  getBankTransactionById(id: string): BankTransaction | undefined {
-    return this.bankTransactions.find(t => t.id === id);
-  }
+  getBankTransactionById(id: string): BankTransaction | undefined { return this.bankTransactions.find(t => t.id === id); }
 
   getBankTransactionsByType(bankAccountId: string, type: 'credit' | 'debit'): BankTransaction[] {
-    return this.bankTransactions.filter(t => 
-      t.bankAccountId === bankAccountId && t.type === type
-    );
+    return this.bankTransactions.filter(t => t.bankAccountId === bankAccountId && t.type === type);
   }
 
-  getBankAccountBalance(bankAccountId: string): number {
-    const bankAccount = this.getBankAccountById(bankAccountId);
-    return bankAccount?.balance || 0;
-  }
+  getBankAccountBalance(bankAccountId: string): number { return this.getBankAccountById(bankAccountId)?.balance || 0; }
 
   getTotalIncome(bankAccountId?: string): number {
-    const transactions = bankAccountId 
-      ? this.getBankTransactions(bankAccountId)
-      : this.bankTransactions;
-    
-    return transactions
-      .filter(t => t.type === 'credit')
-      .reduce((sum, t) => sum + t.amount, 0);
+    const txns = bankAccountId ? this.getBankTransactions(bankAccountId) : this.bankTransactions;
+    return txns.filter(t => t.type === 'credit').reduce((sum, t) => sum + t.amount, 0);
   }
 
   getTotalExpense(bankAccountId?: string): number {
-    const transactions = bankAccountId 
-      ? this.getBankTransactions(bankAccountId)
-      : this.bankTransactions;
-    
-    return transactions
-      .filter(t => t.type === 'debit')
-      .reduce((sum, t) => sum + t.amount, 0);
+    const txns = bankAccountId ? this.getBankTransactions(bankAccountId) : this.bankTransactions;
+    return txns.filter(t => t.type === 'debit').reduce((sum, t) => sum + t.amount, 0);
   }
 
-  // Cheque management methods
   clearCheque(transactionId: string, clearanceDate: string): boolean {
-    const transaction = this.bankTransactions.find(t => t.id === transactionId);
-    if (transaction && transaction.source === 'Cheque' && !transaction.isCleared) {
-      transaction.isCleared = true;
-      transaction.clearanceDate = clearanceDate;
-      
-      // Update bank account balance
-      const bankAccount = this.getBankAccountById(transaction.bankAccountId);
-      if (bankAccount) {
-        if (transaction.type === 'credit') {
-          bankAccount.balance += transaction.amount;
-        } else {
-          bankAccount.balance -= transaction.amount;
-        }
-      }
-      
+    const t = this.bankTransactions.find(t => t.id === transactionId);
+    if (t && t.source === 'Cheque' && !t.isCleared) {
+      t.isCleared = true;
+      t.clearanceDate = clearanceDate;
+      const account = this.getBankAccountById(t.bankAccountId);
+      if (account) account.balance += t.type === 'credit' ? t.amount : -t.amount;
       this.notifyListeners();
       return true;
     }
@@ -1592,26 +823,12 @@ class DataStore {
   }
 
   bounceCheque(transactionId: string): boolean {
-    const transactionIndex = this.bankTransactions.findIndex(t => t.id === transactionId);
-    if (transactionIndex !== -1 && this.bankTransactions[transactionIndex].source === 'Cheque' && !this.bankTransactions[transactionIndex].isCleared) {
-      // Get transaction data before removing it
-      const transaction = this.bankTransactions[transactionIndex];
-      
-      // Remove the transaction
-      this.bankTransactions.splice(transactionIndex, 1);
-      
-      // Update bank account balance (reverse the transaction)
-      if (transaction) {
-        const bankAccount = this.getBankAccountById(transaction.bankAccountId);
-        if (bankAccount) {
-          if (transaction.type === 'credit') {
-            bankAccount.balance -= transaction.amount;
-          } else {
-            bankAccount.balance += transaction.amount;
-          }
-        }
-      }
-      
+    const idx = this.bankTransactions.findIndex(t => t.id === transactionId);
+    if (idx !== -1 && this.bankTransactions[idx].source === 'Cheque' && !this.bankTransactions[idx].isCleared) {
+      const t = this.bankTransactions[idx];
+      this.bankTransactions.splice(idx, 1);
+      const account = this.getBankAccountById(t.bankAccountId);
+      if (account) account.balance += t.type === 'credit' ? -t.amount : t.amount;
       this.notifyListeners();
       return true;
     }
@@ -1619,244 +836,112 @@ class DataStore {
   }
 
   getUnclearedCheques(bankAccountId: string): BankTransaction[] {
-    return this.bankTransactions.filter(t => 
-      t.bankAccountId === bankAccountId && 
-      t.source === 'Cheque' && 
-      !t.isCleared
-    );
+    return this.bankTransactions.filter(t => t.bankAccountId === bankAccountId && t.source === 'Cheque' && !t.isCleared);
   }
 
-  // Product deletion methods - remove all records related to a product
+  // ============================================
+  // Product record management
+  // ============================================
+
   deleteProductRecords(productId: string) {
-    let deletedRecords = {
-      sales: 0,
-      invoices: 0,
-      receivablesUpdated: 0
-    };
-
-    // Filter out sales that contain this product
-    const originalSalesCount = this.sales.length;
-    this.sales = this.sales.filter(sale => {
-      const hasProduct = sale.items.some(item => item.productId === productId);
-      return !hasProduct;
-    });
-    deletedRecords.sales = originalSalesCount - this.sales.length;
-
-    // Filter out invoices that contain this product
-    const originalInvoicesCount = this.invoices.length;
-    this.invoices = this.invoices.filter(invoice => {
-      const hasProduct = invoice.items.some(item => item.productId === productId);
-      return !hasProduct;
-    });
-    deletedRecords.invoices = originalInvoicesCount - this.invoices.length;
-
-    // Update receivables - recalculate totals without the deleted sales
-    this.receivables.forEach(receivable => {
-      const customerInvoices = this.invoices.filter(invoice => invoice.customerId === receivable.customerId);
-      const newTotalReceivable = customerInvoices.reduce((sum, invoice) => sum + invoice.balanceAmount, 0);
-      const newOverdueAmount = customerInvoices.reduce((sum, invoice) => {
-        if (invoice.status === 'overdue') {
-          return sum + invoice.balanceAmount;
-        }
-        return sum;
-      }, 0);
-
-      if (receivable.totalReceivable !== newTotalReceivable || receivable.overdueAmount !== newOverdueAmount) {
-        receivable.totalReceivable = newTotalReceivable;
-        receivable.overdueAmount = newOverdueAmount;
-        receivable.invoiceCount = customerInvoices.length;
-        receivable.status = newOverdueAmount > 0 ? 'overdue' : 'current';
-        deletedRecords.receivablesUpdated++;
-      }
-    });
-
-    // Remove receivables with zero amounts
-    this.receivables = this.receivables.filter(receivable => receivable.totalReceivable > 0);
-
-    console.log('=== PRODUCT RECORDS DELETED ===');
-    console.log('Product ID:', productId);
-    console.log('Sales deleted:', deletedRecords.sales);
-    console.log('Invoices deleted:', deletedRecords.invoices);
-    console.log('Receivables updated:', deletedRecords.receivablesUpdated);
-    console.log('Deleted at:', new Date().toISOString());
-    console.log('================================');
-
+    const origSales = this.sales.length;
+    const origInv = this.invoices.length;
+    this.sales = this.sales.filter(s => !s.items.some(i => i.productId === productId));
+    this.invoices = this.invoices.filter(inv => !inv.items.some(i => i.productId === productId));
+    this.receivables = this.receivables.filter(r => r.totalReceivable > 0);
     this.notifyListeners();
-    return deletedRecords;
+    return { sales: origSales - this.sales.length, invoices: origInv - this.invoices.length, receivablesUpdated: 0 };
   }
 
-  // Get all records related to a product (for preview before deletion)
   getProductRecords(productId: string) {
-    const relatedSales = this.sales.filter(sale => 
-      sale.items.some(item => item.productId === productId)
-    );
-    
-    const relatedInvoices = this.invoices.filter(invoice => 
-      invoice.items.some(item => item.productId === productId)
-    );
-
-    const affectedCustomers = new Set();
-    relatedSales.forEach(sale => affectedCustomers.add(sale.customerId));
-    relatedInvoices.forEach(invoice => affectedCustomers.add(invoice.customerId));
-
-    const relatedReceivables = this.receivables.filter(receivable => 
-      affectedCustomers.has(receivable.customerId)
-    );
-
+    const relatedSales = this.sales.filter(s => s.items.some(i => i.productId === productId));
+    const relatedInvoices = this.invoices.filter(inv => inv.items.some(i => i.productId === productId));
+    const affected = new Set<string>();
+    relatedSales.forEach(s => affected.add(s.customerId));
+    relatedInvoices.forEach(inv => affected.add(inv.customerId));
+    const relatedReceivables = this.receivables.filter(r => affected.has(r.customerId));
     return {
-      sales: relatedSales,
-      invoices: relatedInvoices,
-      receivables: relatedReceivables,
-      totalSales: relatedSales.length,
-      totalInvoices: relatedInvoices.length,
+      sales: relatedSales, invoices: relatedInvoices, receivables: relatedReceivables,
+      totalSales: relatedSales.length, totalInvoices: relatedInvoices.length,
       totalReceivables: relatedReceivables.length,
-      totalAmount: relatedSales.reduce((sum, sale) => sum + sale.totalAmount, 0)
+      totalAmount: relatedSales.reduce((sum, s) => sum + s.totalAmount, 0),
     };
   }
 
-  // Utility methods
-  getCustomerCount(): number {
-    return this.customers.length;
-  }
+  // ============================================
+  // Counts
+  // ============================================
 
-  getSupplierCount(): number {
-    return this.suppliers.length;
-  }
+  getCustomerCount(): number { return this.customers.length; }
+  getSupplierCount(): number { return this.suppliers.length; }
+  getSaleCount(): number { return this.sales.length; }
+  getInvoiceCount(): number { return this.invoices.length; }
 
-  getSaleCount(): number {
-    return this.sales.length;
-  }
+  // ============================================
+  // Signup Progress
+  // ============================================
 
-  getInvoiceCount(): number {
-    return this.invoices.length;
-  }
-
-  // Signup Progress Methods
   updateSignupProgress(updates: Partial<SignupProgress>) {
-    this.signupProgress = {
-      ...this.signupProgress,
-      ...updates,
-      lastUpdated: new Date().toISOString()
-    };
-    this.saveData();
-    
-    console.log('=== SIGNUP PROGRESS UPDATED ===');
-    console.log('Updated fields:', Object.keys(updates).join(', '));
-    console.log('Current step:', this.signupProgress.currentStep);
-    console.log('Full progress:', JSON.stringify(this.signupProgress, null, 2));
-    console.log('================================');
+    this.signupProgress = { ...this.signupProgress, ...updates, lastUpdated: new Date().toISOString() };
+    this.debouncedSave();
   }
 
-  getSignupProgress(): SignupProgress {
-    return this.signupProgress;
-  }
+  getSignupProgress(): SignupProgress { return this.signupProgress; }
 
-  // Get signup progress by mobile number
   async getSignupProgressByMobile(mobile: string): Promise<SignupProgress | null> {
     try {
-      const signupProgressData = await AsyncStorage.getItem('signupProgress');
-      if (signupProgressData) {
-        const progress = JSON.parse(signupProgressData);
-        if (progress.mobile === mobile) {
-          console.log('📥 Found existing signup progress for mobile:', mobile);
-          console.log('Progress:', JSON.stringify(progress, null, 2));
-          return progress;
-        }
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.SIGNUP_PROGRESS);
+      if (raw) {
+        const progress = JSON.parse(raw);
+        if (progress.mobile === mobile) return progress;
       }
-      console.log('📭 No signup progress found for mobile:', mobile);
       return null;
-    } catch (error) {
-      console.error('Error getting signup progress by mobile:', error);
-      return null;
-    }
+    } catch { return null; }
   }
 
   clearSignupProgress() {
     this.signupProgress = {};
-    this.saveData();
-    console.log('✅ Signup progress cleared');
+    this.debouncedSave();
   }
 
-  // Debug method to check AsyncStorage contents
-  async debugAsyncStorage() {
-    try {
-      console.log('🔍 DEBUG: Checking AsyncStorage contents...');
-      const keys = await AsyncStorage.getAllKeys();
-      console.log('🔑 All AsyncStorage keys:', keys);
-      
-      for (const key of keys) {
-        const value = await AsyncStorage.getItem(key);
-        console.log(`📦 ${key}:`, value ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : 'null');
-      }
-    } catch (error) {
-      console.error('❌ Error debugging AsyncStorage:', error);
-    }
-  }
+  // ============================================
+  // Clear all data
+  // ============================================
 
-  // Method to clear all data for fresh testing
   async clearAllDataForTesting() {
+    this.addresses = [];
+    this.bankAccounts = [];
+    this.staff = [];
+    this.customers = [];
+    this.invoices = [];
+    this.receivables = [];
+    this.payables = [];
+    this.bankTransactions = [];
+    this.changeLogs = [];
+    this.userAccounts = [];
+    this.sales = [];
+    this.suppliers = [];
+    this.signupProgress = {};
+    this.isSignupComplete = false;
+
     try {
-      console.log('🧹 CLEARING ALL DATA FOR FRESH TESTING...');
-      
-      // Clear all arrays and objects
-      this.addresses = [];
-      this.bankAccounts = [];
-      this.staff = [];
-      this.customers = [];
-      this.products = [];
-      this.invoices = [];
-      this.purchases = [];
-      this.receivables = [];
-      this.payables = [];
-      this.bankTransactions = [];
-      this.changeLogs = [];
-      this.userAccounts = [];
-      
-      // Reset signup progress
-      this.signupProgress = {};
-      this.isSignupComplete = false;
-      
-      // Clear all AsyncStorage data
       await AsyncStorage.multiRemove([
-        'addresses',
-        'bankAccounts',
-        'staff',
-        'customers',
-        'products',
-        'invoices',
-        'purchases',
-        'receivables',
-        'payables',
-        'bankTransactions',
-        'changeLogs',
-        'userAccounts',
-        'isSignupComplete',
-        'signupProgress',
-        'appSubscription', // Clear subscription data too
-        'subscription_data' // Also clear the other subscription key
+        ...Object.values(STORAGE_KEYS),
+        'appSubscription', 'subscription_data', 'cartItems', 'colorScheme',
       ]);
-      
-      console.log('✅ ALL DATA CLEARED SUCCESSFULLY!');
-      console.log('🎯 Ready for fresh signup testing');
-      
-      // Notify listeners
-      this.notifyListeners();
-      
     } catch (error) {
-      console.error('❌ Error clearing data:', error);
+      console.error('Error clearing AsyncStorage:', error);
     }
+    this.notifyListeners();
   }
 
-  // User Account Methods
+  // ============================================
+  // User Account methods
+  // ============================================
+
   createUserAccount(): UserAccount {
     const progress = this.signupProgress;
     const now = new Date().toISOString();
-    
-    console.log('🏗️ Creating user account with signup progress:', progress);
-    console.log('📱 Mobile from progress:', progress.mobile);
-    console.log('👤 Owner name from progress:', progress.ownerName);
-    console.log('🏢 Business name from progress:', progress.businessName);
-    
     const userAccount: UserAccount = {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       mobile: progress.mobile || '',
@@ -1868,9 +953,7 @@ class DataStore {
       taxIdValue: progress.taxIdValue || '',
       taxIdVerified: progress.taxIdVerified || false,
       ownerDob: progress.ownerDob,
-      createdAt: now,
-      lastLoginAt: now,
-      isActive: true,
+      createdAt: now, lastLoginAt: now, isActive: true,
       addresses: [...this.addresses],
       bankAccounts: [...this.bankAccounts],
       initialCashBalance: parseFloat(progress.initialCashBalance || '0'),
@@ -1881,297 +964,145 @@ class DataStore {
         fiscalYear: progress.fiscalYear || 'APR-MAR',
       },
     };
-
-    // Add to user accounts array
     this.userAccounts.push(userAccount);
     this.saveData();
-
-    console.log('=== USER ACCOUNT CREATED ===');
-    console.log('User ID:', userAccount.id);
-    console.log('Mobile:', userAccount.mobile);
-    console.log('Business Name:', userAccount.businessName);
-    console.log('Created At:', userAccount.createdAt);
-    console.log('============================');
-
-    // Debug AsyncStorage after saving
-    setTimeout(async () => {
-      await this.debugAsyncStorage();
-    }, 1000);
-
     return userAccount;
   }
 
   getUserAccountByMobile(mobile: string): UserAccount | null {
-    console.log('🔍 Searching for user account with mobile:', mobile);
-    console.log('📊 Total user accounts:', this.userAccounts.length);
-    console.log('📋 All user accounts:', this.userAccounts.map(acc => ({ mobile: acc.mobile, isActive: acc.isActive })));
-    
-    const account = this.userAccounts.find(acc => acc.mobile === mobile && acc.isActive);
-    if (account) {
-      console.log('📱 Found user account for mobile:', mobile);
-      console.log('Account ID:', account.id);
-      console.log('Business Name:', account.businessName);
-      console.log('Is Active:', account.isActive);
-    } else {
-      console.log('📭 No user account found for mobile:', mobile);
-      console.log('🔍 Available mobiles:', this.userAccounts.map(acc => acc.mobile));
-    }
-    return account || null;
+    return this.userAccounts.find(acc => acc.mobile === mobile && acc.isActive) || null;
   }
 
-  updateUserLastLogin(mobile: string): void {
+  updateUserLastLogin(mobile: string) {
     const account = this.userAccounts.find(acc => acc.mobile === mobile && acc.isActive);
     if (account) {
       account.lastLoginAt = new Date().toISOString();
-      this.saveData();
-      console.log('🔄 Updated last login for user:', mobile);
+      this.debouncedSave();
     }
   }
 
-  getAllUserAccounts(): UserAccount[] {
-    return this.userAccounts.filter(acc => acc.isActive);
-  }
+  getAllUserAccounts(): UserAccount[] { return this.userAccounts.filter(acc => acc.isActive); }
 
-  deactivateUserAccount(mobile: string): void {
+  deactivateUserAccount(mobile: string) {
     const account = this.userAccounts.find(acc => acc.mobile === mobile);
     if (account) {
       account.isActive = false;
-      this.saveData();
-      console.log('🚫 Deactivated user account for mobile:', mobile);
+      this.debouncedSave();
     }
   }
 
-  // Change Log Methods
+  // ============================================
+  // Change Log
+  // ============================================
+
   logChange(changeType: ChangeLog['changeType'], description: string, oldValue?: any, newValue?: any, metadata?: any) {
-    const changeLog: ChangeLog = {
+    this.changeLogs.push({
       id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       timestamp: new Date().toISOString(),
-      changeType,
-      description,
-      oldValue,
-      newValue,
-      metadata
-    };
-    
-    this.changeLogs.push(changeLog);
-    this.saveData();
-    
-    console.log('=== CHANGE LOGGED ===');
-    console.log('Type:', changeType);
-    console.log('Description:', description);
-    console.log('Timestamp:', changeLog.timestamp);
-    if (oldValue) console.log('Old Value:', JSON.stringify(oldValue, null, 2));
-    if (newValue) console.log('New Value:', JSON.stringify(newValue, null, 2));
-    if (metadata) console.log('Metadata:', JSON.stringify(metadata, null, 2));
-    console.log('Total logs:', this.changeLogs.length);
-    console.log('====================');
+      changeType, description, oldValue, newValue, metadata,
+    });
+    this.debouncedSave();
   }
 
-  getChangeLogs(): ChangeLog[] {
-    return this.changeLogs;
-  }
+  getChangeLogs(): ChangeLog[] { return this.changeLogs; }
+  getChangeLogsByType(changeType: ChangeLog['changeType']): ChangeLog[] { return this.changeLogs.filter(l => l.changeType === changeType); }
+  clearChangeLogs() { this.changeLogs = []; this.debouncedSave(); }
 
-  getChangeLogsByType(changeType: ChangeLog['changeType']): ChangeLog[] {
-    return this.changeLogs.filter(log => log.changeType === changeType);
-  }
+  // ============================================
+  // Signup Summary
+  // ============================================
 
-  clearChangeLogs() {
-    this.changeLogs = [];
-    this.saveData();
-    console.log('✅ Change logs cleared');
-  }
-
-  // Get comprehensive signup summary
   getSignupSummary() {
     const progress = this.signupProgress;
-    const addresses = this.addresses;
-    const bankAccounts = this.bankAccounts;
-    const primaryAddress = addresses.find(addr => addr.isPrimary);
-    const branchAddresses = addresses.filter(addr => addr.type === 'branch');
-    const warehouseAddresses = addresses.filter(addr => addr.type === 'warehouse');
-    const primaryBank = bankAccounts.find(bank => bank.isPrimary);
-    const secondaryBanks = bankAccounts.filter(bank => !bank.isPrimary);
-    
-    const summary = {
-      // User & Business Info
-      userName: progress.ownerName,
-      mobileNumber: progress.mobile,
-      businessName: progress.businessName,
-      businessType: progress.businessType,
-      taxIdType: progress.taxIdType,
-      taxIdValue: progress.taxIdValue,
-      ownerDob: progress.ownerDob,
-      
-      // Addresses
+    const primaryAddress = this.addresses.find(a => a.isPrimary);
+    const branches = this.addresses.filter(a => a.type === 'branch');
+    const warehouses = this.addresses.filter(a => a.type === 'warehouse');
+    const primaryBank = this.bankAccounts.find(b => b.isPrimary);
+    const secondaryBanks = this.bankAccounts.filter(b => !b.isPrimary);
+
+    return {
+      userName: progress.ownerName, mobileNumber: progress.mobile,
+      businessName: progress.businessName, businessType: progress.businessType,
+      taxIdType: progress.taxIdType, taxIdValue: progress.taxIdValue, ownerDob: progress.ownerDob,
       primaryAddress: primaryAddress ? {
-        id: primaryAddress.id,
-        name: primaryAddress.name,
-        doorNumber: primaryAddress.doorNumber,
-        addressLine1: primaryAddress.addressLine1,
-        addressLine2: primaryAddress.addressLine2,
-        city: primaryAddress.city,
-        state: primaryAddress.stateName,
-        stateCode: primaryAddress.stateCode,
-        pincode: primaryAddress.pincode,
-        type: primaryAddress.type
+        id: primaryAddress.id, name: primaryAddress.name, doorNumber: primaryAddress.doorNumber,
+        addressLine1: primaryAddress.addressLine1, addressLine2: primaryAddress.addressLine2,
+        city: primaryAddress.city, state: primaryAddress.stateName, stateCode: primaryAddress.stateCode,
+        pincode: primaryAddress.pincode, type: primaryAddress.type,
       } : null,
-      
-      branchAddresses: branchAddresses.map(addr => ({
-        id: addr.id,
-        name: addr.name,
-        doorNumber: addr.doorNumber,
-        addressLine1: addr.addressLine1,
-        addressLine2: addr.addressLine2,
-        city: addr.city,
-        state: addr.stateName,
-        stateCode: addr.stateCode,
-        pincode: addr.pincode,
-        manager: addr.manager,
-        phone: addr.phone
+      branchAddresses: branches.map(a => ({
+        id: a.id, name: a.name, doorNumber: a.doorNumber, addressLine1: a.addressLine1,
+        addressLine2: a.addressLine2, city: a.city, state: a.stateName, stateCode: a.stateCode,
+        pincode: a.pincode, manager: a.manager, phone: a.phone,
       })),
-      
-      warehouseAddresses: warehouseAddresses.map(addr => ({
-        id: addr.id,
-        name: addr.name,
-        doorNumber: addr.doorNumber,
-        addressLine1: addr.addressLine1,
-        addressLine2: addr.addressLine2,
-        city: addr.city,
-        state: addr.stateName,
-        stateCode: addr.stateCode,
-        pincode: addr.pincode,
-        manager: addr.manager,
-        phone: addr.phone
+      warehouseAddresses: warehouses.map(a => ({
+        id: a.id, name: a.name, doorNumber: a.doorNumber, addressLine1: a.addressLine1,
+        addressLine2: a.addressLine2, city: a.city, state: a.stateName, stateCode: a.stateCode,
+        pincode: a.pincode, manager: a.manager, phone: a.phone,
       })),
-      
-      totalAddresses: addresses.length,
-      
-      // Bank Accounts
+      totalAddresses: this.addresses.length,
       primaryBankAccount: primaryBank ? {
-        id: primaryBank.id,
-        bankName: primaryBank.bankName,
-        accountHolderName: primaryBank.accountHolderName,
-        accountNumber: primaryBank.accountNumber,
-        ifscCode: primaryBank.ifscCode,
-        branchName: primaryBank.branchName,
-        initialBalance: primaryBank.initialBalance,
-        upiId: primaryBank.upiId
+        id: primaryBank.id, bankName: primaryBank.bankName, accountHolderName: primaryBank.accountHolderName,
+        accountNumber: primaryBank.accountNumber, ifscCode: primaryBank.ifscCode,
+        initialBalance: primaryBank.initialBalance, upiId: primaryBank.upiId,
       } : null,
-      
-      additionalBankAccounts: secondaryBanks.map(bank => ({
-        id: bank.id,
-        bankName: bank.bankName,
-        accountHolderName: bank.accountHolderName,
-        accountNumber: bank.accountNumber,
-        ifscCode: bank.ifscCode,
-        branchName: bank.branchName,
-        initialBalance: bank.initialBalance,
-        upiId: bank.upiId
+      additionalBankAccounts: secondaryBanks.map(b => ({
+        id: b.id, bankName: b.bankName, accountHolderName: b.accountHolderName,
+        accountNumber: b.accountNumber, ifscCode: b.ifscCode,
+        initialBalance: b.initialBalance, upiId: b.upiId,
       })),
-      
-      totalBankAccounts: bankAccounts.length,
-      
-      // Financial & Invoice Config
+      totalBankAccounts: this.bankAccounts.length,
       initialCashBalance: progress.initialCashBalance,
-      invoicePrefix: progress.invoicePrefix,
-      invoicePattern: progress.invoicePattern,
-      startingInvoiceNumber: progress.startingInvoiceNumber,
-      fiscalYear: progress.fiscalYear,
-      
-      // Signup Status
-      currentStep: progress.currentStep,
-      lastUpdated: progress.lastUpdated,
-      isComplete: this.isSignupComplete
-    };
-    
-    console.log('=== COMPREHENSIVE SIGNUP SUMMARY ===');
-    console.log(JSON.stringify(summary, null, 2));
-    console.log('====================================');
-    
-    return summary;
-  }
-
-  // Subscribe to changes
-  subscribe(listener: () => void) {
-    this.listeners.push(listener);
-    return () => {
-      const index = this.listeners.indexOf(listener);
-      if (index > -1) {
-        this.listeners.splice(index, 1);
-      }
+      invoicePrefix: progress.invoicePrefix, invoicePattern: progress.invoicePattern,
+      startingInvoiceNumber: progress.startingInvoiceNumber, fiscalYear: progress.fiscalYear,
+      currentStep: progress.currentStep, lastUpdated: progress.lastUpdated,
+      isComplete: this.isSignupComplete,
     };
   }
 
-  private notifyListeners() {
-    this.listeners.forEach(listener => listener());
-  }
+  // ============================================
+  // Signup completion
+  // ============================================
 
-  // Clear all data (for testing)
-  async clearAll() {
-    this.customers = [];
-    this.suppliers = [];
-    this.sales = [];
-    this.invoices = [];
-    this.receivables = [];
-    this.payables = [];
-    this.addresses = [];
-    this.bankAccounts = [];
-    this.staff = [];
-    this.bankTransactions = [];
-    this.isSignupComplete = false;
-    this.signupProgress = {};
-    this.changeLogs = [];
-    this.userAccounts = [];
-    
-    // Clear from AsyncStorage as well
-    await AsyncStorage.removeItem('isSignupComplete');
-    await AsyncStorage.removeItem('signupProgress');
-    await AsyncStorage.removeItem('changeLogs');
-    await AsyncStorage.removeItem('addresses');
-    await AsyncStorage.removeItem('bankAccounts');
-    await AsyncStorage.removeItem('staff');
-    await AsyncStorage.removeItem('userAccounts');
-    await AsyncStorage.removeItem('cartItems');
-    await AsyncStorage.removeItem('colorScheme');
-    
-    console.log('=== ALL DATA CLEARED ===');
-    console.log('Cleared at:', new Date().toISOString());
-    console.log('========================');
-    this.notifyListeners();
-  }
-
-  // Clear addresses only (for testing)
-  clearAddresses() {
-    this.addresses = [];
-    this.saveData();
-    console.log('=== ADDRESSES CLEARED ===');
-    console.log('Cleared at:', new Date().toISOString());
-    console.log('==========================');
-    this.notifyListeners();
-  }
-
-  // Signup completion methods
   setSignupComplete(complete: boolean) {
     this.isSignupComplete = complete;
-    AsyncStorage.setItem('isSignupComplete', complete.toString());
+    AsyncStorage.setItem(STORAGE_KEYS.SIGNUP_COMPLETE, complete.toString()).catch(() => {});
     this.notifyListeners();
   }
 
   async getSignupComplete(): Promise<boolean> {
     try {
-      const stored = await AsyncStorage.getItem('isSignupComplete');
-      if (stored !== null) {
-        this.isSignupComplete = stored === 'true';
-      }
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.SIGNUP_COMPLETE);
+      if (stored !== null) this.isSignupComplete = stored === 'true';
       return this.isSignupComplete;
-    } catch (error) {
-      console.error('Error loading signup complete status:', error);
-      return this.isSignupComplete;
-    }
+    } catch { return this.isSignupComplete; }
   }
 
+  // ============================================
+  // Observer pattern
+  // ============================================
 
+  subscribe(listener: () => void) {
+    this.listeners.push(listener);
+    return () => {
+      const idx = this.listeners.indexOf(listener);
+      if (idx > -1) this.listeners.splice(idx, 1);
+    };
+  }
+
+  private notifyListeners() {
+    this.listeners.forEach(fn => fn());
+  }
+
+  async clearAll() {
+    await this.clearAllDataForTesting();
+  }
+
+  clearAddresses() {
+    this.addresses = [];
+    this.debouncedSave();
+    this.notifyListeners();
+  }
 }
 
-// Export singleton instance
-export const dataStore = new DataStore(); 
+export const dataStore = new DataStore();

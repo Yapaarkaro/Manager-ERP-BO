@@ -44,7 +44,7 @@ import TrialNotification from '@/components/TrialNotification';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { completeOnboarding, deleteSignupProgress, saveSignupProgress, updateBusinessCashBalance } from '@/services/backendApi';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 
@@ -474,8 +474,11 @@ export default function BusinessSummaryScreen() {
 
     try {
       // Complete onboarding in backend
-      // Get mobile from params or from user's phone metadata
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'Business summary: getSession'
+      );
       const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
       
       if (!mobileNumber) {

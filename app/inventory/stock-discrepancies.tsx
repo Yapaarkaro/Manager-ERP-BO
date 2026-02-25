@@ -82,165 +82,7 @@ interface StockDiscrepancy {
   lastUpdated: string;
 }
 
-const mockStockDiscrepancies: StockDiscrepancy[] = [
-  {
-    id: 'DISC-001',
-    productId: 'PROD-001',
-    productName: 'iPhone 14 Pro 128GB',
-    productImage: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    expectedStock: 100,
-    actualStock: 95,
-    discrepancyType: 'shortage',
-    discrepancyQuantity: 5,
-    reportedBy: {
-      id: 'STAFF-001',
-      name: 'Rajesh Kumar',
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Warehouse Manager'
-    },
-    reportedDate: '2024-01-16',
-    relatedInvoice: {
-      id: 'INV-001',
-      invoiceNumber: 'INV-2024-001',
-      type: 'sale',
-      customerName: 'TechCorp Solutions Pvt Ltd',
-      date: '2024-01-15',
-      amount: 649500
-    },
-    location: 'Main Warehouse - A1',
-    reason: 'Stock count mismatch after sale transaction',
-    status: 'pending',
-    priority: 'high',
-    unitPrice: 129900,
-    discrepancyValue: 649500,
-    lastUpdated: '2024-01-16T10:30:00Z'
-  },
-  {
-    id: 'DISC-002',
-    productId: 'PROD-002',
-    productName: 'Samsung Galaxy S23 Ultra',
-    productImage: 'https://images.pexels.com/photos/1092644/pexels-photo-1092644.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Smartphones',
-    expectedStock: 50,
-    actualStock: 52,
-    discrepancyType: 'excess',
-    discrepancyQuantity: 2,
-    reportedBy: {
-      id: 'STAFF-002',
-      name: 'Priya Sharma',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Inventory Supervisor'
-    },
-    reportedDate: '2024-01-15',
-    relatedInvoice: {
-      id: 'PUR-002',
-      invoiceNumber: 'PUR-2024-002',
-      type: 'purchase',
-      supplierName: 'Samsung Electronics India',
-      date: '2024-01-14',
-      amount: 249998
-    },
-    location: 'Main Warehouse - A2',
-    reason: 'Extra units found during purchase verification',
-    status: 'investigating',
-    priority: 'medium',
-    unitPrice: 124999,
-    discrepancyValue: 249998,
-    lastUpdated: '2024-01-15T14:45:00Z'
-  },
-  {
-    id: 'DISC-003',
-    productId: 'PROD-003',
-    productName: 'MacBook Air M2',
-    productImage: 'https://images.pexels.com/photos/205421/pexels-photo-205421.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    expectedStock: 25,
-    actualStock: 22,
-    discrepancyType: 'shortage',
-    discrepancyQuantity: 3,
-    reportedBy: {
-      id: 'STAFF-003',
-      name: 'Amit Singh',
-      avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Store Manager'
-    },
-    reportedDate: '2024-01-14',
-    relatedInvoice: {
-      id: 'RET-001',
-      invoiceNumber: 'RET-2024-001',
-      type: 'return',
-      customerName: 'Global Enterprises Ltd',
-      date: '2024-01-13',
-      amount: 344700
-    },
-    location: 'Branch Office - Mumbai',
-    reason: 'Units missing after return processing',
-    status: 'resolved',
-    priority: 'critical',
-    unitPrice: 114900,
-    discrepancyValue: 344700,
-    lastUpdated: '2024-01-14T16:20:00Z'
-  },
-  {
-    id: 'DISC-004',
-    productId: 'PROD-004',
-    productName: 'AirPods Pro 2nd Gen',
-    productImage: 'https://images.pexels.com/photos/3780681/pexels-photo-3780681.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Audio',
-    expectedStock: 80,
-    actualStock: 85,
-    discrepancyType: 'excess',
-    discrepancyQuantity: 5,
-    reportedBy: {
-      id: 'STAFF-001',
-      name: 'Rajesh Kumar',
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Warehouse Manager'
-    },
-    reportedDate: '2024-01-13',
-    location: 'Main Warehouse - C1',
-    reason: 'Routine stock audit found extra units',
-    status: 'acknowledged',
-    priority: 'low',
-    unitPrice: 24900,
-    discrepancyValue: 124500,
-    lastUpdated: '2024-01-13T11:15:00Z'
-  },
-  {
-    id: 'DISC-005',
-    productId: 'PROD-005',
-    productName: 'Dell XPS 13',
-    productImage: 'https://images.pexels.com/photos/18105/pexels-photo.jpg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-    category: 'Laptops',
-    expectedStock: 15,
-    actualStock: 12,
-    discrepancyType: 'shortage',
-    discrepancyQuantity: 3,
-    reportedBy: {
-      id: 'STAFF-004',
-      name: 'Meera Joshi',
-      avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      role: 'Sales Executive'
-    },
-    reportedDate: '2024-01-12',
-    relatedInvoice: {
-      id: 'INV-005',
-      invoiceNumber: 'INV-2024-005',
-      type: 'sale',
-      customerName: 'Metro Retail Chain',
-      date: '2024-01-11',
-      amount: 269997
-    },
-    location: 'Branch Office - Bangalore',
-    reason: 'Stock shortage discovered during sale',
-    status: 'pending',
-    priority: 'high',
-    unitPrice: 89999,
-    discrepancyValue: 269997,
-    lastUpdated: '2024-01-12T09:30:00Z'
-  },
-];
+const mockStockDiscrepancies: StockDiscrepancy[] = [];
 
 export default function StockDiscrepanciesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -518,7 +360,7 @@ export default function StockDiscrepanciesScreen() {
       const returnInvoiceData = {
         id: invoice.id,
         returnNumber: invoice.invoiceNumber,
-        originalInvoiceNumber: 'INV-2024-001', // Mock original invoice
+        originalInvoiceNumber: '',
         customerName: invoice.customerName || 'N/A',
         customerType: 'business',
         staffName: discrepancy.reportedBy.name,
@@ -531,7 +373,7 @@ export default function StockDiscrepanciesScreen() {
         customerDetails: {
           name: invoice.customerName || 'N/A',
           mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
@@ -559,7 +401,7 @@ export default function StockDiscrepanciesScreen() {
           name: invoice.customerName || invoice.supplierName || 'N/A',
           mobile: '+91 98765 43210',
           businessName: invoice.type === 'purchase' ? invoice.supplierName : invoice.customerName,
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 

@@ -105,7 +105,7 @@ export default function DailyInvoicesScreen() {
         customerDetails: {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
@@ -133,7 +133,7 @@ export default function DailyInvoicesScreen() {
           name: invoice.customerName,
           mobile: '+91 98765 43210',
           businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 

@@ -1,9 +1,9 @@
 /**
  * Backend API Service
- * Handles all calls to Supabase Edge Functions
+ * Handles all calls to Supabase Edge Functions and direct Supabase queries.
  */
 
-import { EDGE_FUNCTIONS_URL, supabase, SUPABASE_ANON_KEY } from '@/lib/supabase';
+import { EDGE_FUNCTIONS_URL, supabase, SUPABASE_ANON_KEY, withTimeout } from '@/lib/supabase';
 
 // Lazy import to avoid circular dependency
 let clearBusinessDataCache: (() => void) | null = null;
@@ -15,6 +15,56 @@ const getClearCache = () => {
   return clearBusinessDataCache;
 };
 
+// ============================================
+// Cached business context to avoid repeated DB lookups
+// ============================================
+let _cachedBusinessCtx: { businessId: string; userId: string; expiresAt: number } | null = null;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getUserBusinessId(): Promise<{ businessId: string; userId: string } | null> {
+  // Return cached value if still valid
+  if (_cachedBusinessCtx && Date.now() < _cachedBusinessCtx.expiresAt) {
+    return { businessId: _cachedBusinessCtx.businessId, userId: _cachedBusinessCtx.userId };
+  }
+
+  try {
+    const { data: { session } } = await withTimeout(
+      supabase.auth.getSession(),
+      10000,
+      'getUserBusinessId: getSession'
+    );
+    if (!session?.user) return null;
+
+    const { data } = await withTimeout(
+      Promise.resolve(
+        supabase
+          .from('users')
+          .select('business_id')
+          .eq('id', session.user.id)
+          .single()
+      ),
+      10000,
+      'getUserBusinessId: query'
+    ) as { data: { business_id: string } | null };
+
+    if (!data?.business_id) return null;
+
+    _cachedBusinessCtx = {
+      businessId: data.business_id,
+      userId: session.user.id,
+      expiresAt: Date.now() + CACHE_TTL,
+    };
+    return { businessId: data.business_id, userId: session.user.id };
+  } catch {
+    return null;
+  }
+}
+
+/** Call this on logout or session change to reset the cache */
+export function clearBusinessContext() {
+  _cachedBusinessCtx = null;
+}
+
 // Helper to call Edge Functions
 export async function callEdgeFunction(
   functionName: string,
@@ -23,159 +73,84 @@ export async function callEdgeFunction(
   requireAuth: boolean = false
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // Check authentication if required
+    let accessToken: string | null = null;
+
     if (requireAuth) {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'callEdgeFunction: getSession'
+      );
       if (!session?.access_token) {
         return {
           success: false,
           error: 'Authentication required. Please sign in first.',
         };
       }
-    }
-
-    // Try using Supabase's functions.invoke() first (only for POST requests)
-    // This handles CORS automatically and is more reliable on web
-    if (method === 'POST') {
+      accessToken = session.access_token;
+    } else {
       try {
-        const response = await supabase.functions.invoke(functionName, {
-          body: body || {},
-        });
-
-        if (response.error) {
-          console.error(`Error calling ${functionName} via functions.invoke():`, response.error);
-          // Fall through to fetch fallback
-        } else {
-          return {
-            success: true,
-            data: response.data,
-          };
-        }
-      } catch (invokeError: any) {
-        console.warn(`Supabase functions.invoke() failed for ${functionName}, falling back to fetch:`, invokeError);
-        // Fall through to fetch fallback
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          5000,
+          'callEdgeFunction: getSession (optional)'
+        );
+        accessToken = session?.access_token ?? null;
+      } catch {
+        // No session available or timed out, will use anon key
       }
     }
 
-    // For GET, PUT, DELETE, or if POST invoke() failed, use fetch
-    // This ensures compatibility with all HTTP methods
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
     };
-
-    if (requireAuth) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-      }
-    }
 
     const options: RequestInit = {
       method,
       headers,
-      // Add credentials for CORS (important for web)
-      credentials: 'omit', // Don't send cookies, but allow CORS
+      credentials: 'omit',
     };
 
     if (body && method !== 'GET') {
       options.body = JSON.stringify(body);
     }
 
-    // ✅ Enhanced logging for PUT requests to debug the issue
-    if (method === 'PUT') {
-      console.log(`🔄 Making PUT request to ${functionName}:`, {
-        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
-        hasBody: !!body,
-        bodyKeys: body ? Object.keys(body) : [],
-        headers: Object.keys(headers),
-      });
-    }
-    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    options.signal = controller.signal;
+
     const response = await fetch(`${EDGE_FUNCTIONS_URL}/${functionName}`, options);
-    
-    // ✅ Enhanced error logging for failed requests
-    if (!response.ok) {
-      console.error(`❌ ${method} request to ${functionName} failed:`, {
-        status: response.status,
-        statusText: response.statusText,
-        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
-        method,
-        hasBody: !!body,
-      });
-    }
-    
-    // Handle non-JSON responses
+    clearTimeout(timeoutId);
+
     let data: any;
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
       try {
         data = await response.json();
-      } catch (jsonError) {
-        console.error(`Error parsing JSON response from ${functionName}:`, jsonError);
-        return {
-          success: false,
-          error: 'Invalid response format from server',
-        };
+      } catch {
+        return { success: false, error: 'Invalid response format from server' };
       }
     } else {
-      // For non-JSON responses, try to get text
       const text = await response.text();
       data = { message: text || 'No response data' };
     }
 
     if (!response.ok) {
-      // Provide more detailed error information
       const errorMessage = data.error || data.message || `Request failed with status ${response.status}`;
-      console.error(`Error calling ${functionName}:`, {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorMessage,
-        data,
-      });
-      return {
-        success: false,
-        error: errorMessage,
-      };
+      return { success: false, error: errorMessage };
     }
 
-    return {
-      success: true,
-      data,
-    };
+    return { success: true, data };
   } catch (error: any) {
-    console.error(`❌ Error calling ${functionName} (${method}):`, error);
-    // Handle network errors more gracefully with detailed messages
-    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message === 'Failed to fetch')) {
-      // This usually indicates CORS issue or network problem
-      console.error(`❌ Network error details for ${functionName} (${method}):`, {
-        message: error.message,
-        stack: error.stack,
-        url: `${EDGE_FUNCTIONS_URL}/${functionName}`,
-        method,
-        hasBody: !!body,
-        bodyType: body ? typeof body : 'none',
-        // ✅ Log if this is a PUT request (which might have CORS issues)
-        isPutRequest: method === 'PUT',
-      });
-      
-      // ✅ Provide more specific error message for PUT requests
-      if (method === 'PUT') {
-        return {
-          success: false,
-          error: 'Failed to update resource. This may be due to a network issue or CORS configuration. Please check your internet connection and try again. If the problem persists, the Edge Function may need to be reconfigured to accept PUT requests.',
-        };
-      }
-      
-      return {
-        success: false,
-        error: 'Network error. Please check your internet connection and try again. If the problem persists, the Edge Function may not be deployed.',
-      };
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timed out. Please check your connection and try again.' };
     }
-    return {
-      success: false,
-      error: error.message || 'Network error. Please check your connection.',
-    };
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message === 'Failed to fetch')) {
+      return { success: false, error: 'Network error. Please check your internet connection and try again.' };
+    }
+    return { success: false, error: error.message || 'Network error. Please check your connection.' };
   }
 }
 
@@ -193,29 +168,12 @@ export async function verifyMobileOTP(
   otp: string
 ): Promise<{ success: boolean; mobileVerified?: boolean; error?: string }> {
   const result = await callEdgeFunction('verify-mobile-otp', 'POST', { mobile, otp }, false);
-  
-  console.log('🔍 verifyMobileOTP - Raw API result:', result);
-  console.log('🔍 verifyMobileOTP - result.data:', result.data);
-  
-  // Check if the response indicates success
-  if (result.success) {
-    // The Edge Function returns { success: true, mobileVerified: true, message: ... }
-    if (result.data?.mobileVerified || result.data?.success) {
-      return {
-        success: true,
-        mobileVerified: true,
-      };
-    }
+
+  if (result.success && (result.data?.mobileVerified || result.data?.success)) {
+    return { success: true, mobileVerified: true };
   }
-  
-  // If we get here, verification failed
-  const errorMessage = result.error || result.data?.error || 'OTP verification failed';
-  console.log('❌ verifyMobileOTP failed:', errorMessage);
-  
-  return {
-    success: false,
-    error: errorMessage,
-  };
+
+  return { success: false, error: result.error || result.data?.error || 'OTP verification failed' };
 }
 
 /**
@@ -225,26 +183,13 @@ export async function verifyMobileOTP(
 export async function verifyGSTIN(
   gstin: string
 ): Promise<{ success: boolean; taxpayerInfo?: any; error?: string }> {
-  // GSTIN verification now requires authentication (JWT)
   const result = await callEdgeFunction('verify-gstin', 'POST', { gstin }, true);
-  
-  console.log('🔍 verifyGSTIN - Raw API result:', result);
-  console.log('🔍 verifyGSTIN - result.data:', result.data);
-  
+
   if (result.success && result.data?.taxpayerInfo) {
-    return {
-      success: true,
-      taxpayerInfo: result.data.taxpayerInfo,
-    };
+    return { success: true, taxpayerInfo: result.data.taxpayerInfo };
   }
-  
-  const errorMessage = result.error || result.data?.message || result.data?.error || 'GSTIN verification failed';
-  console.log('❌ verifyGSTIN failed:', errorMessage);
-  
-  return {
-    success: false,
-    error: errorMessage,
-  };
+
+  return { success: false, error: result.error || result.data?.message || result.data?.error || 'GSTIN verification failed' };
 }
 
 /**
@@ -256,25 +201,13 @@ export async function verifyGSTINOTP(
   gstin: string,
   otp: string
 ): Promise<{ success: boolean; gstinVerified?: boolean; error?: string }> {
-  // GSTIN OTP verification now requires authentication (JWT)
   const result = await callEdgeFunction('verify-gstin-otp', 'POST', { gstin, otp }, true);
-  
-  console.log('🔍 verifyGSTINOTP - Raw API result:', result);
-  
+
   if (result.success && (result.data?.gstinVerified || result.data?.success)) {
-    return {
-      success: true,
-      gstinVerified: true,
-    };
+    return { success: true, gstinVerified: true };
   }
-  
-  const errorMessage = result.error || result.data?.error || 'GSTIN OTP verification failed';
-  console.log('❌ verifyGSTINOTP failed:', errorMessage);
-  
-  return {
-    success: false,
-    error: errorMessage,
-  };
+
+  return { success: false, error: result.error || result.data?.error || 'GSTIN OTP verification failed' };
 }
 
 /**
@@ -288,25 +221,13 @@ export async function verifyPAN(
   name: string,
   dateOfBirth: string
 ): Promise<{ success: boolean; panVerified?: boolean; error?: string }> {
-  // PAN verification now requires authentication (JWT)
   const result = await callEdgeFunction('verify-pan', 'POST', { pan, name, dateOfBirth }, true);
-  
-  console.log('🔍 verifyPAN - Raw API result:', result);
-  
+
   if (result.success && (result.data?.panVerified || result.data?.success)) {
-    return {
-      success: true,
-      panVerified: true,
-    };
+    return { success: true, panVerified: true };
   }
-  
-  const errorMessage = result.error || result.data?.error || 'PAN verification failed';
-  console.log('❌ verifyPAN failed:', errorMessage);
-  
-  return {
-    success: false,
-    error: errorMessage,
-  };
+
+  return { success: false, error: result.error || result.data?.error || 'PAN verification failed' };
 }
 
 // ============================================
@@ -348,7 +269,6 @@ export async function submitBusinessDetails(params: {
     'submit-business-details',
     'POST',
     {
-      userId: user.id,
       ownerName: params.ownerName,
       businessName: params.businessName,
       businessType: params.businessType,
@@ -356,7 +276,7 @@ export async function submitBusinessDetails(params: {
       taxIdValue: params.taxIdValue,
       gstinData: params.gstinData ? JSON.stringify(params.gstinData) : null,
       dateOfBirth: params.dateOfBirth || null,
-      registeredMobile: mobileNumber, // Include mobile number
+      registeredMobile: mobileNumber,
     },
     true
   );
@@ -384,13 +304,8 @@ export async function submitBusinessDetails(params: {
 export async function getAddresses(): Promise<{ success: boolean; addresses?: any[]; error?: string }> {
   const result = await callEdgeFunction('manage-addresses', 'GET', undefined, true);
   
-  // Handle 404 gracefully - edge function may not be deployed
   if (!result.success && result.error?.includes('404')) {
-    console.warn('⚠️ manage-addresses edge function not found (404). This may not be deployed yet.');
-    return {
-      success: true,
-      addresses: [],
-    };
+    return { success: true, addresses: [] };
   }
   
   if (result.success && Array.isArray(result.data?.addresses)) {
@@ -504,17 +419,7 @@ export async function updateAddress(params: {
     requestBody.longitude = params.longitude;
   }
   
-  console.log('🔄 updateAddress - Request body:', {
-    addressId: requestBody.addressId,
-    hasName: !!requestBody.name,
-    hasAddressJson: !!requestBody.addressJson,
-    hasType: !!requestBody.type,
-    hasManagerName: !!requestBody.managerName,
-    hasManagerMobileNumber: !!requestBody.managerMobileNumber,
-    isPrimary: requestBody.isPrimary,
-  });
-  
-  // ✅ Use POST instead of PUT to avoid CORS issues on web
+  // Use POST instead of PUT to avoid CORS issues on web
   // The Edge Function now accepts POST requests with addressId for updates
   // This allows us to use supabase.functions.invoke() which handles CORS automatically
   const result = await callEdgeFunction(
@@ -587,7 +492,7 @@ export async function getBankAccounts(): Promise<{ success: boolean; accounts?: 
   
   // Handle 404 gracefully - edge function may not be deployed
   if (!result.success && result.error?.includes('404')) {
-    console.warn('⚠️ manage-bank-accounts edge function not found (404). This may not be deployed yet.');
+    // Edge function not deployed yet
     return {
       success: true,
       accounts: [],
@@ -714,21 +619,7 @@ export async function updateBankAccount(params: {
     requestBody.isPrimary = params.isPrimary;
   }
   
-  console.log('🔄 updateBankAccount - Request body:', {
-    action: requestBody.action,
-    accountId: requestBody.accountId,
-    hasBankName: !!requestBody.bankName,
-    hasAccountHolderName: !!requestBody.accountHolderName,
-    hasAccountNumber: !!requestBody.accountNumber,
-    hasIfscCode: !!requestBody.ifscCode,
-    hasAccountType: !!requestBody.accountType,
-    hasInitialBalance: requestBody.initialBalance !== undefined,
-    isPrimary: requestBody.isPrimary,
-  });
-  
-  // ✅ Use POST instead of PUT to avoid CORS issues on web
-  // The Edge Function now accepts POST requests with action: 'update' for updates
-  // This allows us to use supabase.functions.invoke() which handles CORS automatically
+  // Use POST with action: 'update' to avoid CORS issues on web
   const result = await callEdgeFunction(
     'manage-bank-accounts',
     'POST',
@@ -796,52 +687,19 @@ export async function deleteBankAccount(accountId: string): Promise<{ success: b
  */
 export async function updateBusinessPrimaryAddress(addressId: string | null): Promise<{ success: boolean; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return {
-        success: false,
-        error: 'Authentication required',
-      };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get user's business_id
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return {
-        success: false,
-        error: 'Business not found',
-      };
-    }
-
-    // Update businesses table
-    const { error: updateError } = await supabase
+    const { error } = await supabase
       .from('businesses')
       .update({ primary_address_id: addressId })
-      .eq('id', userData.business_id);
+      .eq('id', ctx.businessId);
 
-    if (updateError) {
-      console.error('Error updating primary_address_id:', updateError);
-      return {
-        success: false,
-        error: updateError.message,
-      };
-    }
-
-    // Clear cache so data refreshes
+    if (error) return { success: false, error: error.message };
     getClearCache()?.();
-    
     return { success: true };
   } catch (error: any) {
-    console.error('Error updating primary address:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to update primary address',
-    };
+    return { success: false, error: error.message || 'Failed to update primary address' };
   }
 }
 
@@ -850,52 +708,19 @@ export async function updateBusinessPrimaryAddress(addressId: string | null): Pr
  */
 export async function updateBusinessPrimaryBankAccount(accountId: string | null): Promise<{ success: boolean; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return {
-        success: false,
-        error: 'Authentication required',
-      };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get user's business_id
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return {
-        success: false,
-        error: 'Business not found',
-      };
-    }
-
-    // Update businesses table
-    const { error: updateError } = await supabase
+    const { error } = await supabase
       .from('businesses')
       .update({ primary_bank_account_id: accountId })
-      .eq('id', userData.business_id);
+      .eq('id', ctx.businessId);
 
-    if (updateError) {
-      console.error('Error updating primary_bank_account_id:', updateError);
-      return {
-        success: false,
-        error: updateError.message,
-      };
-    }
-
-    // Clear cache so data refreshes
+    if (error) return { success: false, error: error.message };
     getClearCache()?.();
-    
     return { success: true };
   } catch (error: any) {
-    console.error('Error updating primary bank account:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to update primary bank account',
-    };
+    return { success: false, error: error.message || 'Failed to update primary bank account' };
   }
 }
 
@@ -913,28 +738,13 @@ export async function createOrUpdateSubscription(
   }
 ): Promise<{ success: boolean; subscription?: any; error?: string }> {
   try {
-    // Get current user's business_id
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'User not authenticated' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get user's business_id
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
-
-    // Check if subscription already exists
     const { data: existingSubscription } = await supabase
       .from('subscriptions')
       .select('id')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .in('status', ['active', 'trialing'])
       .maybeSingle();
 
@@ -954,7 +764,7 @@ export async function createOrUpdateSubscription(
         .single();
 
       if (error) {
-        console.error('Error updating subscription:', error);
+        // subscription update failed
         return { success: false, error: error.message };
       }
 
@@ -965,7 +775,7 @@ export async function createOrUpdateSubscription(
       const { data, error } = await supabase
         .from('subscriptions')
         .insert({
-          business_id: userData.business_id,
+          business_id: ctx.businessId,
           is_on_trial: subscriptionData.isOnTrial,
           trial_start_date: subscriptionData.trialStartDate || null,
           trial_end_date: subscriptionData.trialEndDate || null,
@@ -975,7 +785,7 @@ export async function createOrUpdateSubscription(
         .single();
 
       if (error) {
-        console.error('Error creating subscription:', error);
+        // subscription create failed
         return { success: false, error: error.message };
       }
 
@@ -983,7 +793,7 @@ export async function createOrUpdateSubscription(
       return { success: true, subscription: data };
     }
   } catch (error: any) {
-    console.error('Error in createOrUpdateSubscription:', error);
+    // createOrUpdateSubscription failed
     return { success: false, error: error.message || 'Failed to sync subscription' };
   }
 }
@@ -1185,11 +995,11 @@ export async function deleteSignupProgress(): Promise<{ success: boolean; error?
       error: result.error,
     };
   } catch (error: any) {
-    console.error('Error deleting signup progress:', error);
+    // signup progress deletion failed
     // Return success: true for network errors during cleanup - this is non-blocking cleanup
     // The signup is already complete, so failing to delete progress shouldn't block the user
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      console.warn('⚠️ Network error during signup progress deletion (non-blocking):', error.message);
+      // Network error during signup progress deletion (non-blocking)
       return {
         success: true, // Treat as success since this is cleanup after successful signup
       };
@@ -1230,50 +1040,17 @@ export async function saveDeviceSnapshot(snapshot: {
   appVersion?: string;
   appBuildNumber?: string;
 }): Promise<{ success: boolean; snapshot?: any; error?: string }> {
-  console.log('📱 Calling saveDeviceSnapshot with:', { deviceId: snapshot.deviceId });
-  
   try {
     const result = await callEdgeFunction('manage-device-snapshots', 'POST', snapshot, true);
-    
-    console.log('📱 saveDeviceSnapshot raw result:', JSON.stringify(result, null, 2));
-    
-    // Edge Function returns { success: true, message: "...", snapshot: {...} }
-    // callEdgeFunction wraps it in result.data, so result.data = { success: true, message: "...", snapshot: {...} }
+
     if (result.success && result.data) {
-      // Check for snapshot in the response
-      if (result.data.snapshot) {
-        console.log('✅ Device snapshot saved successfully:', result.data.snapshot.id);
-        return {
-          success: true,
-          snapshot: result.data.snapshot,
-        };
-      }
-      
-      // If no snapshot but success is true, check if the data itself is the snapshot
-      if (result.data.id && result.data.device_id) {
-        console.log('✅ Device snapshot saved (data is snapshot):', result.data.id);
-        return {
-          success: true,
-          snapshot: result.data,
-        };
-      }
-      
-      // If we have success but no snapshot data, log for debugging
-      console.warn('⚠️ Success but no snapshot data in response:', result.data);
+      if (result.data.snapshot) return { success: true, snapshot: result.data.snapshot };
+      if (result.data.id && result.data.device_id) return { success: true, snapshot: result.data };
     }
-    
-    const errorMsg = result.error || result.data?.error || result.data?.message || 'Failed to save device snapshot';
-    console.error('❌ Failed to save device snapshot:', errorMsg);
-    return {
-      success: false,
-      error: errorMsg,
-    };
+
+    return { success: false, error: result.error || result.data?.error || 'Failed to save device snapshot' };
   } catch (error: any) {
-    console.error('❌ Exception in saveDeviceSnapshot:', error);
-    return {
-      success: false,
-      error: error.message || 'Exception saving device snapshot',
-    };
+    return { success: false, error: error.message || 'Exception saving device snapshot' };
   }
 }
 
@@ -1318,58 +1095,16 @@ export async function deleteDeviceSnapshot(deviceId: string): Promise<{ success:
 export async function getStaff(): Promise<{ success: boolean; staff?: any[]; error?: string }> {
   try {
     const result = await callEdgeFunction('manage-staff', 'GET', undefined, true);
-    
-    console.log('🔍 getStaff API response:', {
-      success: result.success,
-      hasData: !!result.data,
-      dataType: typeof result.data,
-      isArray: Array.isArray(result.data),
-      dataKeys: result.data ? Object.keys(result.data) : [],
-      error: result.error
-    });
-    
-    // Handle different response structures
+
     if (result.success && result.data) {
-      // Case 1: Staff array is directly in result.data
-      if (Array.isArray(result.data)) {
-        console.log('✅ Staff array found directly in result.data, count:', result.data.length);
-        return {
-          success: true,
-          staff: result.data,
-        };
-      }
-      
-      // Case 2: Staff array is in result.data.staff
-      if (Array.isArray(result.data.staff)) {
-        console.log('✅ Staff array found in result.data.staff, count:', result.data.staff.length);
-        return {
-          success: true,
-          staff: result.data.staff,
-        };
-      }
-      
-      // Case 3: Staff array is in result.data.data
-      if (Array.isArray(result.data.data)) {
-        console.log('✅ Staff array found in result.data.data, count:', result.data.data.length);
-        return {
-          success: true,
-          staff: result.data.data,
-        };
-      }
-      
-      console.warn('⚠️ Unexpected response structure:', result.data);
+      if (Array.isArray(result.data)) return { success: true, staff: result.data };
+      if (Array.isArray(result.data.staff)) return { success: true, staff: result.data.staff };
+      if (Array.isArray(result.data.data)) return { success: true, staff: result.data.data };
     }
-    
-    return {
-      success: false,
-      error: result.error || 'Failed to fetch staff - unexpected response structure',
-    };
+
+    return { success: false, error: result.error || 'Failed to fetch staff' };
   } catch (error: any) {
-    console.error('❌ Error in getStaff:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to fetch staff - network error',
-    };
+    return { success: false, error: error.message || 'Failed to fetch staff' };
   }
 }
 
@@ -1438,14 +1173,14 @@ export async function createStaff(params: {
 
     // If Edge Function doesn't exist or fails, return error but don't throw
     // This allows the signup flow to continue
-    console.warn('⚠️ Staff creation failed (Edge Function may not be deployed):', result.error);
+    // Staff creation failed
     return {
       success: false,
       error: result.error || 'Failed to create staff - Edge Function may not be available',
     };
   } catch (error: any) {
     // Catch any unexpected errors and return gracefully
-    console.warn('⚠️ Staff creation error (non-blocking):', error);
+    // Staff creation error (non-blocking)
     return {
       success: false,
       error: error.message || 'Failed to create staff',
@@ -1532,36 +1267,18 @@ export async function deleteStaff(staffId: string): Promise<{ success: boolean; 
  */
 export async function getSuppliers(): Promise<{ success: boolean; suppliers?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
-
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const { data, error } = await supabase
       .from('suppliers')
       .select('*')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching suppliers:', error);
-      return { success: false, error: error.message };
-    }
-
+    if (error) return { success: false, error: error.message };
     return { success: true, suppliers: data || [] };
   } catch (error: any) {
-    console.error('Error in getSuppliers:', error);
     return { success: false, error: error.message || 'Failed to fetch suppliers' };
   }
 }
@@ -1584,26 +1301,13 @@ export async function createSupplier(params: {
   additionalNotes?: string;
 }): Promise<{ success: boolean; supplier?: any; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
-
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const { data, error } = await supabase
       .from('suppliers')
       .insert({
-        business_id: userData.business_id,
+        business_id: ctx.businessId,
         business_name: params.businessName,
         contact_person: params.contactPerson,
         mobile_number: params.mobileNumber,
@@ -1618,19 +1322,14 @@ export async function createSupplier(params: {
         additional_notes: params.additionalNotes || null,
         status: 'active',
         supplier_type: 'business',
-        created_by: session.user.id,
+        created_by: ctx.userId,
       })
       .select()
       .single();
 
-    if (error) {
-      console.error('Error creating supplier:', error);
-      return { success: false, error: error.message };
-    }
-
+    if (error) return { success: false, error: error.message };
     return { success: true, supplier: data };
   } catch (error: any) {
-    console.error('Error in createSupplier:', error);
     return { success: false, error: error.message || 'Failed to create supplier' };
   }
 }
@@ -1657,13 +1356,11 @@ export async function updateSupplier(
   }
 ): Promise<{ success: boolean; supplier?: any; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const updateData: any = {
-      updated_by: session.user.id,
+      updated_by: ctx.userId,
     };
 
     if (params.businessName !== undefined) updateData.business_name = params.businessName;
@@ -1688,13 +1385,13 @@ export async function updateSupplier(
       .single();
 
     if (error) {
-      console.error('Error updating supplier:', error);
+      // supplier update failed
       return { success: false, error: error.message };
     }
 
     return { success: true, supplier: data };
   } catch (error: any) {
-    console.error('Error in updateSupplier:', error);
+    // updateSupplier error
     return { success: false, error: error.message || 'Failed to update supplier' };
   }
 }
@@ -1710,13 +1407,13 @@ export async function deleteSupplier(supplierId: string): Promise<{ success: boo
       .eq('id', supplierId);
 
     if (error) {
-      console.error('Error deleting supplier:', error);
+      // supplier delete failed
       return { success: false, error: error.message };
     }
 
     return { success: true };
   } catch (error: any) {
-    console.error('Error in deleteSupplier:', error);
+    // deleteSupplier error
     return { success: false, error: error.message || 'Failed to delete supplier' };
   }
 }
@@ -1730,36 +1427,18 @@ export async function deleteSupplier(supplierId: string): Promise<{ success: boo
  */
 export async function getProducts(): Promise<{ success: boolean; products?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
-
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const { data, error } = await supabase
       .from('products')
       .select('*')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching products:', error);
-      return { success: false, error: error.message };
-    }
-
+    if (error) return { success: false, error: error.message };
     return { success: true, products: data || [] };
   } catch (error: any) {
-    console.error('Error in getProducts:', error);
     return { success: false, error: error.message || 'Failed to fetch products' };
   }
 }
@@ -1770,35 +1449,18 @@ export async function getProducts(): Promise<{ success: boolean; products?: any[
  */
 export async function getProductInventoryLogs(productId: string): Promise<{ success: boolean; logs?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
-
-    // Fetch inventory logs from inventory_logs table
     const { data: logs, error: logsError } = await supabase
       .from('inventory_logs')
       .select('*')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .eq('product_id', productId)
       .order('transaction_date', { ascending: false })
       .limit(100);
 
-    if (logsError) {
-      console.error('Error fetching inventory logs:', logsError);
-      return { success: false, error: logsError.message };
-    }
+    if (logsError) return { success: false, error: logsError.message };
 
     // Transform logs to match the expected format
     const transformedLogs = (logs || []).map((log: any) => {
@@ -1827,43 +1489,22 @@ export async function getProductInventoryLogs(productId: string): Promise<{ succ
 
     return { success: true, logs: transformedLogs };
   } catch (error: any) {
-    console.error('Error in getProductInventoryLogs:', error);
     return { success: false, error: error.message || 'Failed to fetch inventory logs' };
   }
 }
 
-/**
- * Get location stock for a product (all locations where product has stock)
- */
 export async function getProductLocationStock(productId: string): Promise<{ success: boolean; locationStock?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
-
-    // Fetch location stock from location_stock table
     const { data: locationStock, error: locationStockError } = await supabase
       .from('location_stock')
       .select('*')
       .eq('product_id', productId)
       .order('quantity', { ascending: false });
 
-    if (locationStockError) {
-      console.error('Error fetching location stock:', locationStockError);
-      return { success: false, error: locationStockError.message };
-    }
+    if (locationStockError) return { success: false, error: locationStockError.message };
 
     // Fetch location details for each location_id
     const locationIds = [...new Set((locationStock || []).map((stock: any) => stock.location_id))];
@@ -1893,40 +1534,22 @@ export async function getProductLocationStock(productId: string): Promise<{ succ
 
     return { success: true, locationStock: transformedStock };
   } catch (error: any) {
-    console.error('Error in getProductLocationStock:', error);
     return { success: false, error: error.message || 'Failed to fetch location stock' };
   }
 }
 
-/**
- * Get inventory logs for a product filtered by location (optional)
- */
 export async function getProductInventoryLogsByLocation(
   productId: string, 
   locationId?: string
 ): Promise<{ success: boolean; logs?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
-
-    // Build query with optional location filter
     let query = supabase
       .from('inventory_logs')
       .select('*')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .eq('product_id', productId);
 
     if (locationId) {
@@ -1938,7 +1561,7 @@ export async function getProductInventoryLogsByLocation(
       .limit(100);
 
     if (logsError) {
-      console.error('Error fetching inventory logs:', logsError);
+      // inventory logs fetch failed
       return { success: false, error: logsError.message };
     }
 
@@ -1966,7 +1589,7 @@ export async function getProductInventoryLogsByLocation(
 
     return { success: true, logs: transformedLogs };
   } catch (error: any) {
-    console.error('Error in getProductInventoryLogsByLocation:', error);
+    // getProductInventoryLogsByLocation error
     return { success: false, error: error.message || 'Failed to fetch inventory logs' };
   }
 }
@@ -1976,45 +1599,24 @@ export async function getProductInventoryLogsByLocation(
  */
 export async function getLowStockProducts(): Promise<{ success: boolean; products?: any[]; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
-
-    // First get all products, then filter in JavaScript for low stock
-    // (Supabase doesn't support comparing two columns directly in a filter)
     const { data: allProducts, error } = await supabase
       .from('products')
       .select('*')
-      .eq('business_id', userData.business_id)
+      .eq('business_id', ctx.businessId)
       .gt('min_stock_level', 0)
       .order('urgency_level', { ascending: false })
       .order('current_stock', { ascending: true });
 
-    if (error) {
-      console.error('Error fetching products for low stock:', error);
-      return { success: false, error: error.message };
-    }
+    if (error) return { success: false, error: error.message };
 
-    // Filter products where current_stock <= min_stock_level
     const lowStockProducts = (allProducts || []).filter(
-      (product) => product.current_stock <= product.min_stock_level
+      (product: any) => product.current_stock <= product.min_stock_level
     );
-
     return { success: true, products: lowStockProducts };
   } catch (error: any) {
-    console.error('Error in getLowStockProducts:', error);
     return { success: false, error: error.message || 'Failed to fetch low stock products' };
   }
 }
@@ -2028,38 +1630,18 @@ export async function assignBarcode(params?: {
   locationId?: string | null;
 }): Promise<{ success: boolean; barcode?: string; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
-
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const { data: barcode, error } = await supabase.rpc('reserve_assigned_barcode', {
-      p_business_id: userData.business_id,
+      p_business_id: ctx.businessId,
       p_location_id: params?.locationId || null,
     });
 
-    if (error) {
-      console.error('Error assigning barcode:', error);
-      return { success: false, error: error.message };
-    }
-
-    if (!barcode || typeof barcode !== 'string') {
-      return { success: false, error: 'Failed to generate barcode' };
-    }
-
+    if (error) return { success: false, error: error.message };
+    if (!barcode || typeof barcode !== 'string') return { success: false, error: 'Failed to generate barcode' };
     return { success: true, barcode };
   } catch (error: any) {
-    console.error('Error in assignBarcode:', error);
     return { success: false, error: error.message || 'Failed to assign barcode' };
   }
 }
@@ -2108,26 +1690,13 @@ export async function createProduct(params: {
   description?: string;
 }): Promise<{ success: boolean; product?: any; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
-
-    // Get business_id from user profile
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('business_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.business_id) {
-      return { success: false, error: 'Business not found' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const { data, error } = await supabase
       .from('products')
       .insert({
-        business_id: userData.business_id,
+        business_id: ctx.businessId,
         name: params.name,
         category: params.category || null,
         custom_category: params.customCategory || null,
@@ -2167,31 +1736,24 @@ export async function createProduct(params: {
         storage_location_name: params.storageLocationName || null,
         brand: params.brand || null,
         description: params.description || null,
-        created_by: session.user.id,
+        created_by: ctx.userId,
       })
       .select()
       .single();
 
-    if (error) {
-      console.error('Error creating product:', error);
-      return { success: false, error: error.message };
-    }
+    if (error) return { success: false, error: error.message };
 
-    // If location is specified, create location_stock entry
-    // If opening stock > 0, also create inventory log entry
     const openingStock = params.openingStock || 0;
     const locationId = params.storageLocationId;
-    
+
     if (locationId) {
       try {
-        // Get user's full name for staff_name
         const { data: userProfile } = await supabase
           .from('users')
           .select('full_name')
-          .eq('id', session.user.id)
+          .eq('id', ctx.userId)
           .single();
 
-        // Get location name if not provided
         let locationName = params.storageLocationName;
         if (!locationName) {
           const { data: locationData } = await supabase
@@ -2202,59 +1764,43 @@ export async function createProduct(params: {
           locationName = locationData?.name || null;
         }
 
-        // Create or update location_stock entry (always create, even if stock is 0)
-        const { error: locationStockError } = await supabase
+        await supabase
           .from('location_stock')
           .upsert({
             product_id: data.id,
             location_id: locationId,
             quantity: openingStock,
             last_updated: new Date().toISOString(),
-            updated_by: session.user.id,
-          }, {
-            onConflict: 'product_id,location_id'
-          });
+            updated_by: ctx.userId,
+          }, { onConflict: 'product_id,location_id' });
 
-        if (locationStockError) {
-          console.error('Error creating location_stock:', locationStockError);
-          // Don't fail the product creation if location_stock creation fails, but log the error
-        }
-
-        // Create inventory log entry for opening stock (only if opening stock > 0)
         if (openingStock > 0) {
-          const { error: logError } = await supabase
+          await supabase
             .from('inventory_logs')
             .insert({
-              business_id: userData.business_id,
+              business_id: ctx.businessId,
               product_id: data.id,
               transaction_type: 'opening_stock',
               quantity_change: openingStock,
               balance_after: openingStock,
               location_id: locationId,
               location_name: locationName,
-              staff_id: session.user.id,
+              staff_id: ctx.userId,
               staff_name: userProfile?.full_name || null,
               unit_price: params.purchasePrice || params.perUnitPrice || 0,
               total_value: (params.purchasePrice || params.perUnitPrice || 0) * openingStock,
               reference_type: 'manual',
               notes: 'Opening stock recorded during product creation',
-              created_by: session.user.id,
+              created_by: ctx.userId,
             });
-
-          if (logError) {
-            console.error('Error creating inventory log:', logError);
-            // Don't fail the product creation if log creation fails, but log the error
-          }
         }
-      } catch (stockError: any) {
-        console.error('Error recording opening stock:', stockError);
-        // Don't fail the product creation if stock recording fails, but log the error
+      } catch {
+        // Non-critical: location stock / inventory log creation failed
       }
     }
 
     return { success: true, product: data };
   } catch (error: any) {
-    console.error('Error in createProduct:', error);
     return { success: false, error: error.message || 'Failed to create product' };
   }
 }
@@ -2307,16 +1853,13 @@ export async function updateProduct(
   }
 ): Promise<{ success: boolean; product?: any; error?: string }> {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return { success: false, error: 'Authentication required' };
-    }
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
 
     const updateData: any = {
-      updated_by: session.user.id,
+      updated_by: ctx.userId,
     };
 
-    // Add all provided fields to update
     if (params.name !== undefined) updateData.name = params.name;
     if (params.category !== undefined) updateData.category = params.category || null;
     if (params.customCategory !== undefined) updateData.custom_category = params.customCategory || null;
@@ -2364,36 +1907,1007 @@ export async function updateProduct(
       .select()
       .single();
 
-    if (error) {
-      console.error('Error updating product:', error);
-      return { success: false, error: error.message };
-    }
-
+    if (error) return { success: false, error: error.message };
     return { success: true, product: data };
   } catch (error: any) {
-    console.error('Error in updateProduct:', error);
     return { success: false, error: error.message || 'Failed to update product' };
   }
 }
 
-/**
- * Delete a product
- */
 export async function deleteProduct(productId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .delete()
-      .eq('id', productId);
-
-    if (error) {
-      console.error('Error deleting product:', error);
-      return { success: false, error: error.message };
-    }
-
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) return { success: false, error: error.message };
     return { success: true };
   } catch (error: any) {
-    console.error('Error in deleteProduct:', error);
     return { success: false, error: error.message || 'Failed to delete product' };
+  }
+}
+
+// ============================================
+// Customer APIs (Direct Supabase)
+// ============================================
+
+export async function getCustomers(): Promise<{ success: boolean; customers?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('created_at', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, customers: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch customers' };
+  }
+}
+
+export async function createCustomer(params: {
+  name: string;
+  businessName?: string;
+  customerType: 'business' | 'individual';
+  contactPerson?: string;
+  mobile: string;
+  email?: string;
+  address?: string;
+  gstin?: string;
+  avatar?: string;
+  paymentTerms?: string;
+  creditLimit?: number;
+  categories?: string[];
+}): Promise<{ success: boolean; customer?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('customers')
+      .insert({
+        business_id: ctx.businessId,
+        name: params.name,
+        business_name: params.businessName || null,
+        customer_type: params.customerType,
+        contact_person: params.contactPerson || params.name,
+        mobile: params.mobile,
+        email: params.email || null,
+        address: params.address || null,
+        gstin: params.gstin || null,
+        avatar: params.avatar || '👤',
+        payment_terms: params.paymentTerms || null,
+        credit_limit: params.creditLimit || 0,
+        categories: params.categories || [],
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, customer: data };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create customer' };
+  }
+}
+
+export async function updateCustomer(
+  customerId: string,
+  params: Partial<{
+    name: string;
+    businessName: string;
+    customerType: 'business' | 'individual';
+    contactPerson: string;
+    mobile: string;
+    email: string;
+    address: string;
+    gstin: string;
+    avatar: string;
+    status: 'active' | 'inactive' | 'suspended';
+    paymentTerms: string;
+    creditLimit: number;
+    categories: string[];
+  }>
+): Promise<{ success: boolean; customer?: any; error?: string }> {
+  try {
+    const updateData: any = {};
+    if (params.name !== undefined) updateData.name = params.name;
+    if (params.businessName !== undefined) updateData.business_name = params.businessName || null;
+    if (params.customerType !== undefined) updateData.customer_type = params.customerType;
+    if (params.contactPerson !== undefined) updateData.contact_person = params.contactPerson;
+    if (params.mobile !== undefined) updateData.mobile = params.mobile;
+    if (params.email !== undefined) updateData.email = params.email || null;
+    if (params.address !== undefined) updateData.address = params.address || null;
+    if (params.gstin !== undefined) updateData.gstin = params.gstin || null;
+    if (params.avatar !== undefined) updateData.avatar = params.avatar;
+    if (params.status !== undefined) updateData.status = params.status;
+    if (params.paymentTerms !== undefined) updateData.payment_terms = params.paymentTerms;
+    if (params.creditLimit !== undefined) updateData.credit_limit = params.creditLimit;
+    if (params.categories !== undefined) updateData.categories = params.categories;
+
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updateData)
+      .eq('id', customerId)
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, customer: data };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update customer' };
+  }
+}
+
+export async function deleteCustomer(customerId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('customers').delete().eq('id', customerId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to delete customer' };
+  }
+}
+
+// ============================================
+// Sales Invoice APIs (Direct Supabase)
+// ============================================
+
+export async function getInvoices(): Promise<{ success: boolean; invoices?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('invoice_date', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, invoices: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch invoices' };
+  }
+}
+
+export async function getInvoiceWithItems(invoiceId: string): Promise<{ success: boolean; invoice?: any; items?: any[]; error?: string }> {
+  try {
+    const [invoiceRes, itemsRes] = await Promise.all([
+      supabase.from('invoices').select('*').eq('id', invoiceId).single(),
+      supabase.from('invoice_items').select('*').eq('invoice_id', invoiceId),
+    ]);
+
+    if (invoiceRes.error) return { success: false, error: invoiceRes.error.message };
+    return { success: true, invoice: invoiceRes.data, items: itemsRes.data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch invoice' };
+  }
+}
+
+export async function createInvoice(params: {
+  invoiceNumber: string;
+  customerId?: string;
+  customerName: string;
+  customerType?: string;
+  items: Array<{
+    productId?: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    taxRate?: number;
+    taxAmount?: number;
+    cessType?: string;
+    cessRate?: number;
+    cessAmount?: number;
+    hsnCode?: string;
+    batchNumber?: string;
+    primaryUnit?: string;
+    discountType?: string;
+    discountValue?: number;
+  }>;
+  subtotal: number;
+  taxAmount: number;
+  cessAmount?: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceAmount: number;
+  paymentMethod: string;
+  paymentStatus: 'paid' | 'partial' | 'unpaid';
+  invoiceDate?: string;
+  dueDate?: string;
+  notes?: string;
+  staffId?: string;
+  staffName?: string;
+  locationId?: string;
+}): Promise<{ success: boolean; invoice?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      .insert({
+        business_id: ctx.businessId,
+        invoice_number: params.invoiceNumber,
+        customer_id: params.customerId || null,
+        customer_name: params.customerName,
+        customer_type: params.customerType || 'individual',
+        subtotal: params.subtotal,
+        tax_amount: params.taxAmount,
+        cess_amount: params.cessAmount || 0,
+        total_amount: params.totalAmount,
+        paid_amount: params.paidAmount,
+        balance_amount: params.balanceAmount,
+        payment_method: params.paymentMethod,
+        payment_status: params.paymentStatus,
+        invoice_date: params.invoiceDate || new Date().toISOString(),
+        due_date: params.dueDate || null,
+        notes: params.notes || null,
+        staff_id: params.staffId || null,
+        staff_name: params.staffName || null,
+        location_id: params.locationId || null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (invoiceError) return { success: false, error: invoiceError.message };
+
+    if (params.items.length > 0) {
+      const itemRows = params.items.map(item => ({
+        invoice_id: invoice.id,
+        product_id: item.productId || null,
+        product_name: item.productName,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        tax_rate: item.taxRate || 0,
+        tax_amount: item.taxAmount || 0,
+        cess_type: item.cessType || 'none',
+        cess_rate: item.cessRate || 0,
+        cess_amount: item.cessAmount || 0,
+        hsn_code: item.hsnCode || null,
+        batch_number: item.batchNumber || null,
+        primary_unit: item.primaryUnit || 'Piece',
+        discount_type: item.discountType || null,
+        discount_value: item.discountValue || 0,
+      }));
+
+      const { error: itemsError } = await supabase.from('invoice_items').insert(itemRows);
+      // invoice items creation may have failed silently
+    }
+
+    // Update product stock for each item (deduct sold quantity)
+    for (const item of params.items) {
+      if (item.productId) {
+        const { data: product } = await supabase
+          .from('products')
+          .select('current_stock')
+          .eq('id', item.productId)
+          .single();
+
+        if (product) {
+          const newStock = Math.max(0, (product.current_stock || 0) - item.quantity);
+          await supabase
+            .from('products')
+            .update({ current_stock: newStock })
+            .eq('id', item.productId);
+
+          await supabase.from('inventory_logs').insert({
+            business_id: ctx.businessId,
+            product_id: item.productId,
+            transaction_type: 'sale',
+            quantity_change: -item.quantity,
+            balance_after: newStock,
+            reference_type: 'invoice',
+            reference_id: invoice.id,
+            reference_number: params.invoiceNumber,
+            location_id: params.locationId || null,
+            staff_id: params.staffId || null,
+            staff_name: params.staffName || null,
+            customer_name: params.customerName,
+            unit_price: item.unitPrice,
+            total_value: item.totalPrice,
+            created_by: ctx.userId,
+          });
+        }
+      }
+    }
+
+    return { success: true, invoice };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create invoice' };
+  }
+}
+
+export async function updateInvoicePayment(
+  invoiceId: string,
+  params: { paidAmount: number; paymentMethod?: string; }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: invoice } = await supabase
+      .from('invoices')
+      .select('total_amount')
+      .eq('id', invoiceId)
+      .single();
+
+    if (!invoice) return { success: false, error: 'Invoice not found' };
+
+    const balance = invoice.total_amount - params.paidAmount;
+    const status = balance <= 0 ? 'paid' : params.paidAmount > 0 ? 'partial' : 'unpaid';
+
+    const updateData: any = {
+      paid_amount: params.paidAmount,
+      balance_amount: Math.max(0, balance),
+      payment_status: status,
+    };
+    if (params.paymentMethod) updateData.payment_method = params.paymentMethod;
+
+    const { error } = await supabase.from('invoices').update(updateData).eq('id', invoiceId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update invoice payment' };
+  }
+}
+
+// ============================================
+// Returns APIs (Direct Supabase)
+// ============================================
+
+export async function getReturns(): Promise<{ success: boolean; returns?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('returns')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('return_date', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, returns: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch returns' };
+  }
+}
+
+export async function createReturn(params: {
+  returnNumber: string;
+  originalInvoiceId?: string;
+  originalInvoiceNumber?: string;
+  customerId?: string;
+  customerName: string;
+  customerType?: string;
+  items: Array<{
+    productId?: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    taxRate?: number;
+    taxAmount?: number;
+    reason?: string;
+  }>;
+  totalAmount: number;
+  refundAmount: number;
+  refundStatus?: 'refunded' | 'partially_refunded' | 'pending';
+  refundMethod?: string;
+  reason?: string;
+  staffId?: string;
+  staffName?: string;
+  locationId?: string;
+}): Promise<{ success: boolean; returnData?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data: returnRow, error } = await supabase
+      .from('returns')
+      .insert({
+        business_id: ctx.businessId,
+        return_number: params.returnNumber,
+        original_invoice_id: params.originalInvoiceId || null,
+        original_invoice_number: params.originalInvoiceNumber || null,
+        customer_id: params.customerId || null,
+        customer_name: params.customerName,
+        customer_type: params.customerType || 'individual',
+        total_amount: params.totalAmount,
+        refund_amount: params.refundAmount,
+        refund_status: params.refundStatus || 'pending',
+        refund_method: params.refundMethod || null,
+        reason: params.reason || null,
+        staff_id: params.staffId || null,
+        staff_name: params.staffName || null,
+        location_id: params.locationId || null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+
+    if (params.items.length > 0) {
+      const itemRows = params.items.map(item => ({
+        return_id: returnRow.id,
+        product_id: item.productId || null,
+        product_name: item.productName,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        tax_rate: item.taxRate || 0,
+        tax_amount: item.taxAmount || 0,
+        reason: item.reason || null,
+      }));
+      await supabase.from('return_items').insert(itemRows);
+    }
+
+    // Restore product stock for returned items
+    for (const item of params.items) {
+      if (item.productId) {
+        const { data: product } = await supabase
+          .from('products')
+          .select('current_stock')
+          .eq('id', item.productId)
+          .single();
+        if (product) {
+          const newStock = (product.current_stock || 0) + item.quantity;
+          await supabase.from('products').update({ current_stock: newStock }).eq('id', item.productId);
+          await supabase.from('inventory_logs').insert({
+            business_id: ctx.businessId,
+            product_id: item.productId,
+            transaction_type: 'return',
+            quantity_change: item.quantity,
+            balance_after: newStock,
+            reference_type: 'return',
+            reference_id: returnRow.id,
+            reference_number: params.returnNumber,
+            location_id: params.locationId || null,
+            staff_name: params.staffName || null,
+            customer_name: params.customerName,
+            reason: item.reason || params.reason || null,
+            unit_price: item.unitPrice,
+            total_value: item.totalPrice,
+            created_by: ctx.userId,
+          });
+        }
+      }
+    }
+
+    return { success: true, returnData: returnRow };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create return' };
+  }
+}
+
+// ============================================
+// Purchase Order APIs (Direct Supabase)
+// ============================================
+
+export async function getPurchaseOrders(): Promise<{ success: boolean; orders?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('purchase_orders')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('order_date', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, orders: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch purchase orders' };
+  }
+}
+
+export async function createPurchaseOrder(params: {
+  poNumber: string;
+  supplierId?: string;
+  supplierName: string;
+  items: Array<{
+    productId?: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    taxRate?: number;
+    taxAmount?: number;
+    hsnCode?: string;
+    primaryUnit?: string;
+  }>;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  expectedDelivery?: string;
+  notes?: string;
+  staffId?: string;
+  staffName?: string;
+  locationId?: string;
+}): Promise<{ success: boolean; order?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data: order, error } = await supabase
+      .from('purchase_orders')
+      .insert({
+        business_id: ctx.businessId,
+        po_number: params.poNumber,
+        supplier_id: params.supplierId || null,
+        supplier_name: params.supplierName,
+        subtotal: params.subtotal,
+        tax_amount: params.taxAmount,
+        total_amount: params.totalAmount,
+        expected_delivery: params.expectedDelivery || null,
+        notes: params.notes || null,
+        staff_id: params.staffId || null,
+        staff_name: params.staffName || null,
+        location_id: params.locationId || null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+
+    if (params.items.length > 0) {
+      const itemRows = params.items.map(item => ({
+        purchase_order_id: order.id,
+        product_id: item.productId || null,
+        product_name: item.productName,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        tax_rate: item.taxRate || 0,
+        tax_amount: item.taxAmount || 0,
+        hsn_code: item.hsnCode || null,
+        primary_unit: item.primaryUnit || 'Piece',
+      }));
+      await supabase.from('purchase_order_items').insert(itemRows);
+    }
+
+    return { success: true, order };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create purchase order' };
+  }
+}
+
+export async function updatePurchaseOrderStatus(
+  orderId: string,
+  status: 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const updateData: any = { status };
+    if (status === 'received') updateData.actual_delivery = new Date().toISOString();
+
+    const { error } = await supabase.from('purchase_orders').update(updateData).eq('id', orderId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update purchase order' };
+  }
+}
+
+// ============================================
+// Purchase Invoice APIs (Direct Supabase)
+// ============================================
+
+export async function getPurchaseInvoices(): Promise<{ success: boolean; invoices?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('purchase_invoices')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('invoice_date', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, invoices: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch purchase invoices' };
+  }
+}
+
+export async function createPurchaseInvoice(params: {
+  invoiceNumber: string;
+  purchaseOrderId?: string;
+  poNumber?: string;
+  supplierId?: string;
+  supplierName: string;
+  items: Array<{
+    productId?: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    taxRate?: number;
+    taxAmount?: number;
+    cessType?: string;
+    cessRate?: number;
+    cessAmount?: number;
+    hsnCode?: string;
+    primaryUnit?: string;
+  }>;
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  paidAmount?: number;
+  paymentMethod?: string;
+  paymentStatus?: 'paid' | 'pending' | 'overdue';
+  deliveryStatus?: 'pending' | 'received' | 'partial' | 'cancelled';
+  expectedDelivery?: string;
+  notes?: string;
+  staffId?: string;
+  staffName?: string;
+  locationId?: string;
+}): Promise<{ success: boolean; invoice?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const paidAmount = params.paidAmount || 0;
+    const balance = params.totalAmount - paidAmount;
+
+    const { data: invoice, error } = await supabase
+      .from('purchase_invoices')
+      .insert({
+        business_id: ctx.businessId,
+        invoice_number: params.invoiceNumber,
+        purchase_order_id: params.purchaseOrderId || null,
+        po_number: params.poNumber || null,
+        supplier_id: params.supplierId || null,
+        supplier_name: params.supplierName,
+        subtotal: params.subtotal,
+        tax_amount: params.taxAmount,
+        total_amount: params.totalAmount,
+        paid_amount: paidAmount,
+        balance_amount: Math.max(0, balance),
+        payment_method: params.paymentMethod || 'cash',
+        payment_status: params.paymentStatus || (paidAmount >= params.totalAmount ? 'paid' : 'pending'),
+        delivery_status: params.deliveryStatus || 'pending',
+        expected_delivery: params.expectedDelivery || null,
+        notes: params.notes || null,
+        staff_id: params.staffId || null,
+        staff_name: params.staffName || null,
+        location_id: params.locationId || null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+
+    if (params.items.length > 0) {
+      const itemRows = params.items.map(item => ({
+        purchase_invoice_id: invoice.id,
+        product_id: item.productId || null,
+        product_name: item.productName,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        tax_rate: item.taxRate || 0,
+        tax_amount: item.taxAmount || 0,
+        cess_type: item.cessType || 'none',
+        cess_rate: item.cessRate || 0,
+        cess_amount: item.cessAmount || 0,
+        hsn_code: item.hsnCode || null,
+        primary_unit: item.primaryUnit || 'Piece',
+      }));
+      await supabase.from('purchase_invoice_items').insert(itemRows);
+    }
+
+    // Add stock for received purchase items
+    if (params.deliveryStatus === 'received') {
+      for (const item of params.items) {
+        if (item.productId) {
+          const { data: product } = await supabase
+            .from('products')
+            .select('current_stock')
+            .eq('id', item.productId)
+            .single();
+          if (product) {
+            const newStock = (product.current_stock || 0) + item.quantity;
+            await supabase.from('products').update({ current_stock: newStock }).eq('id', item.productId);
+            await supabase.from('inventory_logs').insert({
+              business_id: ctx.businessId,
+              product_id: item.productId,
+              transaction_type: 'purchase',
+              quantity_change: item.quantity,
+              balance_after: newStock,
+              reference_type: 'purchase_invoice',
+              reference_id: invoice.id,
+              reference_number: params.invoiceNumber,
+              location_id: params.locationId || null,
+              staff_name: params.staffName || null,
+              supplier_name: params.supplierName,
+              unit_price: item.unitPrice,
+              total_value: item.totalPrice,
+              created_by: ctx.userId,
+            });
+          }
+        }
+      }
+    }
+
+    return { success: true, invoice };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create purchase invoice' };
+  }
+}
+
+// ============================================
+// Notifications APIs (Direct Supabase)
+// ============================================
+
+export async function getNotifications(): Promise<{ success: boolean; notifications?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, notifications: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch notifications' };
+  }
+}
+
+export async function createNotification(params: {
+  type: 'urgent' | 'warning' | 'info' | 'success';
+  category: 'order' | 'stock' | 'payment' | 'staff' | 'system' | 'customer';
+  title: string;
+  message: string;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  actionRequired?: boolean;
+  relatedEntityType?: string;
+  relatedEntityId?: string;
+  relatedEntityName?: string;
+  assignedToUserId?: string;
+  assignedToName?: string;
+}): Promise<{ success: boolean; notification?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('full_name')
+      .eq('id', ctx.userId)
+      .single();
+
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert({
+        business_id: ctx.businessId,
+        type: params.type,
+        category: params.category,
+        title: params.title,
+        message: params.message,
+        priority: params.priority || 'medium',
+        action_required: params.actionRequired || false,
+        related_entity_type: params.relatedEntityType || null,
+        related_entity_id: params.relatedEntityId || null,
+        related_entity_name: params.relatedEntityName || null,
+        created_by_user_id: ctx.userId,
+        created_by_name: userProfile?.full_name || null,
+        assigned_to_user_id: params.assignedToUserId || null,
+        assigned_to_name: params.assignedToName || null,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, notification: data };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create notification' };
+  }
+}
+
+export async function updateNotificationStatus(
+  notificationId: string,
+  status: 'read' | 'acknowledged' | 'resolved'
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error } = await supabase.from('notifications').update({ status }).eq('id', notificationId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update notification' };
+  }
+}
+
+// ============================================
+// Marketing Campaign APIs (Direct Supabase)
+// ============================================
+
+export async function getCampaigns(): Promise<{ success: boolean; campaigns?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('marketing_campaigns')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('created_at', { ascending: false });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, campaigns: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch campaigns' };
+  }
+}
+
+export async function createCampaign(params: {
+  name: string;
+  platform?: string;
+  startDate?: string;
+  endDate?: string;
+  budget?: number;
+  status?: 'pending' | 'active' | 'completed' | 'cancelled';
+  targetAudience?: string[];
+  objective?: string;
+}): Promise<{ success: boolean; campaign?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('marketing_campaigns')
+      .insert({
+        business_id: ctx.businessId,
+        name: params.name,
+        platform: params.platform || null,
+        start_date: params.startDate || null,
+        end_date: params.endDate || null,
+        budget: params.budget || 0,
+        status: params.status || 'pending',
+        target_audience: params.targetAudience || [],
+        objective: params.objective || null,
+        created_by: ctx.userId,
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, campaign: data };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create campaign' };
+  }
+}
+
+// ============================================
+// Receivables (Computed from Invoices)
+// ============================================
+
+export async function getReceivables(): Promise<{ success: boolean; receivables?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('customer_id, customer_name, customer_type, balance_amount, payment_status, invoice_date, invoice_number')
+      .eq('business_id', ctx.businessId)
+      .gt('balance_amount', 0)
+      .order('invoice_date', { ascending: true });
+
+    if (error) return { success: false, error: error.message };
+
+    // Group by customer
+    const customerMap = new Map<string, any>();
+    for (const inv of (data || [])) {
+      const key = inv.customer_id || inv.customer_name;
+      if (!customerMap.has(key)) {
+        customerMap.set(key, {
+          id: inv.customer_id || key,
+          customerId: inv.customer_id,
+          customerName: inv.customer_name,
+          customerType: inv.customer_type,
+          totalReceivable: 0,
+          invoiceCount: 0,
+          oldestInvoiceDate: inv.invoice_date,
+          status: 'current' as string,
+        });
+      }
+      const entry = customerMap.get(key);
+      entry.totalReceivable += Number(inv.balance_amount);
+      entry.invoiceCount += 1;
+    }
+
+    return { success: true, receivables: Array.from(customerMap.values()) };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch receivables' };
+  }
+}
+
+// ============================================
+// Payables (Computed from Purchase Invoices)
+// ============================================
+
+export async function getPayables(): Promise<{ success: boolean; payables?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data, error } = await supabase
+      .from('purchase_invoices')
+      .select('supplier_id, supplier_name, balance_amount, payment_status, invoice_date, invoice_number')
+      .eq('business_id', ctx.businessId)
+      .gt('balance_amount', 0)
+      .order('invoice_date', { ascending: true });
+
+    if (error) return { success: false, error: error.message };
+
+    const supplierMap = new Map<string, any>();
+    for (const inv of (data || [])) {
+      const key = inv.supplier_id || inv.supplier_name;
+      if (!supplierMap.has(key)) {
+        supplierMap.set(key, {
+          id: inv.supplier_id || key,
+          supplierId: inv.supplier_id,
+          supplierName: inv.supplier_name,
+          totalPayable: 0,
+          billCount: 0,
+          oldestBillDate: inv.invoice_date,
+          status: 'current' as string,
+        });
+      }
+      const entry = supplierMap.get(key);
+      entry.totalPayable += Number(inv.balance_amount);
+      entry.billCount += 1;
+    }
+
+    return { success: true, payables: Array.from(supplierMap.values()) };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch payables' };
+  }
+}
+
+// ============================================
+// Invoice Number Generation
+// ============================================
+
+export async function getNextInvoiceNumber(): Promise<{ success: boolean; invoiceNumber?: string; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Authentication required' };
+
+    const { data: settings } = await supabase
+      .from('business_settings')
+      .select('invoice_prefix, last_invoice_number')
+      .eq('business_id', ctx.businessId)
+      .single();
+
+    const prefix = settings?.invoice_prefix || 'INV';
+    const lastNumber = settings?.last_invoice_number || 0;
+    const nextNumber = lastNumber + 1;
+
+    const paddedNumber = String(nextNumber).padStart(4, '0');
+    const invoiceNumber = `${prefix}-${paddedNumber}`;
+
+    // Update the counter
+    await supabase
+      .from('business_settings')
+      .update({ last_invoice_number: nextNumber })
+      .eq('business_id', ctx.businessId);
+
+    return { success: true, invoiceNumber };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to generate invoice number' };
   }
 }

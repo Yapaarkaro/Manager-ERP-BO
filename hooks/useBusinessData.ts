@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, withTimeout } from '@/lib/supabase';
 
 interface BusinessData {
   user: {
@@ -140,10 +140,13 @@ export function useBusinessData(): UseBusinessDataReturn {
     }
     setError(null);
 
-    // Create promise for parallel fetching
     const fetchPromise = (async (): Promise<BusinessData> => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          10000,
+          'useBusinessData: getSession'
+        );
         
         if (!session?.user) {
           throw new Error('No session found');
@@ -158,9 +161,7 @@ export function useBusinessData(): UseBusinessDataReturn {
           .select('id, business_id, full_name, role')
           .eq('id', session.user.id)
           .single();
-        } catch (error: any) {
-          console.warn('⚠️ Error fetching user data (406/RLS issue):', error);
-          // Fallback: try with minimal fields
+        } catch {
           try {
             userResult = await supabase
               .from('users')
@@ -168,7 +169,6 @@ export function useBusinessData(): UseBusinessDataReturn {
               .eq('id', session.user.id)
               .single();
           } catch (fallbackError: any) {
-            console.warn('⚠️ Fallback user query also failed:', fallbackError);
             userResult = { data: null, error: fallbackError };
           }
         }
@@ -186,9 +186,6 @@ export function useBusinessData(): UseBusinessDataReturn {
             role: userData.role || 'user',
           };
           businessId = user.business_id;
-        } else if (userResult.error) {
-          console.warn('⚠️ User query error (non-blocking):', userResult.error);
-          // Continue without user data - business_id might be available from session metadata
         }
 
         // ✅ PARALLEL: Fetch all remaining data simultaneously (business, addresses, bank accounts)
@@ -340,9 +337,12 @@ export async function prefetchBusinessData(): Promise<void> {
   // Force fetch data to warm up cache
   const now = Date.now();
   if (!globalCache.data || (now - globalCache.timestamp) >= CACHE_DURATION) {
-    // Cache is stale or doesn't exist, fetch fresh data
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(),
+        10000,
+        'prefetchBusinessData: getSession'
+      );
       
       if (!session?.user) {
         return;
@@ -435,10 +435,8 @@ export async function prefetchBusinessData(): Promise<void> {
         bankAccounts,
       };
       globalCache.timestamp = Date.now();
-    } catch (error) {
-      console.error('Error prefetching business data:', error);
+    } catch {
+      // Prefetch failed silently
     }
   }
 }
-
-
