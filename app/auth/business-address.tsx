@@ -20,7 +20,7 @@ import PlatformMapView from '@/components/PlatformMapView';
 import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
-import { dataStore } from '@/utils/dataStore';
+// DataStore removed - Supabase backend is the sole source of truth
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -75,9 +75,11 @@ export default function BusinessAddressScreen() {
   // Get count for dynamic header
   const getAddressCount = () => {
     if (addressType === 'primary') return '';
-    const allAddresses = dataStore.getAddresses();
-    const typeAddresses = allAddresses.filter(addr => addr.type === addressType);
-    return ` - ${typeAddresses.length + 1}`;
+    try {
+      const parsed = JSON.parse(existingAddresses as string || '[]');
+      const typeAddresses = parsed.filter((addr: any) => addr.type === addressType);
+      return ` - ${typeAddresses.length + 1}`;
+    } catch { return ''; }
   };
 
   // Set status bar to light for blue header
@@ -711,7 +713,7 @@ export default function BusinessAddressScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/mobile')}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color="#ffffff" />

@@ -6,24 +6,27 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Banknote, Save } from 'lucide-react-native';
-import { dataStore } from '@/utils/dataStore';
+import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { updateBusinessCashBalance } from '@/services/backendApi';
 
 export default function EditCashBalanceScreen() {
+  const { data: businessData } = useBusinessData();
   const [cashBalance, setCashBalance] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadCurrentBalance();
-  }, []);
+  }, [businessData.business]);
 
   const loadCurrentBalance = () => {
     try {
-      const signupSummary = dataStore.getSignupSummary();
-      const currentBalance = signupSummary?.initialCashBalance || 0;
+      const currentBalance = businessData.business?.current_cash_balance || businessData.business?.total_cash_balance || 0;
       setCashBalance(currentBalance.toString());
     } catch (error) {
       console.error('Error loading current cash balance:', error);
@@ -87,10 +90,11 @@ export default function EditCashBalanceScreen() {
     setIsLoading(true);
 
     try {
-      // Update the cash balance in signup progress
-      dataStore.updateSignupProgress({
-        initialCashBalance: balance,
-      });
+      const result = await updateBusinessCashBalance(balance);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update cash balance');
+      }
+      clearBusinessDataCache();
 
       Alert.alert(
         'Success',
@@ -126,6 +130,7 @@ export default function EditCashBalanceScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -187,6 +192,7 @@ export default function EditCashBalanceScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );

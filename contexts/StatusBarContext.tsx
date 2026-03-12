@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useMemo, ReactNode } from 'react';
 import { StatusBar } from 'expo-status-bar';
 
 type StatusBarStyle = 'light-content' | 'dark-content' | 'auto';
@@ -25,8 +25,10 @@ interface StatusBarProviderProps {
 export const StatusBarProvider: React.FC<StatusBarProviderProps> = ({ children }) => {
   const [statusBarStyle, setStatusBarStyle] = useState<StatusBarStyle>('auto');
 
+  const value = useMemo(() => ({ statusBarStyle, setStatusBarStyle }), [statusBarStyle]);
+
   return (
-    <StatusBarContext.Provider value={{ statusBarStyle, setStatusBarStyle }}>
+    <StatusBarContext.Provider value={value}>
       <StatusBar style={statusBarStyle} />
       {children}
     </StatusBarContext.Provider>

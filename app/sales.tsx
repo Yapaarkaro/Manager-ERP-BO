@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   Image,
   Keyboard,
   Platform,
   TextInput,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { 
   ArrowLeft, 
   Download,
@@ -35,10 +36,14 @@ import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
-import Sidebar from '@/components/Sidebar';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { usePathname } from 'expo-router';
-import { getInvoices } from '@/services/backendApi';
+import { getInvoices, invalidateApiCache } from '@/services/backendApi';
+
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import DateInputWithPicker from '@/components/DateInputWithPicker';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import ExportModal from '@/components/ExportModal';
+import { ExportConfig } from '@/utils/exportUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -78,14 +83,16 @@ const initialInvoices: SalesInvoice[] = [];
 
 export default function SalesInvoicesScreen() {
   const { handleBack } = useWebBackNavigation();
-  const pathname = usePathname();
   const [invoices, setInvoices] = useState<SalesInvoice[]>(initialInvoices);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(initialInvoices);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   const [activeFilters, setActiveFilters] = useState({
     paymentStatus: [] as string[],
     paymentMethod: [] as string[],
@@ -94,7 +101,8 @@ export default function SalesInvoicesScreen() {
     amountRange: 'none' as string,
     staffMember: [] as string[],
   });
-  
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+
   // Use debounced navigation for invoice cards
   const debouncedNavigate = useDebounceNavigation(500);
 
@@ -116,7 +124,7 @@ export default function SalesInvoicesScreen() {
             invoiceNumber: inv.invoice_number ?? '',
             customerName: inv.customer_name ?? '',
             customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
-            staffName: inv.staff_name ?? '',
+            staffName: inv.staff_name || '',
             staffAvatar: '',
             paymentStatus: (inv.payment_status ?? 'pending') as 'paid' | 'partially_paid' | 'pending',
             paymentMethod: (inv.payment_method ?? 'cash') as 'cash' | 'upi' | 'card' | 'others',
@@ -131,6 +139,42 @@ export default function SalesInvoicesScreen() {
     }
     fetchInvoices();
     return () => { cancelled = true; };
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    (async () => {
+      try {
+        const res = await getInvoices();
+        if (res.success && res.invoices) {
+          const mapped: SalesInvoice[] = res.invoices.map((inv: any) => {
+            const invoiceDate = inv.invoice_date || inv.created_at || '';
+            const createdAt = inv.created_at || '';
+            const dateObj = createdAt ? new Date(createdAt) : new Date();
+            const timeStr = dateObj.toTimeString().slice(0, 5);
+            return {
+              id: inv.id ?? '',
+              invoiceNumber: inv.invoice_number ?? '',
+              customerName: inv.customer_name ?? '',
+              customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+              staffName: inv.staff_name || '',
+              staffAvatar: '',
+              paymentStatus: (inv.payment_status ?? 'pending') as 'paid' | 'partially_paid' | 'pending',
+              paymentMethod: (inv.payment_method ?? 'cash') as 'cash' | 'upi' | 'card' | 'others',
+              amount: Number(inv.total_amount ?? inv.subtotal ?? 0),
+              itemCount: 0,
+              date: invoiceDate,
+              time: timeStr,
+            };
+          });
+          setInvoices(mapped);
+        }
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    })();
+    setTimeout(() => setRefreshing(false), 600);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -178,34 +222,8 @@ export default function SalesInvoicesScreen() {
       );
     }
 
-    // Apply date range filter
-    if (activeFilters.dateRange !== 'all') {
-      const today = new Date();
-      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      
-      switch (activeFilters.dateRange) {
-        case 'today':
-          filtered = filtered.filter(invoice => {
-            const invoiceDate = new Date(invoice.date);
-            return invoiceDate >= todayStart;
-          });
-          break;
-        case 'week':
-          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
-          filtered = filtered.filter(invoice => {
-            const invoiceDate = new Date(invoice.date);
-            return invoiceDate >= weekStart;
-          });
-          break;
-        case 'month':
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          filtered = filtered.filter(invoice => {
-            const invoiceDate = new Date(invoice.date);
-            return invoiceDate >= monthStart;
-          });
-          break;
-      }
-    }
+    // Apply date range filter via DateFilterBar
+    filtered = filterByDateRange(filtered, (inv) => inv.date, selectedTimeRange, customFromDate, customToDate);
 
     // Apply amount range filter
     if (activeFilters.amountRange !== 'none') {
@@ -262,10 +280,10 @@ export default function SalesInvoicesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters or invoices change
+  // Apply filters whenever activeFilters, invoices, or custom dates change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters, invoices]);
+  }, [activeFilters, invoices, customFromDate, customToDate, selectedTimeRange]);
 
   const handleInvoicePress = (invoice: SalesInvoice) => {
     if (isNavigating) return;
@@ -280,14 +298,17 @@ export default function SalesInvoicesScreen() {
       staffName: invoice.staffName,
       staffAvatar: invoice.staffAvatar,
       paymentStatus: invoice.paymentStatus,
+      paymentMethod: invoice.paymentMethod,
       amount: invoice.amount,
+      totalAmount: invoice.amount,
       itemCount: invoice.itemCount,
       date: invoice.date,
+      invoiceDate: invoice.date,
       customerDetails: {
         name: invoice.customerName,
-        mobile: '+91 98765 43210',
+        mobile: (invoice as any).customerMobile || (invoice as any).customer_mobile || '',
         businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-        address: ''
+        address: (invoice as any).customerAddress || (invoice as any).customer_address || '',
       }
     };
 
@@ -447,11 +468,17 @@ export default function SalesInvoicesScreen() {
         <View style={styles.invoiceFooter}>
           {/* Left Side - Staff Info */}
           <View style={styles.staffInfo}>
-            <Image 
-              source={{ uri: invoice.staffAvatar }}
-              style={styles.staffAvatar}
-            />
-            <Text style={styles.staffName}>Processed by {invoice.staffName}</Text>
+            {invoice.staffAvatar ? (
+              <Image 
+                source={{ uri: invoice.staffAvatar }}
+                style={styles.staffAvatar}
+              />
+            ) : (
+              <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                <User size={14} color="#6B7280" />
+              </View>
+            )}
+            <Text style={styles.staffName} numberOfLines={1}>Processed by {invoice.staffName || 'Unknown'}</Text>
           </View>
 
           {/* Right Side - Action Icons */}
@@ -488,33 +515,8 @@ export default function SalesInvoicesScreen() {
   const pendingInvoices = filteredInvoices.filter(inv => inv.paymentStatus === 'pending' || inv.paymentStatus === 'partially_paid');
   const webContainerStyles = getWebContainerStyles();
 
-  const handleMenuNavigation = (route: any) => {
-    router.push(route);
-  };
-
-  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
-    setSidebarWidth(width);
-  };
-
   return (
-    <View style={styles.mainContainer}>
-      {/* Sidebar - Only on web */}
-      {Platform.OS === 'web' && (
-        <Sidebar
-          onNavigate={handleMenuNavigation}
-          currentRoute={pathname}
-          onCollapseChange={handleSidebarCollapseChange}
-        />
-      )}
-      
-      <View style={[
-        styles.contentWrapper,
-        Platform.OS === 'web' && {
-          marginLeft: sidebarWidth,
-          flex: 1,
-        }
-      ]}>
-        <ResponsiveContainer>
+    <ResponsiveContainer>
           <SafeAreaView style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
@@ -527,7 +529,15 @@ export default function SalesInvoicesScreen() {
               </TouchableOpacity>
               
               <Text style={styles.headerTitle}>Sales Invoices</Text>
-              
+
+              <TouchableOpacity
+                style={styles.exportButton}
+                onPress={() => setShowExportModal(true)}
+                activeOpacity={0.7}
+              >
+                <Download size={20} color={Colors.primary} />
+              </TouchableOpacity>
+
               <View style={styles.headerRight}>
                 <Text style={styles.totalCount}>
                   {filteredInvoices.length} invoices
@@ -535,6 +545,10 @@ export default function SalesInvoicesScreen() {
               </View>
             </View>
 
+            {isLoading ? (
+              <ListSkeleton />
+            ) : (
+              <>
             {/* Summary Stats */}
             <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -606,16 +620,26 @@ export default function SalesInvoicesScreen() {
         </View>
       </View>
 
-      {/* Divider */}
-      <View style={styles.divider} />
+      {/* Date Filter Chips */}
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
 
       {/* Sales Invoices List */}
-      <ScrollView 
+      <FlatList
+        data={filteredInvoices}
+        renderItem={({item}) => renderInvoiceCard(item)}
+        keyExtractor={(item) => item.id}
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredInvoices.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <ShoppingCart size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Sales Invoices Found</Text>
@@ -623,10 +647,8 @@ export default function SalesInvoicesScreen() {
               {searchQuery ? 'No sales invoices match your search criteria' : 'No sales invoices for the selected period'}
             </Text>
           </View>
-        ) : (
-          filteredInvoices.map(renderInvoiceCard)
-        )}
-            </ScrollView>
+        }
+      />
 
             {/* New Sale FAB */}
             <TouchableOpacity
@@ -638,6 +660,8 @@ export default function SalesInvoicesScreen() {
         <Plus size={20} color="#ffffff" />
         <Text style={styles.newSaleText}>New Sale</Text>
             </TouchableOpacity>
+              </>
+            )}
 
             {/* Filter Modal */}
             <Modal
@@ -739,7 +763,8 @@ export default function SalesInvoicesScreen() {
                     { value: 'all', label: 'All Time' },
                     { value: 'today', label: 'Today' },
                     { value: 'week', label: 'This Week' },
-                    { value: 'month', label: 'This Month' }
+                    { value: 'month', label: 'This Month' },
+                    { value: 'custom', label: 'Custom Range' }
                   ].map(range => (
                     <TouchableOpacity
                       key={range.value}
@@ -758,6 +783,22 @@ export default function SalesInvoicesScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+                {activeFilters.dateRange === 'custom' && (
+                  <View style={{ marginTop: 12, flexDirection: 'row', gap: 12 }}>
+                    <DateInputWithPicker
+                      label="From Date"
+                      value={customFromDate}
+                      onChangeDate={setCustomFromDate}
+                      maximumDate={new Date()}
+                    />
+                    <DateInputWithPicker
+                      label="To Date"
+                      value={customToDate}
+                      onChangeDate={setCustomToDate}
+                      maximumDate={new Date()}
+                    />
+                  </View>
+                )}
               </View>
 
               {/* Amount Range Filter */}
@@ -792,7 +833,7 @@ export default function SalesInvoicesScreen() {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Staff Member</Text>
                 <View style={styles.filterOptions}>
-                  {['Priya Sharma', 'Rajesh Kumar', 'Amit Singh'].map(staff => (
+                  {[].map(staff => (
                     <TouchableOpacity
                       key={staff}
                       style={[
@@ -830,29 +871,36 @@ export default function SalesInvoicesScreen() {
           </View>
         </View>
             </Modal>
+
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'Sales Invoices',
+          fileName: 'sales_invoices',
+          columns: [
+            { key: 'invoiceNumber', header: 'Invoice #' },
+            { key: 'date', header: 'Date' },
+            { key: 'customerName', header: 'Customer' },
+            { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'paymentStatus', header: 'Payment Status', format: (v) => v === 'paid' ? 'Paid' : v === 'partially_paid' ? 'Partially Paid' : 'Pending' },
+            { key: 'paymentMethod', header: 'Payment Method', format: (v) => v === 'cash' ? 'Cash' : v === 'upi' ? 'UPI' : v === 'card' ? 'Card' : 'Others' },
+            { key: 'staffName', header: 'Processed By' },
+          ],
+          data: filteredInvoices,
+          summaryRows: [
+            { label: 'Total Invoices', value: String(filteredInvoices.length) },
+            { label: 'Total Amount', value: `₹${filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
           </SafeAreaView>
-        </ResponsiveContainer>
-      </View>
-    </View>
+    </ResponsiveContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    backgroundColor: Colors.background,
-  },
-  contentWrapper: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    ...Platform.select({
-      web: {
-        transition: 'margin-left 0.3s ease',
-        minWidth: 0,
-      },
-    }),
-  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -881,6 +929,15 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'flex-end',
+  },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   totalCount: {
     fontSize: 14,

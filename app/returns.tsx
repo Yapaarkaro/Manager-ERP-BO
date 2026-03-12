@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   Image,
   Keyboard,
   Platform,
   TextInput,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, usePathname } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { 
   ArrowLeft, 
@@ -25,13 +26,17 @@ import {
   FileText,
   Search,
   Filter,
-  Package
+  Package,
+  User
 } from 'lucide-react-native';
 import AnimatedSearchBar from '@/components/AnimatedSearchBar';
-import { getInputFocusStyles } from '@/utils/platformUtils';
-import { getReturns } from '@/services/backendApi';
+
+import { getReturns, invalidateApiCache } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
-import Sidebar from '@/components/Sidebar';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import DateInputWithPicker from '@/components/DateInputWithPicker';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -53,7 +58,9 @@ const Colors = {
 interface ReturnInvoice {
   id: string;
   returnNumber: string;
+  originalInvoiceId?: string;
   originalInvoiceNumber: string;
+  customerId?: string;
   customerName: string;
   customerType: 'individual' | 'business';
   staffName: string;
@@ -63,6 +70,9 @@ interface ReturnInvoice {
   itemCount: number;
   date: string;
   reason: string;
+  returnType?: 'customer' | 'supplier';
+  supplierName?: string;
+  items: any[];
   customerDetails: {
     name: string;
     mobile: string;
@@ -76,12 +86,15 @@ interface ReturnInvoice {
 
 export default function ReturnsScreen() {
   const { handleBack } = useWebBackNavigation();
-  const pathname = usePathname();
   const [returnInvoices, setReturnInvoices] = useState<ReturnInvoice[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredReturns, setFilteredReturns] = useState<ReturnInvoice[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   const [activeFilters, setActiveFilters] = useState({
     refundStatus: [] as string[],
     customerType: [] as string[],
@@ -90,31 +103,40 @@ export default function ReturnsScreen() {
     staffMember: [] as string[],
     reason: [] as string[],
   });
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
   const [focusedField, setFocusedField] = useState<string | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const inputFocusStyles = getInputFocusStyles();
+  const [refreshing, setRefreshing] = useState(false);
+
   
   // Use debounced navigation for FAB button
   const debouncedNavigate = useDebounceNavigation(500);
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
     (async () => {
       const { success, returns: data } = await getReturns();
-      if (cancelled || !success || !data) return;
+      if (cancelled) return;
+      setIsLoading(false);
+      if (!success || !data) return;
       const mapped: ReturnInvoice[] = data.map((r: any) => ({
         id: r.id,
         returnNumber: r.return_number || '',
+        originalInvoiceId: r.original_invoice_id || '',
         originalInvoiceNumber: r.original_invoice_number || '',
-        customerName: r.customer_name || '',
+        customerId: r.customer_id || '',
+        customerName: r.return_type === 'supplier' ? (r.supplier_name || r.customer_name || '') : (r.customer_name || ''),
         customerType: (r.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
         staffName: r.staff_name || '',
-        staffAvatar: 'https://via.placeholder.com/20',
+        staffAvatar: '',
         refundStatus: (r.refund_status || 'pending') as 'refunded' | 'partially_refunded' | 'pending',
         amount: Number(r.total_amount) || 0,
-        itemCount: 1,
+        itemCount: Number(r.item_count) || 0,
         date: r.return_date || '',
         reason: r.reason || '',
+        returnType: r.return_type === 'supplier' ? 'supplier' : 'customer',
+        supplierName: r.supplier_name || '',
+        items: [],
         customerDetails: {
           name: r.customer_name || '',
           mobile: '',
@@ -124,6 +146,46 @@ export default function ReturnsScreen() {
       setReturnInvoices(mapped);
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    (async () => {
+      try {
+        const { success, returns: data } = await getReturns();
+        if (success && data) {
+          const mapped: ReturnInvoice[] = data.map((r: any) => ({
+            id: r.id,
+            returnNumber: r.return_number || '',
+            originalInvoiceId: r.original_invoice_id || '',
+            originalInvoiceNumber: r.original_invoice_number || '',
+            customerId: r.customer_id || '',
+            customerName: r.return_type === 'supplier' ? (r.supplier_name || r.customer_name || '') : (r.customer_name || ''),
+            customerType: (r.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+            staffName: r.staff_name || '',
+            staffAvatar: '',
+            refundStatus: (r.refund_status || 'pending') as 'refunded' | 'partially_refunded' | 'pending',
+            amount: Number(r.total_amount) || 0,
+            itemCount: Number(r.item_count) || 0,
+            date: r.return_date || '',
+            reason: r.reason || '',
+            returnType: r.return_type === 'supplier' ? 'supplier' : 'customer',
+            supplierName: r.supplier_name || '',
+            items: [],
+            customerDetails: {
+              name: r.customer_name || '',
+              mobile: '',
+              address: '',
+            },
+          }));
+          setReturnInvoices(mapped);
+        }
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    })();
+    setTimeout(() => setRefreshing(false), 600);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -173,34 +235,8 @@ export default function ReturnsScreen() {
       );
     }
 
-    // Apply date range filter
-    if (activeFilters.dateRange !== 'all') {
-      const today = new Date();
-      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      
-      switch (activeFilters.dateRange) {
-        case 'today':
-          filtered = filtered.filter(returnInvoice => {
-            const returnDate = new Date(returnInvoice.date);
-            return returnDate >= todayStart;
-          });
-          break;
-        case 'week':
-          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
-          filtered = filtered.filter(returnInvoice => {
-            const returnDate = new Date(returnInvoice.date);
-            return returnDate >= weekStart;
-          });
-          break;
-        case 'month':
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          filtered = filtered.filter(returnInvoice => {
-            const returnDate = new Date(returnInvoice.date);
-            return returnDate >= monthStart;
-          });
-          break;
-      }
-    }
+    // Apply date range filter via DateFilterBar
+    filtered = filterByDateRange(filtered, (ret) => ret.date, selectedTimeRange, customFromDate, customToDate);
 
     // Apply amount range filter
     if (activeFilters.amountRange !== 'none') {
@@ -314,10 +350,10 @@ export default function ReturnsScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters or returnInvoices change
+  // Apply filters whenever activeFilters, returnInvoices, custom dates, or selectedTimeRange change
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters, returnInvoices]);
+  }, [activeFilters, returnInvoices, customFromDate, customToDate, selectedTimeRange]);
 
   // Calculate summary data
   const getSummaryData = () => {
@@ -335,7 +371,6 @@ export default function ReturnsScreen() {
   const renderReturnCard = (returnInvoice: ReturnInvoice) => {
     return (
       <TouchableOpacity
-        key={returnInvoice.id}
         style={styles.returnCard}
         onPress={() => debouncedNavigate({
           pathname: '/return-details',
@@ -350,16 +385,29 @@ export default function ReturnsScreen() {
         <View style={styles.returnHeader}>
           {/* Left Side - Return Info */}
           <View style={styles.returnLeft}>
-            <Text style={styles.returnNumber}>{returnInvoice.returnNumber}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+              <Text style={styles.returnNumber}>{returnInvoice.returnNumber}</Text>
+              {returnInvoice.returnType === 'supplier' && (
+                <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400E' }}>SUPPLIER</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.originalInvoice}>
-              Original: {returnInvoice.originalInvoiceNumber}
+              {returnInvoice.returnType === 'supplier' ? 'Purchase' : 'Original'}: {returnInvoice.originalInvoiceNumber}
             </Text>
             <Text style={styles.customerName}>{returnInvoice.customerName}</Text>
             <View style={styles.staffInfo}>
-              <Image 
-                source={{ uri: returnInvoice.staffAvatar }}
-                style={styles.staffAvatar}
-              />
+              {returnInvoice.staffAvatar ? (
+                <Image 
+                  source={{ uri: returnInvoice.staffAvatar }}
+                  style={styles.staffAvatar}
+                />
+              ) : (
+                <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                  <User size={14} color="#6B7280" />
+                </View>
+              )}
               <Text style={styles.staffName}>{returnInvoice.staffName}</Text>
             </View>
           </View>
@@ -428,32 +476,7 @@ export default function ReturnsScreen() {
     );
   };
 
-  const handleMenuNavigation = (route: any) => {
-    router.push(route);
-  };
-
-  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
-    setSidebarWidth(width);
-  };
-
   return (
-    <View style={styles.mainContainer}>
-      {/* Sidebar - Only on web */}
-      {Platform.OS === 'web' && (
-        <Sidebar
-          onNavigate={handleMenuNavigation}
-          currentRoute={pathname}
-          onCollapseChange={handleSidebarCollapseChange}
-        />
-      )}
-      
-      <View style={[
-        styles.contentWrapper,
-        Platform.OS === 'web' && {
-          marginLeft: sidebarWidth,
-          flex: 1,
-        }
-      ]}>
         <ResponsiveContainer>
           <SafeAreaView style={styles.container}>
             {/* Header */}
@@ -467,7 +490,15 @@ export default function ReturnsScreen() {
               </TouchableOpacity>
               
               <Text style={styles.headerTitle}>Return Invoices</Text>
-              
+
+              <TouchableOpacity
+                style={styles.exportButton}
+                onPress={() => setShowExportModal(true)}
+                activeOpacity={0.7}
+              >
+                <Download size={20} color={Colors.primary} />
+              </TouchableOpacity>
+
               <View style={styles.headerRight}>
                 <Text style={styles.totalCount}>
                   {filteredReturns.length} returns
@@ -475,6 +506,10 @@ export default function ReturnsScreen() {
               </View>
             </View>
 
+      {isLoading ? (
+        <ListSkeleton />
+      ) : (
+        <>
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -524,12 +559,11 @@ export default function ReturnsScreen() {
       <View style={styles.inlineSearchContainer}>
         <View style={[
           styles.searchBar,
-          inputFocusStyles.inputContainer,
-          focusedField === 'search' && inputFocusStyles.inputContainerFocused,
+          focusedField === 'search' && { borderColor: Colors.primary },
         ]}>
           <Search size={20} color={Colors.primary} />
           <TextInput
-            style={[styles.searchInput, inputFocusStyles.input as any]}
+            style={styles.searchInput}
             placeholder="Search returns..."
             placeholderTextColor={Colors.textLight}
             value={searchQuery}
@@ -555,13 +589,25 @@ export default function ReturnsScreen() {
       {/* Divider */}
       <View style={styles.divider} />
 
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
+
       {/* Returns List */}
-      <ScrollView 
+      <FlatList
+        data={filteredReturns}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => renderReturnCard(item)}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredReturns.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <RotateCcw size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Returns Found</Text>
@@ -569,10 +615,8 @@ export default function ReturnsScreen() {
               {searchQuery ? 'No returns match your search criteria' : 'No return invoices yet'}
             </Text>
           </View>
-        ) : (
-          filteredReturns.map(renderReturnCard)
-        )}
-      </ScrollView>
+        }
+      />
 
       {/* New Return FAB */}
       <TouchableOpacity
@@ -584,6 +628,8 @@ export default function ReturnsScreen() {
         <RotateCcw size={20} color="#ffffff" />
         <Text style={styles.newReturnText}>New Return</Text>
       </TouchableOpacity>
+        </>
+      )}
 
       {/* Filter Modal */}
       <Modal
@@ -661,7 +707,8 @@ export default function ReturnsScreen() {
                     { value: 'all', label: 'All Time' },
                     { value: 'today', label: 'Today' },
                     { value: 'week', label: 'This Week' },
-                    { value: 'month', label: 'This Month' }
+                    { value: 'month', label: 'This Month' },
+                    { value: 'custom', label: 'Custom Range' }
                   ].map(range => (
                     <TouchableOpacity
                       key={range.value}
@@ -680,6 +727,22 @@ export default function ReturnsScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+                {activeFilters.dateRange === 'custom' && (
+                  <View style={{ marginTop: 12, flexDirection: 'row', gap: 12 }}>
+                    <DateInputWithPicker
+                      label="From Date"
+                      value={customFromDate}
+                      onChangeDate={setCustomFromDate}
+                      maximumDate={new Date()}
+                    />
+                    <DateInputWithPicker
+                      label="To Date"
+                      value={customToDate}
+                      onChangeDate={setCustomToDate}
+                      maximumDate={new Date()}
+                    />
+                  </View>
+                )}
               </View>
 
               {/* Amount Range Filter */}
@@ -714,7 +777,7 @@ export default function ReturnsScreen() {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Staff Member</Text>
                 <View style={styles.filterOptions}>
-                  {['Priya Sharma', 'Rajesh Kumar', 'Amit Singh'].map(staff => (
+                  {[].map(staff => (
                     <TouchableOpacity
                       key={staff}
                       style={[
@@ -776,29 +839,37 @@ export default function ReturnsScreen() {
           </View>
         </View>
       </Modal>
+
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'Return Invoices',
+          fileName: 'return_invoices',
+          columns: [
+            { key: 'returnNumber', header: 'Return #' },
+            { key: 'date', header: 'Date' },
+            { key: 'originalInvoiceNumber', header: 'Original Invoice' },
+            { key: 'customerName', header: 'Customer' },
+            { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'refundStatus', header: 'Refund Status', format: (v) => v === 'refunded' ? 'Refunded' : v === 'partially_refunded' ? 'Partially Refunded' : 'Pending' },
+            { key: 'reason', header: 'Reason' },
+            { key: 'staffName', header: 'Processed By' },
+          ],
+          data: filteredReturns,
+          summaryRows: [
+            { label: 'Total Returns', value: String(filteredReturns.length) },
+            { label: 'Total Refund Amount', value: `₹${filteredReturns.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
           </SafeAreaView>
         </ResponsiveContainer>
-      </View>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    backgroundColor: Colors.background,
-  },
-  contentWrapper: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    ...Platform.select({
-      web: {
-        transition: 'margin-left 0.3s ease',
-        minWidth: 0,
-      },
-    }),
-  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -827,6 +898,15 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'flex-end',
+  },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   totalCount: {
     fontSize: 14,
@@ -1141,14 +1221,13 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderRadius: 25,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     minHeight: 52,
     borderWidth: 1,
     borderColor: Colors.grey[200],
-    // No shadows or elevation - completely transparent
   },
   searchInput: {
     flex: 1,
@@ -1156,18 +1235,13 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    padding: 0,
+    paddingVertical: 4,
     fontWeight: '500',
-    // Better contrast for glassmorphism - use platform-specific textShadow
     ...Platform.select({
       web: {
-        textShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+        outlineStyle: 'none' as any,
       },
-      default: {
-        textShadowColor: 'rgba(0, 0, 0, 0.1)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
-      },
+      default: {},
     }),
   },
   fabDisabled: {

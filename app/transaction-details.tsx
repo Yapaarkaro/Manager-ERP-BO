@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building, FileText, CreditCard, Smartphone, Banknote, Receipt, ExternalLink, Calendar, Hash, User, Building2, Check, X } from 'lucide-react-native';
-import { dataStore, BankTransaction } from '@/utils/dataStore';
+import { BankTransaction } from '@/utils/dataStore';
+import { getCashTransactionById, getBankTransactionById, invalidateApiCache } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -28,44 +32,124 @@ const Colors = {
 };
 
 export default function TransactionDetailsScreen() {
-  const { transactionId, bankAccountId } = useLocalSearchParams();
+  const { transactionId, bankAccountId, transactionType, transactionData } = useLocalSearchParams();
   const [transaction, setTransaction] = useState<BankTransaction | null>(null);
   const [relatedInvoice, setRelatedInvoice] = useState<any>(null);
   const [relatedCustomer, setRelatedCustomer] = useState<any>(null);
   const [relatedSupplier, setRelatedSupplier] = useState<any>(null);
-  
-
+  const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const isCash = transactionType === 'cash';
 
   useEffect(() => {
     loadTransactionDetails();
   }, [transactionId]);
 
-  const loadTransactionDetails = () => {
-    if (transactionId) {
-      const allTransactions = dataStore.getBankTransactions(bankAccountId as string);
-      const foundTransaction = allTransactions.find(t => t.id === transactionId);
-      
-      if (foundTransaction) {
-        setTransaction(foundTransaction);
-        
-        // Load related data
-        if (foundTransaction.relatedInvoiceId) {
-          const invoice = dataStore.getInvoiceById(foundTransaction.relatedInvoiceId);
-          setRelatedInvoice(invoice);
+  const loadTransactionDetails = async () => {
+    if (!transactionId) { setIsLoading(false); return; }
+    setIsLoading(true);
+
+    try {
+      if (transactionData) {
+        try {
+          const parsed = JSON.parse(transactionData as string);
+          setTransaction({
+            id: parsed.id,
+            bankAccountId: parsed.bankAccountId || '',
+            type: parsed.type,
+            amount: parseFloat(parsed.amount) || 0,
+            description: parsed.description || '',
+            date: parsed.date || parsed.transaction_date || parsed.createdAt || '',
+            source: parsed.source || parsed.referenceType || 'Cash',
+            reference: parsed.reference || parsed.referenceNumber || parsed.reference_number || '',
+            category: parsed.category || parsed.referenceType || '',
+            transactionNumber: parsed.transactionNumber || parsed.transaction_number || parsed.id?.substring(0, 8) || '',
+            relatedInvoiceId: parsed.relatedInvoiceId || parsed.related_invoice_id || parsed.referenceId || '',
+            relatedCustomerId: parsed.relatedCustomerId || parsed.related_customer_id || '',
+            relatedSupplierId: parsed.relatedSupplierId || parsed.related_supplier_id || '',
+            createdAt: parsed.createdAt || parsed.created_at || '',
+          } as any);
+          setIsLoading(false);
+          return;
+        } catch { /* ignore parse error, fall through */ }
+      }
+
+      if (isCash) {
+        const cashResult = await getCashTransactionById(transactionId as string);
+        let txn = cashResult?.transaction;
+
+        if (txn) {
+          const refType = txn.reference_type || '';
+          const sourceLabel = refType === 'return' ? 'Sales Return' : refType === 'invoice' ? 'Sales Invoice' : refType === 'purchase_invoice' ? 'Purchase Invoice' : refType ? refType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : 'Cash';
+          setTransaction({
+            id: txn.id,
+            bankAccountId: '',
+            type: txn.type,
+            amount: parseFloat(txn.amount) || 0,
+            description: txn.description || '',
+            date: txn.transaction_date || txn.date || txn.created_at || '',
+            source: sourceLabel,
+            reference: txn.reference_number || txn.reference_id || '',
+            category: refType || txn.category || 'Cash',
+            transactionNumber: txn.id?.substring(0, 8) || '',
+            relatedInvoiceId: txn.related_invoice_id || txn.reference_id || '',
+            relatedCustomerId: txn.related_customer_id || '',
+            relatedSupplierId: txn.related_supplier_id || '',
+            createdAt: txn.created_at || '',
+          } as any);
+
+          const invoiceId = txn.related_invoice_id || txn.reference_id;
+          if (invoiceId) {
+            const { getInvoiceWithItems } = await import('@/services/backendApi');
+            const invResult = await getInvoiceWithItems(invoiceId);
+            if (invResult.success && invResult.invoice) setRelatedInvoice(invResult.invoice);
+          }
         }
-        
-        if (foundTransaction.relatedCustomerId) {
-          const customer = dataStore.getCustomerById(foundTransaction.relatedCustomerId);
-          setRelatedCustomer(customer);
-        }
-        
-        if (foundTransaction.relatedSupplierId) {
-          const supplier = dataStore.getSupplierById(foundTransaction.relatedSupplierId);
-          setRelatedSupplier(supplier);
+      } else {
+        const bankResult = await getBankTransactionById(transactionId as string);
+        let txn = bankResult?.transaction;
+
+        if (txn) {
+          setTransaction({
+            id: txn.id,
+            bankAccountId: txn.bank_account_id || '',
+            type: txn.type,
+            amount: parseFloat(txn.amount) || 0,
+            description: txn.description || '',
+            date: txn.transaction_date || txn.created_at || '',
+            source: txn.source || txn.payment_mode || 'Bank Transfer',
+            reference: txn.reference_number || txn.reference || '',
+            category: txn.category || '',
+            transactionNumber: txn.transaction_number || txn.id?.substring(0, 8) || '',
+            relatedInvoiceId: txn.related_invoice_id || '',
+            relatedCustomerId: txn.related_customer_id || '',
+            relatedSupplierId: txn.related_supplier_id || '',
+            createdAt: txn.created_at || '',
+          } as any);
+
+          if (result?.data?.relatedCustomer) setRelatedCustomer(result.data.relatedCustomer);
+          if (result?.data?.relatedSupplier) setRelatedSupplier(result.data.relatedSupplier);
+
+          if (txn.related_invoice_id) {
+            const { getInvoiceWithItems } = await import('@/services/backendApi');
+            const invResult = await getInvoiceWithItems(txn.related_invoice_id);
+            if (invResult.success && invResult.invoice) setRelatedInvoice(invResult.invoice);
+          }
         }
       }
+    } catch (error) {
+      console.error('Error loading transaction details:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadTransactionDetails().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [transactionId]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -123,7 +207,7 @@ export default function TransactionDetailsScreen() {
 
   const handleInvoicePress = () => {
     if (transaction?.relatedInvoiceId) {
-      router.push({
+      safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: transaction.relatedInvoiceId,
@@ -134,7 +218,7 @@ export default function TransactionDetailsScreen() {
 
   const handleCustomerPress = () => {
     if (transaction?.relatedCustomerId) {
-      router.push({
+      safeRouter.push({
         pathname: '/people/customer-details',
         params: {
           customerId: transaction.relatedCustomerId,
@@ -145,7 +229,7 @@ export default function TransactionDetailsScreen() {
 
   const handleSupplierPress = () => {
     if (transaction?.relatedSupplierId) {
-      router.push({
+      safeRouter.push({
         pathname: '/purchasing/supplier-details',
         params: {
           supplierId: transaction.relatedSupplierId,
@@ -156,7 +240,7 @@ export default function TransactionDetailsScreen() {
 
 
 
-  if (!transaction) {
+  if (isLoading || !transaction) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.headerSafeArea}>
@@ -172,7 +256,14 @@ export default function TransactionDetailsScreen() {
           </View>
         </SafeAreaView>
         <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Transaction not found</Text>
+          {isLoading ? (
+            <>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={[styles.errorText, { marginTop: 12 }]}>Loading transaction...</Text>
+            </>
+          ) : (
+            <Text style={styles.errorText}>Transaction not found</Text>
+          )}
         </View>
       </View>
     );
@@ -197,7 +288,7 @@ export default function TransactionDetailsScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {/* Transaction Header */}
         <View style={styles.transactionHeader}>
           <View style={styles.transactionHeaderTop}>

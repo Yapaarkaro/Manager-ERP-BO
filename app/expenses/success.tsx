@@ -1,17 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   CheckCircle,
   ArrowLeft,
   Home,
 } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -40,7 +42,24 @@ interface ExpenseData {
 
 export default function ExpenseSuccessScreen() {
   const { expenseData } = useLocalSearchParams();
-  
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      safeRouter.replace('/dashboard');
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   let expense: ExpenseData | null = null;
   try {
     expense = JSON.parse(expenseData as string);
@@ -72,11 +91,11 @@ export default function ExpenseSuccessScreen() {
   };
 
   const handleGoHome = () => {
-    router.push('/dashboard');
+    safeRouter.replace('/dashboard');
   };
 
   const handleAddAnother = () => {
-    router.push('/expenses/add-expense');
+    safeRouter.push('/expenses/add-expense');
   };
 
   return (

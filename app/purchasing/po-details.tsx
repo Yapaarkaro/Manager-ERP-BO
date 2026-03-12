@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   Image,
   Alert,
   TextInput,
@@ -12,8 +13,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Download, Share, Eye, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Edit3, Send, X, User, MessageCircle } from 'lucide-react-native';
-import { dataStore, Supplier } from '@/utils/dataStore';
+import { ArrowLeft, Download, Share, Eye, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Edit3, Send, X, User, MessageCircle, FileText, ActivityIndicator as ActivityIcon } from 'lucide-react-native';
+import { ActivityIndicator } from 'react-native';
+import { Supplier } from '@/utils/dataStore';
+import { getSuppliers, invalidateApiCache, getOrCreateConversation, sendMessage, autoLinkSupplierToUser, acknowledgePurchaseOrder, createInAppNotification } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -64,62 +71,152 @@ interface POData {
 
 export default function PODetailsScreen() {
   const { poId, poData } = useLocalSearchParams();
+  const { data: bizData } = useBusinessData();
   const [isEdited, setIsEdited] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [linkedInvoiceId, setLinkedInvoiceId] = useState<string | null>(null);
+  const [isLoadingFromDB, setIsLoadingFromDB] = useState(!poData);
 
-  // Parse the PO data from navigation params
+  const normalizeItems = (raw: any): POItem[] => {
+    if (Array.isArray(raw.items) && raw.items.length > 0) {
+      return raw.items.map((it: any) => ({
+        id: it.id || it.productId || it.product_id || '',
+        name: it.name || it.productName || it.product_name || '',
+        quantity: it.quantity || 0,
+        price: it.price || it.unitPrice || it.unit_price || 0,
+        total: it.total || it.totalPrice || it.total_price || ((it.quantity || 0) * (it.price || it.unitPrice || it.unit_price || 0)),
+      }));
+    }
+    if (Array.isArray(raw.products) && raw.products.length > 0) {
+      return raw.products.map((p: any) => ({
+        id: p.id || '',
+        name: p.name || '',
+        quantity: p.orderQuantity || p.quantity || 0,
+        price: p.price || p.unitPrice || 0,
+        total: (p.orderQuantity || p.quantity || 0) * (p.price || p.unitPrice || 0),
+      }));
+    }
+    return [];
+  };
+
   const parsePOData = (): POData => {
     if (poData) {
       try {
-        const parsedData = JSON.parse(poData as string);
-        // Add missing fields with default values
+        const d = JSON.parse(poData as string);
+        const items = normalizeItems(d);
         return {
-          ...parsedData,
-          items: parsedData.items || [
-            { id: '1', name: 'Product 1', quantity: 1, price: parsedData.amount, total: parsedData.amount },
-          ],
-          terms: parsedData.terms || 'Net 30 days',
-          notes: parsedData.notes || 'Please ensure all items are in original packaging.',
-          supplierId: parsedData.supplierId || `supplier_${parsedData.id}`,
-          customerId: parsedData.customerId || `customer_${parsedData.id}`
+          id: d.id || (poId as string) || '',
+          poNumber: d.poNumber || d.po_number || '',
+          supplierName: d.supplierName || d.supplier_name || d.supplier?.businessName || d.supplier?.name || '',
+          supplierType: d.supplierType || d.supplier?.supplierType || 'business',
+          businessName: d.businessName || d.supplier?.businessName || '',
+          gstin: d.gstin || d.supplier?.gstin || '',
+          staffName: d.staffName || d.staff_name || '',
+          staffAvatar: d.staffAvatar || '',
+          status: d.status || 'draft',
+          type: d.type || 'created',
+          amount: d.amount || d.grandTotal || d.totalAmount || d.total_amount || 0,
+          itemCount: items.length || d.itemCount || 0,
+          date: d.date || d.createdAt || d.order_date || d.created_at || '',
+          expectedDelivery: d.expectedDelivery || d.expected_delivery || '',
+          supplierAvatar: d.supplierAvatar || '',
+          items,
+          terms: d.terms || '',
+          notes: d.notes || '',
+          supplierId: d.supplierId || d.supplier_id || d.supplier?.id || '',
+          customerId: d.customerId || '',
         };
       } catch (error) {
         console.error('Error parsing PO data:', error);
       }
     }
-    
+
     return {
-      id: poId as string,
-      poNumber: 'PO-2024-001',
-      supplierName: 'Apple India Pvt Ltd',
+      id: (poId as string) || '',
+      poNumber: '',
+      supplierName: '',
       supplierType: 'business',
-      businessName: 'Apple India Pvt Ltd',
-      gstin: '29ABCDE1234F2Z6',
-      staffName: 'Rajesh Kumar',
-      staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      status: 'sent',
+      businessName: '',
+      gstin: '',
+      staffName: '',
+      staffAvatar: '',
+      status: 'draft',
       type: 'created',
-      amount: 850000,
-      itemCount: 10,
-      date: '2024-01-15',
-      expectedDelivery: '2024-01-20',
-      supplierAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-      items: [
-        { id: '1', name: 'iPhone 15 Pro', quantity: 5, price: 85000, total: 425000 },
-        { id: '2', name: 'iPhone 15', quantity: 3, price: 75000, total: 225000 },
-        { id: '3', name: 'AirPods Pro', quantity: 2, price: 25000, total: 50000 },
-      ],
-      terms: 'Net 30 days',
-      notes: 'Please ensure all items are in original packaging with warranty cards.',
-      supplierId: 'supplier_001',
-      customerId: 'customer_001'
+      amount: 0,
+      itemCount: 0,
+      date: '',
+      expectedDelivery: '',
+      supplierAvatar: '',
+      items: [],
+      terms: '',
+      notes: '',
+      supplierId: '',
+      customerId: '',
     };
   };
 
   const [po, setPo] = useState<POData>(parsePOData());
-
   const [editForm, setEditForm] = useState<POData>(parsePOData());
+
+  // Load PO from DB when opened via notification (no poData param) and fetch linked_invoice_id
+  useEffect(() => {
+    const resolvedId = Array.isArray(poId) ? poId[0] : poId;
+    if (!resolvedId) return;
+
+    (async () => {
+      try {
+        const { data: poRow } = await supabase
+          .from('purchase_orders')
+          .select('*, purchase_order_items(*)')
+          .eq('id', resolvedId)
+          .maybeSingle();
+
+        if (poRow) {
+          setLinkedInvoiceId(poRow.linked_invoice_id || null);
+
+          if (!poData) {
+            const items = (poRow.purchase_order_items || []).map((it: any) => ({
+              id: it.id,
+              name: it.product_name || '',
+              quantity: it.quantity || 0,
+              price: it.unit_price || 0,
+              total: it.total_price || ((it.quantity || 0) * (it.unit_price || 0)),
+            }));
+            const loadedPO: POData = {
+              id: poRow.id,
+              poNumber: poRow.po_number || '',
+              supplierName: poRow.supplier_name || '',
+              supplierType: 'business',
+              businessName: '',
+              gstin: '',
+              staffName: poRow.staff_name || '',
+              staffAvatar: '',
+              status: poRow.status || 'draft',
+              type: 'created',
+              amount: Number(poRow.total_amount) || 0,
+              itemCount: items.length,
+              date: poRow.order_date || poRow.created_at || '',
+              expectedDelivery: poRow.expected_delivery || '',
+              supplierAvatar: '',
+              items,
+              terms: '',
+              notes: poRow.notes || '',
+              supplierId: poRow.supplier_id || '',
+              customerId: '',
+            };
+            setPo(loadedPO);
+            setEditForm(loadedPO);
+          }
+        }
+      } catch {} finally {
+        setIsLoadingFromDB(false);
+      }
+    })();
+  }, [poId]);
+
+  const isAcknowledged = po.status === 'confirmed' || po.status === 'received';
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -140,11 +237,12 @@ export default function PODetailsScreen() {
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'received': return 'Received';
+      case 'received': return 'Invoice Created';
       case 'sent': return 'Sent';
-      case 'confirmed': return 'Confirmed';
+      case 'confirmed': return 'Acknowledged';
       case 'draft': return 'Draft';
       case 'cancelled': return 'Cancelled';
+      case 'pending': return 'Pending';
       default: return status;
     }
   };
@@ -184,11 +282,60 @@ export default function PODetailsScreen() {
     setShowEditModal(true);
   };
 
-  const handleSaveEdits = () => {
+  const handleSaveEdits = async () => {
     setPo(editForm);
     setIsEdited(true);
     setShowEditModal(false);
-    Alert.alert('PO Updated', 'Purchase Order has been updated successfully. You can now send the updated version.');
+
+    // Persist changes to database
+    try {
+      const newTotal = editForm.items.reduce((sum, it) => sum + it.total, 0);
+      await supabase
+        .from('purchase_orders')
+        .update({
+          notes: editForm.notes || null,
+          expected_delivery: editForm.expectedDelivery || null,
+          total_amount: newTotal,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', po.id);
+
+      // Notify supplier of the changes
+      if (po.supplierId) {
+        const { data: supplierRec } = await supabase
+          .from('suppliers')
+          .select('linked_user_id')
+          .eq('id', po.supplierId)
+          .maybeSingle();
+
+        if (supplierRec?.linked_user_id) {
+          const { data: supplierUser } = await supabase
+            .from('users')
+            .select('business_id')
+            .eq('id', supplierRec.linked_user_id)
+            .maybeSingle();
+
+          if (supplierUser?.business_id) {
+            const myBizName = bizData?.business?.legal_name || bizData?.business?.owner_name || 'Customer';
+            await createInAppNotification({
+              businessId: supplierUser.business_id,
+              recipientId: supplierUser.business_id,
+              recipientType: 'owner',
+              title: 'Purchase Order Updated',
+              message: `${myBizName} has updated PO ${po.poNumber}. Please review the changes.`,
+              type: 'purchase_order',
+              category: 'purchase',
+              priority: 'medium',
+              relatedEntityType: 'purchase_order',
+              relatedEntityId: po.id,
+              relatedEntityName: po.poNumber,
+            });
+          }
+        }
+      }
+    } catch {}
+
+    Alert.alert('PO Updated', 'Purchase Order has been updated and the supplier has been notified.');
   };
 
   const handleCancelEdit = () => {
@@ -197,7 +344,7 @@ export default function PODetailsScreen() {
   };
 
   const handleViewSupplier = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/purchasing/supplier-details',
       params: {
         supplierId: po.supplierId || 'supplier_001',
@@ -214,7 +361,7 @@ export default function PODetailsScreen() {
   };
 
   const handleViewCustomer = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/people/customer-details',
       params: {
         customerId: po.customerId || 'customer_001',
@@ -230,63 +377,106 @@ export default function PODetailsScreen() {
     });
   };
 
-  const handleSendToSupplier = () => {
-    // Get the actual supplier data from the data store
-    const actualSupplier = po.supplierId ? dataStore.getSupplierById(po.supplierId) : null;
-    const supplierPhoneNumber = actualSupplier?.mobile || '+919876543210';
+  const [supplierPhone, setSupplierPhone] = useState<string>('');
+  const [refreshing, setRefreshing] = useState(false);
 
-    if (isEdited) {
-      Alert.alert(
-        'Send Updated PO to Supplier',
-        `Updated PO ${po.poNumber} will be sent to the supplier with all changes listed.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Send', 
-            onPress: () => {
-              // Navigate to supplier chat with specific supplier ID
-              router.push({
-                pathname: '/purchasing/supplier-chat',
-                params: {
-                  supplierId: po.supplierId || 'supplier_001',
-                  supplierName: po.supplierType === 'business' ? po.businessName : po.supplierName,
-                  supplierAvatar: po.supplierAvatar,
-                  supplierPhoneNumber: supplierPhoneNumber,
-                  message: `Here is the updated PO ${po.poNumber}`,
-                  poData: JSON.stringify(po),
-                  isUpdated: 'true'
-                }
-              });
-              setIsEdited(false);
-            }
+  const fetchSupplierPhone = useCallback(async () => {
+    if (po.supplierId) {
+      try {
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          const found = result.suppliers.find((s: any) => s.id === po.supplierId);
+          if (found) {
+            setSupplierPhone(found.mobile_number || '');
           }
-        ]
-      );
-    } else {
-      Alert.alert(
-        'Send PO to Supplier',
-        `PO ${po.poNumber} will be sent to the supplier.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Send', 
-            onPress: () => {
-              router.push({
-                pathname: '/purchasing/supplier-chat',
-                params: {
-                  supplierId: po.supplierId || 'supplier_001',
-                  supplierName: po.supplierType === 'business' ? po.businessName : po.supplierName,
-                  supplierAvatar: po.supplierAvatar,
-                  supplierPhoneNumber: supplierPhoneNumber,
-                  message: `Here is the PO ${po.poNumber}`,
-                  poData: JSON.stringify(po)
-                }
-              });
-            }
-          }
-        ]
-      );
+        }
+      } catch (error) {
+        console.error('Error fetching supplier phone:', error);
+      }
     }
+  }, [po.supplierId]);
+
+  useEffect(() => {
+    fetchSupplierPhone();
+  }, [fetchSupplierPhone]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    fetchSupplierPhone().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [fetchSupplierPhone]);
+
+  const handleSendToSupplier = () => {
+    const title = isEdited ? 'Send Updated PO to Supplier' : 'Send PO to Supplier';
+    const msg = isEdited
+      ? `Updated PO ${po.poNumber} will be sent to the supplier with all changes listed.`
+      : `PO ${po.poNumber} will be sent to the supplier.`;
+
+    Alert.alert(title, msg, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Send',
+        onPress: async () => {
+          const businessId = bizData?.business?.id;
+          if (!businessId || !po.supplierId) return;
+
+          const supplierDisplayName = po.supplierType === 'business' ? po.businessName : po.supplierName;
+
+          let linked = po.supplierBusinessId ? true : false;
+          if (!linked) {
+            const uid = await autoLinkSupplierToUser(po.supplierId);
+            linked = !!uid;
+          }
+          if (!linked) {
+            Alert.alert('Not on Manager', `${supplierDisplayName} is not on Manager yet.`);
+            return;
+          }
+
+          const convResult = await getOrCreateConversation({
+            businessId,
+            otherPartyId: po.supplierId,
+            otherPartyType: 'supplier',
+            otherPartyName: supplierDisplayName,
+          });
+
+          if (convResult.success && convResult.conversation) {
+            const content = isEdited
+              ? `📋 Updated Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ₹${po.grandTotal || po.totalAmount || 0}`
+              : `📋 Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ₹${po.grandTotal || po.totalAmount || 0}`;
+
+            const senderType = convResult.crossBusiness ? 'supplier' : 'owner';
+            const { data: { session } } = await (await import('@/lib/supabase')).supabase.auth.getSession();
+            await sendMessage({
+              conversationId: convResult.conversation.id,
+              senderId: session?.user?.id || '',
+              senderType,
+              senderName: bizData?.business?.legal_name || bizData?.business?.owner_name || 'Owner',
+              content,
+              messageType: 'file',
+              metadata: {
+                document_type: 'purchase_order',
+                entity_id: po.id || '',
+                entity_number: po.poNumber,
+              },
+            });
+
+            if (isEdited) setIsEdited(false);
+
+            safeRouter.push({
+              pathname: '/chat/conversation',
+              params: {
+                conversationId: convResult.conversation.id,
+                name: supplierDisplayName,
+                type: convResult.crossBusiness ? 'customer' : 'supplier',
+                otherPartyId: po.supplierId,
+                ...(convResult.crossBusiness ? { crossBusiness: 'true' } : {}),
+              }
+            });
+          }
+        }
+      }
+    ]);
   };
 
   const handleUpdateToCustomer = () => {
@@ -299,8 +489,7 @@ export default function PODetailsScreen() {
           { 
             text: 'Send', 
             onPress: () => {
-              // Navigate to customer chat with specific customer ID
-              router.push({
+              safeRouter.push({
                 pathname: '/people/customer-chat',
                 params: {
                   customerId: po.customerId || 'customer_001',
@@ -325,7 +514,7 @@ export default function PODetailsScreen() {
           { 
             text: 'Send', 
             onPress: () => {
-              router.push({
+              safeRouter.push({
                 pathname: '/people/customer-chat',
                 params: {
                   customerId: po.customerId || 'customer_001',
@@ -340,6 +529,72 @@ export default function PODetailsScreen() {
         ]
       );
     }
+  };
+
+  const handleAcknowledgePO = async () => {
+    Alert.alert(
+      'Acknowledge Purchase Order',
+      `Confirm that you have received PO ${po.poNumber} and will fulfill it?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Acknowledge',
+          onPress: async () => {
+            setIsAcknowledging(true);
+            try {
+              const result = await acknowledgePurchaseOrder(po.id);
+              if (!result.success) {
+                Alert.alert('Error', result.error || 'Failed to acknowledge PO');
+                return;
+              }
+              setPo(prev => ({ ...prev, status: 'confirmed' }));
+
+              // Notify the customer (PO creator) via in-app notification
+              try {
+                const { data: poRow } = await supabase
+                  .from('purchase_orders')
+                  .select('business_id')
+                  .eq('id', po.id)
+                  .single();
+                if (poRow?.business_id) {
+                  const myBizName = bizData?.business?.legal_name || bizData?.business?.owner_name || 'Supplier';
+                  await createInAppNotification({
+                    businessId: poRow.business_id,
+                    recipientId: poRow.business_id,
+                    recipientType: 'owner',
+                    title: 'Purchase Order Acknowledged',
+                    message: `${myBizName} has acknowledged PO ${po.poNumber} and will fulfill the order.`,
+                    type: 'purchase_order',
+                    category: 'purchase',
+                    priority: 'medium',
+                    relatedEntityType: 'purchase_order',
+                    relatedEntityId: po.id,
+                    relatedEntityName: po.poNumber,
+                  });
+                }
+              } catch {}
+
+              Alert.alert('Success', `PO ${po.poNumber} has been acknowledged. The customer has been notified.`);
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Something went wrong');
+            } finally {
+              setIsAcknowledging(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCreateInvoiceAgainstPO = () => {
+    safeRouter.push({
+      pathname: '/purchasing/create-invoice-against-po' as any,
+      params: {
+        poId: po.id,
+        poNumber: po.poNumber,
+        poData: JSON.stringify(po),
+      },
+    });
   };
 
   const handleDownload = () => {
@@ -367,6 +622,17 @@ export default function PODetailsScreen() {
   const updatePOField = (field: keyof POData, value: any) => {
     setEditForm(prev => ({ ...prev, [field]: value }));
   };
+
+  if (isLoadingFromDB) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={{ color: Colors.textLight, marginTop: 12 }}>Loading PO...</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -397,6 +663,7 @@ export default function PODetailsScreen() {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           {/* PO Header */}
           <View style={styles.poHeader}>
@@ -420,21 +687,29 @@ export default function PODetailsScreen() {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>
-                {po.type === 'created' ? 'Supplier Information' : 'Customer Information'}
+                {po.type === 'created' ? 'Supplier Information' : 'From Business'}
               </Text>
-              <TouchableOpacity 
-                style={styles.viewDetailsButton}
-                onPress={po.type === 'created' ? handleViewSupplier : handleViewCustomer}
-                activeOpacity={0.7}
-              >
-                <User size={16} color={Colors.primary} />
-                <Text style={styles.viewDetailsText}>
-                  View {po.type === 'created' ? 'Supplier' : 'Customer'}
-                </Text>
-              </TouchableOpacity>
+              {po.type === 'created' && (
+                <TouchableOpacity 
+                  style={styles.viewDetailsButton}
+                  onPress={handleViewSupplier}
+                  activeOpacity={0.7}
+                >
+                  <User size={16} color={Colors.primary} />
+                  <Text style={styles.viewDetailsText}>View Supplier</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={styles.supplierCard}>
-              <Image source={{ uri: po.supplierAvatar }} style={styles.supplierAvatar} />
+              {po.supplierAvatar ? (
+                <Image source={{ uri: po.supplierAvatar }} style={styles.supplierAvatar} />
+              ) : (
+                <View style={[styles.supplierAvatar, { backgroundColor: getAvatarColor(po.supplierType === 'business' ? po.businessName : po.supplierName), justifyContent: 'center', alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>
+                    {getInitials(po.supplierType === 'business' ? po.businessName || po.supplierName : po.supplierName)}
+                  </Text>
+                </View>
+              )}
               <View style={styles.supplierDetails}>
                 <Text style={styles.supplierName}>{po.supplierName}</Text>
                 {po.gstin && (
@@ -514,34 +789,74 @@ export default function PODetailsScreen() {
             <View style={styles.staffCard}>
               <Image source={{ uri: po.staffAvatar }} style={styles.staffAvatar} />
               <View style={styles.staffDetails}>
-                <Text style={styles.staffName}>{po.staffName}</Text>
-                <Text style={styles.staffRole}>Purchase Manager</Text>
+                <Text style={styles.staffName}>{po.staffName || 'N/A'}</Text>
+                <Text style={styles.staffRole}>Created By</Text>
               </View>
             </View>
           </View>
 
+          {/* Linked Invoice */}
+          {linkedInvoiceId && (
+            <View style={styles.section}>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: Colors.success }]}
+                onPress={() => safeRouter.push({ pathname: '/invoice-details', params: { invoiceId: linkedInvoiceId } })}
+                activeOpacity={0.7}
+              >
+                <FileText size={16} color={Colors.background} />
+                <Text style={styles.primaryButtonText}>View Invoice Against This PO</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View style={styles.section}>
             <View style={styles.actionButtons}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={handleEditPO} activeOpacity={0.7}>
-                <Edit3 size={16} color={Colors.text} />
-                <Text style={styles.secondaryButtonText}>Edit PO</Text>
-              </TouchableOpacity>
-              
+              {po.type === 'created' && !isAcknowledged && (
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleEditPO} activeOpacity={0.7}>
+                  <Edit3 size={16} color={Colors.text} />
+                  <Text style={styles.secondaryButtonText}>Edit PO</Text>
+                </TouchableOpacity>
+              )}
+
               {po.type === 'created' ? (
-                <TouchableOpacity style={[styles.primaryButton]} onPress={handleSendToSupplier} activeOpacity={0.7}>
-                  <Send size={16} color={Colors.background} />
-                  <Text style={styles.primaryButtonText}>
-                    {isEdited ? 'Send Updated PO to Supplier' : 'Send to Supplier'}
-                  </Text>
-                </TouchableOpacity>
+                isAcknowledged && linkedInvoiceId ? null : (
+                  <TouchableOpacity style={[styles.primaryButton]} onPress={handleSendToSupplier} activeOpacity={0.7}>
+                    <Send size={16} color={Colors.background} />
+                    <Text style={styles.primaryButtonText}>
+                      {isEdited ? 'Send Updated PO to Supplier' : 'Send to Supplier'}
+                    </Text>
+                  </TouchableOpacity>
+                )
               ) : (
-                <TouchableOpacity style={[styles.primaryButton]} onPress={handleUpdateToCustomer} activeOpacity={0.7}>
-                  <Send size={16} color={Colors.background} />
-                  <Text style={styles.primaryButtonText}>
-                    {isEdited ? 'Send Updated PO to Customer' : 'Send to Customer'}
-                  </Text>
-                </TouchableOpacity>
+                <>
+                  {po.status !== 'confirmed' && po.status !== 'received' ? (
+                    <TouchableOpacity
+                      style={[styles.primaryButton, { flex: 1 }]}
+                      onPress={handleAcknowledgePO}
+                      disabled={isAcknowledging}
+                      activeOpacity={0.7}
+                    >
+                      {isAcknowledging ? (
+                        <ActivityIndicator size="small" color={Colors.background} />
+                      ) : (
+                        <CheckCircle size={16} color={Colors.background} />
+                      )}
+                      <Text style={styles.primaryButtonText}>
+                        {isAcknowledging ? 'Acknowledging...' : 'Acknowledge PO'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : linkedInvoiceId ? null : (
+                    <TouchableOpacity
+                      style={[styles.primaryButton, { flex: 1, backgroundColor: Colors.success }]}
+                      onPress={handleCreateInvoiceAgainstPO}
+                      activeOpacity={0.7}
+                    >
+                      <FileText size={16} color={Colors.background} />
+                      <Text style={styles.primaryButtonText}>Create Invoice</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
               )}
             </View>
           </View>

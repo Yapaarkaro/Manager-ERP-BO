@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   Check,
@@ -59,7 +60,7 @@ export default function StockOutScreen() {
 
     const finalReason = selectedReason === 'Other' ? otherReason : selectedReason;
     
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-out/select-products',
       params: {
         reason: finalReason
@@ -81,7 +82,7 @@ export default function StockOutScreen() {
           <ArrowLeft size={24} color={Colors.text} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Stock Out</Text>
+        <Text style={styles.headerTitle}>Write-Off</Text>
       </View>
 
       <ScrollView 
@@ -89,7 +90,7 @@ export default function StockOutScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Select Reason for Stock Out</Text>
+        <Text style={styles.title}>Select Reason for Write-Off</Text>
         <Text style={styles.description}>
           Choose the reason why you're removing items from your inventory
         </Text>
@@ -127,7 +128,7 @@ export default function StockOutScreen() {
             <Text style={styles.otherReasonLabel}>Specify Reason</Text>
             <TextInput
               style={styles.otherReasonInput}
-              placeholder="Enter the reason for stock out..."
+              placeholder="Enter the reason for write-off..."
               placeholderTextColor={Colors.textLight}
               value={otherReason}
               onChangeText={setOtherReason}

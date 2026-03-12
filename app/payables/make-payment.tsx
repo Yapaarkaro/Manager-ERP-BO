@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
+import { getPayables } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   Search, 
@@ -34,31 +37,52 @@ const Colors = {
   }
 };
 
-const suppliersWithPayables = [];
-
 export default function MakePaymentScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredSuppliers, setFilteredSuppliers] = useState(suppliersWithPayables);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadPayables = useCallback(async () => {
+    try {
+      const result = await getPayables();
+      if (result.success && result.payables) {
+        setSuppliers(result.payables);
+      }
+    } catch (e) {
+      console.warn('Failed to load payables:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPayables();
+  }, [loadPayables]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadPayables();
+  }, [loadPayables]);
+
+  const filteredSuppliers = searchQuery.trim() === ''
+    ? suppliers
+    : suppliers.filter((supplier: any) =>
+        (supplier.supplierName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (supplier.businessName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (supplier.mobile || '').includes(searchQuery) ||
+        (supplier.gstin || '').toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredSuppliers(suppliersWithPayables);
-    } else {
-      const filtered = suppliersWithPayables.filter(supplier =>
-        supplier.supplierName.toLowerCase().includes(query.toLowerCase()) ||
-        supplier.businessName?.toLowerCase().includes(query.toLowerCase()) ||
-        supplier.mobile.includes(query) ||
-        supplier.gstin?.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredSuppliers(filtered);
-    }
   };
 
   const handleSupplierSelect = (supplier: any) => {
     // Clear the navigation stack and go to process payment
-    router.push({
+    safeRouter.push({
       pathname: '/payables/process-payment',
       params: {
         supplierData: JSON.stringify(supplier)
@@ -114,6 +138,7 @@ export default function MakePaymentScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Instructions */}
         <View style={styles.instructionsContainer}>
@@ -125,7 +150,12 @@ export default function MakePaymentScreen() {
 
         {/* Suppliers List */}
         <View style={styles.suppliersContainer}>
-          {filteredSuppliers.length === 0 ? (
+          {loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={[styles.emptyStateText, { marginTop: 16 }]}>Loading suppliers...</Text>
+            </View>
+          ) : filteredSuppliers.length === 0 ? (
             <View style={styles.emptyState}>
               <IndianRupee size={64} color={Colors.textLight} />
               <Text style={styles.emptyStateTitle}>No Suppliers Found</Text>

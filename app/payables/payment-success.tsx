@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, IndianRupee, Eye, FileText } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -30,6 +32,23 @@ const Colors = {
 export default function PaymentSuccessScreen() {
   const { paymentData } = useLocalSearchParams();
   const payment = JSON.parse(paymentData as string);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      safeRouter.replace('/dashboard');
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -77,19 +96,19 @@ export default function PaymentSuccessScreen() {
   };
 
   const handleMakeAnother = () => {
-    router.push('/payables/make-payment');
+    safeRouter.push('/payables/make-payment');
   };
 
   const handleGoToPayables = () => {
-    router.push('/payables');
+    safeRouter.push('/payables');
   };
 
   const handleGoToDashboard = () => {
-    router.push('/dashboard');
+    safeRouter.replace('/dashboard');
   };
 
   const handleViewSupplierAccount = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/payables/supplier-details',
       params: {
         supplierId: payment.supplierId,
@@ -97,7 +116,6 @@ export default function PaymentSuccessScreen() {
           id: payment.supplierId,
           supplierName: payment.supplierName,
           totalPayable: payment.remainingBalance,
-          // Add other supplier data as needed
         })
       }
     });

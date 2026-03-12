@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { productStore, Product } from '@/utils/productStore';
+import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
   Search, 
@@ -98,7 +99,7 @@ export default function ManualProductScreen() {
     console.log('Selected at:', new Date().toISOString());
     console.log('==============================================');
 
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-out/stock-details',
       params: {
         reason,
@@ -124,7 +125,13 @@ export default function ManualProductScreen() {
         onPress={() => handleProductSelect(product)}
         activeOpacity={0.8}
       >
-        <Image source={{ uri: product.image }} style={styles.productImage} />
+        {product.image ? (
+          <Image source={{ uri: product.image }} style={styles.productImage} />
+        ) : (
+          <View style={[styles.productImage, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+            <Package size={16} color="#6B7280" />
+          </View>
+        )}
         <View style={styles.productInfo}>
           <Text style={styles.productName}>{product.name}</Text>
           <Text style={styles.productCategory}>{product.category}</Text>
@@ -173,7 +180,7 @@ export default function ManualProductScreen() {
 
       {/* Reason Display */}
       <View style={styles.reasonContainer}>
-        <Text style={styles.reasonLabel}>Stock Out Reason:</Text>
+        <Text style={styles.reasonLabel}>Write-Off Reason:</Text>
         <Text style={styles.reasonText}>{reason}</Text>
       </View>
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
+import { getReceivables } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   Search, 
@@ -34,31 +37,52 @@ const Colors = {
   }
 };
 
-const customersWithReceivables: any[] = [];
-
 export default function ReceivePaymentScreen() {
   const { customerId, customerData } = useLocalSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredCustomers, setFilteredCustomers] = useState(customersWithReceivables);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadReceivables = useCallback(async () => {
+    try {
+      const result = await getReceivables();
+      if (result.success && result.receivables) {
+        setCustomers(result.receivables);
+      }
+    } catch (e) {
+      console.warn('Failed to load receivables:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadReceivables();
+  }, [loadReceivables]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadReceivables();
+  }, [loadReceivables]);
+
+  const filteredCustomers = searchQuery.trim() === ''
+    ? customers
+    : customers.filter((customer: any) =>
+        (customer.customerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (customer.businessName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (customer.mobile || '').includes(searchQuery) ||
+        (customer.gstin || '').toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredCustomers(customersWithReceivables);
-    } else {
-      const filtered = customersWithReceivables.filter(customer =>
-        customer.customerName.toLowerCase().includes(query.toLowerCase()) ||
-        customer.businessName?.toLowerCase().includes(query.toLowerCase()) ||
-        customer.mobile.includes(query) ||
-        customer.gstin?.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredCustomers(filtered);
-    }
   };
 
   const handleCustomerSelect = (customer: any) => {
     // Clear the navigation stack and go to collect payment
-    router.push({
+    safeRouter.push({
       pathname: '/receivables/collect-payment',
       params: {
         customerData: JSON.stringify(customer)
@@ -114,6 +138,7 @@ export default function ReceivePaymentScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Instructions */}
         <View style={styles.instructionsContainer}>
@@ -125,7 +150,12 @@ export default function ReceivePaymentScreen() {
 
         {/* Customers List */}
         <View style={styles.customersContainer}>
-          {filteredCustomers.length === 0 ? (
+          {loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={[styles.emptyStateText, { marginTop: 16 }]}>Loading customers...</Text>
+            </View>
+          ) : filteredCustomers.length === 0 ? (
             <View style={styles.emptyState}>
               <IndianRupee size={64} color={Colors.textLight} />
               <Text style={styles.emptyStateTitle}>No Customers Found</Text>

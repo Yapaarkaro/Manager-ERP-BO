@@ -19,6 +19,7 @@ import {
   Clock,
   Receipt,
 } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#ffffff',
@@ -38,78 +39,7 @@ const Colors = {
 };
 
 export default function SubscriptionsScreen() {
-  const [subscriptions] = useState([
-    {
-      id: '1',
-      name: 'ERP Basic Plan',
-      amount: 500,
-      currency: '₹',
-      status: 'current',
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
-      nextBilling: '2024-12-31',
-      invoiceId: 'INV-001',
-      description: 'Essential ERP features for small businesses',
-      features: ['Inventory Management', 'Basic Sales Tracking', 'Simple Reports'],
-      type: 'subscription'
-    },
-    {
-      id: '2',
-      name: 'ERP Pro Plan',
-      amount: 750,
-      currency: '₹',
-      status: 'paid',
-      startDate: '2024-01-01',
-      endDate: '2024-03-31',
-      nextBilling: '2024-03-31',
-      invoiceId: 'INV-002',
-      description: 'Complete ERP solution with all modules',
-      features: ['Full Inventory Management', 'Sales & CRM', 'Financial Reports', 'Analytics Dashboard'],
-      type: 'subscription'
-    },
-    {
-      id: '3',
-      name: 'GST Filing Service',
-      amount: 500,
-      currency: '₹',
-      status: 'current',
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
-      nextBilling: '2024-12-31',
-      invoiceId: 'INV-003',
-      description: 'Monthly GST filing and compliance service',
-      features: ['GST Return Filing', 'Compliance Monitoring', 'Tax Calculation', 'Document Management'],
-      type: 'addon'
-    },
-    {
-      id: '4',
-      name: 'Digital Marketing Package',
-      amount: 5000,
-      currency: '₹',
-      status: 'paid',
-      startDate: '2024-02-01',
-      endDate: '2024-04-30',
-      nextBilling: '2024-04-30',
-      invoiceId: 'INV-004',
-      description: 'Comprehensive digital marketing services',
-      features: ['Social Media Management', 'Google Ads', 'Content Creation', 'Performance Analytics'],
-      type: 'marketing'
-    },
-    {
-      id: '5',
-      name: 'SEO Optimization',
-      amount: 3000,
-      currency: '₹',
-      status: 'failed',
-      startDate: '2024-03-01',
-      endDate: '2024-05-31',
-      nextBilling: '2024-05-31',
-      invoiceId: 'INV-005',
-      description: 'Search engine optimization services',
-      features: ['Keyword Research', 'On-Page SEO', 'Link Building', 'Ranking Reports'],
-      type: 'marketing'
-    },
-  ]);
+  const [subscriptions] = useState<any[]>([]);
 
   const [selectedSubscription, setSelectedSubscription] = useState<any>(null);
   const [subscriptionSearch, setSubscriptionSearch] = useState('');
@@ -123,7 +53,7 @@ export default function SubscriptionsScreen() {
     const invoiceData = {
       id: subscription.id,
       invoiceNumber: subscription.invoiceId,
-      customerName: 'Business Owner',
+      customerName: '',
       customerType: 'business',
       subscriptionName: subscription.name,
       subscriptionType: subscription.type,
@@ -136,14 +66,14 @@ export default function SubscriptionsScreen() {
       description: subscription.description,
       features: subscription.features,
       customerDetails: {
-        name: 'Business Owner',
-        mobile: '+91 98765 43210',
-        businessName: 'Your Business Name',
+        name: '',
+        mobile: '',
+        businessName: '',
         address: ''
       }
     };
 
-    router.push({
+    safeRouter.push({
       pathname: '/subscription-invoice-details',
       params: {
         invoiceId: invoiceData.id,
@@ -225,100 +155,31 @@ export default function SubscriptionsScreen() {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* January Month Invoice */}
-        <View style={styles.monthSection}>
-          <Text style={styles.monthTitle}>January Month Invoice</Text>
-          <TouchableOpacity
-            style={styles.invoiceCard}
-            onPress={() => handleSubscriptionSelect(subscriptions[0])}
-            activeOpacity={0.7}
-          >
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceName}>ERP Basic Plan</Text>
-              <View style={[styles.statusBadge, { backgroundColor: Colors.primary + '15' }]}>
-                <Text style={[styles.statusText, { color: Colors.primary }]}>Current</Text>
-              </View>
+        {subscriptions.length === 0 ? (
+          <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+            <Text style={{ fontSize: 16, color: Colors.textLight }}>No subscriptions found</Text>
+          </View>
+        ) : (
+          subscriptions.map((sub, index) => (
+            <View key={sub.id} style={styles.monthSection}>
+              <Text style={styles.monthTitle}>{sub.name}</Text>
+              <TouchableOpacity
+                style={styles.invoiceCard}
+                onPress={() => handleSubscriptionSelect(sub)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.invoiceHeader}>
+                  <Text style={styles.invoiceName}>{sub.name}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: (sub.status === 'current' ? Colors.primary : sub.status === 'paid' ? Colors.success : Colors.error) + '15' }]}>
+                    <Text style={[styles.statusText, { color: sub.status === 'current' ? Colors.primary : sub.status === 'paid' ? Colors.success : Colors.error }]}>{sub.status}</Text>
+                  </View>
+                </View>
+                <Text style={styles.invoiceAmount}>{sub.currency}{sub.amount}</Text>
+                <Text style={styles.invoiceDate}>{sub.startDate} - {sub.endDate}</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.invoiceAmount}>₹500</Text>
-            <Text style={styles.invoiceDate}>Jan 1, 2024 - Dec 31, 2024</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* February Month Invoice */}
-        <View style={styles.monthSection}>
-          <Text style={styles.monthTitle}>February Month Invoice</Text>
-          <TouchableOpacity
-            style={styles.invoiceCard}
-            onPress={() => handleSubscriptionSelect(subscriptions[1])}
-            activeOpacity={0.7}
-          >
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceName}>ERP Pro Plan</Text>
-              <View style={[styles.statusBadge, { backgroundColor: Colors.success + '15' }]}>
-                <Text style={[styles.statusText, { color: Colors.success }]}>Paid</Text>
-              </View>
-            </View>
-            <Text style={styles.invoiceAmount}>₹750</Text>
-            <Text style={styles.invoiceDate}>Jan 1, 2024 - Mar 31, 2024</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* GST Add-on Services */}
-        <View style={styles.monthSection}>
-          <Text style={styles.monthTitle}>GST (Add-on Services)</Text>
-          <TouchableOpacity
-            style={styles.invoiceCard}
-            onPress={() => handleSubscriptionSelect(subscriptions[2])}
-            activeOpacity={0.7}
-          >
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceName}>GST Filing Service</Text>
-              <View style={[styles.statusBadge, { backgroundColor: Colors.secondary + '15' }]}>
-                <Text style={[styles.statusText, { color: Colors.secondary }]}>Add-on</Text>
-              </View>
-            </View>
-            <Text style={styles.invoiceAmount}>₹500</Text>
-            <Text style={styles.invoiceDate}>Jan 1, 2024 - Dec 31, 2024</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* March Invoice */}
-        <View style={styles.monthSection}>
-          <Text style={styles.monthTitle}>March Invoice</Text>
-          <TouchableOpacity
-            style={styles.invoiceCard}
-            onPress={() => handleSubscriptionSelect(subscriptions[3])}
-            activeOpacity={0.7}
-          >
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceName}>Digital Marketing Package</Text>
-              <View style={[styles.statusBadge, { backgroundColor: Colors.success + '15' }]}>
-                <Text style={[styles.statusText, { color: Colors.success }]}>Paid</Text>
-              </View>
-            </View>
-            <Text style={styles.invoiceAmount}>₹5,000</Text>
-            <Text style={styles.invoiceDate}>Feb 1, 2024 - Apr 30, 2024</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Marketing Services */}
-        <View style={styles.monthSection}>
-          <Text style={styles.monthTitle}>Marketing Services</Text>
-          <TouchableOpacity
-            style={styles.invoiceCard}
-            onPress={() => handleSubscriptionSelect(subscriptions[4])}
-            activeOpacity={0.7}
-          >
-            <View style={styles.invoiceHeader}>
-              <Text style={styles.invoiceName}>SEO Optimization</Text>
-              <View style={[styles.statusBadge, { backgroundColor: Colors.error + '15' }]}>
-                <Text style={[styles.statusText, { color: Colors.error }]}>Failed</Text>
-              </View>
-            </View>
-            <Text style={styles.invoiceAmount}>₹3,000</Text>
-            <Text style={styles.invoiceDate}>Mar 1, 2024 - May 31, 2024</Text>
-          </TouchableOpacity>
-        </View>
+          ))
+        )}
 
         {/* Current Plan Section - At Bottom */}
         <View style={styles.currentPlanSection}>

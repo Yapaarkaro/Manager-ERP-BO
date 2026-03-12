@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { AuthCheckSkeleton } from '@/components/SkeletonLoader';
+import { supabase, withTimeout } from '@/lib/supabase';
+import { mapLocationsToAddresses } from '@/utils/dataStore';
 import { 
   FileText, 
   Smartphone, 
@@ -75,8 +78,168 @@ const onboardingData = [
 
 export default function OnboardingScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const debouncedNavigate = useDebounceNavigation();
+
+  // Check auth status on mount - Supabase is the sole source of truth
+  useEffect(() => {
+    let cancelled = false;
+    const checkAuth = async () => {
+      try {
+        let session: any = null;
+        try {
+          const { data } = await withTimeout(
+            supabase.auth.getSession(),
+            5000,
+            'Index: getSession'
+          );
+          session = data?.session;
+        } catch (authErr: any) {
+          if (authErr?.name === 'AuthUnknownError' || authErr?.message?.includes('JSON Parse error')) {
+            console.log('⚠️ Auth server returned non-JSON response, treating as no session');
+          }
+        }
+        if (cancelled) return;
+        if (!session?.user) {
+          return;
+        }
+
+        try {
+          const { verifySuperadmin } = await import('@/services/superadminApi');
+          const isSA = await verifySuperadmin();
+          if (!cancelled && isSA) {
+            console.log('🛡️ Superadmin detected on launch, signing out for re-auth');
+            await supabase.auth.signOut();
+            setIsCheckingAuth(false);
+            return;
+          }
+        } catch {
+          // Not superadmin or check failed -- continue normal flow
+        }
+        if (cancelled) return;
+
+        const { data: userData } = await withTimeout(
+          Promise.resolve(supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle()),
+          5000,
+          'Index: check user business'
+        ) as { data: { business_id: string } | null };
+        if (cancelled) return;
+
+        if (userData?.business_id) {
+          // Check if onboarding is complete
+          const { data: bizData } = await withTimeout(
+            Promise.resolve(
+              supabase.from('businesses').select('is_onboarding_complete').eq('id', userData.business_id).single()
+            ),
+            5000,
+            'Index: check onboarding status'
+          ) as { data: { is_onboarding_complete: boolean } | null };
+          if (cancelled) return;
+
+          if (bizData?.is_onboarding_complete) {
+            try {
+              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+              await Promise.race([
+                prefetchBusinessData(),
+                new Promise(r => setTimeout(r, 3000)),
+              ]);
+            } catch {}
+            router.replace('/dashboard');
+            return;
+          }
+          // Business exists but onboarding not complete - fall through to resume
+        }
+
+        // Check signup_progress to resume from where they left off
+        const { data: progress } = await withTimeout(
+          Promise.resolve(
+            supabase.from('signup_progress')
+              .select('current_step, phone, tax_id_type, tax_id_value, owner_name, business_name, business_type, gstin_data, business_id')
+              .eq('user_id', session.user.id)
+              .maybeSingle()
+          ),
+          5000,
+          'Index: check signup progress'
+        ) as { data: any };
+        if (cancelled) return;
+
+        if (progress?.current_step && progress.current_step !== 'complete') {
+          const step = progress.current_step;
+
+          // Early steps: sign out and restart from mobile so user re-authenticates
+          const earlySteps = ['mobile', 'mobileOtp', 'otp'];
+          if (earlySteps.includes(step)) {
+            await supabase.auth.signOut();
+            if (!cancelled) setIsCheckingAuth(false);
+            return;
+          }
+
+          const resumeParams: Record<string, string> = {
+            mobile: progress.phone || '',
+            type: progress.tax_id_type || '',
+            value: progress.tax_id_value || '',
+            name: progress.owner_name || '',
+            businessName: progress.business_name || '',
+            businessType: progress.business_type || '',
+            gstinData: progress.gstin_data ? JSON.stringify(progress.gstin_data) : '',
+          };
+
+          const needsAddresses = ['primaryAddress', 'address', 'addressManagement', 'primaryBank', 'banking', 'bankManagement', 'finalSetup', 'businessSummary'];
+          if (needsAddresses.includes(step) && progress.business_id) {
+            try {
+              const { data: locations } = await supabase.from('locations').select('*').eq('business_id', progress.business_id).eq('is_deleted', false);
+              resumeParams.allAddresses = JSON.stringify(mapLocationsToAddresses(locations || []));
+            } catch { resumeParams.allAddresses = '[]'; }
+          }
+          const needsBanks = ['bankManagement', 'finalSetup', 'businessSummary'];
+          if (needsBanks.includes(step) && progress.business_id) {
+            try {
+              const { data: banks } = await supabase.from('bank_accounts').select('*').eq('business_id', progress.business_id);
+              resumeParams.allBankAccounts = JSON.stringify(banks || []);
+            } catch { resumeParams.allBankAccounts = '[]'; }
+          }
+
+          const stepToRoute: Record<string, string> = {
+            gstinPan: '/auth/gstin-pan',
+            taxId: '/auth/gstin-pan',
+            gstinOtp: '/auth/gstin-pan-otp',
+            taxIdOtp: '/auth/gstin-pan-otp',
+            verifyPan: '/auth/gstin-pan',
+            businessDetails: '/auth/business-details',
+            primaryAddress: '/auth/business-address',
+            address: '/auth/business-address',
+            addressManagement: '/auth/address-confirmation',
+            primaryBank: '/auth/banking-details',
+            banking: '/auth/banking-details',
+            bankManagement: '/auth/bank-accounts',
+            finalSetup: '/auth/final-setup',
+            businessSummary: '/auth/business-summary',
+          };
+          const route = stepToRoute[step];
+          if (route) {
+            router.replace({ pathname: route as any, params: resumeParams });
+            return;
+          }
+        }
+        // Session exists but no business and no progress - show onboarding
+      } catch {
+        // Auth/backend check failed - show onboarding
+      } finally {
+        if (!cancelled) setIsCheckingAuth(false);
+      }
+    };
+    checkAuth();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (isCheckingAuth) {
+    return (
+      <ResponsiveContainer fullWidth>
+        <AuthCheckSkeleton />
+      </ResponsiveContainer>
+    );
+  }
 
   const handleNext = () => {
     if (currentIndex < onboardingData.length - 1) {

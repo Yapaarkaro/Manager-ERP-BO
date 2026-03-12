@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { 
   CircleCheck as CheckCircle, 
   Download, 
@@ -18,6 +19,7 @@ import {
   Eye,
   FileText
 } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -38,6 +40,23 @@ const Colors = {
 export default function POSuccessScreen() {
   const { poData } = useLocalSearchParams();
   const po = JSON.parse(poData as string);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      safeRouter.replace('/dashboard');
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -60,20 +79,61 @@ export default function POSuccessScreen() {
   };
 
   const handleCreateAnother = () => {
-    router.push('/purchasing/purchases');
+    safeRouter.push('/purchasing/purchases');
   };
 
   const handleGoToDashboard = () => {
-    router.push('/dashboard');
+    safeRouter.replace('/dashboard');
   };
 
   const handleViewPODetails = () => {
-    router.push({
+    const productsArr = po.products || [];
+    const itemsArr = po.items || [];
+
+    const normalizedItems = itemsArr.length > 0
+      ? itemsArr.map((it: any) => ({
+          id: it.productId || it.id || '',
+          name: it.productName || it.name || '',
+          quantity: it.quantity || 0,
+          price: it.unitPrice || it.price || 0,
+          total: it.totalPrice || it.total || (it.quantity * (it.unitPrice || it.price || 0)),
+        }))
+      : productsArr.map((p: any) => ({
+          id: p.id || '',
+          name: p.name || '',
+          quantity: p.orderQuantity || p.quantity || 0,
+          price: p.price || p.unitPrice || 0,
+          total: (p.orderQuantity || p.quantity || 0) * (p.price || p.unitPrice || 0),
+        }));
+
+    const detailData = {
+      id: po.id || po.poNumber,
+      poNumber: po.poNumber,
+      supplierName: po.supplier?.businessName || po.supplier?.name || po.supplierName || '',
+      supplierType: po.supplier?.supplierType || 'business',
+      businessName: po.supplier?.businessName || '',
+      gstin: po.supplier?.gstin || '',
+      staffName: po.staffName || '',
+      staffAvatar: '',
+      status: po.status || 'sent',
+      type: 'created' as const,
+      amount: po.grandTotal || po.totalAmount || 0,
+      itemCount: normalizedItems.length,
+      date: po.createdAt || new Date().toISOString(),
+      expectedDelivery: po.expectedDelivery || '',
+      supplierAvatar: '',
+      items: normalizedItems,
+      terms: '',
+      notes: po.notes || '',
+      supplierId: po.supplier?.id || '',
+    };
+
+    safeRouter.push({
       pathname: '/purchasing/po-details',
       params: {
-        poId: po.poNumber,
-        poData: JSON.stringify(po)
-      }
+        poId: detailData.id,
+        poData: JSON.stringify(detailData),
+      },
     });
   };
 
@@ -108,14 +168,14 @@ export default function POSuccessScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Supplier:</Text>
                 <Text style={styles.detailValue}>
-                  {po.supplier.supplierType === 'business' ? po.supplier.businessName : po.supplier.name}
+                  {po.supplier?.businessName || po.supplier?.name || po.supplierName || ''}
                 </Text>
               </View>
               
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Products:</Text>
                 <Text style={styles.detailValue}>
-                  {po.products.reduce((sum: number, product: any) => sum + product.orderQuantity, 0)} items
+                  {(po.products || po.items || []).reduce((sum: number, p: any) => sum + (p.orderQuantity || p.quantity || 0), 0)} items
                 </Text>
               </View>
               
@@ -129,7 +189,9 @@ export default function POSuccessScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Expected Delivery:</Text>
                 <Text style={styles.detailValue}>
-                  {new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}
+                  {po.expectedDelivery
+                    ? new Date(po.expectedDelivery).toLocaleDateString('en-IN')
+                    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}
                 </Text>
               </View>
 

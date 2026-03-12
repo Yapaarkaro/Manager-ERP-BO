@@ -4,13 +4,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   TextInput,
   Alert,
   Modal,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   Search,
@@ -147,13 +148,13 @@ export default function VerifyStockScreen() {
 
   const handleScanBarcode = () => {
     // Navigate to barcode scanner
-    router.push('/inventory/scan-product');
+    safeRouter.push('/inventory/scan-product');
   };
 
   const handleReportDiscrepancy = () => {
     if (!po) return;
     
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-in/discrepancy-report',
       params: {
         poData: JSON.stringify(po)
@@ -165,7 +166,7 @@ export default function VerifyStockScreen() {
     if (!po) return;
     
     // Navigate to confirmation page
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-in/stock-confirmation',
       params: {
         poData: JSON.stringify(po),

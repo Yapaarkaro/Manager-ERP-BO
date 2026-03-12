@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,12 @@ import {
   ScrollView,
   TextInput,
   Image,
+  RefreshControl,
 } from 'react-native';
+import { invalidateApiCache } from '@/services/backendApi';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
   Search, 
@@ -51,6 +54,19 @@ export default function DailyInvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(invoicesList);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns'>('all');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    try {
+      const refreshedList = JSON.parse(invoices as string);
+      setFilteredInvoices(refreshedList);
+    } catch (e) {
+      console.error('Refresh failed:', e);
+    }
+    setTimeout(() => setRefreshing(false), 600);
+  }, [invoices]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -92,24 +108,24 @@ export default function DailyInvoicesScreen() {
       const returnData = {
         id: invoice.id,
         returnNumber: invoice.invoiceNumber,
-        originalInvoiceNumber: invoice.originalInvoice || 'INV-2024-001',
+        originalInvoiceNumber: invoice.originalInvoice || '',
         customerName: invoice.customerName,
         customerType: invoice.customerType,
         staffName: invoice.staffName,
         staffAvatar: invoice.staffAvatar,
-        refundStatus: 'refunded',
+        refundStatus: invoice.refundStatus || 'pending',
         amount: invoice.amount,
-        itemCount: 1,
+        itemCount: invoice.itemCount || 0,
         date: date as string,
-        reason: 'Customer return',
+        reason: invoice.reason || '',
         customerDetails: {
           name: invoice.customerName,
-          mobile: '+91 98765 43210',
+          mobile: '',
           address: ''
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/return-details',
         params: {
           returnId: returnData.id,
@@ -117,7 +133,6 @@ export default function DailyInvoicesScreen() {
         }
       });
     } else {
-      // Navigate to invoice details
       const invoiceData = {
         id: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -125,19 +140,20 @@ export default function DailyInvoicesScreen() {
         customerType: invoice.customerType,
         staffName: invoice.staffName,
         staffAvatar: invoice.staffAvatar,
-        paymentStatus: 'paid',
+        paymentStatus: invoice.paymentStatus || 'paid',
         amount: invoice.amount,
-        itemCount: 2,
+        totalAmount: invoice.amount,
+        itemCount: invoice.itemCount || 0,
         date: date as string,
         customerDetails: {
           name: invoice.customerName,
-          mobile: '+91 98765 43210',
+          mobile: '',
           businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
           address: ''
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
@@ -273,10 +289,16 @@ export default function DailyInvoicesScreen() {
         <View style={styles.invoiceFooter}>
           {/* Left Side - Staff Info */}
           <View style={styles.staffInfo}>
-            <Image 
-              source={{ uri: invoice.staffAvatar }}
-              style={styles.staffAvatar}
-            />
+            {invoice.staffAvatar ? (
+              <Image 
+                source={{ uri: invoice.staffAvatar }}
+                style={styles.staffAvatar}
+              />
+            ) : (
+              <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                <User size={14} color="#6B7280" />
+              </View>
+            )}
             <Text style={styles.staffName}>Processed by {invoice.staffName}</Text>
           </View>
 
@@ -434,6 +456,7 @@ export default function DailyInvoicesScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {filteredInvoices.length === 0 ? (
           <View style={styles.emptyState}>

@@ -9,10 +9,17 @@ import {
   Alert,
   Modal,
   TextInput,
+  Platform,
+  ActionSheetIOS,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Package, PackageMinus, PackagePlus, TriangleAlert as AlertTriangle, Eye, FileText, User, Calendar, MapPin, Hash, Building2, Phone, Mail, Clock, Edit3, Check, X, MessageSquare } from 'lucide-react-native';
+import { ArrowLeft, Package, PackageMinus, PackagePlus, TriangleAlert as AlertTriangle, Eye, FileText, User, Calendar, MapPin, Hash, Building2, Phone, Mail, Clock, Edit3, Check, X, MessageSquare, Download, Camera, Images } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { generateInvoicePDF, InvoicePDFData } from '@/utils/invoicePdfGenerator';
+import { shareInvoicePDF } from '@/utils/invoiceShareUtils';
+import * as ImagePicker from 'expo-image-picker';
 
 const Colors = {
   background: '#FFFFFF',
@@ -33,12 +40,15 @@ const Colors = {
 
 export default function DiscrepancyDetailsScreen() {
   const { discrepancyId, discrepancyData } = useLocalSearchParams();
+  const { data: businessData } = useBusinessData();
   const discrepancy = JSON.parse(discrepancyData as string);
   
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showNotesModal, setShowNotesModal] = useState(false);
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
   const [newNote, setNewNote] = useState('');
   const [currentStatus, setCurrentStatus] = useState(discrepancy.status);
+  const [evidenceImages, setEvidenceImages] = useState<string[]>(discrepancy.evidenceImages || []);
 
   const statusOptions = [
     { value: 'pending', label: 'Pending Investigation', color: Colors.error },
@@ -108,7 +118,7 @@ export default function DiscrepancyDetailsScreen() {
       const returnInvoiceData = {
         id: invoice.id,
         returnNumber: invoice.invoiceNumber,
-        originalInvoiceNumber: 'INV-2024-001',
+        originalInvoiceNumber: '',
         customerName: invoice.customerName || 'N/A',
         customerType: 'business',
         staffName: discrepancy.reportedBy.name,
@@ -120,12 +130,12 @@ export default function DiscrepancyDetailsScreen() {
         reason: 'Product return',
         customerDetails: {
           name: invoice.customerName || 'N/A',
-          mobile: '+91 98765 43210',
-          address: '123, Sample Address, City - 560001'
+          mobile: '',
+          address: ''
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/return-details',
         params: {
           returnId: returnInvoiceData.id,
@@ -147,13 +157,13 @@ export default function DiscrepancyDetailsScreen() {
         date: invoice.date,
         customerDetails: {
           name: invoice.customerName || invoice.supplierName || 'N/A',
-          mobile: '+91 98765 43210',
+          mobile: '',
           businessName: invoice.type === 'purchase' ? invoice.supplierName : invoice.customerName,
-          address: '123, Sample Address, City - 560001'
+          address: ''
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
@@ -181,6 +191,90 @@ export default function DiscrepancyDetailsScreen() {
     setShowNotesModal(false);
   };
 
+  const handleDownloadReport = async () => {
+    try {
+      const pdfData: InvoicePDFData = {
+        type: 'stock_discrepancy',
+        invoiceNumber: `DISC-${discrepancy.id || discrepancyId}`,
+        invoiceDate: discrepancy.reportedDate || discrepancy.date || new Date().toISOString(),
+        business: {
+          name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
+          gstin: businessData?.business?.tax_id || '',
+        },
+        items: [],
+        subtotal: 0,
+        taxAmount: 0,
+        totalAmount: discrepancy.value || 0,
+        discrepancyDetails: {
+          productName: discrepancy.productName || discrepancy.product || '',
+          expectedStock: discrepancy.expectedQuantity || discrepancy.systemStock || 0,
+          actualStock: discrepancy.actualQuantity || discrepancy.physicalStock || 0,
+          discrepancyQty: discrepancy.discrepancyQuantity || discrepancy.difference || 0,
+          value: discrepancy.value || 0,
+          reason: discrepancy.reason,
+          investigationNotes: discrepancy.investigationNotes || discrepancy.notes,
+        },
+        staffName: discrepancy.reportedBy?.name,
+        businessId: businessData?.business?.id,
+      };
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, pdfData.invoiceNumber);
+    } catch (error: any) {
+      Alert.alert('Download Failed', error.message || 'Could not generate report');
+    }
+  };
+
+  const pickImageFromGallery = async () => {
+    setShowImagePickerModal(false);
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to your photo library to upload evidence images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      quality: 0.8,
+      selectionLimit: 5,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      setEvidenceImages(prev => [...prev, ...result.assets.map(a => a.uri)]);
+    }
+  };
+
+  const takePhoto = async () => {
+    setShowImagePickerModal(false);
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow camera access to take evidence photos.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      setEvidenceImages(prev => [...prev, result.assets[0].uri]);
+    }
+  };
+
+  const removeEvidenceImage = (index: number) => {
+    setEvidenceImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddImage = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options: ['Cancel', 'Take Photo', 'Choose from Gallery'], cancelButtonIndex: 0 },
+        (buttonIndex) => {
+          if (buttonIndex === 1) takePhoto();
+          else if (buttonIndex === 2) pickImageFromGallery();
+        }
+      );
+    } else {
+      setShowImagePickerModal(true);
+    }
+  };
+
   const DiscrepancyIcon = getDiscrepancyTypeIcon(discrepancy.discrepancyType);
   const discrepancyColor = getDiscrepancyTypeColor(discrepancy.discrepancyType);
   const statusColor = getStatusColor(currentStatus);
@@ -200,19 +294,30 @@ export default function DiscrepancyDetailsScreen() {
         
         <Text style={styles.headerTitle}>Discrepancy Details</Text>
         
-        <TouchableOpacity
-          style={styles.headerActionButton}
-          onPress={() => setShowStatusModal(true)}
-          activeOpacity={0.7}
-        >
-          <Edit3 size={20} color={Colors.primary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={handleDownloadReport}
+            activeOpacity={0.7}
+          >
+            <Download size={20} color={Colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={() => setShowStatusModal(true)}
+            activeOpacity={0.7}
+          >
+            <Edit3 size={20} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Discrepancy Header */}
         <View style={[
@@ -440,6 +545,45 @@ export default function DiscrepancyDetailsScreen() {
           </View>
         </View>
 
+        {/* Evidence Images */}
+        <View style={styles.section}>
+          <View style={styles.notesHeader}>
+            <Text style={styles.sectionTitle}>Evidence Images</Text>
+            <TouchableOpacity
+              style={styles.addNoteButton}
+              onPress={handleAddImage}
+              activeOpacity={0.7}
+            >
+              <Camera size={16} color={Colors.primary} />
+              <Text style={styles.addNoteText}>Add Image</Text>
+            </TouchableOpacity>
+          </View>
+
+          {evidenceImages.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.evidenceScroll}>
+              {evidenceImages.map((uri, idx) => (
+                <View key={idx} style={styles.evidenceImageWrapper}>
+                  <Image source={{ uri }} style={styles.evidenceImage} />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => removeEvidenceImage(idx)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={14} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          ) : (
+            <TouchableOpacity style={styles.notesCard} onPress={handleAddImage} activeOpacity={0.7}>
+              <Camera size={24} color={Colors.textLight} style={{ marginBottom: 8 }} />
+              <Text style={styles.notesPlaceholder}>
+                Tap to add evidence photos from camera or gallery
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Investigation Notes */}
         <View style={styles.section}>
           <View style={styles.notesHeader}>
@@ -531,6 +675,55 @@ export default function DiscrepancyDetailsScreen() {
                   )}
                 </TouchableOpacity>
               ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Image Picker Modal (Android/Web) */}
+      <Modal
+        visible={showImagePickerModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImagePickerModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Evidence Image</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowImagePickerModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 20, gap: 12 }}>
+              <TouchableOpacity
+                style={styles.imagePickerOption}
+                onPress={takePhoto}
+                activeOpacity={0.7}
+              >
+                <Camera size={24} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.imagePickerOptionTitle}>Take Photo</Text>
+                  <Text style={styles.imagePickerOptionSub}>Use camera to capture evidence</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.imagePickerOption}
+                onPress={pickImageFromGallery}
+                activeOpacity={0.7}
+              >
+                <Images size={24} color={Colors.success} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.imagePickerOptionTitle}>Choose from Gallery</Text>
+                  <Text style={styles.imagePickerOptionSub}>Select existing photos</Text>
+                </View>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -632,6 +825,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 160,
   },
   discrepancyHeader: {
     backgroundColor: Colors.background,
@@ -1123,5 +1317,49 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: Colors.textLight,
+  },
+  evidenceScroll: {
+    marginTop: 4,
+  },
+  evidenceImageWrapper: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  evidenceImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 10,
+    backgroundColor: Colors.grey[100],
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  imagePickerOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  imagePickerOptionSub: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginTop: 2,
   },
 });

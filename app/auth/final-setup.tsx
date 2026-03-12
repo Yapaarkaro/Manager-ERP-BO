@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CircleCheck as CheckCircle, Banknote, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore } from '@/utils/dataStore';
+// DataStore removed - Supabase backend is the sole source of truth
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import FiscalYearSelector from '@/components/FiscalYearSelector';
 import { saveSignupProgress } from '@/services/backendApi';
@@ -204,6 +204,12 @@ export default function FinalSetupScreen() {
               mobile: mobileNumber,
               mobileVerified: true,
               currentStep: 'finalSetup',
+              taxIdType: type as string || undefined,
+              taxIdValue: value as string || undefined,
+              ownerName: name as string || undefined,
+              businessName: businessName as string || undefined,
+              businessType: businessType as string || undefined,
+              gstinData: gstinData ? (typeof gstinData === 'string' ? gstinData : JSON.stringify(gstinData)) : undefined,
             }).then((progressResult) => {
               if (progressResult.success) {
                 console.log('✅ Signup progress saved: finalSetup');
@@ -226,11 +232,7 @@ export default function FinalSetupScreen() {
     const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
     clearBusinessDataCache();
     
-    // Get latest data from dataStore to ensure we have all updates
-    const latestAddresses = dataStore.getAddresses();
-    const latestBankAccounts = dataStore.getBankAccounts();
-
-    // Navigate immediately without delay
+    // Navigate using route params (already passed through screens, backend is source of truth)
     router.replace({
       pathname: '/auth/business-summary',
       params: {
@@ -241,13 +243,14 @@ export default function FinalSetupScreen() {
         businessName,
         businessType,
         customBusinessType,
-        allAddresses: JSON.stringify(latestAddresses),
-        allBankAccounts: JSON.stringify(latestBankAccounts),
+        allAddresses,
+        allBankAccounts,
         initialCashBalance: totalCashBalance.toString(),
         invoicePrefix,
         invoicePattern,
         startingInvoiceNumber,
         fiscalYear,
+        mobile,
       }
     });
     

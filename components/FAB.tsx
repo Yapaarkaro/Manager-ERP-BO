@@ -9,22 +9,22 @@ import {
   Platform,
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
+import { usePermissions } from '@/contexts/PermissionContext';
 import {
   Plus,
-  X,
   ShoppingCart,
   RotateCcw,
   Package,
-  CreditCard,
   IndianRupee,
   Bell,
+  Briefcase,
   Wallet,
 } from 'lucide-react-native';
 
 interface FABProps {
   onAction?: (action: string) => void;
   onExpandedChange?: (isExpanded: boolean) => void;
+  hiddenActions?: string[];
 }
 
 interface FABAction {
@@ -35,75 +35,67 @@ interface FABAction {
   backgroundColor: string;
 }
 
-const fabActions: FABAction[] = [
-  {
-    id: 'notify-staff',
-    title: 'Notify Staff',
-    icon: Bell,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
-  {
-    id: 'expense',
-    title: 'Income/Expense',
-    icon: IndianRupee,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
-  {
-    id: 'stock',
-    title: 'Stock',
-    icon: Package,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
-  {
-    id: 'payments',
-    title: 'Payment',
-    icon: Wallet,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
-  {
-    id: 'return',
-    title: 'Return',
-    icon: RotateCcw,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
-  {
-    id: 'new-sale',
-    title: 'New Sale',
-    icon: ShoppingCart,
-    color: '#ffffff',
-    backgroundColor: '#3f66ac',
-  },
+const ownerFabActions: FABAction[] = [
+  { id: 'notify-staff', title: 'Notify Staff', icon: Bell, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'expense', title: 'Income/Expense', icon: IndianRupee, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'stock', title: 'Stock', icon: Package, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'payments', title: 'Payment', icon: Wallet, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'return', title: 'Return', icon: RotateCcw, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'new-sale', title: 'New Sale', icon: ShoppingCart, color: '#ffffff', backgroundColor: '#3f66ac' },
 ];
 
-export default function FAB({ onAction, onExpandedChange }: FABProps) {
+const staffFabActions: FABAction[] = [
+  { id: 'notify-owner', title: 'Notify Owner', icon: Briefcase, color: '#ffffff', backgroundColor: '#059669' },
+  { id: 'expense', title: 'Income/Expense', icon: IndianRupee, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'stock', title: 'Stock', icon: Package, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'payments', title: 'Payment', icon: Wallet, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'return', title: 'Return', icon: RotateCcw, color: '#ffffff', backgroundColor: '#3f66ac' },
+  { id: 'new-sale', title: 'New Sale', icon: ShoppingCart, color: '#ffffff', backgroundColor: '#3f66ac' },
+];
+
+export default function FAB({ onAction, onExpandedChange, hiddenActions }: FABProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showActions, setShowActions] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const animationValue = useRef(new Animated.Value(0)).current;
+  const { isStaff, hasPermission } = usePermissions();
   
-  // Use debounced navigation for all FAB actions
+  const fabActions = (() => {
+    if (!isStaff) return ownerFabActions;
+    const actions = [...staffFabActions];
+    if (hasPermission('master_access') || hasPermission('staff_management')) {
+      actions.splice(1, 0, { id: 'notify-staff', title: 'Notify Staff', icon: Bell, color: '#ffffff', backgroundColor: '#3f66ac' });
+    }
+    return actions;
+  })();
+  
   const debouncedNavigate = useDebounceNavigation(500);
-  
-  // Get web navigation context for web split-view
-  const webNav = useWebNavigation();
 
   const toggleFAB = () => {
-    const toValue = isExpanded ? 0 : 1;
+    const willExpand = !isExpanded;
+    const toValue = willExpand ? 1 : 0;
     
-    Animated.spring(animationValue, {
-      toValue,
-      useNativeDriver: Platform.OS !== 'web',
-      tension: 120,
-      friction: 10,
-    }).start();
+    if (willExpand) {
+      // Start animation first, then render action buttons after 1 frame
+      // so animationValue is already >0 when they mount (prevents flash)
+      Animated.spring(animationValue, {
+        toValue,
+        useNativeDriver: Platform.OS !== 'web',
+        tension: 120,
+        friction: 10,
+      }).start();
+      requestAnimationFrame(() => setShowActions(true));
+    } else {
+      Animated.spring(animationValue, {
+        toValue,
+        useNativeDriver: Platform.OS !== 'web',
+        tension: 120,
+        friction: 10,
+      }).start(() => setShowActions(false));
+    }
     
-    const newExpandedState = !isExpanded;
-    setIsExpanded(newExpandedState);
-    onExpandedChange?.(newExpandedState);
+    setIsExpanded(willExpand);
+    onExpandedChange?.(willExpand);
   };
 
   const handleActionPress = (actionId: string) => {
@@ -131,14 +123,13 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
       route = '/expenses/income-expense-toggle';
     } else if (actionId === 'notify-staff') {
       route = '/notifications/notify-staff';
+    } else if (actionId === 'notify-owner') {
+      route = '/notifications/notify-owner';
     } else if (actionId === 'stock') {
       route = '/inventory/stock-management';
     }
     
-    // On web, use split-view navigation; otherwise use normal navigation
-    if (Platform.OS === 'web' && webNav.isWeb && route) {
-      webNav.navigateToScreen(route);
-    } else if (route) {
+    if (route) {
       debouncedNavigate(route);
     }
     
@@ -159,22 +150,27 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
         />
       )}
       
-      {/* Action Buttons */}
-      {fabActions.map((action, index) => {
+      {/* Action Buttons - only render when visible to prevent flash */}
+      {showActions && fabActions
+        .filter(a => !hiddenActions?.includes(a.id))
+        .map((action, index, visibleActions) => {
         const IconComponent = action.icon;
         const translateY = animationValue.interpolate({
           inputRange: [0, 1],
-          outputRange: [0, -(45 * (fabActions.length - index))],
+          outputRange: [0, -(45 * (visibleActions.length - index))],
+          extrapolate: 'clamp',
         });
         
         const opacity = animationValue.interpolate({
           inputRange: [0, 0.5, 1],
           outputRange: [0, 0, 1],
+          extrapolate: 'clamp',
         });
 
         const scale = animationValue.interpolate({
           inputRange: [0, 1],
-          outputRange: [0.3, 1],
+          outputRange: [0, 1],
+          extrapolate: 'clamp',
         });
 
         return (
@@ -213,17 +209,23 @@ export default function FAB({ onAction, onExpandedChange }: FABProps) {
         );
       })}
 
-      {/* Main FAB Button */}
+      {/* Main FAB Button - Plus rotates 45° to become X, no icon swap = no flash */}
       <TouchableOpacity
         style={styles.mainButton as any}
         onPress={toggleFAB}
         activeOpacity={0.8}
       >
-        {isExpanded ? (
-          <X size={24} color="#ffffff" />
-        ) : (
+        <Animated.View style={{
+          transform: [{
+            rotate: animationValue.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0deg', '45deg'],
+              extrapolate: 'clamp',
+            }),
+          }],
+        }}>
           <Plus size={24} color="#ffffff" />
-        )}
+        </Animated.View>
       </TouchableOpacity>
     </View>
   );

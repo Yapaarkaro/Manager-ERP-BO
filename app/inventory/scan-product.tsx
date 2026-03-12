@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { 
   ArrowLeft, 
@@ -133,7 +134,7 @@ export default function ScanProductScreen() {
         };
 
         // Auto-navigate to manual product entry with found data
-        router.push({
+        safeRouter.push({
           pathname: '/inventory/manual-product',
           params: {
             scannedData: JSON.stringify(productData),
@@ -165,7 +166,7 @@ export default function ScanProductScreen() {
                   image: null,
                 };
                 
-                router.push({
+                safeRouter.push({
                   pathname: '/inventory/manual-product',
                   params: {
                     scannedData: JSON.stringify(basicProductData),

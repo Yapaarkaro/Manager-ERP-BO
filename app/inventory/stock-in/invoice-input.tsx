@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   FileText,
@@ -128,7 +129,7 @@ export default function InvoiceInputScreen() {
       params.vehicleType = vehicleType.trim();
     }
 
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-in/verify-stock',
       params
     });
@@ -154,7 +155,7 @@ export default function InvoiceInputScreen() {
               try {
                 router.back();
               } catch (error) {
-                router.replace('/inventory/stock-in');
+                safeRouter.replace('/inventory/stock-in');
               }
             }}
             activeOpacity={0.7}
@@ -181,7 +182,7 @@ export default function InvoiceInputScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-in');
+              safeRouter.replace('/inventory/stock-in');
             }
           }}
           activeOpacity={0.7}

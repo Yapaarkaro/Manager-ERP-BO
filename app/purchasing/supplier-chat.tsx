@@ -17,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Send, Search, X, Phone, Video, MoveVertical as MoreVertical, Paperclip, Camera, Mic, Check, CheckCheck, Play, Pause, Square } from 'lucide-react-native';
 import { Audio } from 'expo-audio';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -50,11 +52,12 @@ interface ChatMessage {
   audioDuration?: number;
 }
 
-const mockMessages: ChatMessage[] = [];
+const initialMessages: ChatMessage[] = [];
 
 export default function SupplierChatScreen() {
-  const { supplierId, supplierName, supplierAvatar, supplierPhoneNumber } = useLocalSearchParams();
-  const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
+  const { supplierId, supplierName, supplierAvatar, supplierPhoneNumber, isOnManager } = useLocalSearchParams();
+  const supplierOnManager = isOnManager === 'true';
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [newMessage, setNewMessage] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -133,9 +136,13 @@ export default function SupplierChatScreen() {
   const handlePhoneCall = async () => {
     try {
       // Get supplier phone number from params or use a default
-      let supplierPhone = supplierPhoneNumber || '9876543210'; // Default number without prefix
+      let supplierPhone = supplierPhoneNumber || '';
       
-      // Add +91 prefix if not already present
+      if (!supplierPhone) {
+        Alert.alert('No Phone Number', 'Supplier phone number is not available.');
+        return;
+      }
+
       if (!supplierPhone.startsWith('+91') && !supplierPhone.startsWith('+')) {
         supplierPhone = `+91${supplierPhone}`;
       }
@@ -500,17 +507,23 @@ export default function SupplierChatScreen() {
           <View style={styles.header}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => router.push('/dashboard')}
+              onPress={() => safeRouter.replace('/dashboard')}
               activeOpacity={0.7}
             >
               <ArrowLeft size={24} color={Colors.text} />
             </TouchableOpacity>
             
             <View style={styles.headerInfo}>
-              <Image 
-                source={{ uri: supplierAvatar as string }}
-                style={styles.headerAvatar}
-              />
+              {supplierAvatar ? (
+                <Image
+                  source={{ uri: supplierAvatar as string }}
+                  style={styles.headerAvatar}
+                />
+              ) : (
+                <View style={[styles.headerAvatar, { backgroundColor: getAvatarColor(supplierName as string), justifyContent: 'center', alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>{getInitials(supplierName as string)}</Text>
+                </View>
+              )}
               <View style={styles.headerText}>
                 <Text style={styles.headerName} numberOfLines={1}>{supplierName}</Text>
                 <Text style={styles.headerStatus}>Online</Text>
@@ -569,18 +582,52 @@ export default function SupplierChatScreen() {
           )}
         </SafeAreaView>
 
-        {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {displayMessages.map((message, index) => renderMessage(message, index))}
-        </ScrollView>
+        {!supplierOnManager ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
+            <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: `${Colors.grey[200]}`, justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+              <Send size={28} color={Colors.textLight} />
+            </View>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text, textAlign: 'center', marginBottom: 8 }}>
+              {supplierName} is not on Manager
+            </Text>
+            <Text style={{ fontSize: 14, color: Colors.textLight, textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+              Invite them to join Manager so you can chat, share POs, and manage orders seamlessly.
+            </Text>
+            <TouchableOpacity
+              style={{ backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+              onPress={() => {
+                const phone = (supplierPhoneNumber as string || '').replace(/\D/g, '');
+                const msg = encodeURIComponent(`Hi ${supplierName}, I'm using Manager ERP to manage my business. Join Manager to receive purchase orders and invoices from me directly! Download here: https://managererp.app/invite`);
+                if (phone.length >= 10) {
+                  Linking.openURL(`sms:${phone}?body=${msg}`).catch(() =>
+                    Linking.openURL(`whatsapp://send?phone=${phone}&text=${msg}`).catch(() =>
+                      Alert.alert('Cannot Send', 'Please send the invite link manually.')
+                    )
+                  );
+                } else {
+                  Alert.alert('No Phone Number', 'This supplier does not have a phone number on file.');
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Send size={16} color="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600' }}>Send Invite</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Messages */}
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {displayMessages.map((message, index) => renderMessage(message, index))}
+            </ScrollView>
 
-        {/* Message Input */}
-        <View style={styles.messageInputContainer}>
+            {/* Message Input */}
+            <View style={styles.messageInputContainer}>
           <View style={styles.messageInputRow}>
             <View style={styles.messageInputWrapper}>
               <TextInput
@@ -647,6 +694,8 @@ export default function SupplierChatScreen() {
             )}
           </View>
         </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </View>
   );

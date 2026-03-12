@@ -15,21 +15,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { MapPin, Building2, Warehouse, Plus, Edit3, Trash2, Check, ArrowRight, Home, ChevronDown, ChevronUp, User, Phone, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore } from '@/utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { ListSkeleton } from '@/components/SkeletonLoader';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { deleteAddress, updateAddress, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { getPlatformShadow } from '@/utils/shadowUtils';
+import { mapLocationToAddress } from '@/utils/dataStore';
 
 interface Address {
   id: string;
-  backendId?: string; // Backend ID for API operations
+  backendId?: string;
   name: string;
   type: 'primary' | 'branch' | 'warehouse';
   doorNumber: string;
   addressLine1: string;
   addressLine2: string;
+  addressLine3?: string;
   city: string;
   pincode: string;
   stateName: string;
@@ -62,6 +64,7 @@ export default function AddressConfirmationScreen() {
   } = useLocalSearchParams();
 
   const [addresses, setAddresses] = useState<Address[]>([]);
+  const [isLoadingAddresses, setIsLoadingAddresses] = useState(true);
   const [expandedSections, setExpandedSections] = useState<Set<AddressSection>>(new Set(['primary']));
   const [showAddOptions, setShowAddOptions] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -69,74 +72,78 @@ export default function AddressConfirmationScreen() {
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const colors = useThemeColors();
   const [isNavigating, setIsNavigating] = useState(false);
+  const [staffVerificationMap, setStaffVerificationMap] = useState<Record<string, { code: string | null; staffName: string }>>({});
 
   useEffect(() => {
     Animated.timing(slideAnimation, {
       toValue: 1,
       duration: 500,
-      useNativeDriver: false, // Disable for web to avoid warning
+      useNativeDriver: false,
     }).start();
   }, []);
 
-  // ✅ Load addresses once on mount and when params change (not on every focus)
+  // Load addresses from route params (source of truth passed between screens)
+  // Backend data will be fetched via useBusinessData if available
   useEffect(() => {
-    console.log('🔄 Address Confirmation - loading addresses');
-    console.log('🔍 Address Confirmation - TAX ID Type parameter:', taxIdType);
-    console.log('🔍 Address Confirmation - TAX ID Value parameter:', taxIdValue);
-    console.log('🔍 Address Confirmation - AddressType parameter:', addressType);
-    
-    // Load addresses from dataStore first (single source of truth)
-    const dataStoreAddresses = dataStore.getAddresses();
-    console.log(`📋 Loaded ${dataStoreAddresses.length} addresses from DataStore:`, 
-      dataStoreAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
-    
-    // Try to parse addresses from parameters (for backward compatibility)
     let paramAddresses: Address[] = [];
     try {
-      paramAddresses = JSON.parse(allAddresses as string);
-      console.log(`📋 Parsed ${paramAddresses.length} addresses from params:`, 
-        paramAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
-    } catch (error) {
-      // No addresses to parse from parameters or parse error
-      console.log('⚠️ Could not parse addresses from params');
+      const raw = JSON.parse(allAddresses as string);
+      paramAddresses = (raw || []).map((addr: any) => {
+        const mapped = mapLocationToAddress(addr);
+        return {
+          id: mapped.id,
+          backendId: mapped.backendId || mapped.id,
+          name: mapped.name,
+          type: mapped.type,
+          doorNumber: mapped.doorNumber || '',
+          addressLine1: mapped.addressLine1 || '',
+          addressLine2: mapped.addressLine2 || '',
+          addressLine3: mapped.addressLine3 || '',
+          city: mapped.city || '',
+          pincode: mapped.pincode || '',
+          stateName: mapped.stateName || '',
+          stateCode: mapped.stateCode || '',
+          manager: mapped.manager || '',
+          phone: mapped.phone || '',
+          isPrimary: mapped.isPrimary ?? false,
+        } as Address;
+      });
+    } catch {
+      paramAddresses = [];
     }
     
-    // ✅ CRITICAL: Always use DataStore as primary source, merge with params only for missing data
-    if (dataStoreAddresses.length > 0) {
-      // Merge: Use DataStore addresses, but update with param data if param has newer info
-      const mergedAddresses = dataStoreAddresses.map(dataStoreAddr => {
-        const paramAddr = paramAddresses.find(addr => addr.id === dataStoreAddr.id);
-        if (paramAddr) {
-          // Use parameter address if it exists (it might have more recent data)
-          // But preserve backendId from DataStore if param doesn't have it
-          return {
-            ...paramAddr,
-            backendId: paramAddr.backendId || dataStoreAddr.backendId,
-          };
-        }
-        return dataStoreAddr;
-      });
-      
-      // ✅ Also add any addresses from params that don't exist in DataStore (shouldn't happen, but safety)
-      const missingFromDataStore = paramAddresses.filter(
-        paramAddr => !dataStoreAddresses.find(dsAddr => dsAddr.id === paramAddr.id)
-      );
-      if (missingFromDataStore.length > 0) {
-        console.warn(`⚠️ Found ${missingFromDataStore.length} addresses in params but not in DataStore, adding them`);
-        mergedAddresses.push(...missingFromDataStore);
-      }
-      
-      console.log(`✅ Final merged addresses: ${mergedAddresses.length}`, 
-        mergedAddresses.map(a => ({ id: a.id, name: a.name, type: a.type })));
-      setAddresses(mergedAddresses);
-    } else if (paramAddresses.length > 0) {
-      // Fallback: If DataStore is empty, use params (shouldn't happen in normal flow)
-      console.warn('⚠️ DataStore is empty, using addresses from params');
+    if (paramAddresses.length > 0) {
       setAddresses(paramAddresses);
-    } else {
-      setAddresses([]);
     }
-  }, [taxIdType, taxIdValue, addressType, allAddresses]);
+    setIsLoadingAddresses(false);
+  }, [allAddresses]);
+
+  // Query staff verification codes for branch/warehouse managers
+  useEffect(() => {
+    const fetchStaffCodes = async () => {
+      const managerPhones = addresses
+        .filter(a => (a.type === 'branch' || a.type === 'warehouse') && a.phone)
+        .map(a => a.phone!);
+      if (managerPhones.length === 0) return;
+
+      try {
+        const { data: staffRecords } = await supabase
+          .from('staff')
+          .select('mobile, name, verification_code')
+          .in('mobile', managerPhones);
+        if (staffRecords && staffRecords.length > 0) {
+          const map: Record<string, { code: string | null; staffName: string }> = {};
+          staffRecords.forEach((s: any) => {
+            map[s.mobile] = { code: s.verification_code, staffName: s.name };
+          });
+          setStaffVerificationMap(map);
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to fetch staff verification codes:', err);
+      }
+    };
+    if (addresses.length > 0) fetchStaffCodes();
+  }, [addresses]);
 
   const getAddressTypeInfo = (type: Address['type']) => {
     switch (type) {
@@ -175,6 +182,7 @@ export default function AddressConfirmationScreen() {
       address.doorNumber,
       address.addressLine1,
       address.addressLine2,
+      address.addressLine3,
       address.city,
       `${address.stateName} - ${address.pincode}`
     ].filter(part => part && part.trim() !== '');
@@ -285,9 +293,6 @@ export default function AddressConfirmationScreen() {
         // Update local state
         setAddresses(prev => prev.filter(addr => addr.id !== addressToDelete));
         
-        // Update dataStore
-        dataStore.deleteAddress(addressToDelete);
-        
         setAddressToDelete(null);
         setShowDeleteModal(false);
       } catch (error: any) {
@@ -379,40 +384,6 @@ export default function AddressConfirmationScreen() {
       updatedAddresses[currentPrimaryIndex] = swappedOldPrimary;
       updatedAddresses[newPrimaryIndex] = swappedNewPrimary;
       
-      // Update in dataStore
-      dataStore.updateAddress(currentPrimary.id, swappedOldPrimary);
-      dataStore.updateAddress(newPrimary.id, swappedNewPrimary);
-      
-      // Log the complete address swap
-      dataStore.logChange(
-        'address_primary_change',
-        `⭐ COMPLETE ADDRESS SWAP via star icon: ${currentPrimary.name} (${currentPrimary.city}) ↔ ${newPrimary.name} (${newPrimary.city})`,
-        {
-          id: currentPrimary.id,
-          type: currentPrimary.type,
-          name: currentPrimary.name,
-          city: currentPrimary.city,
-          isPrimary: true,
-          manager: currentPrimary.manager,
-          phone: currentPrimary.phone
-        },
-        {
-          id: newPrimary.id,
-          type: 'primary',
-          name: newPrimary.name,
-          city: newPrimary.city,
-          isPrimary: true,
-          manager: newPrimary.manager,
-          phone: newPrimary.phone
-        },
-        { 
-          action: 'star_icon_click',
-          completeAddressSwap: true,
-          swappedAllFields: true,
-          oldPrimaryNewType: newPrimary.type,
-          addressesExchanged: true
-        }
-      );
       
       console.log('✅ COMPLETE ADDRESS SWAP finished - all data swapped');
       console.log('📊 Final addresses state:', updatedAddresses.map(a => ({
@@ -525,13 +496,29 @@ export default function AddressConfirmationScreen() {
         }
       })();
 
-      // Check if user already has bank accounts (returning from business summary)
-      const existingBankAccounts = dataStore.getBankAccounts();
-      const hasExistingBanks = existingBankAccounts && existingBankAccounts.length > 0;
+      // Use current local state as the latest addresses (already synced to backend above)
+      const latestAddresses = addresses;
 
-      // Get latest data from dataStore to ensure we have all updates (after sync)
-      const latestAddresses = dataStore.getAddresses();
-      console.log(`📋 Navigating with ${latestAddresses.length} addresses from DataStore`);
+      // Check if we have bank accounts from route params (returning from business summary)
+      let existingBankAccounts: any[] = [];
+      try {
+        // Bank accounts would have been passed as route params if returning from summary
+        const { useBusinessData: _ubd } = await import('@/hooks/useBusinessData');
+        // Query backend directly for bank accounts
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: userRow } = await supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle();
+          if (userRow?.business_id) {
+            const { data: bankData } = await supabase.from('bank_accounts').select('*').eq('business_id', userRow.business_id);
+            if (bankData && bankData.length > 0) {
+              existingBankAccounts = bankData;
+            }
+          }
+        }
+      } catch {
+        // If backend check fails, assume no existing banks
+      }
+      const hasExistingBanks = existingBankAccounts.length > 0;
 
       // Navigate after sync completes
       if (hasExistingBanks) {
@@ -589,16 +576,6 @@ export default function AddressConfirmationScreen() {
     const typeInfo = getAddressTypeInfo(address.type);
     const IconComponent = typeInfo.icon;
     
-    console.log(`🎨 Rendering address card:`, {
-      id: address.id,
-      name: address.name,
-      type: address.type,
-      isPrimary: address.isPrimary,
-      city: address.city,
-      manager: address.manager,
-      phone: address.phone
-    });
-
     return (
       <View key={`${address.id}-${address.isPrimary}-${address.name}-${address.city}`} style={[styles.addressCard, { backgroundColor: typeInfo.bgColor }]}>
         <View style={styles.addressHeader}>
@@ -647,12 +624,26 @@ export default function AddressConfirmationScreen() {
 
         <View style={styles.addressContent}>
           <Text style={styles.addressName}>{address.name}</Text>
-          <Text style={styles.addressText}>{formatAddress(address)}</Text>
+          {address.doorNumber ? (
+            <Text style={styles.addressText}>Door/Flat: {address.doorNumber}</Text>
+          ) : null}
+          {address.addressLine1 ? (
+            <Text style={styles.addressText}>{address.addressLine1}</Text>
+          ) : null}
+          {address.addressLine2 ? (
+            <Text style={styles.addressText}>{address.addressLine2}</Text>
+          ) : null}
+          {address.addressLine3 ? (
+            <Text style={styles.addressText}>{address.addressLine3}</Text>
+          ) : null}
+          <Text style={styles.addressText}>
+            {[address.city, address.stateName, address.pincode].filter(Boolean).join(', ')}
+          </Text>
           
           {address.stateCode && (
             <View style={styles.stateCodeContainer}>
               <Text style={styles.stateCodeLabel}>
-                State Name: {address.stateName} Code: {address.stateCode}
+                State: {address.stateName} | Code: {address.stateCode}
               </Text>
             </View>
           )}
@@ -683,7 +674,6 @@ export default function AddressConfirmationScreen() {
                   </>
                 ) : (
                   <>
-                    {/* For non-primary, show address contact if exists, otherwise show user contact as fallback */}
                     {(address.manager || name) && (
                       <>
                         <User size={14} color={typeInfo.color} />
@@ -699,6 +689,15 @@ export default function AddressConfirmationScreen() {
                           {address.phone || mobile}
                         </Text>
                       </>
+                    )}
+                    {address.phone && staffVerificationMap[address.phone] && (
+                      <View style={styles.verificationBadge}>
+                        <Text style={[styles.verificationText, { color: staffVerificationMap[address.phone].code ? '#f59e0b' : '#10b981' }]}>
+                          {staffVerificationMap[address.phone].code
+                            ? `Code: ${staffVerificationMap[address.phone].code}`
+                            : 'Verified ✓'}
+                        </Text>
+                      </View>
                     )}
                   </>
                 )}
@@ -803,6 +802,14 @@ export default function AddressConfirmationScreen() {
   };
 
   const webContainerStyles = getWebContainerStyles();
+
+  if (isLoadingAddresses) {
+    return (
+      <ResponsiveContainer>
+        <ListSkeleton itemCount={4} showSearch={false} showFilter={false} />
+      </ResponsiveContainer>
+    );
+  }
 
   return (
     <ResponsiveContainer>
@@ -1492,12 +1499,23 @@ const styles = StyleSheet.create({
   contactText: {
     fontSize: Platform.select({
       web: 14,
-      default: 12, // Reduced for truncated text on mobile
+      default: 12,
     }),
     fontWeight: '500',
     marginRight: Platform.select({
       web: 8,
-      default: 6, // Reduced spacing on mobile
+      default: 6,
     }),
+  },
+  verificationBadge: {
+    backgroundColor: '#fffbeb',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 4,
+  },
+  verificationText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

@@ -81,6 +81,7 @@ const fetchProductDetails = async (barcode: string) => {
 };
 
 import { setScannedData } from '@/utils/scannedDataStore';
+import { safeRouter } from '@/utils/safeRouter';
 
 export default function BarcodeScannerScreen() {
   const params = useLocalSearchParams();
@@ -149,7 +150,7 @@ export default function BarcodeScannerScreen() {
           name: result.product.name || 'Unknown Product',
           price: 999, // Default price, can be updated later
           barcode: barcode,
-          image: result.product.image || 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+          image: result.product.image || '',
           category: result.product.category || 'Others',
           brand: result.product.brand || '',
           quantity: result.product.quantity || '',
@@ -217,7 +218,7 @@ export default function BarcodeScannerScreen() {
                 text: 'Add to Cart',
                 onPress: () => {
                   try {
-                    router.push({
+                    safeRouter.push({
                       pathname: '/new-sale/cart',
                       params: {
                         selectedProducts: JSON.stringify([{
@@ -303,12 +304,12 @@ export default function BarcodeScannerScreen() {
                     name: 'Manual Product',
                     price: 999,
                     barcode: barcode,
-                    image: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
+                    image: '',
                     category: 'Others',
                   };
                   
                   try {
-                    router.push({
+                    safeRouter.push({
                       pathname: '/new-sale/cart',
                       params: {
                         selectedProducts: JSON.stringify([{

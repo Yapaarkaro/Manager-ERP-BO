@@ -5,11 +5,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, CheckCircle, Crown, Users, MapPin, FileText, Star } from 'lucide-react-native';
 import { subscriptionStore, subscriptionPlans, addOns, oneTimeServices, SubscriptionPlan, AddOn, OneTimeService } from '@/utils/subscriptionStore';
+import { safeRouter } from '@/utils/safeRouter';
 
 export default function SubscriptionScreen() {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
@@ -82,7 +83,7 @@ export default function SubscriptionScreen() {
       });
       setSubscription(subscriptionStore.getSubscription());
       // Navigate to payment or success screen
-      router.push('/subscription-success');
+      safeRouter.replace('/subscription-success' as any);
     }
   };
 
@@ -296,8 +297,8 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
     color: '#1a1a1a',
   },
   scrollView: {

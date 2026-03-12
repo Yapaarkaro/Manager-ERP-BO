@@ -6,20 +6,18 @@ import {
   TextInput,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Phone } from 'lucide-react-native';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
-import { dataStore } from '@/utils/dataStore';
-import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { supabase } from '@/lib/supabase';
+import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 
 const COLORS = {
@@ -40,6 +38,7 @@ export default function MobileScreen() {
   const [isReturningUser, setIsReturningUser] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const otpRetryCount = useRef(0);
   const mobileInputRef = useRef<TextInput>(null);
 
   // Set status bar to dark for white background
@@ -54,27 +53,17 @@ export default function MobileScreen() {
         try {
           console.log('🔍 Checking for returning user with mobile:', mobileNumber);
           
-          // ✅ First check backend to see if user has completed signup
-          // Note: We can't check backend before OTP verification, so we'll check after OTP
-          // This check is mainly for UI indication (showing "Welcome back" message)
-          // The actual backend check happens in OTP screen after verification
+          // Check Supabase backend for signup progress (source of truth)
+          const { data: progress } = await supabase.from('signup_progress')
+            .select('id, owner_name')
+            .eq('phone', mobileNumber)
+            .maybeSingle();
           
-          // Fallback to local dataStore check
-          const userAccount = dataStore.getUserAccountByMobile(mobileNumber);
-          
-          if (userAccount) {
+          if (progress) {
             setIsReturningUser(true);
-            console.log('👋 Welcome back! Found existing account locally for:', mobileNumber);
+            console.log('👋 Welcome back! Found signup progress for:', mobileNumber);
           } else {
-            // Check if user has incomplete signup progress
-            const existingProgress = await dataStore.getSignupProgressByMobile(mobileNumber);
-            if (existingProgress && existingProgress.ownerName) {
-              setIsReturningUser(true);
-              console.log('👋 Welcome back! Found incomplete signup locally for:', mobileNumber);
-            } else {
-              setIsReturningUser(false);
-              console.log('📭 No existing data found for mobile:', mobileNumber);
-            }
+            setIsReturningUser(false);
           }
         } catch (error) {
           console.error('Error checking returning user:', error);
@@ -88,24 +77,62 @@ export default function MobileScreen() {
   }, [mobileNumber]);
 
   useEffect(() => {
-    // Auto-navigate when 10 digits are entered (only once)
     if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber) && !isNavigating) {
       setIsValid(true);
       setIsNavigating(true);
+      otpRetryCount.current = 0;
 
-      console.log('✅ Valid mobile number entered, navigating to OTP screen');
+      console.log('✅ Valid mobile number entered, sending OTP...');
 
-      // Navigate to OTP screen. OTP verification is handled by the
-      // verify-mobile-otp edge function. Supabase Auth session is created after verification.
-      router.push({
-        pathname: '/auth/otp',
-        params: { mobile: mobileNumber }
-      });
+      const sendOtpAndNavigate = async () => {
+        const MAX_RETRIES = 3;
+        let lastError = '';
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`🔄 Retrying OTP send (attempt ${attempt + 1}/${MAX_RETRIES + 1})...`);
+              await new Promise(r => setTimeout(r, 2000 * attempt));
+            }
+
+            const { error } = await supabase.auth.signInWithOtp({
+              phone: `+91${mobileNumber}`,
+            });
+
+            if (!error) {
+              console.log('📱 OTP sent successfully, navigating to OTP screen');
+              router.push({
+                pathname: '/auth/otp',
+                params: { mobile: mobileNumber },
+              });
+              return;
+            }
+
+            lastError = error.message;
+            const isTransient = lastError.includes('JSON') || lastError.includes('Unexpected') || lastError.includes('fetch') || lastError.includes('AuthUnknownError') || error.name === 'AuthUnknownError';
+            if (!isTransient) {
+              break;
+            }
+            console.log(`⚠️ Transient OTP error (attempt ${attempt + 1}), will retry...`);
+          } catch (err: any) {
+            const msg = err?.message || 'Network error';
+            const isTransient = msg.includes('JSON') || msg.includes('Unexpected') || msg.includes('fetch') || msg.includes('network') || msg.includes('AuthUnknownError') || err?.name === 'AuthUnknownError';
+            lastError = isTransient ? 'Network issue, retrying...' : msg;
+            if (!isTransient) break;
+            console.log(`⚠️ Transient network error (attempt ${attempt + 1}), will retry...`);
+          }
+        }
+
+        Alert.alert('Unable to send OTP', 'Please check your internet connection and try again.');
+        setIsNavigating(false);
+      };
+
+      sendOtpAndNavigate();
     } else if (mobileNumber.length !== 10) {
       setIsValid(false);
       setIsNavigating(false);
     }
-  }, [mobileNumber, isNavigating]);
+  }, [mobileNumber]);
 
   const handleMobileChange = (text: string) => {
     // Only allow numbers and limit to 10 digits

@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { safeRouter } from '@/utils/safeRouter';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft,
   Check,
@@ -81,7 +81,7 @@ export default function StockConfirmationScreen() {
           text: 'OK',
           onPress: () => {
             // Navigate to dashboard to clear the entire flow
-            router.replace('/dashboard');
+            safeRouter.replace('/dashboard' as any);
           }
         }
       ]

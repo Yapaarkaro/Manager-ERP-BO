@@ -1,21 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Image,
   Platform,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowDownLeft, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
 import { Receivable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { getReceivables } from '@/services/backendApi';
+import { getReceivables, invalidateApiCache } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -75,6 +81,7 @@ export default function ReceivablesScreen() {
   const [filteredReceivables, setFilteredReceivables] = useState<Receivable[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     status: [] as string[],
     customerType: [] as string[],
@@ -83,6 +90,11 @@ export default function ReceivablesScreen() {
     daysPastDue: 'none' as string,
     creditLimit: 'none' as string,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   
   // Use debounced navigation for customer cards
   const debouncedNavigate = useDebounceNavigation(500);
@@ -96,7 +108,24 @@ export default function ReceivablesScreen() {
       } else {
         setReceivables([]);
       }
+      setIsLoading(false);
     })();
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    (async () => {
+      try {
+        const { success, receivables: data } = await getReceivables();
+        if (success && data) {
+          setReceivables(data.map(mapReceivableFromBackend));
+        }
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    })();
+    setTimeout(() => setRefreshing(false), 600);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -173,6 +202,9 @@ export default function ReceivablesScreen() {
         }
       });
     }
+
+    // Apply date range filter
+    filtered = filterByDateRange(filtered, (r) => r.oldestInvoiceDate, selectedTimeRange, customFromDate, customToDate);
 
     setFilteredReceivables(filtered);
   };
@@ -270,10 +302,10 @@ export default function ReceivablesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters or receivables change
+  // Apply filters whenever activeFilters, receivables, or date range changes
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters, receivables]);
+  }, [activeFilters, receivables, selectedTimeRange, customFromDate, customToDate]);
 
   const handleCustomerDetails = (receivable: Receivable) => {
     if (isNavigating) return;
@@ -306,10 +338,18 @@ export default function ReceivablesScreen() {
         <View style={styles.receivableHeader}>
           {/* Left Side - Customer Info */}
           <View style={styles.receivableLeft}>
-            <Image 
-              source={{ uri: receivable.customerAvatar }}
-              style={styles.customerAvatar}
-            />
+            {receivable.customerAvatar ? (
+              <Image 
+                source={{ uri: receivable.customerAvatar }}
+                style={styles.customerAvatar}
+              />
+            ) : (
+              <View style={[styles.customerAvatar, { backgroundColor: getAvatarColor(receivable.customerType === 'business' ? receivable.businessName : receivable.customerName), justifyContent: 'center', alignItems: 'center' }]}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF' }}>
+                  {getInitials(receivable.customerType === 'business' ? receivable.businessName || receivable.customerName : receivable.customerName)}
+                </Text>
+              </View>
+            )}
             <View style={styles.customerInfo}>
               <Text style={styles.customerName}>
                 {receivable.customerType === 'business' ? receivable.businessName : receivable.customerName}
@@ -451,7 +491,15 @@ export default function ReceivablesScreen() {
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>Receivables</Text>
-        
+
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={() => setShowExportModal(true)}
+          activeOpacity={0.7}
+        >
+          <Download size={20} color={Colors.primary} />
+        </TouchableOpacity>
+
         <View style={styles.headerRight}>
           <Text style={styles.totalCount}>
             {filteredReceivables.length} customers
@@ -459,6 +507,10 @@ export default function ReceivablesScreen() {
         </View>
       </View>
 
+      {isLoading ? (
+        <ListSkeleton itemCount={6} showSearch={true} showFilter={true} />
+      ) : (
+        <>
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -533,13 +585,25 @@ export default function ReceivablesScreen() {
       {/* Divider */}
       <View style={styles.divider} />
 
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
+
       {/* Receivables List */}
-      <ScrollView 
+      <FlatList
+        data={filteredReceivables}
+        renderItem={({item}) => renderReceivableCard(item)}
+        keyExtractor={(item) => item.id}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredReceivables.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <ArrowDownLeft size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Receivables Found</Text>
@@ -547,10 +611,8 @@ export default function ReceivablesScreen() {
               {searchQuery ? 'No receivables match your search criteria' : 'No outstanding receivables'}
             </Text>
           </View>
-        ) : (
-          filteredReceivables.map(renderReceivableCard)
-        )}
-      </ScrollView>
+        }
+      />
 
       {/* Receive Payment FAB */}
       <TouchableOpacity
@@ -756,7 +818,32 @@ export default function ReceivablesScreen() {
           </View>
         </View>
       </Modal>
+        </>
+      )}
 
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'Receivables',
+          fileName: 'receivables',
+          columns: [
+            { key: 'customerName', header: 'Customer' },
+            { key: 'mobile', header: 'Mobile' },
+            { key: 'totalReceivable', header: 'Total Receivable (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'invoiceCount', header: 'Invoices', format: (v) => String(v || 0) },
+            { key: 'daysPastDue', header: 'Days Past Due', format: (v) => String(v || 0) },
+            { key: 'status', header: 'Status', format: (v) => v === 'current' ? 'Current' : v === 'overdue' ? 'Overdue' : 'Critical' },
+            { key: 'oldestInvoiceDate', header: 'Oldest Invoice Date' },
+          ],
+          data: filteredReceivables,
+          summaryRows: [
+            { label: 'Total Receivable', value: `₹${filteredReceivables.reduce((s, r) => s + (r.totalReceivable || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Overdue', value: `₹${filteredReceivables.reduce((s, r) => s + (r.overdueAmount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -790,6 +877,15 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'flex-end',
+  },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   totalCount: {
     fontSize: 14,

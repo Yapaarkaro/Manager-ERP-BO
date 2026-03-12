@@ -87,6 +87,7 @@ export default function GstinPanScreen() {
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verifiedGstinData, setVerifiedGstinData] = useState<any>(null);
   const [hasAutoVerified, setHasAutoVerified] = useState(false);
+  const [lastVerifiedGstin, setLastVerifiedGstin] = useState<string>('');
 
   const validateInput = (text: string, type: 'GSTIN' | 'PAN') => {
     if (type === 'GSTIN') {
@@ -115,6 +116,13 @@ export default function GstinPanScreen() {
     const isFormatValid = validateInput(formatted, selectedType);
     setIsValid(isFormatValid);
     setVerificationError(null);
+
+    // If user erased or changed text so it no longer matches the previously verified GSTIN, clear stale data
+    if (verifiedGstinData && formatted !== lastVerifiedGstin) {
+      setVerifiedGstinData(null);
+      setHasAutoVerified(false);
+      setIsValid(false);
+    }
     
     // Update keyboard type based on the NEXT character position (current length is where next char will go)
     const nextPosition = formatted.length;
@@ -124,7 +132,6 @@ export default function GstinPanScreen() {
     // Only update keyboard if it needs to change, and blur/refocus to force keyboard change
     if (nextKeyboardType !== currentKeyboardType) {
       setKeyboardType(nextKeyboardType);
-      // Blur and refocus to force keyboard type change
       setTimeout(() => {
         inputRef.current?.blur();
         setTimeout(() => {
@@ -133,8 +140,8 @@ export default function GstinPanScreen() {
       }, 50);
     }
     
-    // Auto-verify GSTIN when format is valid (only once)
-    if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15 && !hasAutoVerified && !isVerifying) {
+    // Auto-verify GSTIN when format is valid and it's a new value
+    if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15 && formatted !== lastVerifiedGstin && !isVerifying) {
       setHasAutoVerified(true);
       verifyGSTINNumber(formatted);
     }
@@ -147,6 +154,8 @@ export default function GstinPanScreen() {
     setVerificationError(null);
     setIsVerifying(false);
     setHasAutoVerified(false);
+    setVerifiedGstinData(null);
+    setLastVerifiedGstin('');
     // Reset keyboard type based on the first character of the new type
     const initialKeyboardType = getKeyboardType(type, 0);
     setKeyboardType(initialKeyboardType);
@@ -170,20 +179,18 @@ export default function GstinPanScreen() {
       // Call backend API (user should be authenticated by now with JWT)
       const result = await verifyGSTINBackend(gstinNumber);
       
-      console.log('📡 GSTIN Backend API response:', result);
-      
       if (result.success && result.taxpayerInfo) {
-        // GSTIN is valid and verified
         setVerifiedGstinData(result.taxpayerInfo);
+        setLastVerifiedGstin(gstinNumber);
         setIsValid(true);
         setVerificationError(null);
       } else {
-        // GSTIN verification failed
         setVerificationError(result.error || 'GSTIN verification failed');
         setIsValid(false);
         setInputValue('');
         setHasAutoVerified(false);
         setVerifiedGstinData(null);
+        setLastVerifiedGstin('');
         setTimeout(() => {
           inputRef.current?.focus();
         }, 300);
@@ -195,6 +202,7 @@ export default function GstinPanScreen() {
       setInputValue('');
       setHasAutoVerified(false);
       setVerifiedGstinData(null);
+      setLastVerifiedGstin('');
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
@@ -204,56 +212,83 @@ export default function GstinPanScreen() {
   };
 
   const handleContinue = async () => {
-    if (isValid && !isVerifying) {
-      // ✅ Optimistically save signup progress (non-blocking)
-      (async () => {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
-            optimisticSaveSignupProgress({
-              mobile: mobile as string,
-              mobileVerified: true,
-              taxIdType: selectedType as 'GSTIN' | 'PAN',
-              taxIdValue: inputValue,
-              taxIdVerified: false, // Will be verified after OTP
-              currentStep: 'gstinPan',
-            });
-          }
-        } catch (error) {
-          console.error('Error saving signup progress:', error);
-        }
-      })();
-      
-      // Navigate immediately (no delay)
-      if (selectedType === 'GSTIN') {
-        // For GSTIN, go to OTP verification screen
-        router.replace({
-          pathname: '/auth/gstin-pan-otp',
-          params: { 
-            type: selectedType,
-            value: inputValue,
-            gstinData: JSON.stringify(verifiedGstinData),
-            mobile: mobile
-          }
-        });
-      } else {
-        // For PAN, go to PAN details screen
-        router.replace({
-          pathname: '/auth/gstin-pan-otp',
-          params: { 
-            type: selectedType,
-            value: inputValue,
-            mobile: mobile
-          }
-        });
-      }
-    } else {
+    if (!isValid || isVerifying) {
       if (verificationError) {
         Alert.alert('Verification Failed', verificationError);
       } else {
         Alert.alert('Invalid Input', `Please enter a valid ${selectedType}`);
       }
+      return;
+    }
+
+    const currentGstin = inputValue;
+
+    // For GSTIN: ensure verified data matches the current input at the moment of pressing Continue
+    if (selectedType === 'GSTIN' && (!verifiedGstinData || lastVerifiedGstin !== currentGstin)) {
+      try {
+        setIsVerifying(true);
+        const result = await verifyGSTINBackend(currentGstin);
+        if (!result.success || !result.taxpayerInfo) {
+          setVerificationError(result.error || 'GSTIN verification failed');
+          setIsValid(false);
+          setVerifiedGstinData(null);
+          setLastVerifiedGstin('');
+          setIsVerifying(false);
+          Alert.alert('Verification Failed', result.error || 'GSTIN verification failed. Please re-enter.');
+          return;
+        }
+        setVerifiedGstinData(result.taxpayerInfo);
+        setLastVerifiedGstin(currentGstin);
+        setIsVerifying(false);
+
+        navigateNext(currentGstin, result.taxpayerInfo);
+      } catch (error: any) {
+        setIsVerifying(false);
+        Alert.alert('Error', error.message || 'Failed to verify GSTIN');
+      }
+      return;
+    }
+
+    navigateNext(currentGstin, verifiedGstinData);
+  };
+
+  const navigateNext = (gstinValue: string, gstinDataObj: any) => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
+          optimisticSaveSignupProgress({
+            mobile: mobile as string,
+            mobileVerified: true,
+            taxIdType: selectedType as 'GSTIN' | 'PAN',
+            taxIdValue: gstinValue,
+            taxIdVerified: false,
+            currentStep: 'gstinPan',
+          });
+        }
+      } catch {}
+    })();
+
+    if (selectedType === 'GSTIN') {
+      router.replace({
+        pathname: '/auth/gstin-pan-otp',
+        params: { 
+          type: selectedType,
+          value: gstinValue,
+          gstinData: JSON.stringify(gstinDataObj),
+          mobile: mobile
+        }
+      });
+    } else {
+      router.replace({
+        pathname: '/auth/gstin-pan-otp',
+        params: { 
+          type: selectedType,
+          value: gstinValue,
+          mobile: mobile
+        }
+      });
     }
   };
 

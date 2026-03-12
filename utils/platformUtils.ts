@@ -154,15 +154,13 @@ export const getInputFocusStyles = () => {
       borderColor: colors.grey[200],
       borderRadius: 12,
       paddingHorizontal: 16,
-      paddingVertical: 4,
       ...Platform.select({
         web: {
+          paddingVertical: 4,
           transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
         },
         default: {
-          // Ensure inputs are selectable on mobile
-          pointerEvents: 'box-none', // Allow touches to pass through to children
-          backgroundColor: 'transparent', // Ensure no background blocking
+          paddingVertical: 0,
         },
       }),
     },
@@ -185,24 +183,19 @@ export const getInputFocusStyles = () => {
     },
     input: {
       flex: 1,
-      paddingVertical: Platform.select({
-        web: 14,
-        default: 14, // Keep consistent padding
-      }),
       fontSize: 16,
       color: colors.text,
       borderWidth: 0,
       ...Platform.select({
         web: {
+          paddingVertical: 14,
           outlineWidth: 0,
           outlineColor: 'transparent',
           outlineStyle: 'none',
         },
         default: {
-          // Ensure inputs are fully interactive on mobile
-          minHeight: 50, // Better touch target
-          backgroundColor: 'transparent', // Ensure no background blocking
-          pointerEvents: 'auto', // Explicitly allow touches
+          paddingVertical: 16,
+          minHeight: 52,
         },
       }),
     },

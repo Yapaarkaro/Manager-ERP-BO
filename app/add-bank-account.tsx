@@ -28,38 +28,40 @@ import {
   Hash,
   Building2,
 } from 'lucide-react-native';
-import { dataStore, BankAccount } from '@/utils/dataStore';
+import { BankAccount } from '@/utils/dataStore';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
 import { optimisticUpdateBankAccount, optimisticAddBankAccount } from '@/utils/optimisticSync';
-import { clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { updateBusinessPrimaryBankAccount } from '@/services/backendApi';
 
 const Colors = {
-  primary: '#007AFF',
-  secondary: '#5856D6',
-  success: '#34C759',
-  warning: '#FF9500',
-  error: '#FF3B30',
-  background: '#F2F2F7',
+  primary: '#3F66AC',
+  secondary: '#F5C754',
+  success: '#10b981',
+  warning: '#f59e0b',
+  error: '#ef4444',
+  background: '#F8FAFC',
   card: '#FFFFFF',
-  text: '#000000',
-  textSecondary: '#8E8E93',
-  border: '#C6C6C8',
+  text: '#1F2937',
+  textSecondary: '#6B7280',
+  border: '#E5E7EB',
   grey: {
-    50: '#F9F9F9',
-    100: '#F2F2F7',
-    200: '#E5E5EA',
-    300: '#D1D1D6',
-    400: '#C7C7CC',
-    500: '#AEAEB2',
-    600: '#8E8E93',
-    700: '#636366',
-    800: '#48484A',
-    900: '#1C1C1E',
+    50: '#F9FAFB',
+    100: '#F3F4F6',
+    200: '#E5E7EB',
+    300: '#D1D5DB',
+    400: '#9CA3AF',
+    500: '#6B7280',
+    600: '#4B5563',
+    700: '#374151',
+    800: '#1F2937',
+    900: '#111827',
   },
 };
 
 export default function AddBankAccount() {
   const params = useLocalSearchParams();
+  const { data: businessData } = useBusinessData();
   const isEditMode = params.account ? true : false;
   const existingAccount = params.account ? JSON.parse(params.account as string) : null;
 
@@ -242,10 +244,9 @@ export default function AddBankAccount() {
       return;
     }
 
-    // Check for duplicate UPI IDs
-    const allBankAccounts = dataStore.getBankAccounts();
-    const isDuplicateUpi = allBankAccounts.some(account => 
-      account.upiId.toLowerCase() === upiId.toLowerCase() &&
+    const allBankAccounts = businessData.bankAccounts || [];
+    const isDuplicateUpi = allBankAccounts.some((account: any) => 
+      (account.upi_id || account.upiId || '').toLowerCase() === upiId.toLowerCase() &&
       (!isEditMode || account.id !== existingAccount?.id)
     );
 
@@ -279,9 +280,8 @@ export default function AddBankAccount() {
       // ✅ Small additional delay to ensure backend has fully processed the update
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // If setting as primary, update the dataStore
       if (isPrimary) {
-        dataStore.setPrimaryBankAccount(existingAccount.id);
+        await updateBusinessPrimaryBankAccount(existingAccount.id);
       }
       
       Alert.alert('Success', 'Bank account updated successfully!', [
@@ -316,9 +316,8 @@ export default function AddBankAccount() {
       // ✅ Small additional delay to ensure backend has fully processed the update
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // If setting as primary, update the dataStore
       if (isPrimary) {
-        dataStore.setPrimaryBankAccount(newBankAccount.id);
+        await updateBusinessPrimaryBankAccount(newBankAccount.id);
       }
       
       Alert.alert('Success', 'Bank account added successfully!', [

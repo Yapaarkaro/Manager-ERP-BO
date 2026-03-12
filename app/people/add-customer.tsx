@@ -27,8 +27,9 @@ import {
   AlertTriangle
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
-import { dataStore, Customer } from '@/utils/dataStore';
-import GoogleGoogleAddressAutocomplete from '@/components/GoogleGoogleAddressAutocomplete';
+import { Customer } from '@/utils/dataStore';
+import { createCustomer } from '@/services/backendApi';
+import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 
 const Colors = {
   background: '#FFFFFF',
@@ -206,11 +207,11 @@ export default function AddCustomerScreen() {
       paymentTerms: formData.paymentTerms === 'Others' ? formData.customPaymentTerms : formData.paymentTerms,
       creditLimit: formData.creditLimit ? parseFloat(formData.creditLimit) : 0,
       categories: [],
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-      customerScore: 85,
-      onTimePayment: 90,
-      satisfactionRating: 4.5,
-      responseTime: 2.1,
+      avatar: '',
+      customerScore: 0,
+      onTimePayment: 0,
+      satisfactionRating: 0,
+      responseTime: 0,
       totalOrders: 0,
       completedOrders: 0,
       pendingOrders: 0,
@@ -225,23 +226,38 @@ export default function AddCustomerScreen() {
       createdAt: new Date().toISOString(),
     };
 
-    // Add customer to data store
-    dataStore.addCustomer(customerData);
+    try {
+      const result = await createCustomer({
+        name: customerData.name,
+        businessName: customerData.businessName,
+        customerType: customerData.customerType,
+        contactPerson: customerData.contactPerson,
+        mobile: customerData.mobile,
+        email: customerData.email || undefined,
+        address: customerData.address,
+        gstin: customerData.gstin || undefined,
+        paymentTerms: customerData.paymentTerms || undefined,
+        creditLimit: customerData.creditLimit || undefined,
+      });
 
-    console.log('Creating new customer:', customerData);
-    
-    setTimeout(() => {
+      if (!result.success) {
+        Alert.alert('Error', result.error || 'Failed to create customer');
+        setIsSubmitting(false);
+        return;
+      }
+
       Alert.alert('Success', 'Customer added successfully', [
         {
           text: 'OK',
-          onPress: () => {
-            // Navigate back to customers list
-            router.back();
-          }
+          onPress: () => router.back(),
         }
       ]);
+    } catch (error: any) {
+      console.error('Error creating customer:', error);
+      Alert.alert('Error', error.message || 'Failed to create customer');
+    } finally {
       setIsSubmitting(false);
-    }, 1000);
+    }
   };
 
   return (

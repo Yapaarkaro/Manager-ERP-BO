@@ -10,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, User, Phone, Mail, MapPin, Calendar, Clock, IndianRupee, FileText, CreditCard, TriangleAlert as AlertTriangle, TrendingUp, TrendingDown, Eye, Download, Share } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -40,7 +42,7 @@ interface TransactionLog {
   balanceAfter: number;
 }
 
-const mockTransactionLogs: TransactionLog[] = [];
+const transactionLogs: TransactionLog[] = [];
 
 export default function SupplierDetailsScreen() {
   const { supplierId, supplierData } = useLocalSearchParams();
@@ -101,11 +103,11 @@ export default function SupplierDetailsScreen() {
         billNumber: transaction.billNumber,
         supplierName: supplier.supplierName,
         supplierType: supplier.supplierType,
-        staffName: 'Current User',
-        staffAvatar: supplier.supplierAvatar,
+        staffName: transaction.staffName || '',
+        staffAvatar: '',
         paymentStatus: transaction.status,
         amount: transaction.amount,
-        itemCount: 2,
+        itemCount: transaction.itemCount || 0,
         date: transaction.date,
         supplierDetails: {
           name: supplier.supplierName,
@@ -117,7 +119,7 @@ export default function SupplierDetailsScreen() {
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/bill-details',
         params: {
           billId: billData.id,
@@ -128,7 +130,7 @@ export default function SupplierDetailsScreen() {
   };
 
   const handleMakePayment = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/payables/make-payment',
       params: {
         supplierId: supplier.id,
@@ -242,10 +244,18 @@ export default function SupplierDetailsScreen() {
 
       {/* Supplier Header */}
       <View style={styles.supplierHeader}>
-        <Image 
-          source={{ uri: supplier.supplierAvatar }}
-          style={styles.supplierHeaderAvatar}
-        />
+        {supplier.supplierAvatar ? (
+          <Image 
+            source={{ uri: supplier.supplierAvatar }}
+            style={styles.supplierHeaderAvatar}
+          />
+        ) : (
+          <View style={[styles.supplierHeaderAvatar, { backgroundColor: getAvatarColor(supplier.supplierType === 'business' ? supplier.businessName : supplier.supplierName), justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFFFFF' }}>
+              {getInitials(supplier.supplierType === 'business' ? supplier.businessName || supplier.supplierName : supplier.supplierName)}
+            </Text>
+          </View>
+        )}
         <View style={styles.supplierHeaderInfo}>
           <Text style={styles.supplierHeaderName}>
             {supplier.supplierType === 'business' ? supplier.businessName : supplier.supplierName}
@@ -444,21 +454,15 @@ export default function SupplierDetailsScreen() {
               <Text style={styles.sectionTitle}>Aging Analysis</Text>
               <View style={styles.agingCard}>
                 <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>Current (0-30 days):</Text>
+                  <Text style={styles.agingLabel}>Current:</Text>
                   <Text style={[styles.agingValue, { color: Colors.success }]}>
                     {formatAmount(supplier.totalPayable - supplier.overdueAmount)}
                   </Text>
                 </View>
                 <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>31-60 days:</Text>
-                  <Text style={[styles.agingValue, { color: Colors.warning }]}>
-                    {formatAmount(supplier.overdueAmount * 0.6)}
-                  </Text>
-                </View>
-                <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>60+ days:</Text>
+                  <Text style={styles.agingLabel}>Overdue:</Text>
                   <Text style={[styles.agingValue, { color: Colors.error }]}>
-                    {formatAmount(supplier.overdueAmount * 0.4)}
+                    {formatAmount(supplier.overdueAmount)}
                   </Text>
                 </View>
               </View>
@@ -474,7 +478,7 @@ export default function SupplierDetailsScreen() {
             </View>
 
             <View style={styles.transactionLogs}>
-              {mockTransactionLogs.map(renderTransactionLog)}
+              {transactionLogs.map(renderTransactionLog)}
             </View>
           </View>
         )}

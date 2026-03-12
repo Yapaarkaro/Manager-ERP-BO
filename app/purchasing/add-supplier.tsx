@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams, usePathname } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
-import Sidebar from '@/components/Sidebar';
 import { 
   ArrowLeft, 
   Building2, 
@@ -36,10 +35,11 @@ import {
   Lock
 } from 'lucide-react-native';
 import { verifyGSTIN } from '@/services/gstinApi';
-import { dataStore, Supplier } from '@/utils/dataStore';
+import { Supplier } from '@/utils/dataStore';
 import { createSupplier } from '@/services/backendApi';
 import PlatformMapView from '@/components/PlatformMapView';
 import { getInputFocusStyles } from '@/utils/platformUtils';
+import { safeRouter } from '@/utils/safeRouter';
 import { extractAddressComponents, reverseGeocode } from '@/services/googleMapsApi';
 
 const Colors = {
@@ -114,8 +114,6 @@ const indianStates = [
 
 export default function AddSupplierScreen() {
   const { returnToStockIn, returnToAddProduct } = useLocalSearchParams();
-  const pathname = usePathname();
-  const [sidebarWidth, setSidebarWidth] = useState(280);
   const [formData, setFormData] = useState<SupplierFormData>({
     businessName: '',
     contactPerson: '',
@@ -152,6 +150,13 @@ export default function AddSupplierScreen() {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number }>({ lat: 28.6139, lng: 77.209 });
   const searchInputRef = React.useRef<TextInput>(null);
+  const inputRefs = useRef<Record<string, TextInput | null>>({});
+  const setInputRef = useCallback((name: string) => (ref: TextInput | null) => {
+    inputRefs.current[name] = ref;
+  }, []);
+  const focusInput = useCallback((name: string) => () => {
+    inputRefs.current[name]?.focus();
+  }, []);
   
   // Get focus styles utility
   const inputFocusStyles = getInputFocusStyles();
@@ -556,6 +561,10 @@ export default function AddSupplierScreen() {
       state: '',
       pincode: '',
     }));
+    // Re-focus the GSTIN input so user can immediately type a new one
+    setTimeout(() => {
+      taxIdInputRef.current?.focus();
+    }, 150);
   };
 
   // Handle GSTIN lookup when search button is clicked
@@ -829,38 +838,6 @@ export default function AddSupplierScreen() {
       const newSupplier = result.supplier;
       console.log('✅ Supplier created successfully:', newSupplier);
 
-      // Also add to dataStore for backward compatibility (will be removed later)
-      const supplierForStore: Supplier = {
-        id: newSupplier.id,
-        name: formData.contactPerson.trim(),
-        businessName: formData.businessName.trim(),
-        supplierType: 'business',
-        contactPerson: formData.contactPerson.trim(),
-        mobile: formData.mobile.trim(),
-        email: formData.email.trim(),
-        address: `${formData.addressLine1.trim()}, ${formData.addressLine2.trim() ? formData.addressLine2.trim() + ', ' : ''}${formData.addressLine3.trim() ? formData.addressLine3.trim() + ', ' : ''}${formData.city.trim()}, ${formData.pincode.trim()}, ${formData.state.trim()}`,
-        gstin: formData.gstin.trim(),
-        avatar: '', // No avatar - will show initials instead
-        supplierScore: 85,
-        onTimeDelivery: 90,
-        qualityRating: 4.5,
-        responseTime: 2.1,
-        totalOrders: 0,
-        completedOrders: 0,
-        pendingOrders: 0,
-        cancelledOrders: 0,
-        totalValue: 0,
-        lastOrderDate: null,
-        joinedDate: new Date().toISOString(),
-        status: 'active',
-        paymentTerms: 'Net 30 Days',
-        deliveryTime: '3-5 Business Days',
-        categories: ['Electronics', 'Accessories'],
-        productCount: 0,
-        createdAt: new Date().toISOString(),
-      };
-      dataStore.addSupplier(supplierForStore);
-
       // Navigate immediately after success
       // Check if we should return to add product page
       if (returnToAddProduct === 'true') {
@@ -874,7 +851,7 @@ export default function AddSupplierScreen() {
         };
         
         // Navigate back to add product page with supplier data
-        router.replace({
+        safeRouter.replace({
           pathname: '/inventory/manual-product',
           params: {
             newSupplier: JSON.stringify(supplierData)
@@ -892,8 +869,7 @@ export default function AddSupplierScreen() {
           address: `${formData.addressLine1}, ${formData.addressLine2 ? formData.addressLine2 + ', ' : ''}${formData.addressLine3 ? formData.addressLine3 + ', ' : ''}${formData.city}, ${formData.pincode}, ${formData.state}`,
         };
         
-        // Navigate back to stock-in with supplier data
-        router.push({
+        safeRouter.replace({
           pathname: '/inventory/stock-in/manual',
           params: {
             newSupplier: JSON.stringify(supplierData)
@@ -912,34 +888,10 @@ export default function AddSupplierScreen() {
     }
   };
 
-  const handleMenuNavigation = (route: any) => {
-    router.push(route);
-  };
-
-  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
-    setSidebarWidth(width);
-  };
-
   return (
-    <View style={styles.mainContainer}>
-      {/* Sidebar - Only on web */}
-      {Platform.OS === 'web' && (
-        <Sidebar 
-          onNavigate={handleMenuNavigation} 
-          currentRoute={pathname}
-          onCollapseChange={handleSidebarCollapseChange}
-        />
-      )}
-      
-      <View style={[
-        styles.contentWrapper,
-        Platform.OS === 'web' && {
-          marginLeft: sidebarWidth,
-          flex: 1,
-        }
-      ]}>
-        <ResponsiveContainer>
-          <View style={styles.container}>
+    <>
+      <ResponsiveContainer>
+        <View style={styles.container}>
             <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
@@ -1030,13 +982,13 @@ export default function AddSupplierScreen() {
               </View>
               
               <View style={styles.inputGroup}>
-                <View style={[
+                <Pressable style={[
                   inputFocusStyles.inputContainer,
                   focusedField === 'taxId' && inputFocusStyles.inputContainerFocused,
                   isLoadingGstin && styles.gstinInputContainerLoading,
                   isTaxIdValid && gstinInput.length > 0 && styles.validTaxIdInput,
                   gstinInput.length > 0 && !isTaxIdValid && !isLoadingGstin && styles.invalidTaxIdInput,
-                ]}>
+                ]} onPress={() => taxIdInputRef.current?.focus()}>
                   {taxIdType === 'GSTIN' ? (
                     <FileText size={20} color={isLoadingGstin ? Colors.primary : Colors.textLight} style={styles.inputIcon} />
                   ) : (
@@ -1093,7 +1045,7 @@ export default function AddSupplierScreen() {
                       <Lock size={18} color={Colors.textLight} />
                     </View>
                   )}
-                </View>
+                </Pressable>
                 <Text style={styles.gstinHelperText}>
                   {isLoadingGstin ? `Fetching business details from ${taxIdType}...` :
                     isGstinAutoFilled ? 
@@ -1158,12 +1110,13 @@ export default function AddSupplierScreen() {
               
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Business Name *</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'businessName' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('businessName')}>
                     <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('businessName')}
                       style={inputFocusStyles.input as any}
                       value={formData.businessName}
                       onChangeText={(text) => handleTextInput('businessName', text)}
@@ -1173,21 +1126,21 @@ export default function AddSupplierScreen() {
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
                     />
-                  </View>
+                  </Pressable>
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Contact Person *</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'contactPerson' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('contactPerson')}>
                     <User size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('contactPerson')}
                       style={inputFocusStyles.input as any}
                       value={formData.contactPerson}
                       onChangeText={(text) => {
-                        // Remove any numeric characters and apply camel case
                         const cleanText = text.replace(/[0-9]/g, '');
                         handleTextInput('contactPerson', cleanText);
                       }}
@@ -1197,18 +1150,19 @@ export default function AddSupplierScreen() {
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
                     />
-                  </View>
+                  </Pressable>
               </View>
 
               <View style={styles.rowContainer}>
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Mobile *</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'mobile' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('mobile')}>
                     <Phone size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('mobile')}
                       style={inputFocusStyles.input as any}
                       value={formData.mobile}
                       onChangeText={(text) => updateFormData('mobile', text.replace(/\D/g, '').slice(0, 10))}
@@ -1219,17 +1173,18 @@ export default function AddSupplierScreen() {
                       keyboardType="phone-pad"
                       maxLength={10}
                     />
-                  </View>
+                  </Pressable>
                 </View>
 
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Email</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'email' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('email')}>
                     <Mail size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('email')}
                       style={inputFocusStyles.input as any}
                       value={formData.email}
                       onChangeText={(text) => updateFormData('email', text)}
@@ -1240,7 +1195,7 @@ export default function AddSupplierScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                     />
-                  </View>
+                  </Pressable>
                 </View>
               </View>
 
@@ -1370,12 +1325,13 @@ export default function AddSupplierScreen() {
                 <>
                   <View style={styles.inputGroup}>
                     <Text style={styles.label}>Address Line 1 *</Text>
-                    <View style={[
+                    <Pressable style={[
                       inputFocusStyles.inputContainer,
                       focusedField === 'addressLine1' && inputFocusStyles.inputContainerFocused,
-                    ]}>
+                    ]} onPress={focusInput('addressLine1')}>
                       <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                       <TextInput
+                        ref={setInputRef('addressLine1')}
                         style={inputFocusStyles.input as any}
                         value={formData.addressLine1}
                         onChangeText={(text) => handleTextInput('addressLine1', text)}
@@ -1384,19 +1340,20 @@ export default function AddSupplierScreen() {
                         placeholder="Enter address line 1"
                         placeholderTextColor={Colors.textLight}
                       />
-                    </View>
+                    </Pressable>
                   </View>
                 </>
               )}
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address Line 2</Text>
-                <View style={[
+                <Pressable style={[
                   inputFocusStyles.inputContainer,
                   focusedField === 'addressLine2' && inputFocusStyles.inputContainerFocused,
-                ]}>
+                ]} onPress={focusInput('addressLine2')}>
                   <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
+                    ref={setInputRef('addressLine2')}
                     style={inputFocusStyles.input as any}
                     value={formData.addressLine2}
                     onChangeText={(text) => handleTextInput('addressLine2', text)}
@@ -1405,17 +1362,18 @@ export default function AddSupplierScreen() {
                     placeholder="Enter address line 2 (optional)"
                     placeholderTextColor={Colors.textLight}
                   />
-                </View>
+                </Pressable>
               </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Address Line 3</Text>
-                <View style={[
+                <Pressable style={[
                   inputFocusStyles.inputContainer,
                   focusedField === 'addressLine3' && inputFocusStyles.inputContainerFocused,
-                ]}>
+                ]} onPress={focusInput('addressLine3')}>
                   <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
+                    ref={setInputRef('addressLine3')}
                     style={inputFocusStyles.input as any}
                     value={formData.addressLine3}
                     onChangeText={(text) => handleTextInput('addressLine3', text)}
@@ -1424,18 +1382,19 @@ export default function AddSupplierScreen() {
                     placeholder="Enter address line 3 (optional)"
                     placeholderTextColor={Colors.textLight}
                   />
-                </View>
+                </Pressable>
               </View>
 
               <View style={styles.rowContainer}>
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>City *</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'city' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('city')}>
                     <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('city')}
                       style={inputFocusStyles.input as any}
                       value={formData.city}
                       onChangeText={(text) => handleTextInput('city', text)}
@@ -1445,17 +1404,18 @@ export default function AddSupplierScreen() {
                       placeholderTextColor={Colors.textLight}
                       autoCapitalize="words"
                     />
-                  </View>
+                  </Pressable>
                 </View>
 
                 <View style={[styles.inputGroup, styles.halfWidth]}>
                   <Text style={styles.label}>Pincode *</Text>
-                  <View style={[
+                  <Pressable style={[
                     inputFocusStyles.inputContainer,
                     focusedField === 'pincode' && inputFocusStyles.inputContainerFocused,
-                  ]}>
+                  ]} onPress={focusInput('pincode')}>
                     <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
                     <TextInput
+                      ref={setInputRef('pincode')}
                       style={inputFocusStyles.input as any}
                       value={formData.pincode}
                       onChangeText={(text) => updateFormData('pincode', text.replace(/\D/g, '').slice(0, 6))}
@@ -1466,7 +1426,7 @@ export default function AddSupplierScreen() {
                       keyboardType="numeric"
                       maxLength={6}
                     />
-                  </View>
+                  </Pressable>
                 </View>
               </View>
 
@@ -1497,12 +1457,13 @@ export default function AddSupplierScreen() {
               
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Additional Notes</Text>
-                <View style={[
+                <Pressable style={[
                   inputFocusStyles.inputContainer,
                   focusedField === 'notes' && inputFocusStyles.inputContainerFocused,
                   styles.textAreaContainer,
-                ]}>
+                ]} onPress={focusInput('notes')}>
                   <TextInput
+                    ref={setInputRef('notes')}
                     style={[inputFocusStyles.input as any, styles.textArea]}
                     value={formData.notes}
                     onChangeText={(text) => updateFormData('notes', text)}
@@ -1514,7 +1475,7 @@ export default function AddSupplierScreen() {
                     numberOfLines={4}
                     textAlignVertical="top"
                   />
-                </View>
+                </Pressable>
               </View>
             </View>
           </ScrollView>
@@ -1541,8 +1502,7 @@ export default function AddSupplierScreen() {
         </View>
       </SafeAreaView>
         </View>
-        </ResponsiveContainer>
-      </View>
+      </ResponsiveContainer>
 
       {/* State Selection Modal */}
       <Modal
@@ -1653,26 +1613,11 @@ export default function AddSupplierScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    backgroundColor: Colors.background,
-  },
-  contentWrapper: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    ...Platform.select({
-      web: {
-        transition: 'margin-left 0.3s ease',
-        minWidth: 0,
-      },
-    }),
-  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,

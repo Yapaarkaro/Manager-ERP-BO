@@ -16,11 +16,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone, Building2, Package } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode, BusinessAddress } from '@/utils/dataStore';
+import { getGSTINStateCode, BusinessAddress, mapLocationToAddress, mapLocationsToAddresses } from '@/utils/dataStore';
+import { supabase } from '@/lib/supabase';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
 import { extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { updateAddress, createStaff } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -124,32 +126,63 @@ export default function EditAddressScreen() {
     }
   }, [showStates]);
 
-  // Load existing address data
+  // Load existing address data from backend
   useEffect(() => {
-    if (editAddressId) {
-      const existingAddress = dataStore.getAddressById(editAddressId as string);
-      if (existingAddress) {
-        setAddressName(existingAddress.name);
-        setAddressLine1(existingAddress.addressLine1);
-        setAddressLine2(existingAddress.addressLine2);
-        setAdditionalLines(existingAddress.additionalLines || []);
-        setCity(existingAddress.city);
-        setPincode(existingAddress.pincode);
-        setManagerName(existingAddress.manager || '');
-        setManagerPhone(existingAddress.phone || '');
+    const loadAddress = async () => {
+      if (!editAddressId) return;
+
+      // Try route params first
+      let address: BusinessAddress | null = null;
+      try {
+        const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
+        const mapped = mapLocationsToAddresses(paramAddrs);
+        address = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId) || null;
+      } catch { /* ignore parse error */ }
+
+      // Fallback: query backend directly
+      if (!address) {
+        try {
+          const { data: loc } = await supabase
+            .from('locations')
+            .select('*')
+            .eq('id', editAddressId)
+            .maybeSingle();
+          if (loc) {
+            address = mapLocationToAddress(loc);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (address) {
+        setAddressName(address.name);
+        setAddressLine1(address.addressLine1);
+        setAddressLine2(address.addressLine2);
+        setAdditionalLines(address.additionalLines || []);
+        setCity(address.city);
+        setPincode(address.pincode);
+        setManagerName(address.manager || '');
+        setManagerPhone(address.phone || '');
         
-        // Set state
-        const matchingState = indianStates.find(state => state.code === existingAddress.stateCode);
+        const matchingState = indianStates.find(state => state.code === address!.stateCode);
         if (matchingState) {
           setSelectedState(matchingState);
         }
       }
-    }
+    };
+
+    loadAddress();
   }, [editAddressId]);
+
+  // Parse existing addresses from route params
+  const parsedExistingAddresses = React.useMemo(() => {
+    try {
+      return mapLocationsToAddresses(JSON.parse((existingAddresses || '[]') as string));
+    } catch { return []; }
+  }, [existingAddresses]);
 
   // Dynamic header and form configuration
   const typeInfo = React.useMemo(() => {
-    const allAddresses = dataStore.getAddresses();
+    const allAddresses = parsedExistingAddresses;
     
     if (addressType === 'branch') {
       const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
@@ -182,7 +215,7 @@ export default function EditAddressScreen() {
         showContactFields: false,
       };
     }
-  }, [addressType, editAddressId]);
+  }, [addressType, editAddressId, parsedExistingAddresses]);
 
   // Glowy animation effect - stops when user starts searching or search bar is shown
   useEffect(() => {
@@ -348,14 +381,8 @@ export default function EditAddressScreen() {
     setIsLoading(true);
     
     try {
-      // Get existing address to check if it has backendId
-      const existingAddress = dataStore.getAddressById(editAddressId as string);
-      
-      // Update existing address
-      const updatedAddress: BusinessAddress = {
-        id: editAddressId as string,
+      const addressUpdates: Partial<BusinessAddress> = {
         name: addressName.trim(),
-        type: addressType as 'primary' | 'branch' | 'warehouse',
         doorNumber: addressLine1.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
@@ -367,79 +394,37 @@ export default function EditAddressScreen() {
         manager: typeInfo.showContactFields ? managerName.trim() : undefined,
         phone: typeInfo.showContactFields ? managerPhone.trim() : undefined,
         isPrimary: addressType === 'primary',
-        status: 'active' as const,
-        createdAt: existingAddress?.createdAt || new Date().toISOString(), // Preserve original createdAt
         updatedAt: new Date().toISOString(),
-        backendId: existingAddress?.backendId, // Preserve backendId
       };
-
-      console.log('🔄 Updating address:', updatedAddress);
       
-      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
       const { optimisticUpdateAddress } = await import('@/utils/optimisticSync');
-      
-      // Prepare address updates with all fields including additionalLines
-      const addressUpdates: Partial<BusinessAddress> = {
-        name: addressName.trim(),
-        doorNumber: addressLine1.trim(),
-        addressLine1: addressLine1.trim(),
-        addressLine2: addressLine2.trim(),
-        additionalLines: additionalLines.filter(line => line.trim().length > 0), // ✅ Always include additionalLines
-        city: city.trim(),
-        pincode: pincode,
-        stateName: selectedState?.name || '',
-        stateCode: getGSTINStateCode(selectedState?.name || ''),
-        manager: typeInfo.showContactFields ? managerName.trim() : undefined,
-        phone: typeInfo.showContactFields ? managerPhone.trim() : undefined,
-        isPrimary: addressType === 'primary',
-        updatedAt: new Date().toISOString(),
-      };
-      
-      // ✅ Optimistically update (DataStore updated immediately, backend sync in background)
-      // This ensures backend is always updated with all fields including additionalLines
-      // ✅ Await backend sync to ensure changes are persisted before navigation
       await optimisticUpdateAddress(editAddressId as string, addressUpdates, { showError: false, awaitSync: true });
       
-      // ✅ Clear cache to ensure fresh data is loaded when navigating back
       const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
       clearBusinessDataCache();
       
-      // ✅ Small additional delay to ensure backend has fully processed the update
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // If manager info was added/updated, ensure staff is synced to backend (non-blocking)
-      if (addressUpdates.manager && addressUpdates.phone && existingAddress?.backendId) {
-        (async () => {
-          try {
-            const updatedAddr = dataStore.getAddressById(editAddressId as string);
-            if (updatedAddr) {
-              const staffId = await dataStore.createStaffFromAddress(updatedAddr);
-              if (staffId) {
-                const staffData = dataStore.getStaffById(staffId);
-                if (staffData && !staffData.employeeId) {
-                  // Staff doesn't exist in backend yet, create it
-                  await createStaff({
-                    name: staffData.name,
-                    mobile: staffData.mobile,
-                    role: staffData.role,
-                    locationId: existingAddress.backendId,
-                    locationType: staffData.locationType,
-                    locationName: staffData.locationName,
-                  });
-                  console.log('✅ Staff synced to backend from address update');
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Error syncing staff to backend:', error);
-          }
-        })();
+      // If manager info was added/updated, create staff via backend directly
+      if (addressUpdates.manager && addressUpdates.phone) {
+        try {
+          await createStaff({
+            name: addressUpdates.manager,
+            mobile: addressUpdates.phone,
+            role: addressType === 'branch' ? 'branch_manager' : addressType === 'warehouse' ? 'warehouse_manager' : 'manager',
+            locationId: editAddressId as string,
+            locationType: addressType as string,
+            locationName: addressName.trim(),
+          });
+          console.log('✅ Staff synced to backend from address update');
+        } catch (error) {
+          console.error('Error syncing staff to backend:', error);
+        }
       }
       
       setIsLoading(false);
-      // Navigate back to address confirmation screen with signup parameters
       if (type && value) {
-        router.push({
+        safeRouter.push({
           pathname: '/auth/address-confirmation',
           params: {
             type,
@@ -449,11 +434,11 @@ export default function EditAddressScreen() {
             businessName,
             businessType,
             customBusinessType,
-            allAddresses: JSON.stringify(dataStore.getAddresses()),
+            allAddresses: JSON.stringify(parsedExistingAddresses),
           }
         });
       } else {
-        router.push('/settings');
+        safeRouter.push('/settings');
       }
     } catch (error) {
       console.error('Error updating address:', error);

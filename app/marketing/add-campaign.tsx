@@ -23,6 +23,8 @@ import {
   Plus,
   CheckCircle
 } from 'lucide-react-native';
+import { autoFormatDateInput, parseDDMMYYYY, validateDateDDMMYYYY } from '@/utils/formatters';
+import { safeRouter } from '@/utils/safeRouter';
 
 
 const Colors = {
@@ -145,53 +147,21 @@ export default function AddCampaignScreen() {
     return `${day}-${month}-${year}`;
   };
 
-  const parseDateInput = (input: string) => {
-    // Handle DD-MM-YYYY format
-    const parts = input.split('-');
-    if (parts.length === 3) {
-      const day = parseInt(parts[0]);
-      const month = parseInt(parts[1]) - 1; // Month is 0-indexed
-      const year = parseInt(parts[2]);
-      
-      if (day && month >= 0 && month <= 11 && year) {
-        const date = new Date(year, month, day);
-        if (date.getDate() === day && date.getMonth() === month && date.getFullYear() === year) {
-          return date.toISOString().split('T')[0]; // Return YYYY-MM-DD for storage
-        }
-      }
-    }
-    return null;
-  };
-
   const handleDateInput = (dateType: 'startDate' | 'endDate', input: string) => {
-    // Allow only numbers and hyphens
-    const cleaned = input.replace(/[^0-9-]/g, '');
+    const formatted = autoFormatDateInput(input);
     
-    // Auto-format as user types
-    let formatted = cleaned;
-    if (cleaned.length >= 2 && !cleaned.includes('-')) {
-      formatted = cleaned.slice(0, 2) + '-' + cleaned.slice(2);
-    }
-    if (formatted.length >= 5 && formatted.split('-').length === 2) {
-      formatted = formatted.slice(0, 5) + '-' + formatted.slice(5);
-    }
-    
-    // Limit to DD-MM-YYYY format
-    if (formatted.length > 10) {
-      formatted = formatted.slice(0, 10);
-    }
-    
-    // Store the formatted display value
     if (dateType === 'startDate') {
       setFormData(prev => ({ ...prev, startDateDisplay: formatted }));
     } else {
       setFormData(prev => ({ ...prev, endDateDisplay: formatted }));
     }
     
-    // Try to parse and store the actual date
-    const parsedDate = parseDateInput(formatted);
-    if (parsedDate) {
-      updateFormData(dateType, parsedDate);
+    if (formatted.length === 10) {
+      const parsed = parseDDMMYYYY(formatted);
+      if (parsed) {
+        const iso = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+        updateFormData(dateType, iso);
+      }
     }
   };
 
@@ -204,10 +174,12 @@ export default function AddCampaignScreen() {
     const minBudget = getMinBudget();
     const budget = parseInt(formData.budget) || 0;
     
-    // Check if end date is after start date
     const startDate = new Date(formData.startDate);
     const endDate = new Date(formData.endDate);
     const isEndDateValid = endDate > startDate;
+
+    if (formData.startDateDisplay.length === 10 && validateDateDDMMYYYY(formData.startDateDisplay, true)) return false;
+    if (formData.endDateDisplay.length === 10 && validateDateDDMMYYYY(formData.endDateDisplay, true)) return false;
     
     return (
       formData.name.trim().length > 0 &&
@@ -227,7 +199,7 @@ export default function AddCampaignScreen() {
       return;
     }
 
-    router.push({
+    safeRouter.push({
       pathname: '/marketing/payment',
       params: {
         campaignData: JSON.stringify(formData)
@@ -612,20 +584,23 @@ export default function AddCampaignScreen() {
 
              <View style={styles.calendarContainer}>
                <Text style={styles.calendarTitle}>Select Start Date</Text>
-               <View style={styles.dateInputContainer}>
-                 <TextInput
-                   style={styles.dateInput}
-                   placeholder="DD-MM-YYYY"
-                   placeholderTextColor={Colors.textLight}
-                   value={formData.startDateDisplay}
-                   onChangeText={(text) => handleDateInput('startDate', text)}
-                   keyboardType="numeric"
-                   maxLength={10}
-                 />
-               </View>
-               <TouchableOpacity
-                 style={styles.confirmDateButton}
-                 onPress={() => setShowStartDateModal(false)}
+              <View style={styles.dateInputContainer}>
+                <TextInput
+                  style={styles.dateInput}
+                  placeholder="DD-MM-YYYY"
+                  placeholderTextColor={Colors.textLight}
+                  value={formData.startDateDisplay}
+                  onChangeText={(text) => handleDateInput('startDate', text)}
+                  keyboardType="numeric"
+                  maxLength={10}
+                />
+              </View>
+              {formData.startDateDisplay.length === 10 && validateDateDDMMYYYY(formData.startDateDisplay, true) && (
+                <Text style={{ fontSize: 11, color: Colors.error, marginTop: 4 }}>{validateDateDDMMYYYY(formData.startDateDisplay, true)}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.confirmDateButton}
+                onPress={() => setShowStartDateModal(false)}
                  activeOpacity={0.7}
                >
                  <Text style={styles.confirmDateButtonText}>Confirm</Text>
@@ -657,20 +632,23 @@ export default function AddCampaignScreen() {
 
              <View style={styles.calendarContainer}>
                <Text style={styles.calendarTitle}>Select End Date</Text>
-               <View style={styles.dateInputContainer}>
-                 <TextInput
-                   style={styles.dateInput}
-                   placeholder="DD-MM-YYYY"
-                   placeholderTextColor={Colors.textLight}
-                   value={formData.endDateDisplay}
-                   onChangeText={(text) => handleDateInput('endDate', text)}
-                   keyboardType="numeric"
-                   maxLength={10}
-                 />
-               </View>
-               <TouchableOpacity
-                 style={styles.confirmDateButton}
-                 onPress={() => setShowEndDateModal(false)}
+              <View style={styles.dateInputContainer}>
+                <TextInput
+                  style={styles.dateInput}
+                  placeholder="DD-MM-YYYY"
+                  placeholderTextColor={Colors.textLight}
+                  value={formData.endDateDisplay}
+                  onChangeText={(text) => handleDateInput('endDate', text)}
+                  keyboardType="numeric"
+                  maxLength={10}
+                />
+              </View>
+              {formData.endDateDisplay.length === 10 && validateDateDDMMYYYY(formData.endDateDisplay, true) && (
+                <Text style={{ fontSize: 11, color: Colors.error, marginTop: 4 }}>{validateDateDDMMYYYY(formData.endDateDisplay, true)}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.confirmDateButton}
+                onPress={() => setShowEndDateModal(false)}
                  activeOpacity={0.7}
                >
                  <Text style={styles.confirmDateButtonText}>Confirm</Text>

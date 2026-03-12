@@ -1,22 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
-  Image,
   Modal,
   Alert,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Search, Filter, Bell, BellRing, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle, Info, Users, Package, ShoppingCart, IndianRupee, Eye, Check, X, MessageSquare } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { getNotifications } from '@/services/backendApi';
+import { getNotifications, invalidateApiCache, getInAppNotifications, updateNotificationStatus } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { useBusinessData } from '@/hooks/useBusinessData';
 
 const Colors = {
   background: '#FFFFFF',
@@ -38,7 +42,7 @@ const Colors = {
 interface Notification {
   id: string;
   type: 'urgent' | 'warning' | 'info' | 'success';
-  category: 'order' | 'stock' | 'payment' | 'staff' | 'system' | 'customer';
+  category: 'order' | 'stock' | 'payment' | 'staff' | 'system' | 'customer' | 'purchase' | 'sale' | 'return';
   title: string;
   message: string;
   timestamp: string;
@@ -46,7 +50,7 @@ interface Notification {
   priority: 'low' | 'medium' | 'high' | 'critical';
   actionRequired: boolean;
   relatedEntity?: {
-    type: 'customer' | 'supplier' | 'product' | 'invoice' | 'staff';
+    type: 'customer' | 'supplier' | 'product' | 'invoice' | 'staff' | 'purchase_order' | 'purchase_invoice' | 'return';
     id: string;
     name: string;
   };
@@ -80,7 +84,7 @@ function mapNotificationFromBackend(raw: {
   created_at?: string;
 }): Notification {
   const validType = ['urgent', 'warning', 'info', 'success'].includes(raw.type || '') ? raw.type as Notification['type'] : 'info';
-  const validCategory = ['order', 'stock', 'payment', 'staff', 'system', 'customer'].includes(raw.category || '') ? raw.category as Notification['category'] : 'system';
+  const validCategory = ['order', 'stock', 'payment', 'staff', 'system', 'customer', 'purchase', 'sale', 'return'].includes(raw.category || '') ? raw.category as Notification['category'] : 'system';
   const validStatus = ['unread', 'read', 'acknowledged', 'resolved'].includes(raw.status || '') ? raw.status as Notification['status'] : 'unread';
   const validPriority = ['low', 'medium', 'high', 'critical'].includes(raw.priority || '') ? raw.priority as Notification['priority'] : 'medium';
 
@@ -96,7 +100,7 @@ function mapNotificationFromBackend(raw: {
     actionRequired: raw.action_required ?? false,
     relatedEntity: (raw.related_entity_type && raw.related_entity_id)
       ? {
-          type: raw.related_entity_type as 'customer' | 'supplier' | 'product' | 'invoice' | 'staff',
+          type: raw.related_entity_type as any,
           id: raw.related_entity_id,
           name: raw.related_entity_name ?? '',
         }
@@ -115,13 +119,18 @@ function mapNotificationFromBackend(raw: {
 
 export default function NotificationsScreen() {
   const { handleBack } = useWebBackNavigation();
+  const { isStaff, isOwner, hasPermission, staffId, staffBusinessId } = usePermissions();
+  const { data: businessData } = useBusinessData();
+  const effectiveBusinessId = staffBusinessId || businessData?.business?.id;
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredNotifications, setFilteredNotifications] = useState<Notification[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'unread' | 'urgent' | 'action_required'>('all');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     type: [] as string[],
@@ -136,17 +145,61 @@ export default function NotificationsScreen() {
   // Use debounced navigation for related entity buttons
   const debouncedNavigate = useDebounceNavigation(500);
 
-  useEffect(() => {
-    (async () => {
-      const { success, notifications: data } = await getNotifications();
-      if (success && data) {
-        const mapped = data.map(mapNotificationFromBackend);
-        setNotifications(mapped);
-      } else {
-        setNotifications([]);
+  const loadNotifications = useCallback(async () => {
+    const allNotifs: Notification[] = [];
+
+    const { success, notifications: edgeData } = await getNotifications();
+    if (success && edgeData) {
+      const filtered = edgeData.filter((n: any) => n.type !== 'chat_message');
+      allNotifs.push(...filtered.map(mapNotificationFromBackend));
+    }
+
+    if (effectiveBusinessId) {
+      const recipientFilter = isStaff && staffId
+        ? { recipientId: staffId, recipientType: 'staff' as const }
+        : {};
+      const inAppResult = await getInAppNotifications({
+        businessId: effectiveBusinessId,
+        ...recipientFilter,
+        limit: 100,
+      });
+      if (inAppResult.success && inAppResult.notifications) {
+        const filtered = inAppResult.notifications.filter((n: any) => n.type !== 'chat_message');
+        const mapped = filtered.map((n: any) => mapNotificationFromBackend({
+          id: n.id,
+          type: n.type || 'info',
+          category: n.category || 'system',
+          title: n.title,
+          message: n.message,
+          status: n.status || (n.is_read ? 'read' : 'unread'),
+          priority: n.priority || 'medium',
+          action_required: false,
+          related_entity_type: n.related_entity_type,
+          related_entity_id: n.related_entity_id,
+          related_entity_name: n.related_entity_name,
+          created_at: n.created_at,
+        }));
+        const existingIds = new Set(allNotifs.map(n => n.id));
+        mapped.forEach((n: Notification) => { if (!existingIds.has(n.id)) allNotifs.push(n); });
       }
-    })();
-  }, []);
+    }
+
+    allNotifs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setNotifications(allNotifs);
+  }, [effectiveBusinessId, isStaff, staffId]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    loadNotifications().finally(() => setIsLoading(false));
+  }, [loadNotifications]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadNotifications()
+      .catch(e => console.error('Refresh failed:', e))
+      .finally(() => setTimeout(() => setRefreshing(false), 600));
+  }, [loadNotifications]);
 
   const statusOptions = [
     { value: 'unread', label: 'Unread', color: Colors.error },
@@ -381,8 +434,10 @@ export default function NotificationsScreen() {
     setShowStatusModal(true);
   };
 
-  const handleStatusUpdate = (newStatus: string) => {
+  const handleStatusUpdate = async (newStatus: string) => {
     if (!selectedNotification) return;
+
+    await updateNotificationStatus(selectedNotification.id, newStatus as any);
 
     setNotifications(prev =>
       prev.map(notif =>
@@ -394,13 +449,16 @@ export default function NotificationsScreen() {
 
     setShowStatusModal(false);
     setSelectedNotification(null);
-    Alert.alert('Status Updated', `Notification status changed to ${newStatus}`);
   };
 
   const handleNotifyStaff = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('notify staff')) return;
     debouncedNavigate('/notifications/notify-staff');
+  };
+
+  const handleNotifyOwner = () => {
+    debouncedNavigate('/notifications/notify-owner');
   };
 
   const handleRelatedEntityPress = (notification: Notification) => {
@@ -420,8 +478,7 @@ export default function NotificationsScreen() {
             customerData: JSON.stringify({
               id: entity.id,
               customerName: entity.name,
-              totalReceivable: 35000,
-              // Add mock data as needed
+              totalReceivable: 0,
             })
           }
         });
@@ -429,21 +486,38 @@ export default function NotificationsScreen() {
       case 'product':
         debouncedNavigate({
           pathname: '/inventory/product-details',
-          params: {
-            productId: entity.id,
-            productData: JSON.stringify({
-              id: entity.id,
-              name: entity.name,
-              currentStock: 3,
-              minStockLevel: 10,
-              // Add mock data as needed
-            })
-          }
+          params: { productId: entity.id }
         });
         break;
       case 'invoice':
-        // Navigate to invoice details
-        console.log('Navigate to invoice:', entity.id);
+        debouncedNavigate({
+          pathname: '/invoice-details',
+          params: { invoiceId: entity.id }
+        });
+        break;
+      case 'purchase_order':
+        debouncedNavigate({
+          pathname: '/purchasing/po-details',
+          params: { poId: entity.id }
+        });
+        break;
+      case 'purchase_invoice':
+        debouncedNavigate({
+          pathname: '/purchasing/invoice-details',
+          params: { invoiceId: entity.id }
+        });
+        break;
+      case 'return':
+        debouncedNavigate({
+          pathname: '/return-details',
+          params: { returnId: entity.id }
+        });
+        break;
+      case 'supplier':
+        debouncedNavigate({
+          pathname: '/purchasing/supplier-details',
+          params: { supplierId: entity.id }
+        });
         break;
       default:
         console.log('View entity:', entity.type, entity.id);
@@ -452,20 +526,38 @@ export default function NotificationsScreen() {
     setTimeout(() => setIsNavigating(false), 1000);
   };
 
+  const getCardBackgroundColor = (status: string) => {
+    switch (status) {
+      case 'unread': return '#FEF3F2';
+      case 'read': return '#EFF6FF';
+      case 'acknowledged': return '#FFFBEB';
+      case 'resolved': return '#ECFDF5';
+      default: return Colors.background;
+    }
+  };
+
+  const getCardBorderColor = (status: string) => {
+    switch (status) {
+      case 'unread': return Colors.error;
+      case 'read': return Colors.info;
+      case 'acknowledged': return Colors.warning;
+      case 'resolved': return Colors.success;
+      default: return Colors.grey[200];
+    }
+  };
+
   const renderNotificationCard = (notification: Notification) => {
     const NotificationIcon = getNotificationTypeIcon(notification.type);
-    const CategoryIcon = getCategoryIcon(notification.category);
-    const typeColor = getNotificationTypeColor(notification.type);
     const statusColor = getStatusColor(notification.status);
     const priorityColor = getPriorityColor(notification.priority);
+    const cardBg = getCardBackgroundColor(notification.status);
+    const cardBorder = getCardBorderColor(notification.status);
 
     return (
       <TouchableOpacity
-        key={notification.id}
         style={[
           styles.notificationCard,
-          { borderLeftColor: typeColor },
-          notification.status === 'unread' && styles.unreadCard
+          { backgroundColor: cardBg, borderLeftColor: cardBorder, borderColor: cardBorder + '40' },
         ]}
         onPress={() => handleNotificationPress(notification)}
         activeOpacity={0.7}
@@ -476,21 +568,17 @@ export default function NotificationsScreen() {
           <View style={styles.notificationLeft}>
             <View style={[
               styles.notificationTypeIcon,
-              { backgroundColor: `${typeColor}20` }
+              { backgroundColor: `${priorityColor}20` }
             ]}>
-              <NotificationIcon size={20} color={typeColor} />
+              <NotificationIcon size={20} color={priorityColor} />
             </View>
             <View style={styles.notificationInfo}>
               <Text style={styles.notificationTitle} numberOfLines={2}>
                 {notification.title}
               </Text>
               <View style={styles.notificationMeta}>
-                <CategoryIcon size={14} color={Colors.textLight} />
-                <Text style={styles.notificationCategory}>
-                  {notification.category.toUpperCase()}
-                </Text>
                 <Text style={styles.notificationTime}>
-                  • {formatDateTime(notification.timestamp)}
+                  {formatDateTime(notification.timestamp)}
                 </Text>
               </View>
             </View>
@@ -498,22 +586,22 @@ export default function NotificationsScreen() {
 
           <View style={styles.notificationRight}>
             <View style={[
-              styles.statusBadge,
-              { backgroundColor: `${statusColor}20` }
+              styles.priorityBadge,
+              { backgroundColor: `${priorityColor}18` }
             ]}>
-              <Text style={[
-                styles.statusText,
-                { color: statusColor }
-              ]}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: priorityColor, marginRight: 4 }} />
+              <Text style={[styles.priorityText, { color: priorityColor }]}>
+                {notification.priority.toUpperCase()}
+              </Text>
+            </View>
+            <View style={[
+              styles.statusBadge,
+              { backgroundColor: `${statusColor}18` }
+            ]}>
+              <Text style={[styles.statusText, { color: statusColor }]}>
                 {notification.status.toUpperCase()}
               </Text>
             </View>
-            
-            {notification.actionRequired && (
-              <View style={styles.actionRequiredBadge}>
-                <Text style={styles.actionRequiredText}>ACTION REQUIRED</Text>
-              </View>
-            )}
           </View>
         </View>
 
@@ -537,56 +625,18 @@ export default function NotificationsScreen() {
           >
             <Eye size={14} color={Colors.primary} />
             <Text style={styles.relatedEntityText}>
-              View {notification.relatedEntity.type}: {notification.relatedEntity.name}
+              View {(() => {
+                const t = notification.relatedEntity!.type;
+                switch (t) {
+                  case 'purchase_order': return 'Purchase Order';
+                  case 'purchase_invoice': return 'Purchase Invoice';
+                  case 'return': return 'Return';
+                  default: return t.charAt(0).toUpperCase() + t.slice(1);
+                }
+              })()}{notification.relatedEntity!.name ? `: ${notification.relatedEntity!.name}` : ''}
             </Text>
           </TouchableOpacity>
         )}
-
-        {/* Created By & Assigned To */}
-        <View style={styles.assignmentSection}>
-          <View style={styles.createdBySection}>
-            <Image 
-              source={{ uri: notification.createdBy.avatar }}
-              style={styles.userAvatar}
-            />
-            <View style={styles.userInfo}>
-              <Text style={styles.userName}>
-                {notification.createdBy.name}
-              </Text>
-              <Text style={styles.userRole}>
-                {notification.createdBy.role}
-              </Text>
-            </View>
-          </View>
-
-          {notification.assignedTo && (
-            <View style={styles.assignedToSection}>
-              <Text style={styles.assignedLabel}>Assigned to:</Text>
-              <Image 
-                source={{ uri: notification.assignedTo.avatar }}
-                style={styles.userAvatar}
-              />
-              <Text style={styles.assignedName}>
-                {notification.assignedTo.name}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Priority */}
-        <View style={styles.prioritySection}>
-          <View style={[
-            styles.priorityBadge,
-            { backgroundColor: `${priorityColor}20` }
-          ]}>
-            <Text style={[
-              styles.priorityText,
-              { color: priorityColor }
-            ]}>
-              {notification.priority.toUpperCase()} PRIORITY
-            </Text>
-          </View>
-        </View>
       </TouchableOpacity>
     );
   };
@@ -623,6 +673,10 @@ export default function NotificationsScreen() {
         </View>
       </View>
 
+      {isLoading ? (
+        <ListSkeleton />
+      ) : (
+        <>
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -742,12 +796,15 @@ export default function NotificationsScreen() {
       </View>
 
       {/* Notifications List */}
-      <ScrollView 
+      <FlatList
+        data={filteredNotifications}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => renderNotificationCard(item)}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredNotifications.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <Bell size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Notifications Found</Text>
@@ -755,22 +812,52 @@ export default function NotificationsScreen() {
               {searchQuery ? 'No notifications match your search criteria' : 'All caught up! No new notifications.'}
             </Text>
           </View>
-        ) : (
-          filteredNotifications.map(renderNotificationCard)
-        )}
-      </ScrollView>
+        }
+      />
 
-      {/* Notify Staff FAB */}
-      <TouchableOpacity
-        style={styles.notifyStaffFAB}
-        onPress={handleNotifyStaff}
-        activeOpacity={0.8}
-      >
-        <MessageSquare size={20} color="#ffffff" />
-        <Text style={styles.notifyStaffText}>Notify Staff</Text>
-      </TouchableOpacity>
-
-
+      {/* Notification FAB(s) */}
+      {isOwner && (
+        <TouchableOpacity
+          style={styles.notifyStaffFAB}
+          onPress={handleNotifyStaff}
+          activeOpacity={0.8}
+        >
+          <MessageSquare size={20} color="#ffffff" />
+          <Text style={styles.notifyStaffText}>Notify Staff</Text>
+        </TouchableOpacity>
+      )}
+      {isStaff && !hasPermission('master_access') && !hasPermission('staff_management') && (
+        <TouchableOpacity
+          style={styles.notifyStaffFAB}
+          onPress={handleNotifyOwner}
+          activeOpacity={0.8}
+        >
+          <MessageSquare size={20} color="#ffffff" />
+          <Text style={styles.notifyStaffText}>Notify Owner</Text>
+        </TouchableOpacity>
+      )}
+      {isStaff && (hasPermission('master_access') || hasPermission('staff_management')) && (
+        <View style={{ position: 'absolute', bottom: Platform.OS === 'ios' ? 50 : 40, right: 20, gap: 10 }}>
+          <TouchableOpacity
+            style={[styles.notifyStaffFAB, { position: 'relative', bottom: 0, right: 0 }]}
+            onPress={handleNotifyOwner}
+            activeOpacity={0.8}
+          >
+            <MessageSquare size={20} color="#ffffff" />
+            <Text style={styles.notifyStaffText}>Notify Owner</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.notifyStaffFAB, { position: 'relative', bottom: 0, right: 0, backgroundColor: Colors.primary }]}
+            onPress={handleNotifyStaff}
+            activeOpacity={0.8}
+          >
+            <Users size={20} color="#ffffff" />
+            <Text style={styles.notifyStaffText}>Notify Staff</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+        </>
+      )}
 
       {/* Status Update Modal */}
       <Modal
@@ -982,7 +1069,7 @@ export default function NotificationsScreen() {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Created By</Text>
                 <View style={styles.filterOptions}>
-                  {['System', 'Rajesh Kumar', 'Priya Sharma', 'Amit Singh', 'Warehouse Manager'].map(creator => (
+                  {[].map(creator => (
                     <TouchableOpacity
                       key={creator}
                       style={[
@@ -1222,25 +1309,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   notificationCard: {
-    backgroundColor: Colors.background,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: Colors.grey[200],
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
-  },
-  unreadCard: {
-    backgroundColor: '#fefefe',
-    borderColor: Colors.primary,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
   notificationHeader: {
     flexDirection: 'row',
@@ -1334,60 +1412,16 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontWeight: '600',
   },
-  assignmentSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  createdBySection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  userAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: Colors.text,
-  },
-  userRole: {
-    fontSize: 10,
-    color: Colors.textLight,
-  },
-  assignedToSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  assignedLabel: {
-    fontSize: 10,
-    color: Colors.textLight,
-  },
-  assignedName: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: Colors.text,
-  },
-  prioritySection: {
-    alignItems: 'flex-start',
-  },
   priorityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   priorityText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   notifyStaffFAB: {
     position: 'absolute',

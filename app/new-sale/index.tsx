@@ -10,13 +10,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { productStore, Product } from '@/utils/productStore';
+import { productStore, Product, cartBridge } from '@/utils/productStore';
+import { safeRouter } from '@/utils/safeRouter';
 import { canPerformAction } from '@/utils/trialUtils';
 import { 
   ArrowLeft, 
   Search, 
   Scan,
   Plus,
+  Package,
   ShoppingCart,
 } from 'lucide-react-native';
 
@@ -42,16 +44,15 @@ export default function NewSaleScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
-  // Load products from backend and store
+  // Show cached products immediately, then refresh in background
   useEffect(() => {
-    const loadProducts = async () => {
-      // Load products from backend first
-      await productStore.loadProductsFromBackend();
-      // Then get products from store
-    const products = productStore.getProducts();
-    setRecentProducts(products);
-    };
-    loadProducts();
+    const cached = productStore.getProducts();
+    if (cached.length > 0) {
+      setRecentProducts(cached);
+    }
+    productStore.loadProductsFromBackend().then(() => {
+      setRecentProducts(productStore.getProducts());
+    });
   }, []);
 
   // Subscribe to product store changes
@@ -64,33 +65,21 @@ export default function NewSaleScreen() {
   }, []);
 
   const handleProductSelect = (product: Product) => {
-    // Check if trial expired
     if (!canPerformAction('add product to sale')) {
       return;
     }
 
-    // Navigate to cart with selected product
-    router.push({
+    // Use in-memory bridge instead of serializing full product through params
+    cartBridge.setPendingProducts([product.id]);
+    safeRouter.push({
       pathname: '/new-sale/cart',
-      params: {
-        selectedProducts: JSON.stringify([{
-          ...product,
-          quantity: 1,
-          price: product.salesPrice,
-          // Ensure CESS fields are passed
-          cessType: product.cessType || 'none',
-          cessRate: product.cessRate || 0,
-          cessAmount: product.cessAmount || 0,
-          cessUnit: product.cessUnit || ''
-        }]),
-        preSelectedCustomer: preSelectedCustomer
-      }
+      params: { preSelectedCustomer: preSelectedCustomer }
     });
   };
 
   const handleScanBarcode = () => {
     // Navigate to barcode scanner
-    router.push({
+    safeRouter.push({
       pathname: '/new-sale/scanner',
       params: {
         preSelectedCustomer: preSelectedCustomer
@@ -111,10 +100,14 @@ export default function NewSaleScreen() {
     }).format(price);
   };
 
-  const filteredProducts = recentProducts.filter(product =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.category.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProducts = recentProducts.filter(product => {
+    const q = searchQuery.toLowerCase();
+    return (
+      product.name.toLowerCase().includes(q) ||
+      product.category.toLowerCase().includes(q) ||
+      (product.barcode && product.barcode.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -133,7 +126,7 @@ export default function NewSaleScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity
             style={styles.cartButton}
-            onPress={() => router.push('/new-sale/cart')}
+            onPress={() => safeRouter.push('/new-sale/cart')}
             activeOpacity={0.7}
           >
             <ShoppingCart size={24} color={Colors.text} />
@@ -148,7 +141,7 @@ export default function NewSaleScreen() {
             <Search size={20} color={Colors.primary} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search products..."
+              placeholder="Search by name or barcode..."
               placeholderTextColor={Colors.textLight}
               value={searchQuery}
               onChangeText={handleSearch}
@@ -183,7 +176,7 @@ export default function NewSaleScreen() {
           style={styles.addNewProductCard}
           onPress={() => {
             if (!canPerformAction('add new product')) return;
-            router.push({
+            safeRouter.push({
               pathname: '/inventory/manual-product',
               params: {
                 returnTo: 'new-sale',
@@ -214,10 +207,13 @@ export default function NewSaleScreen() {
               onPress={() => handleProductSelect(product)}
               activeOpacity={0.7}
             >
-              <Image 
-                source={{ uri: product.image }}
-                style={styles.productImage}
-              />
+              {product.image ? (
+                <Image source={{ uri: product.image }} style={styles.productImage} />
+              ) : (
+                <View style={[styles.productImage, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                  <Package size={16} color="#6B7280" />
+                </View>
+              )}
               <View style={styles.productInfo}>
                 <Text style={styles.productName} numberOfLines={2}>
                   {product.name}

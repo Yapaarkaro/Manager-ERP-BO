@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,12 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { showInfo } from '@/utils/notifications';
+import { createWriteOff } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
+import { usePermissions } from '@/contexts/PermissionContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
@@ -62,6 +66,8 @@ interface StockOutData {
 
 export default function ConfirmationScreen() {
   const { stockOutData } = useLocalSearchParams<{ stockOutData: string }>();
+  const [isSaving, setIsSaving] = useState(false);
+  const { staffId, staffName } = usePermissions();
   
   // Parse stock out data
   const data: StockOutData = stockOutData ? JSON.parse(stockOutData) : {
@@ -71,38 +77,47 @@ export default function ConfirmationScreen() {
   };
 
   const handleConfirm = () => {
-    // Log final stock out confirmation
-    console.log('=== STOCK OUT CONFIRMED ===');
-    console.log('Reason:', data.reason);
-    console.log('Total Items:', totalItems);
-    console.log('Total Quantity:', totalItems);
-    console.log('Total Value:', formatPrice(totalValue));
-    console.log('General Notes:', data.generalNotes);
-    data.items.forEach((item, index) => {
-      console.log(`Confirmed Item ${index + 1}:`);
-      console.log('  Product ID:', item.product.id);
-      console.log('  Product Name:', item.product.name);
-      console.log('  Current Stock:', item.product.currentStock);
-      console.log('  Quantity Removed:', item.quantityToRemove);
-      console.log('  Remaining Stock:', item.product.currentStock - item.quantityToRemove);
-      console.log('  Unit Price:', formatPrice(item.product.unitPrice));
-      console.log('  Total Value:', formatPrice(item.quantityToRemove * item.product.unitPrice));
-      console.log('  Notes:', item.notes);
-      console.log('  Has Proof Image:', !!item.proofImage);
-      console.log('  Category:', item.product.category);
-      console.log('  Supplier:', item.product.supplier);
-      console.log('  Location:', item.product.location);
-      console.log('  Primary Unit:', item.product.primaryUnit);
-    });
-    console.log('Confirmed at:', new Date().toISOString());
-    console.log('==========================');
+    Alert.alert(
+      'Confirm Write-Off',
+      'Are you sure you want to proceed? Stock will be deducted and this action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Confirm', style: 'destructive', onPress: processWriteOff },
+      ]
+    );
+  };
 
-    showInfo('Are you sure you want to proceed with this stock out? This action cannot be undone.', 'Confirm Stock Out');
-    // Here you would typically make an API call to process the stock out
-    // For now, we'll just navigate to success screen after a short delay
-    setTimeout(() => {
-      router.replace('/inventory/stock-out/success');
-    }, 2000);
+  const processWriteOff = async () => {
+    setIsSaving(true);
+    try {
+      const result = await createWriteOff({
+        reason: data.reason,
+        items: data.items.map(item => ({
+          productId: item.product.id,
+          productName: item.product.name,
+          quantity: item.quantityToRemove,
+          unitPrice: item.product.unitPrice,
+          primaryUnit: item.product.primaryUnit,
+          notes: item.notes,
+          proofImage: item.proofImage || undefined,
+        })),
+        generalNotes: data.generalNotes,
+        staffId: staffId || undefined,
+        staffName: staffName || undefined,
+      });
+
+      setIsSaving(false);
+
+      if (!result.success) {
+        Alert.alert('Error', result.error || 'Failed to process write-off');
+        return;
+      }
+
+      safeRouter.replace('/inventory/stock-out/success');
+    } catch (error: any) {
+      setIsSaving(false);
+      Alert.alert('Error', error.message || 'Failed to process write-off');
+    }
   };
 
   const handleBack = () => {
@@ -201,7 +216,7 @@ export default function ConfirmationScreen() {
           <ArrowLeft size={24} color={Colors.text} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Confirm Stock Out</Text>
+        <Text style={styles.headerTitle}>Confirm Write-Off</Text>
       </View>
 
       <ScrollView 
@@ -211,7 +226,7 @@ export default function ConfirmationScreen() {
       >
         {/* Summary Card */}
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>Stock Out Summary</Text>
+          <Text style={styles.summaryTitle}>Write-Off Summary</Text>
           
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Reason:</Text>
@@ -273,12 +288,17 @@ export default function ConfirmationScreen() {
         </TouchableOpacity>
         
         <TouchableOpacity
-          style={styles.confirmButton}
+          style={[styles.confirmButton, isSaving && { opacity: 0.6 }]}
           onPress={handleConfirm}
           activeOpacity={0.8}
+          disabled={isSaving}
         >
-          <CheckCircle size={20} color={Colors.background} />
-          <Text style={styles.confirmButtonText}>Confirm Stock Out</Text>
+          {isSaving ? (
+            <ActivityIndicator size="small" color={Colors.background} />
+          ) : (
+            <CheckCircle size={20} color={Colors.background} />
+          )}
+          <Text style={styles.confirmButtonText}>{isSaving ? 'Processing...' : 'Confirm Write-Off'}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

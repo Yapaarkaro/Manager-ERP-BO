@@ -1,16 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MessageCircle, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw } from 'lucide-react-native';
-import { dataStore } from '@/utils/dataStore';
+import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInitials as getNameInitials, getAvatarColor } from '@/utils/formatters';
+import { getCustomers, getCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
+import { DetailSkeleton } from '@/components/SkeletonLoader';
 
 const Colors = {
   background: '#FFFFFF',
@@ -39,27 +43,110 @@ interface TransactionLog {
   paymentMethod?: string;
 }
 
-const mockTransactionLogs: TransactionLog[] = [];
-
 export default function CustomerDetailsScreen() {
   const { customerId } = useLocalSearchParams();
   const [customer, setCustomer] = useState<any>(null);
+  const [transactionLogs, setTransactionLogs] = useState<TransactionLog[]>([]);
   const [selectedTab, setSelectedTab] = useState<'overview' | 'transactions'>('overview');
   const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadCustomerData();
   }, [customerId]);
 
-  const loadCustomerData = () => {
+  const loadCustomerData = async () => {
     try {
       setIsLoading(true);
       
       if (customerId) {
-        const customerData = dataStore.getCustomerById(customerId as string);
-        if (customerData) {
-          setCustomer(customerData);
+        const [result, metricsResult, invoicesResult, returnsResult] = await Promise.all([
+          getCustomers(),
+          getCustomerMetrics(customerId as string),
+          getInvoices(),
+          getReturns(),
+        ]);
+
+        const m = metricsResult.success ? metricsResult.metrics : null;
+
+        if (result.success && result.customers) {
+          const found = result.customers.find((c: any) => c.id === customerId);
+          if (found) {
+            const avgOrderVal = m && m.total_invoices > 0 ? (m.total_value / m.total_invoices) : (found.average_order_value ?? 0);
+            setCustomer({
+              ...found,
+              businessName: found.business_name,
+              customerType: found.customer_type,
+              contactPerson: found.contact_person,
+              customerScore: m?.payment_score ?? found.customer_score ?? 0,
+              onTimePayment: m ? (m.on_time_payment_count + m.late_payment_count > 0 ? Math.round((m.on_time_payment_count / (m.on_time_payment_count + m.late_payment_count)) * 100) : 0) : (found.on_time_payment ?? 0),
+              satisfactionRating: found.satisfaction_rating ?? 0,
+              responseTime: found.response_time ?? 0,
+              averageOrderValue: avgOrderVal,
+              avgPaymentDays: m?.avg_payment_duration_days ?? 0,
+              totalOrders: m?.total_invoices ?? found.total_orders ?? 0,
+              completedOrders: m?.paid_invoices ?? found.completed_orders ?? 0,
+              pendingOrders: m?.pending_invoices ?? found.pending_orders ?? 0,
+              cancelledOrders: found.cancelled_orders ?? 0,
+              overdueOrders: m?.overdue_invoices ?? 0,
+              totalValue: m?.total_value ?? found.total_value ?? 0,
+              totalPaid: m?.total_paid ?? 0,
+              totalDue: m?.total_due ?? 0,
+              creditLimit: found.credit_limit ?? 0,
+              paymentTerms: found.payment_terms,
+              joinedDate: found.joined_date || found.created_at,
+              lastOrderDate: m?.last_invoice_date || found.last_order_date || null,
+              lastPaymentDate: m?.last_payment_date || null,
+              createdAt: found.created_at,
+            });
+          }
         }
+
+        const logs: TransactionLog[] = [];
+        if (invoicesResult.success && invoicesResult.invoices) {
+          invoicesResult.invoices
+            .filter((inv: any) => inv.customer_id === customerId)
+            .forEach((inv: any) => {
+              logs.push({
+                id: inv.id,
+                type: 'invoice',
+                number: inv.invoice_number || '',
+                amount: Number(inv.total_amount) || 0,
+                date: inv.invoice_date || inv.created_at || '',
+                status: (inv.payment_status || 'pending').toLowerCase() === 'paid' ? 'completed' : 'pending',
+                description: `Sales Invoice - ${Array.isArray(inv.items) ? inv.items.length : 0} items`,
+                paymentMethod: inv.payment_method || '',
+              });
+            });
+        }
+        let customerReturnCount = 0;
+        if (returnsResult.success && returnsResult.returns) {
+          const customerReturns = returnsResult.returns.filter((ret: any) => ret.customer_id === customerId);
+          customerReturnCount = customerReturns.length;
+          customerReturns.forEach((ret: any) => {
+              logs.push({
+                id: ret.id,
+                type: 'return',
+                number: ret.return_number || ret.return_invoice_number || '',
+                amount: Number(ret.refund_amount || ret.total_amount) || 0,
+                date: ret.return_date || ret.created_at || '',
+                status: 'completed',
+                description: `Return - ${ret.return_reason || 'Items returned'}`,
+              });
+            });
+        }
+
+        setCustomer((prev: any) => {
+          if (!prev) return prev;
+          const totalOrders = prev.totalOrders || 0;
+          return {
+            ...prev,
+            returnedOrders: customerReturnCount,
+            returnRate: totalOrders > 0 ? Math.round((customerReturnCount / totalOrders) * 100) : 0,
+          };
+        });
+        logs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setTransactionLogs(logs);
       }
     } catch (error) {
       console.error('Error loading customer data:', error);
@@ -67,6 +154,13 @@ export default function CustomerDetailsScreen() {
       setIsLoading(false);
     }
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadCustomerData().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [customerId]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -122,16 +216,16 @@ export default function CustomerDetailsScreen() {
   };
 
   const handleChatPress = () => {
-    if (customer.customerType === 'business') {
-      router.push({
-        pathname: '/people/customer-chat',
-        params: {
-          customerId: customer.id,
-          customerName: customer.businessName || customer.name,
-          customerAvatar: customer.avatar
-        }
-      });
-    }
+    safeRouter.push({
+      pathname: '/people/customer-chat',
+      params: {
+        customerId: customer.id,
+        customerName: customer.businessName || customer.name || customer.contact_person || '',
+        customerAvatar: customer.avatar || '',
+        customerPhone: customer.mobile || customer.mobile_number || customer.phone || '',
+        isOnManager: customer.business_id ? 'true' : 'false',
+      }
+    });
   };
 
   // Show loading state
@@ -147,11 +241,11 @@ export default function CustomerDetailsScreen() {
             >
               <ArrowLeft size={24} color={Colors.text} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Loading Customer...</Text>
+            <Text style={styles.headerTitle}>Customer Details</Text>
           </View>
         </SafeAreaView>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading customer details...</Text>
+          <DetailSkeleton />
         </View>
       </View>
     );
@@ -203,7 +297,7 @@ export default function CustomerDetailsScreen() {
     
     console.log('Creating sale with customer data:', preSelectedCustomerData);
     
-    router.push({
+    safeRouter.push({
       pathname: '/new-sale',
       params: {
         preSelectedCustomer: JSON.stringify(preSelectedCustomerData)
@@ -277,7 +371,7 @@ export default function CustomerDetailsScreen() {
                 onPress={handleChatPress}
                 activeOpacity={0.7}
               >
-                <MessageCircle size={24} color={Colors.success} />
+                <MessageSquare size={22} color={Colors.primary} />
               </TouchableOpacity>
             )}
             <TouchableOpacity
@@ -300,10 +394,15 @@ export default function CustomerDetailsScreen() {
 
       {/* Customer Header */}
       <View style={styles.customerHeader}>
-        <Image 
-          source={{ uri: customer.avatar }}
-          style={styles.customerHeaderAvatar}
-        />
+        {customer.avatar ? (
+          <Image source={{ uri: customer.avatar }} style={styles.customerHeaderAvatar} />
+        ) : (
+          <View style={[styles.customerHeaderAvatar, { backgroundColor: getAvatarColor(customer.customerType === 'business' ? customer.businessName : customer.name), justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>
+              {getNameInitials(customer.customerType === 'business' ? customer.businessName || customer.name : customer.name)}
+            </Text>
+          </View>
+        )}
         <View style={styles.customerHeaderInfo}>
           <Text style={styles.customerHeaderName}>
             {customer.customerType === 'business' ? customer.businessName : customer.name}
@@ -380,9 +479,24 @@ export default function CustomerDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {selectedTab === 'overview' && (
           <View style={styles.overviewContainer}>
+            {/* Payment Score */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Payment Score</Text>
+              <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', backgroundColor: `${customer.customerScore >= 70 ? Colors.success : customer.customerScore >= 40 ? Colors.warning : Colors.error}15`, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16, gap: 4 }}>
+                  <Text style={{ fontSize: 32, fontWeight: '700', color: customer.customerScore >= 70 ? Colors.success : customer.customerScore >= 40 ? Colors.warning : Colors.error }}>{customer.customerScore}</Text>
+                  <Text style={{ fontSize: 14, color: customer.customerScore >= 70 ? Colors.success : customer.customerScore >= 40 ? Colors.warning : Colors.error, fontWeight: '500' }}>/100</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 6 }}>
+                  {customer.customerScore >= 80 ? 'Excellent Payer' : customer.customerScore >= 60 ? 'Good Payer' : customer.customerScore >= 40 ? 'Average Payer' : 'Needs Follow-up'}
+                </Text>
+              </View>
+            </View>
+
             {/* Performance Metrics */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Customer Metrics</Text>
@@ -390,19 +504,16 @@ export default function CustomerDetailsScreen() {
                 <View style={styles.metricCard}>
                   <Clock size={20} color={Colors.primary} />
                   <Text style={styles.metricLabel}>On-Time Payment</Text>
-                  <Text style={[
-                    styles.metricValue,
-                    { color: customer.onTimePayment >= 90 ? Colors.success : Colors.warning }
-                  ]}>
+                  <Text style={[styles.metricValue, { color: customer.onTimePayment >= 80 ? Colors.success : customer.onTimePayment >= 50 ? Colors.warning : Colors.error }]}>
                     {customer.onTimePayment}%
                   </Text>
                 </View>
 
                 <View style={styles.metricCard}>
-                  <Star size={20} color={Colors.warning} />
-                  <Text style={styles.metricLabel}>Satisfaction</Text>
+                  <Calendar size={20} color={Colors.warning} />
+                  <Text style={styles.metricLabel}>Avg Pay Duration</Text>
                   <Text style={styles.metricValue}>
-                    {customer.satisfactionRating}/5
+                    {customer.avgPaymentDays || 0} days
                   </Text>
                 </View>
 
@@ -417,15 +528,33 @@ export default function CustomerDetailsScreen() {
                 <View style={styles.metricCard}>
                   <RotateCcw size={20} color={Colors.error} />
                   <Text style={styles.metricLabel}>Return Rate</Text>
-                  <Text style={[
-                    styles.metricValue,
-                    { color: customer.returnRate > 10 ? Colors.error : customer.returnRate > 5 ? Colors.warning : Colors.success }
-                  ]}>
+                  <Text style={[styles.metricValue, { color: customer.returnRate > 10 ? Colors.error : customer.returnRate > 5 ? Colors.warning : Colors.success }]}>
                     {customer.returnRate}%
                   </Text>
                 </View>
               </View>
             </View>
+
+            {/* Financial Overview */}
+            {(customer.totalValue > 0 || customer.totalDue > 0) && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Financial Overview</Text>
+                <View style={{ gap: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 14, color: Colors.textLight }}>Total Purchases</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.primary }}>{formatAmount(customer.totalValue)}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 14, color: Colors.textLight }}>Amount Paid</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.success }}>{formatAmount(customer.totalPaid || 0)}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 14, color: Colors.textLight }}>Outstanding Due</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: (customer.totalDue || 0) > 0 ? Colors.error : Colors.success }}>{formatAmount(customer.totalDue || 0)}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
 
             {/* Contact Information */}
             <View style={styles.section}>
@@ -449,7 +578,7 @@ export default function CustomerDetailsScreen() {
                   <MapPin size={16} color={Colors.textLight} />
                   <Text style={styles.contactLabel}>Address:</Text>
                   <Text style={[styles.contactValue, styles.addressText]}>
-                    {customer.address}
+                    {customer.address || 'Not provided'}
                   </Text>
                 </View>
                 
@@ -470,21 +599,25 @@ export default function CustomerDetailsScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Business Terms</Text>
                 <View style={styles.termsCard}>
-                  {customer.paymentTerms && (
+                  {customer.paymentTerms ? (
                     <View style={styles.termRow}>
                       <Text style={styles.termLabel}>Payment Terms:</Text>
                       <Text style={styles.termValue}>{customer.paymentTerms}</Text>
                     </View>
-                  )}
-                  {customer.creditLimit && (
+                  ) : null}
+                  {customer.creditLimit > 0 ? (
                     <View style={styles.termRow}>
                       <Text style={styles.termLabel}>Credit Limit:</Text>
                       <Text style={styles.termValue}>{formatAmount(customer.creditLimit)}</Text>
                     </View>
-                  )}
+                  ) : null}
                   <View style={styles.termRow}>
-                    <Text style={styles.termLabel}>Joined Date:</Text>
-                    <Text style={styles.termValue}>{formatDate(customer.joinedDate)}</Text>
+                    <Text style={styles.termLabel}>Added On:</Text>
+                    <Text style={styles.termValue}>{customer.createdAt ? formatDate(customer.createdAt) : 'N/A'}</Text>
+                  </View>
+                  <View style={styles.termRow}>
+                    <Text style={styles.termLabel}>Last Order:</Text>
+                    <Text style={styles.termValue}>{customer.lastOrderDate ? formatDate(customer.lastOrderDate) : 'Never'}</Text>
                   </View>
                 </View>
               </View>
@@ -540,7 +673,15 @@ export default function CustomerDetailsScreen() {
             </View>
 
             <View style={styles.transactionsList}>
-              {mockTransactionLogs.map(renderTransactionLog)}
+              {transactionLogs.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <FileText size={40} color={Colors.grey[300]} />
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.text, marginTop: 12 }}>No Transactions Yet</Text>
+                  <Text style={{ fontSize: 13, color: Colors.textLight, marginTop: 4 }}>Sales and returns for this customer will appear here</Text>
+                </View>
+              ) : (
+                transactionLogs.map(renderTransactionLog)
+              )}
             </View>
           </View>
         )}

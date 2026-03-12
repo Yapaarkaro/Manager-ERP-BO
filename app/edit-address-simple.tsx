@@ -15,14 +15,17 @@ import {
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone, Building2, Package } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode, BusinessAddress } from '@/utils/dataStore';
+import { getGSTINStateCode, BusinessAddress, mapLocationsToAddresses, mapLocationToAddress } from '@/utils/dataStore';
+import { supabase } from '@/lib/supabase';
 import { extractAddressComponents, reverseGeocode } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import PlatformMapView from '@/components/PlatformMapView';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { createStaff } from '@/services/backendApi';
 
 // Import web-specific API for better CORS handling on web
 const getPlacePredictions = Platform.OS === 'web' 
@@ -124,6 +127,10 @@ export default function EditAddressSimpleScreen() {
   const [managerPhone, setManagerPhone] = useState('');
   const [originalAddress, setOriginalAddress] = useState<any>(null);
   const [originalPhone, setOriginalPhone] = useState<string>('');
+  const [showStaffOtpModal, setShowStaffOtpModal] = useState(false);
+  const [staffOtpCode, setStaffOtpCode] = useState('');
+  const [staffOtpName, setStaffOtpName] = useState('');
+  const pendingNavigateRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setStatusBarStyle('dark-content');
@@ -146,33 +153,29 @@ export default function EditAddressSimpleScreen() {
       console.log('🔍 Loading address with editAddressId:', editAddressId);
       console.log('🔍 From settings:', fromSettings === 'true', 'From summary:', fromSummary === 'true');
       
-      // ✅ Try to find address by ID first, then by backendId (handles both cases)
-      let existingAddress = dataStore.getAddressById(editAddressId as string);
-      console.log('🔍 Found by ID:', existingAddress ? { id: existingAddress.id, backendId: existingAddress.backendId, name: existingAddress.name } : 'not found');
-      
-      // If not found by ID, try finding by backendId (when coming from business summary/settings with backend ID)
+      // Try to find address from route params first (passed between screens)
+      let existingAddress: any = null;
+      try {
+        const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
+        const mapped = mapLocationsToAddresses(paramAddrs);
+        existingAddress = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId);
+      } catch { /* ignore parse error */ }
+
+      // Fallback: query backend directly
       if (!existingAddress) {
-        existingAddress = dataStore.getAddresses().find(addr => addr.backendId === editAddressId);
-        console.log('🔍 Found by backendId:', existingAddress ? { id: existingAddress.id, backendId: existingAddress.backendId, name: existingAddress.name } : 'not found');
-      }
-      
-      // ✅ If still not found and coming from settings, try to load from backend via useBusinessData
-      if (!existingAddress && fromSettings === 'true') {
         try {
-          const { useBusinessData } = await import('@/hooks/useBusinessData');
-          // We can't use hooks here, so we'll need to fetch directly
-          // For now, try to find by backendId in all addresses from backend
-          console.log('🔄 Address not in DataStore, attempting to sync from backend...');
-          // The address should be in DataStore if it was loaded in settings screen
-          // If not, we'll show an error and let user go back
-        } catch (error) {
-          console.error('❌ Error loading address from backend:', error);
-        }
+          const { data: loc } = await supabase
+            .from('locations')
+            .select('*')
+            .eq('id', editAddressId)
+            .maybeSingle();
+          if (loc) {
+            existingAddress = mapLocationToAddress(loc);
+          }
+        } catch { /* ignore */ }
       }
-      
+
       if (!existingAddress) {
-        console.error('❌ Address not found with ID:', editAddressId);
-        console.error('📋 Available addresses in DataStore:', dataStore.getAddresses().map(a => ({ id: a.id, backendId: a.backendId, name: a.name })));
         Alert.alert('Error', 'Address not found. Please go back and try again.');
         return;
       }
@@ -283,9 +286,14 @@ export default function EditAddressSimpleScreen() {
     loadAddress();
   }, [editAddressId]);
 
-  // Dynamic header and form configuration
+  const parsedExistingAddresses = React.useMemo(() => {
+    try {
+      return mapLocationsToAddresses(JSON.parse((existingAddresses || '[]') as string));
+    } catch { return []; }
+  }, [existingAddresses]);
+
   const typeInfo = React.useMemo(() => {
-    const allAddresses = dataStore.getAddresses();
+    const allAddresses = parsedExistingAddresses;
     
     if (addressType === 'branch') {
       const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
@@ -598,7 +606,7 @@ export default function EditAddressSimpleScreen() {
       // Navigate back to settings screen
       router.back();
     } else if (fromSummary === 'true') {
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/business-summary',
         params: {
           type,
@@ -608,7 +616,7 @@ export default function EditAddressSimpleScreen() {
           businessName,
           businessType,
           customBusinessType,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          allAddresses: JSON.stringify(parsedExistingAddresses),
           allBankAccounts: '[]',
           initialCashBalance: '0',
           invoicePrefix: 'INV',
@@ -618,7 +626,7 @@ export default function EditAddressSimpleScreen() {
         }
       });
     } else if (type && value) {
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/address-confirmation',
         params: {
           type,
@@ -628,7 +636,7 @@ export default function EditAddressSimpleScreen() {
           businessName,
           businessType,
           customBusinessType,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          allAddresses: JSON.stringify(parsedExistingAddresses),
         }
       });
     } else {
@@ -645,32 +653,75 @@ export default function EditAddressSimpleScreen() {
     setIsLoading(true);
     
     try {
-      // ✅ Get existing address - try by ID first, then by backendId (handles both cases)
-      let existingAddress = dataStore.getAddressById(editAddressId as string);
+      let existingAddress: any = parsedExistingAddresses.find(
+        a => a.id === editAddressId || a.backendId === editAddressId
+      );
       if (!existingAddress) {
-        existingAddress = dataStore.getAddresses().find(addr => addr.backendId === editAddressId);
+        try {
+          const { data: loc } = await supabase
+            .from('locations')
+            .select('*')
+            .eq('id', editAddressId)
+            .maybeSingle();
+          if (loc) {
+            existingAddress = mapLocationToAddress(loc);
+          }
+        } catch { /* ignore */ }
       }
       
       if (!existingAddress) {
-        console.error('❌ Address not found in DataStore with ID:', editAddressId);
-        console.error('📋 Available addresses:', dataStore.getAddresses().map(a => ({ id: a.id, backendId: a.backendId, name: a.name })));
         Alert.alert('Error', 'Address not found. Please go back and try again.');
         setIsLoading(false);
         return;
       }
       
-      // ✅ CRITICAL: Ensure backendId is set - if editAddressId is a backend ID, use it
-      // This handles the case where editAddressId is the backend ID but the address in DataStore
-      // might have a different local ID
-      const backendId = existingAddress.backendId || (existingAddress.id === editAddressId ? editAddressId : null);
+      // Resolve the real backend UUID
+      let backendId = existingAddress.backendId || (existingAddress.id === editAddressId ? editAddressId : null);
       
-      if (!backendId) {
-        console.error('❌ Address has no backendId and editAddressId is not a backend ID:', {
+      // If backendId doesn't look like a UUID, look up the real one from Supabase
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(backendId || '');
+      if (!isUUID) {
+        console.log('🔍 backendId is not a UUID, looking up real ID from Supabase...', backendId);
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: userData } = await supabase
+              .from('users')
+              .select('business_id')
+              .eq('id', session.user.id)
+              .single();
+            
+            if (userData?.business_id) {
+              const { data: locations } = await supabase
+                .from('locations')
+                .select('id, name')
+                .eq('business_id', userData.business_id)
+                .eq('is_deleted', false);
+              
+              if (locations && locations.length > 0) {
+                const addrName = existingAddress.name || addressName.trim();
+                const match = locations.find((l: any) => l.name === addrName);
+                if (match) {
+                  console.log('✅ Found real backend UUID by name:', match.id, 'for name:', addrName);
+                  backendId = match.id;
+                } else {
+                  console.log('⚠️ No name match for:', addrName, '- available:', locations.map((l: any) => `${l.id}: ${l.name}`));
+                }
+              }
+            }
+          }
+        } catch (lookupErr) {
+          console.warn('⚠️ Failed to look up real backend ID:', lookupErr);
+        }
+      }
+      
+      if (!backendId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(backendId)) {
+        console.error('❌ Could not resolve a valid backend UUID:', {
           editAddressId,
           addressId: existingAddress.id,
-          backendId: existingAddress.backendId
+          backendId
         });
-        Alert.alert('Error', 'Cannot update address: Missing backend ID. Please try again.');
+        Alert.alert('Error', 'Cannot update address: Unable to find it in the database. Please go back and try again.');
         setIsLoading(false);
         return;
       }
@@ -751,97 +802,82 @@ export default function EditAddressSimpleScreen() {
       try {
         await prefetchBusinessData();
         console.log('✅ Business data prefetched - screen will show updated address immediately');
-        
-        // ✅ After prefetch, update DataStore with the latest backend data to ensure consistency
-        // The prefetched data is now in the cache, but we should also sync it to DataStore
-        // This ensures edit-address-simple can find the address if user edits again
-        const { __getGlobalCache } = await import('@/hooks/useBusinessData');
-        const cache = __getGlobalCache();
-        if (cache.data?.addresses) {
-          // Sync prefetched addresses to DataStore
-          cache.data.addresses.forEach((addr: any) => {
-            const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
-            const formattedAddress = {
-              id: addr.id,
-              backendId: addr.id,
-              name: addr.name,
-              type: addr.type,
-              doorNumber: addr.door_number || '',
-              addressLine1: addr.address_line1 || '',
-              addressLine2: addr.address_line2 || '',
-              additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [],
-              city: addr.city || '',
-              pincode: addr.pincode || '',
-              stateName: addr.state || '',
-              stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-              isPrimary: addr.is_primary || false,
-              manager: addr.manager_name || '',
-              phone: addr.manager_mobile_number || '',
-              status: 'active' as const,
-              createdAt: addr.created_at || new Date().toISOString(),
-              updatedAt: addr.updated_at || new Date().toISOString(),
-            };
-            if (!existingAddress) {
-              dataStore.addAddress(formattedAddress as any);
-            } else {
-              dataStore.updateAddress(existingAddress.id, formattedAddress as any);
-            }
-          });
-          console.log('✅ DataStore synced with prefetched backend data');
-        }
       } catch (error) {
         console.warn('⚠️ Prefetch failed (non-blocking):', error);
         // Continue with navigation even if prefetch fails
       }
       
       setIsLoading(false);
-      // ✅ Navigate back based on source screen
-      if (fromSettings === 'true') {
-        // Return to settings screen - data is prefetched and will be shown immediately
-        router.back();
-      } else if (fromSummary === 'true') {
-        // Return to business summary page - data will be refreshed from backend via useBusinessData hook
-        router.replace({
-          pathname: '/auth/business-summary',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            // Don't pass allAddresses - let it load from backend via useBusinessData hook to avoid duplicates
-            allBankAccounts: '[]', // Will be updated from summary
-            initialCashBalance: '0',
-            invoicePrefix: 'INV',
-            invoicePattern: '',
-            startingInvoiceNumber: '1',
-            fiscalYear: 'APR-MAR',
+
+      const doNavigate = () => {
+        if (fromSettings === 'true') {
+          router.back();
+        } else if (fromSummary === 'true') {
+          safeRouter.replace({
+            pathname: '/auth/business-summary',
+            params: {
+              type, value, gstinData, name, businessName, businessType, customBusinessType,
+              allBankAccounts: '[]', initialCashBalance: '0',
+              invoicePrefix: 'INV', invoicePattern: '', startingInvoiceNumber: '1', fiscalYear: 'APR-MAR',
+            }
+          });
+        } else if (type && value) {
+          safeRouter.replace({
+            pathname: '/auth/address-confirmation',
+            params: {
+              type, value, gstinData, name, businessName, businessType, customBusinessType,
+              allAddresses: JSON.stringify(parsedExistingAddresses),
+            }
+          });
+        } else {
+          router.back();
+        }
+      };
+
+      // Auto-create staff for branch/warehouse manager during onboarding
+      const isOnboarding = fromSettings !== 'true' && !!(type && value);
+      const isBranchOrWarehouse = addressType === 'branch' || addressType === 'warehouse';
+      const hasNewManager = managerName.trim() && managerPhone.trim().length === 10;
+      const managerChanged = managerName.trim() !== (originalAddress?.manager || '') || managerPhone.trim() !== (originalAddress?.phone || '');
+
+      if (isOnboarding && isBranchOrWarehouse && hasNewManager && managerChanged) {
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        try {
+          const staffResult = await createStaff({
+            name: managerName.trim(),
+            mobile: managerPhone.trim(),
+            role: 'Manager',
+            department: addressType === 'branch' ? 'Branch' : 'Warehouse',
+            locationName: addressName.trim(),
+            locationType: addressType as 'branch' | 'warehouse',
+            verificationCode,
+          });
+          if (staffResult.success) {
+            console.log('✅ Staff created during onboarding edit:', managerName.trim());
+            setStaffOtpName(managerName.trim());
+            setStaffOtpCode(verificationCode);
+            pendingNavigateRef.current = doNavigate;
+            setShowStaffOtpModal(true);
+            return;
           }
-        });
-      } else if (type && value) {
-        // Navigate back to address confirmation screen with signup parameters
-        router.replace({
-          pathname: '/auth/address-confirmation',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            allAddresses: JSON.stringify(dataStore.getAddresses()),
-          }
-        });
-      } else {
-        router.back();
+        } catch (staffErr) {
+          console.warn('⚠️ Staff creation error during edit:', staffErr);
+        }
       }
+
+      doNavigate();
     } catch (error) {
       console.error('Error updating address:', error);
       Alert.alert('Error', 'Failed to update address. Please try again.');
       setIsLoading(false);
+    }
+  };
+
+  const handleDismissStaffOtpModal = () => {
+    setShowStaffOtpModal(false);
+    if (pendingNavigateRef.current) {
+      pendingNavigateRef.current();
+      pendingNavigateRef.current = null;
     }
   };
 
@@ -854,7 +890,6 @@ export default function EditAddressSimpleScreen() {
         }),
       },
     ],
-    // Removed opacity animation to prevent grey background flash
   };
 
   const filteredStates = indianStates.filter(state =>
@@ -1365,6 +1400,33 @@ export default function EditAddressSimpleScreen() {
             </View>
           </TouchableOpacity>
         </Modal>
+
+        {/* Staff OTP Modal */}
+        <Modal
+          visible={showStaffOtpModal}
+          transparent
+          animationType="fade"
+          onRequestClose={handleDismissStaffOtpModal}
+        >
+          <View style={styles.otpModalOverlay}>
+            <View style={styles.otpModalContent}>
+              <Text style={{ fontSize: 40, marginBottom: 12 }}>🔑</Text>
+              <Text style={styles.otpModalTitle}>Staff Verification Code</Text>
+              <Text style={styles.otpModalSubtitle}>
+                Share this code with <Text style={{ fontWeight: '700' }}>{staffOtpName}</Text> for their first login.
+              </Text>
+              <View style={styles.otpCodeContainer}>
+                <Text style={styles.otpCodeText} selectable>{staffOtpCode}</Text>
+              </View>
+              <Text style={styles.otpModalHint}>
+                The staff member will enter this code after verifying their mobile number to link their account.
+              </Text>
+              <TouchableOpacity style={styles.otpModalButton} onPress={handleDismissStaffOtpModal} activeOpacity={0.8}>
+                <Text style={styles.otpModalButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
     </ResponsiveContainer>
@@ -1870,5 +1932,70 @@ const styles = StyleSheet.create({
     color: '#3f66ac',
     fontSize: 14,
     fontWeight: '600',
+  },
+  otpModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  otpModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center' as const,
+  },
+  otpModalTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  otpModalSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center' as const,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  otpCodeContainer: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderWidth: 1.5,
+    borderColor: '#3F66AC',
+    borderStyle: 'dashed' as const,
+    marginBottom: 16,
+  },
+  otpCodeText: {
+    fontSize: 32,
+    fontWeight: '800' as const,
+    color: '#3F66AC',
+    letterSpacing: 8,
+    textAlign: 'center' as const,
+  },
+  otpModalHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center' as const,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  otpModalButton: {
+    backgroundColor: '#3F66AC',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    width: '100%' as const,
+    alignItems: 'center' as const,
+  },
+  otpModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
 });

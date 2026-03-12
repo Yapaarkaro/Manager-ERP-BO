@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Image,
   Alert,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -26,9 +27,13 @@ import {
   Calendar,
   TrendingUp,
   TrendingDown,
-  Building2
+  Building2,
+  Download
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { invalidateApiCache } from '@/services/backendApi';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -82,14 +87,18 @@ interface StockDiscrepancy {
   lastUpdated: string;
 }
 
-const mockStockDiscrepancies: StockDiscrepancy[] = [];
+const stockDiscrepancies: StockDiscrepancy[] = [];
 
 export default function StockDiscrepanciesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredDiscrepancies, setFilteredDiscrepancies] = useState(mockStockDiscrepancies);
+  const [filteredDiscrepancies, setFilteredDiscrepancies] = useState(stockDiscrepancies);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'shortage' | 'excess' | 'pending' | 'critical'>('all');
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   const [activeFilters, setActiveFilters] = useState({
     discrepancyType: [] as string[],
     status: [] as string[],
@@ -101,8 +110,17 @@ export default function StockDiscrepanciesScreen() {
     dateRange: 'none' as string,
   });
   
+  const [refreshing, setRefreshing] = useState(false);
+  
   // Use debounced navigation for discrepancy cards
   const debouncedNavigate = useDebounceNavigation(500);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    applyFilters(searchQuery, selectedFilter);
+    setTimeout(() => setRefreshing(false), 600);
+  }, [searchQuery, selectedFilter]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -115,7 +133,7 @@ export default function StockDiscrepanciesScreen() {
   };
 
   const applyFilters = (query: string, filter: typeof selectedFilter) => {
-    let filtered = mockStockDiscrepancies;
+    let filtered = stockDiscrepancies;
 
     // Apply search filter
     if (query.trim() !== '') {
@@ -195,34 +213,8 @@ export default function StockDiscrepanciesScreen() {
       });
     }
 
-    // Apply date range filter
-    if (activeFilters.dateRange !== 'none') {
-      const today = new Date();
-      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      
-      switch (activeFilters.dateRange) {
-        case 'today':
-          filtered = filtered.filter(discrepancy => {
-            const reportedDate = new Date(discrepancy.reportedDate);
-            return reportedDate >= todayStart;
-          });
-          break;
-        case 'week':
-          const weekStart = new Date(todayStart.getTime() - (today.getDay() * 24 * 60 * 60 * 1000));
-          filtered = filtered.filter(discrepancy => {
-            const reportedDate = new Date(discrepancy.reportedDate);
-            return reportedDate >= weekStart;
-          });
-          break;
-        case 'month':
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          filtered = filtered.filter(discrepancy => {
-            const reportedDate = new Date(discrepancy.reportedDate);
-            return reportedDate >= monthStart;
-          });
-          break;
-      }
-    }
+    // Apply date range filter via DateFilterBar
+    filtered = filterByDateRange(filtered, (d) => d.reportedDate, selectedTimeRange, customFromDate, customToDate);
 
     setFilteredDiscrepancies(filtered);
   };
@@ -318,10 +310,10 @@ export default function StockDiscrepanciesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters change
+  // Apply filters whenever activeFilters or date range change
   useEffect(() => {
     applyFilters(searchQuery, selectedFilter);
-  }, [activeFilters]);
+  }, [activeFilters, selectedTimeRange, customFromDate, customToDate]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -372,7 +364,7 @@ export default function StockDiscrepanciesScreen() {
         reason: 'Product return',
         customerDetails: {
           name: invoice.customerName || 'N/A',
-          mobile: '+91 98765 43210',
+          mobile: '',
           address: ''
         }
       };
@@ -399,7 +391,7 @@ export default function StockDiscrepanciesScreen() {
         date: invoice.date,
         customerDetails: {
           name: invoice.customerName || invoice.supplierName || 'N/A',
-          mobile: '+91 98765 43210',
+          mobile: '',
           businessName: invoice.type === 'purchase' ? invoice.supplierName : invoice.customerName,
           address: ''
         }
@@ -461,10 +453,13 @@ export default function StockDiscrepanciesScreen() {
         {/* Header */}
         <View style={styles.discrepancyHeader}>
           <View style={styles.discrepancyLeft}>
-            <Image 
-              source={{ uri: discrepancy.productImage }}
-              style={styles.productImage}
-            />
+            {discrepancy.productImage ? (
+              <Image source={{ uri: discrepancy.productImage }} style={styles.productImage} />
+            ) : (
+              <View style={[styles.productImage, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                <Package size={16} color="#6B7280" />
+              </View>
+            )}
             <View style={styles.productInfo}>
               <Text style={styles.productName} numberOfLines={2}>
                 {discrepancy.productName}
@@ -531,10 +526,13 @@ export default function StockDiscrepanciesScreen() {
         {/* Reported By */}
         <View style={styles.reportedBySection}>
           <View style={styles.reportedByHeader}>
-            <Image 
-              source={{ uri: discrepancy.reportedBy.avatar }}
-              style={styles.staffAvatar}
-            />
+            {discrepancy.reportedBy.avatar ? (
+              <Image source={{ uri: discrepancy.reportedBy.avatar }} style={styles.staffAvatar} />
+            ) : (
+              <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                <User size={14} color="#6B7280" />
+              </View>
+            )}
             <View style={styles.reportedByInfo}>
               <Text style={styles.reportedByName}>
                 Reported by {discrepancy.reportedBy.name}
@@ -634,11 +632,11 @@ export default function StockDiscrepanciesScreen() {
 
   const getFilterCounts = () => {
     return {
-      all: mockStockDiscrepancies.length,
-      shortage: mockStockDiscrepancies.filter(d => d.discrepancyType === 'shortage').length,
-      excess: mockStockDiscrepancies.filter(d => d.discrepancyType === 'excess').length,
-      pending: mockStockDiscrepancies.filter(d => d.status === 'pending').length,
-      critical: mockStockDiscrepancies.filter(d => d.priority === 'critical').length,
+      all: stockDiscrepancies.length,
+      shortage: stockDiscrepancies.filter(d => d.discrepancyType === 'shortage').length,
+      excess: stockDiscrepancies.filter(d => d.discrepancyType === 'excess').length,
+      pending: stockDiscrepancies.filter(d => d.status === 'pending').length,
+      critical: stockDiscrepancies.filter(d => d.priority === 'critical').length,
     };
   };
 
@@ -658,7 +656,15 @@ export default function StockDiscrepanciesScreen() {
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>Stock Discrepancies</Text>
-        
+
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={() => setShowExportModal(true)}
+          activeOpacity={0.7}
+        >
+          <Download size={20} color={Colors.primary} />
+        </TouchableOpacity>
+
         <View style={styles.headerRight}>
           <Text style={styles.totalCount}>
             {filteredDiscrepancies.length} items
@@ -737,8 +743,15 @@ export default function StockDiscrepanciesScreen() {
         </View>
       </View>
 
-      {/* Divider */}
-      <View style={styles.divider} />
+      {/* Date Filter Chips */}
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
 
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
@@ -790,6 +803,7 @@ export default function StockDiscrepanciesScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {filteredDiscrepancies.length === 0 ? (
           <View style={styles.emptyState}>
@@ -948,7 +962,7 @@ export default function StockDiscrepanciesScreen() {
               <View style={styles.filterSection}>
                 <Text style={styles.filterSectionTitle}>Reported By</Text>
                 <View style={styles.filterOptions}>
-                  {['Rajesh Kumar', 'Priya Sharma', 'Amit Singh', 'Warehouse Manager', 'Inventory Staff'].map(staff => (
+                  {([] as string[]).map(staff => (
                     <TouchableOpacity
                       key={staff}
                       style={[
@@ -1044,6 +1058,33 @@ export default function StockDiscrepanciesScreen() {
         </View>
       </Modal>
 
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'Stock Discrepancies / Write-Offs',
+          fileName: 'stock_writeoffs',
+          columns: [
+            { key: 'productName', header: 'Product' },
+            { key: 'category', header: 'Category' },
+            { key: 'discrepancyType', header: 'Type', format: (v) => v === 'shortage' ? 'Shortage' : 'Excess' },
+            { key: 'expectedStock', header: 'Expected Stock', format: (v) => String(v || 0) },
+            { key: 'actualStock', header: 'Actual Stock', format: (v) => String(v || 0) },
+            { key: 'discrepancyQuantity', header: 'Discrepancy Qty', format: (v) => String(v || 0) },
+            { key: 'discrepancyValue', header: 'Value (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'status', header: 'Status', format: (v) => v ? v.charAt(0).toUpperCase() + v.slice(1) : '' },
+            { key: 'priority', header: 'Priority', format: (v) => v ? v.charAt(0).toUpperCase() + v.slice(1) : '' },
+            { key: 'reportedDate', header: 'Reported Date' },
+            { key: 'location', header: 'Location' },
+            { key: 'reason', header: 'Reason' },
+          ],
+          data: filteredDiscrepancies,
+          summaryRows: [
+            { label: 'Total Discrepancies', value: String(filteredDiscrepancies.length) },
+            { label: 'Total Value', value: `₹${filteredDiscrepancies.reduce((s, d) => s + (d.discrepancyValue || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1077,6 +1118,15 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'flex-end',
+  },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   totalCount: {
     fontSize: 14,

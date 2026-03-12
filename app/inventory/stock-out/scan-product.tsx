@@ -8,6 +8,7 @@ import {
 import { showInfo } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   Scan,
@@ -53,7 +54,7 @@ export default function ScanProductScreen() {
         primaryUnit: '',
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/inventory/stock-out/stock-details',
         params: {
           reason,
@@ -65,7 +66,7 @@ export default function ScanProductScreen() {
 
   const handleManualEntry = () => {
     // Navigate to manual product entry
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-out/manual-product',
       params: { reason }
     });
@@ -94,7 +95,7 @@ export default function ScanProductScreen() {
 
         {/* Reason Display */}
         <View style={styles.reasonContainer}>
-          <Text style={styles.reasonLabel}>Stock Out Reason:</Text>
+          <Text style={styles.reasonLabel}>Write-Off Reason:</Text>
           <Text style={styles.reasonText}>{reason}</Text>
         </View>
 

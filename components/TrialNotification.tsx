@@ -15,13 +15,37 @@ interface TrialNotificationProps {
   onClose: () => void;
   onUpgrade: () => void;
   trialEndDate: string;
+  loading?: boolean;
 }
+
+const SkeletonBar = ({ width, height = 14, style }: { width: number | string; height?: number; style?: any }) => {
+  const pulseAnim = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        { width: width as any, height, borderRadius: height / 2, backgroundColor: '#e2e8f0', opacity: pulseAnim },
+        style,
+      ]}
+    />
+  );
+};
 
 const TrialNotification: React.FC<TrialNotificationProps> = ({
   visible,
   onClose,
   onUpgrade,
   trialEndDate,
+  loading = false,
 }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -58,6 +82,11 @@ const TrialNotification: React.FC<TrialNotificationProps> = ({
   }, [visible]);
 
   const formatTrialEndDate = (dateString: string) => {
+    if (!dateString) {
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      return d.toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' });
+    }
     const date = new Date(dateString);
     return date.toLocaleDateString('en-IN', {
       year: 'numeric',
@@ -71,7 +100,7 @@ const TrialNotification: React.FC<TrialNotificationProps> = ({
       visible={visible}
       transparent
       animationType="none"
-      onRequestClose={onClose}
+      onRequestClose={loading ? undefined : onClose}
     >
       <Animated.View 
         style={[
@@ -82,7 +111,7 @@ const TrialNotification: React.FC<TrialNotificationProps> = ({
         <TouchableOpacity 
           style={styles.overlayTouchable}
           activeOpacity={1}
-          onPress={onClose}
+          onPress={loading ? undefined : onClose}
         >
           <Animated.View 
             style={[
@@ -93,13 +122,15 @@ const TrialNotification: React.FC<TrialNotificationProps> = ({
               }
             ]}
           >
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={onClose}
-              activeOpacity={0.7}
-            >
-              <X size={24} color="#64748b" />
-            </TouchableOpacity>
+            {!loading && (
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <X size={24} color="#64748b" />
+              </TouchableOpacity>
+            )}
 
             <View style={styles.iconContainer}>
               <View style={styles.iconWrapper}>
@@ -107,68 +138,107 @@ const TrialNotification: React.FC<TrialNotificationProps> = ({
               </View>
             </View>
 
-            <View style={styles.content}>
-              <Text style={styles.title}>🎉 Welcome to Manager ERP!</Text>
-              <Text style={styles.subtitle}>
-                Your 30-day free trial has started
-              </Text>
-
-              <View style={styles.trialInfo}>
-                <View style={styles.trialInfoItem}>
-                  <CheckCircle size={20} color="#10b981" />
-                  <Text style={styles.trialInfoText}>
-                    Full access to all features
-                  </Text>
-                </View>
-                <View style={styles.trialInfoItem}>
-                  <CheckCircle size={20} color="#10b981" />
-                  <Text style={styles.trialInfoText}>
-                    Primary location management
-                  </Text>
-                </View>
-                <View style={styles.trialInfoItem}>
-                  <CheckCircle size={20} color="#10b981" />
-                  <Text style={styles.trialInfoText}>
-                    Invoice generation & reporting
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.trialEndContainer}>
-                <Calendar size={20} color="#3f66ac" />
-                <Text style={styles.trialEndText}>
-                  Free trial ends on {formatTrialEndDate(trialEndDate)}
+            {loading ? (
+              <View style={styles.content}>
+                <Text style={styles.title}>Setting up your business...</Text>
+                <Text style={styles.subtitle}>
+                  This will only take a moment
                 </Text>
-              </View>
 
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={styles.upgradeButton}
-                  onPress={onUpgrade}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.upgradeButtonText}>
-                    View Subscription Plans
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.trialInfo}>
+                  <View style={styles.trialInfoItem}>
+                    <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#d1fae5' }} />
+                    <SkeletonBar width="70%" style={{ marginLeft: 12 }} />
+                  </View>
+                  <View style={styles.trialInfoItem}>
+                    <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#d1fae5' }} />
+                    <SkeletonBar width="60%" style={{ marginLeft: 12 }} />
+                  </View>
+                  <View style={styles.trialInfoItem}>
+                    <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#d1fae5' }} />
+                    <SkeletonBar width="65%" style={{ marginLeft: 12 }} />
+                  </View>
+                </View>
 
-                <TouchableOpacity
-                  style={styles.laterButton}
-                  onPress={onClose}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.laterButtonText}>
-                    Continue with Trial
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.trialEndContainer}>
+                  <SkeletonBar width="80%" height={16} />
+                </View>
+
+                <View style={styles.buttonContainer}>
+                  <View style={[styles.upgradeButton, { opacity: 0.5 }]}>
+                    <SkeletonBar width={160} height={16} />
+                  </View>
+                  <View style={[styles.laterButton, { opacity: 0.5 }]}>
+                    <SkeletonBar width={130} height={16} />
+                  </View>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View style={styles.content}>
+                <Text style={styles.title}>🎉 Welcome to Manager ERP!</Text>
+                <Text style={styles.subtitle}>
+                  Your 30-day free trial has started
+                </Text>
+
+                <View style={styles.trialInfo}>
+                  <View style={styles.trialInfoItem}>
+                    <CheckCircle size={20} color="#10b981" />
+                    <Text style={styles.trialInfoText}>
+                      Full access to all features
+                    </Text>
+                  </View>
+                  <View style={styles.trialInfoItem}>
+                    <CheckCircle size={20} color="#10b981" />
+                    <Text style={styles.trialInfoText}>
+                      Primary location management
+                    </Text>
+                  </View>
+                  <View style={styles.trialInfoItem}>
+                    <CheckCircle size={20} color="#10b981" />
+                    <Text style={styles.trialInfoText}>
+                      Invoice generation & reporting
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.trialEndContainer}>
+                  <Calendar size={20} color="#3f66ac" />
+                  <Text style={styles.trialEndText}>
+                    Free trial ends on {formatTrialEndDate(trialEndDate)}
+                  </Text>
+                </View>
+
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity
+                    style={styles.upgradeButton}
+                    onPress={onUpgrade}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.upgradeButtonText}>
+                      View Subscription Plans
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.laterButton}
+                    onPress={onClose}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.laterButtonText}>
+                      Continue with Trial
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </Animated.View>
         </TouchableOpacity>
       </Animated.View>
     </Modal>
   );
 };
+
+export default React.memo(TrialNotification);
 
 const styles = StyleSheet.create({
   overlay: {
@@ -310,4 +380,3 @@ const styles = StyleSheet.create({
   },
 });
 
-export default TrialNotification;

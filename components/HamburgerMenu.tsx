@@ -7,9 +7,12 @@ import {
   Modal,
   ScrollView,
   Animated,
+  Platform,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet, MessageSquare } from 'lucide-react-native';
+import { usePermissions } from '@/contexts/PermissionContext';
 
 interface HamburgerMenuProps {
   visible: boolean;
@@ -22,10 +25,12 @@ interface MenuSection {
   title: string;
   icon: any;
   route?: string;
+  permission?: string;
   subsections?: {
     id: string;
     title: string;
     route: string;
+    permission?: string;
   }[];
 }
 
@@ -41,17 +46,20 @@ const menuSections: MenuSection[] = [
     title: 'Transactions',
     icon: IndianRupee,
     route: '/all-invoices',
+    permission: 'sales',
   },
   {
     id: 'inventory',
     title: 'Inventory',
     icon: Package,
     route: '/inventory',
+    permission: 'inventory',
   },
   {
     id: 'purchasing',
     title: 'Purchasing',
     icon: ShoppingCart,
+    permission: 'inventory',
     subsections: [
       { id: 'purchases', title: 'Purchases', route: '/purchasing/purchases' },
       { id: 'suppliers', title: 'Suppliers', route: '/purchasing/suppliers' },
@@ -62,8 +70,8 @@ const menuSections: MenuSection[] = [
     title: 'People',
     icon: Users,
     subsections: [
-      { id: 'customers', title: 'Customers', route: '/people/customers' },
-      { id: 'staff', title: 'Staff', route: '/people/staff' },
+      { id: 'customers', title: 'Customers', route: '/people/customers', permission: 'customer_management' },
+      { id: 'staff', title: 'Staff', route: '/people/staff', permission: 'staff_management' },
     ],
   },
   {
@@ -71,17 +79,20 @@ const menuSections: MenuSection[] = [
     title: 'Bank Accounts',
     icon: CreditCard,
     route: '/bank-accounts',
+    permission: 'payment_processing',
   },
   {
     id: 'cash-accounts',
     title: 'Cash Accounts',
     icon: Wallet,
     route: '/cash-accounts',
+    permission: 'payment_processing',
   },
   {
     id: 'locations',
     title: 'Locations',
     icon: MapPin,
+    permission: 'inventory',
     subsections: [
       { id: 'branches', title: 'Branches', route: '/locations/branches' },
       { id: 'warehouses', title: 'Warehouses', route: '/locations/warehouses' },
@@ -92,12 +103,20 @@ const menuSections: MenuSection[] = [
     title: 'Reports',
     icon: BarChart3,
     route: '/reports',
+    permission: 'reports',
   },
   {
     id: 'marketing',
     title: 'Marketing',
     icon: Megaphone,
     route: '/marketing',
+    permission: 'master_access',
+  },
+  {
+    id: 'chat',
+    title: 'Chat',
+    icon: MessageSquare,
+    route: '/chat',
   },
   {
     id: 'settings',
@@ -109,6 +128,8 @@ const menuSections: MenuSection[] = [
 
 export default function HamburgerMenu({ visible, onClose, onNavigate }: HamburgerMenuProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const { hasPermission } = usePermissions();
+  const insets = useSafeAreaInsets();
 
   const toggleSection = (sectionId: string) => {
     const newExpanded = new Set(expandedSections);
@@ -187,25 +208,40 @@ export default function HamburgerMenu({ visible, onClose, onNavigate }: Hamburge
     >
       <View style={styles.overlay}>
         
-        <View style={styles.menuContainer}>
-          <SafeAreaView style={styles.menuHeaderSafeArea}>
-            <View style={styles.menuHeader}>
-              <Text style={styles.menuTitle}>Menu</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={onClose}
-                activeOpacity={0.7}
-              >
-                <X size={24} color="#64748b" />
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
+        <View style={[
+          styles.menuContainer,
+          {
+            paddingTop: Math.max(insets.top, Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0),
+            paddingBottom: insets.bottom,
+          },
+        ]}>
+          <View style={styles.menuHeader}>
+            <Text style={styles.menuTitle}>Menu</Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              activeOpacity={0.7}
+            >
+              <X size={24} color="#64748b" />
+            </TouchableOpacity>
+          </View>
 
           <ScrollView
             style={styles.menuContent}
             showsVerticalScrollIndicator={false}
           >
-            {menuSections.map(renderMenuItem)}
+            {menuSections
+              .filter(s => !s.permission || hasPermission(s.permission))
+              .map(section => {
+                if (section.subsections) {
+                  const filteredSubs = section.subsections.filter(
+                    sub => !sub.permission || hasPermission(sub.permission)
+                  );
+                  if (filteredSubs.length === 0) return null;
+                  return renderMenuItem({ ...section, subsections: filteredSubs });
+                }
+                return renderMenuItem(section);
+              })}
           </ScrollView>
         </View>
         
@@ -239,9 +275,6 @@ const styles = StyleSheet.create({
   },
   overlayTouchable: {
     flex: 1,
-  },
-  menuHeaderSafeArea: {
-    backgroundColor: '#ffffff',
   },
   menuHeader: {
     flexDirection: 'row',

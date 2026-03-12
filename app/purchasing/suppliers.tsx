@@ -1,23 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Modal,
   Alert,
   Linking,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, Package, TrendingUp, TrendingDown, Eye, MessageCircle, X, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
-import { dataStore, Supplier } from '@/utils/dataStore';
-import { getSuppliers } from '@/services/backendApi';
-import { getInputFocusStyles } from '@/utils/platformUtils';
+import { Supplier } from '@/utils/dataStore';
+import { getSuppliers, getAllSupplierMetrics, getProducts, getPurchaseInvoices, invalidateApiCache } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { onTransactionChange } from '@/utils/transactionEvents';
 
 const Colors = {
   background: '#FFFFFF',
@@ -50,25 +55,68 @@ const getInitials = (name: string): string => {
 
 // Using Supplier interface from dataStore
 
-const mockSuppliers: Supplier[] = [];
-
 export default function SuppliersScreen() {
   const { handleBack } = useWebBackNavigation();
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'high_score'>('all');
-  const [focusedField, setFocusedField] = useState<string | null>(null);
-  const inputFocusStyles = getInputFocusStyles();
+  const mountedRef = useRef(true);
 
-  // Fetch suppliers from Supabase
-  React.useEffect(() => {
-    const loadSuppliers = async () => {
-      try {
-        const result = await getSuppliers();
-        if (result.success && result.suppliers) {
-          // Convert Supabase supplier format to Supplier interface format
-          const convertedSuppliers: Supplier[] = result.suppliers.map((sup: any) => ({
+  const loadSuppliers = useCallback(async (showLoader = true) => {
+    try {
+      if (showLoader) setIsLoading(true);
+      const [result, metricsResult, productsResult, invoicesResult] = await Promise.all([
+        getSuppliers(),
+        typeof getAllSupplierMetrics === 'function' ? getAllSupplierMetrics() : Promise.resolve({ success: false }),
+        typeof getProducts === 'function' ? getProducts() : Promise.resolve({ success: false }),
+        typeof getPurchaseInvoices === 'function' ? getPurchaseInvoices() : Promise.resolve({ success: false }),
+      ]);
+      if (!mountedRef.current) return;
+      if (result.success && result.suppliers) {
+        const metricsMap = new Map<string, any>();
+        if (metricsResult.success && metricsResult.metrics) {
+          metricsResult.metrics.forEach((m: any) => metricsMap.set(m.supplier_id, m));
+        }
+
+        const productCountMap = new Map<string, number>();
+        const categoryMap = new Map<string, Set<string>>();
+        if (productsResult.success && productsResult.products) {
+          productsResult.products.forEach((p: any) => {
+            if (p.preferred_supplier_id) {
+              productCountMap.set(p.preferred_supplier_id, (productCountMap.get(p.preferred_supplier_id) || 0) + 1);
+              if (p.category) {
+                if (!categoryMap.has(p.preferred_supplier_id)) categoryMap.set(p.preferred_supplier_id, new Set());
+                categoryMap.get(p.preferred_supplier_id)!.add(p.category);
+              }
+            }
+          });
+        }
+
+        const invoiceCountMap = new Map<string, { count: number; total: number; lastDate: string | null }>();
+        if (invoicesResult.success && invoicesResult.invoices) {
+          invoicesResult.invoices.forEach((inv: any) => {
+            if (!inv.supplier_id) return;
+            const existing = invoiceCountMap.get(inv.supplier_id) || { count: 0, total: 0, lastDate: null };
+            existing.count += 1;
+            existing.total += Number(inv.total_amount) || 0;
+            const invDate = inv.invoice_date || inv.created_at;
+            if (!existing.lastDate || (invDate && new Date(invDate) > new Date(existing.lastDate))) {
+              existing.lastDate = invDate;
+            }
+            invoiceCountMap.set(inv.supplier_id, existing);
+          });
+        }
+
+        const convertedSuppliers: Supplier[] = result.suppliers.map((sup: any) => {
+          const m = metricsMap.get(sup.id);
+          const invData = invoiceCountMap.get(sup.id);
+          const pCount = productCountMap.get(sup.id) || 0;
+          const cats = categoryMap.get(sup.id);
+
+          return {
             id: sup.id,
             name: sup.contact_person,
             businessName: sup.business_name,
@@ -78,54 +126,54 @@ export default function SuppliersScreen() {
             email: sup.email || '',
             address: `${sup.address_line_1}, ${sup.address_line_2 ? sup.address_line_2 + ', ' : ''}${sup.address_line_3 ? sup.address_line_3 + ', ' : ''}${sup.city}, ${sup.pincode}, ${sup.state}`,
             gstin: sup.gstin_pan || '',
-            avatar: '', // No avatar - will show initials instead
-            supplierScore: 85, // Default values for backward compatibility
-            onTimeDelivery: 90,
-            qualityRating: 4.5,
-            responseTime: 2.1,
-            totalOrders: 0,
-            completedOrders: 0,
-            pendingOrders: 0,
+            avatar: '',
+            supplierScore: m?.health_score || 0,
+            onTimeDelivery: m?.on_time_delivery_rate || 0,
+            qualityRating: m?.quality_rating || 0,
+            responseTime: 0,
+            totalOrders: m?.total_orders || invData?.count || 0,
+            completedOrders: m?.paid_orders || 0,
+            pendingOrders: m?.pending_orders || 0,
             cancelledOrders: 0,
-            totalValue: 0,
-            lastOrderDate: null,
+            totalValue: m?.total_value || invData?.total || 0,
+            lastOrderDate: m?.last_order_date || invData?.lastDate || null,
             joinedDate: sup.created_at,
             status: sup.status || 'active',
-            paymentTerms: 'Net 30 Days',
-            deliveryTime: '3-5 Business Days',
-            categories: ['Electronics', 'Accessories'],
-            productCount: 0,
+            paymentTerms: '',
+            deliveryTime: '',
+            categories: cats ? Array.from(cats) : [],
+            productCount: pCount,
             createdAt: sup.created_at,
-          }));
-          
-          setSuppliers(convertedSuppliers);
-          setFilteredSuppliers(convertedSuppliers);
-          
-          // Also sync to dataStore for backward compatibility
-          convertedSuppliers.forEach(supplier => {
-            if (!dataStore.getSuppliers().find(s => s.id === supplier.id)) {
-              dataStore.addSupplier(supplier);
-            }
-          });
-        } else {
-          console.error('Failed to load suppliers:', result.error);
-        }
-      } catch (error) {
-        console.error('Error loading suppliers:', error);
+          };
+        });
+        setSuppliers(convertedSuppliers);
+        setFilteredSuppliers(convertedSuppliers);
       }
-    };
-
-    loadSuppliers();
-
-    // Also subscribe to data store changes for backward compatibility
-    const unsubscribe = dataStore.subscribe(() => {
-      const allSuppliers = dataStore.getSuppliers();
-      setSuppliers(allSuppliers);
-      applyFilters(searchQuery, selectedFilter);
-    });
-
-    return unsubscribe;
+    } catch (error) {
+      console.error('Error loading suppliers:', error);
+    } finally {
+      if (mountedRef.current) setIsLoading(false);
+    }
   }, []);
+
+  useFocusEffect(useCallback(() => { loadSuppliers(); }, [loadSuppliers]));
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadSuppliers(false).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [loadSuppliers]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsubscribe = onTransactionChange((source) => {
+      if (mountedRef.current && (source === 'supplier' || !source)) {
+        loadSuppliers(false);
+      }
+    });
+    return () => { mountedRef.current = false; unsubscribe(); };
+  }, [loadSuppliers]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -170,7 +218,7 @@ export default function SuppliersScreen() {
   };
 
   const handleSupplierPress = (supplier: Supplier) => {
-    router.push({
+    safeRouter.push({
       pathname: '/purchasing/supplier-details',
       params: {
         supplierId: supplier.id,
@@ -182,7 +230,7 @@ export default function SuppliersScreen() {
   const handleAddSupplier = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('add supplier')) return;
-    router.push('/purchasing/add-supplier');
+    safeRouter.push('/purchasing/add-supplier');
   };
 
   const handlePhoneCall = (phoneNumber: string) => {
@@ -360,23 +408,25 @@ export default function SuppliersScreen() {
         </View>
 
         {/* Categories */}
-        <View style={styles.categoriesSection}>
-          <Text style={styles.categoriesLabel}>Categories:</Text>
-          <View style={styles.categoriesContainer}>
-            {supplier.categories.slice(0, 3).map((category, index) => (
-              <View key={index} style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>{category}</Text>
-              </View>
-            ))}
-            {supplier.categories.length > 3 && (
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>
-                  +{supplier.categories.length - 3}
-                </Text>
-              </View>
-            )}
+        {supplier.categories.length > 0 && (
+          <View style={styles.categoriesSection}>
+            <Text style={styles.categoriesLabel}>Categories:</Text>
+            <View style={styles.categoriesContainer}>
+              {supplier.categories.slice(0, 3).map((category, index) => (
+                <View key={index} style={styles.categoryChip}>
+                  <Text style={styles.categoryChipText}>{category}</Text>
+                </View>
+              ))}
+              {supplier.categories.length > 3 && (
+                <View style={styles.categoryChip}>
+                  <Text style={styles.categoryChipText}>
+                    +{supplier.categories.length - 3}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Contact Info */}
         <View style={styles.contactSection}>
@@ -426,6 +476,10 @@ export default function SuppliersScreen() {
         </View>
       </View>
 
+      {isLoading ? (
+        <ListSkeleton itemCount={6} showSearch={true} showFilter={true} />
+      ) : (
+        <>
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -464,20 +518,14 @@ export default function SuppliersScreen() {
 
       {/* Search Bar - Inline between summary and content */}
       <View style={styles.inlineSearchContainer}>
-        <View style={[
-          styles.searchBar,
-          inputFocusStyles.inputContainer,
-          focusedField === 'search' && inputFocusStyles.inputContainerFocused,
-        ]}>
+        <View style={styles.searchBar}>
           <Search size={20} color={Colors.primary} />
           <TextInput
-            style={[styles.searchInput, inputFocusStyles.input as any]}
+            style={styles.searchInput}
             placeholder="Search suppliers..."
             placeholderTextColor={Colors.textLight}
             value={searchQuery}
             onChangeText={handleSearch}
-            onFocus={() => setFocusedField('search')}
-            onBlur={() => setFocusedField(null)}
           />
         </View>
       </View>
@@ -529,12 +577,15 @@ export default function SuppliersScreen() {
       </View>
 
       {/* Suppliers List */}
-      <ScrollView 
+      <FlatList
+        data={filteredSuppliers}
+        renderItem={({item}) => renderSupplierCard(item)}
+        keyExtractor={(item) => item.id}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredSuppliers.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <Building2 size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Suppliers Found</Text>
@@ -542,10 +593,8 @@ export default function SuppliersScreen() {
               {searchQuery ? 'No suppliers match your search criteria' : 'Add your first supplier to get started'}
             </Text>
           </View>
-        ) : (
-          filteredSuppliers.map(renderSupplierCard)
-        )}
-      </ScrollView>
+        }
+      />
 
       {/* Add Supplier FAB */}
       <TouchableOpacity
@@ -557,28 +606,9 @@ export default function SuppliersScreen() {
         <Text style={styles.addSupplierText}>Add Supplier</Text>
       </TouchableOpacity>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search suppliers..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Advanced filter')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -922,7 +952,7 @@ const styles = StyleSheet.create({
   },
   addSupplierFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: 24,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -946,59 +976,42 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
-  },
   divider: {
     height: 1,
     backgroundColor: Colors.grey[200],
   },
   inlineSearchContainer: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.background,
+    paddingVertical: 16,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
-    gap: 12,
+    borderColor: Colors.grey[200],
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: Colors.text,
-  },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    marginLeft: 12,
+    marginRight: 12,
+    padding: 0,
+    fontWeight: '500',
+    ...Platform.select({
+      web: {
+        textShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        textShadowColor: 'rgba(0, 0, 0, 0.1)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+      },
+    }),
   },
 });

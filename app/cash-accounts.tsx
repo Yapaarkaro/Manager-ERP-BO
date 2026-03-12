@@ -1,9 +1,4 @@
-/**
- * Cash Accounts Screen
- * Shows only Cash Accounts (not bank accounts)
- */
-
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,491 +6,193 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Banknote, Wallet, Plus } from 'lucide-react-native';
+import { ArrowLeft, Wallet, TrendingUp, TrendingDown, ChevronRight, IndianRupee } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import ResponsiveContainer from '@/components/ResponsiveContainer';
-import { getWebContainerStyles } from '@/utils/platformUtils';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { onTransactionChange } from '@/utils/transactionEvents';
+import { invalidateApiCache, getCashTransactions } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
-const Colors = {
-  background: '#FFFFFF',
+const C = {
+  bg: '#FFFFFF',
+  surface: '#F9FAFB',
   text: '#1F2937',
-  textLight: '#6B7280',
+  textMuted: '#6B7280',
   primary: '#3f66ac',
   success: '#059669',
+  successBg: '#ECFDF5',
   error: '#DC2626',
-  warning: '#D97706',
-  grey: {
-    50: '#F9FAFB',
-    100: '#F3F4F6',
-    200: '#E5E7EB',
-    300: '#D1D5DB',
-  }
+  errorBg: '#FEF2F2',
+  border: '#E5E7EB',
+  divider: '#F3F4F6',
 };
 
-// Interface for backend account
-interface BackendAccount {
-  id: string;
-  bank_name?: string;
-  bankName?: string;
-  account_holder_name?: string;
-  accountHolderName?: string;
-  account_number?: string;
-  accountNumber?: string;
-  ifsc_code?: string;
-  ifscCode?: string;
-  account_type?: string;
-  accountType?: string;
-  initial_balance?: number;
-  initialBalance?: number;
-  current_balance?: number;
-  currentBalance?: number;
-  balance?: number;
-  is_primary?: boolean;
-  isPrimary?: boolean;
-  type?: 'bank' | 'cash';
-  upi_id?: string;
-  upiId?: string;
-  created_at?: string;
-  createdAt?: string;
-}
+const fmt = (n: number) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(n);
 
 export default function CashAccountsScreen() {
-  const { handleBack } = useWebBackNavigation();
   const { data: businessData, refetch } = useBusinessData();
+  const [totalIn, setTotalIn] = useState(0);
+  const [totalOut, setTotalOut] = useState(0);
 
-  // Use cached data immediately for fast loading
-  const bankAccountsData = useMemo(() => {
-    if (!businessData?.bankAccounts) return [];
-    return businessData.bankAccounts;
-  }, [businessData?.bankAccounts]);
+  const openingBalance = useMemo(() => {
+    return businessData?.business?.initial_cash_balance || businessData?.business?.current_cash_balance || 0;
+  }, [businessData?.business?.initial_cash_balance, businessData?.business?.current_cash_balance]);
 
-  // Filter only cash accounts (exclude bank accounts)
-  const cashAccounts = useMemo(() => {
-    return bankAccountsData.filter((account: any) => {
-      // Only show cash accounts
-      return account.type === 'cash' || account.account_type === 'cash';
-    });
-  }, [bankAccountsData]);
+  const currentBalance = openingBalance + totalIn - totalOut;
 
-  // Get cash balance from business data (instant from cache)
-  const cashBalance = useMemo(() => {
-    return businessData?.business?.current_cash_balance || 
-           businessData?.business?.current_total_cash_balance || 0;
-  }, [businessData?.business?.current_cash_balance, businessData?.business?.current_total_cash_balance]);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Refetch when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      refetch();
-    }, [refetch])
-  );
+  const loadTransactions = useCallback(async () => {
+    try {
+      const r = await getCashTransactions();
+      if (r.success && r.transactions) {
+        const txns = r.transactions;
+        setTotalIn(txns.filter((t: any) => t.type === 'credit').reduce((s: number, t: any) => s + (parseFloat(t.amount) || 0), 0));
+        setTotalOut(txns.filter((t: any) => t.type === 'debit').reduce((s: number, t: any) => s + (parseFloat(t.amount) || 0), 0));
+      }
+    } catch { /* silent */ }
+  }, []);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    Promise.all([refetch(), loadTransactions()]).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [refetch, loadTransactions]);
 
-  // Map backend account to display format
-  const mapAccountToDisplay = (account: any) => {
-    return {
-      id: account.id || account.backend_id || '',
-      bankName: account.bank_name || account.bankName || 'Cash Account',
-      accountHolderName: account.account_holder_name || account.accountHolderName || '',
-      accountNumber: account.account_number || account.accountNumber || '',
-      ifscCode: account.ifsc_code || account.ifscCode || '',
-      accountType: account.account_type || account.accountType || 'Cash',
-      currentBalance: account.current_balance || account.currentBalance || account.balance || account.initial_balance || account.initialBalance || 0,
-      isPrimary: account.is_primary || account.isPrimary || false,
-      upiId: account.upi_id || account.upiId || '',
-    };
-  };
+  useFocusEffect(React.useCallback(() => { refetch(); loadTransactions(); }, [refetch, loadTransactions]));
 
-  const handleViewAccount = (accountId: string) => {
-    router.push({
-      pathname: '/bank-details',
-      params: { bankAccountId: accountId }
-    });
-  };
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsub = onTransactionChange(() => { if (mountedRef.current) { refetch(); loadTransactions(); } });
+    return () => { mountedRef.current = false; unsub(); };
+  }, [refetch, loadTransactions]);
 
-  // Calculate total cash balance
-  const totalCashBalance = useMemo(() => {
-    const cashFromAccounts = cashAccounts.reduce((sum, acc) => {
-      const balance = acc.current_balance || acc.currentBalance || acc.balance || acc.initial_balance || acc.initialBalance || 0;
-      return sum + (typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0);
-    }, 0);
-    return cashFromAccounts + (typeof cashBalance === 'number' ? cashBalance : parseFloat(String(cashBalance)) || 0);
-  }, [cashAccounts, cashBalance]);
-
-  const webContainerStyles = getWebContainerStyles();
+  const netChange = totalIn - totalOut;
+  const isPositive = netChange >= 0;
 
   return (
-    <ResponsiveContainer>
-      <SafeAreaView style={styles.container}>
+    <View style={s.container}>
+      <SafeAreaView style={{ flex: 1 }}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBack}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+            <ArrowLeft size={22} color={C.text} />
           </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Cash Accounts</Text>
+          <Text style={s.headerTitle}>Cash</Text>
+          <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView 
-          style={styles.content}
-          contentContainerStyle={[
-            styles.scrollContent,
-            Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}
-          ]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Cash Balance Card (if cash balance exists) */}
-          {cashBalance > 0 && (
-            <View style={styles.section}>
-              <View style={styles.cashCard}>
-                <View style={styles.cashCardHeader}>
-                  <Banknote size={32} color={Colors.success} />
-                  <View style={styles.cashDetails}>
-                    <Text style={styles.cashLabel}>Current Cash Balance</Text>
-                    <Text style={styles.cashAmount}>
-                      {formatAmount(cashBalance)}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  style={styles.viewCashButton}
-                  onPress={() => router.push('/cash-details')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.viewCashButtonText}>View Cash Transactions</Text>
-                </TouchableOpacity>
-              </View>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          {/* Hero Balance Card */}
+          <View style={s.heroCard}>
+            <View style={s.heroIconWrap}>
+              <Wallet size={28} color={C.success} />
             </View>
-          )}
-
-          {/* Cash Accounts from backend (if any) */}
-          {cashAccounts.length > 0 && (
-            <View style={[styles.section, styles.cashSection]}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <Wallet size={24} color={Colors.success} />
-                  <Text style={[styles.sectionTitle, { color: Colors.success }]}>Cash Accounts</Text>
-                  {cashAccounts.length > 0 && (
-                    <View style={[styles.countBadge, { backgroundColor: Colors.success + '20' }]}>
-                      <Text style={[styles.countBadgeText, { color: Colors.success }]}>
-                        {cashAccounts.length}
-                      </Text>
-                    </View>
-                  )}
+            <Text style={s.heroLabel}>Current Cash Balance</Text>
+            <Text style={s.heroAmount}>{fmt(currentBalance)}</Text>
+            <View style={s.heroDivider} />
+            <View style={s.heroRow}>
+              <View style={s.heroStat}>
+                <Text style={s.heroStatLabel}>Opening Balance</Text>
+                <Text style={s.heroStatVal}>{fmt(openingBalance)}</Text>
+              </View>
+              <View style={s.heroStatSep} />
+              <View style={s.heroStat}>
+                <Text style={s.heroStatLabel}>Net Change</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  {isPositive
+                    ? <TrendingUp size={14} color={C.success} />
+                    : <TrendingDown size={14} color={C.error} />}
+                  <Text style={[s.heroStatVal, { color: isPositive ? C.success : C.error }]}>
+                    {isPositive ? '+' : ''}{fmt(netChange)}
+                  </Text>
                 </View>
               </View>
+            </View>
+          </View>
 
-              <View style={styles.accountsList}>
-                {cashAccounts.map((account) => {
-                  const displayAccount = mapAccountToDisplay(account);
-                  return (
-                    <TouchableOpacity
-                      key={account.id || displayAccount.id}
-                      style={[styles.accountCard, styles.cashAccountCard]}
-                      onPress={() => handleViewAccount(displayAccount.id)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.accountCardHeader}>
-                        <View style={styles.accountInfo}>
-                          <Wallet size={20} color={Colors.success} />
-                          <View style={styles.accountDetails}>
-                            <Text style={styles.accountName}>{displayAccount.bankName}</Text>
-                            <Text style={styles.accountNumber}>
-                              {displayAccount.accountNumber ? `****${displayAccount.accountNumber.slice(-4)}` : 'Cash Account'}
-                            </Text>
-                          </View>
-                        </View>
-                        {displayAccount.isPrimary && (
-                          <View style={[styles.primaryBadge, { backgroundColor: Colors.success + '15' }]}>
-                            <Text style={[styles.primaryBadgeText, { color: Colors.success }]}>Primary</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.accountBalance}>
-                        <Text style={styles.balanceLabel}>Balance</Text>
-                        <Text style={[styles.balanceAmount, { color: Colors.success }]}>
-                          {formatAmount(displayAccount.currentBalance)}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
+          {/* View Transactions */}
+          <TouchableOpacity
+            style={s.txnCard}
+            onPress={() => safeRouter.push('/cash-details')}
+            activeOpacity={0.7}
+          >
+            <View style={s.txnCardLeft}>
+              <View style={[s.txnIcon, { backgroundColor: C.successBg }]}>
+                <IndianRupee size={20} color={C.success} />
+              </View>
+              <View>
+                <Text style={s.txnCardTitle}>Cash Transactions</Text>
+                <Text style={s.txnCardSub}>View all cash in & cash out</Text>
               </View>
             </View>
-          )}
+            <ChevronRight size={20} color={C.textMuted} />
+          </TouchableOpacity>
 
-          {/* Empty state for cash accounts */}
-          {cashAccounts.length === 0 && cashBalance === 0 && (
-            <View style={styles.section}>
-              <View style={styles.emptyState}>
-                <Wallet size={48} color={Colors.grey[300]} />
-                <Text style={styles.emptyStateText}>No cash accounts</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Summary */}
-          <View style={styles.summarySection}>
-            <Text style={styles.summaryTitle}>Total Cash Balance</Text>
-            <Text style={[styles.summaryAmount, { color: Colors.success }]}>
-              {formatAmount(totalCashBalance)}
+          {/* Quick Info */}
+          <View style={s.infoCard}>
+            <Text style={s.infoTitle}>How cash balance works</Text>
+            <Text style={s.infoText}>
+              Your cash balance updates automatically when you record income, expenses, sales, purchases, returns, receivables, and payables with cash as the payment method.
             </Text>
           </View>
         </ScrollView>
       </SafeAreaView>
-    </ResponsiveContainer>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-    backgroundColor: Colors.background,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: C.text },
+  scroll: { padding: 16, paddingBottom: 40 },
+
+  heroCard: {
+    backgroundColor: C.bg, borderRadius: 16, padding: 24,
+    borderWidth: 1, borderColor: C.border, marginBottom: 16,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 }, android: { elevation: 3 } }),
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.text,
+  heroIconWrap: {
+    width: 52, height: 52, borderRadius: 14, backgroundColor: C.successBg,
+    justifyContent: 'center', alignItems: 'center', marginBottom: 16,
   },
-  content: {
-    flex: 1,
+  heroLabel: { fontSize: 14, color: C.textMuted, fontWeight: '500', marginBottom: 6 },
+  heroAmount: { fontSize: 32, fontWeight: '800', color: C.text, letterSpacing: -0.5 },
+  heroDivider: { height: 1, backgroundColor: C.divider, marginVertical: 18 },
+  heroRow: { flexDirection: 'row', alignItems: 'center' },
+  heroStat: { flex: 1 },
+  heroStatSep: { width: 1, height: 32, backgroundColor: C.divider, marginHorizontal: 12 },
+  heroStatLabel: { fontSize: 12, color: C.textMuted, marginBottom: 4 },
+  heroStatVal: { fontSize: 15, fontWeight: '700', color: C.text },
+
+  txnCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: C.bg, borderRadius: 14, padding: 16,
+    borderWidth: 1, borderColor: C.border, marginBottom: 16,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4 }, android: { elevation: 1 } }),
   },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
+  txnCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 },
+  txnIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  txnCardTitle: { fontSize: 15, fontWeight: '600', color: C.text },
+  txnCardSub: { fontSize: 13, color: C.textMuted, marginTop: 2 },
+
+  infoCard: {
+    backgroundColor: C.surface, borderRadius: 14, padding: 18,
+    borderWidth: 1, borderColor: C.divider,
   },
-  section: {
-    marginBottom: 24,
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
-      },
-    }),
-  },
-  cashSection: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.success,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginLeft: 8,
-  },
-  countBadge: {
-    backgroundColor: Colors.primary + '15',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginLeft: 8,
-  },
-  countBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  accountsList: {
-    gap: 12,
-  },
-  accountCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    marginBottom: 12,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-      },
-    }),
-  },
-  cashAccountCard: {
-    borderColor: Colors.success + '40',
-    backgroundColor: Colors.success + '05',
-  },
-  accountCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  accountInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  accountDetails: {
-    flex: 1,
-  },
-  accountName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  accountNumber: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  primaryBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: Colors.primary + '15',
-  },
-  primaryBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  accountBalance: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  balanceAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 32,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: Colors.textLight,
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  cashCard: {
-    backgroundColor: Colors.success + '10',
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.success + '30',
-  },
-  cashCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 16,
-  },
-  cashDetails: {
-    flex: 1,
-  },
-  cashLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  cashAmount: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: Colors.success,
-  },
-  viewCashButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: Colors.success,
-    alignItems: 'center',
-  },
-  viewCashButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  summarySection: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 8,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textLight,
-    marginBottom: 8,
-  },
-  summaryAmount: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: Colors.text,
-  },
+  infoTitle: { fontSize: 14, fontWeight: '600', color: C.text, marginBottom: 8 },
+  infoText: { fontSize: 13, color: C.textMuted, lineHeight: 20 },
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

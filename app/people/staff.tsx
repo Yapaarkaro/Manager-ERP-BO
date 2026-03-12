@@ -1,23 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Image,
-  Alert,
   Modal,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, MapPin, Calendar, Clock, TrendingUp, TrendingDown, IndianRupee, Award, Target, Eye, CreditCard as Edit, UserCheck, UserX, AlertCircle } from 'lucide-react-native';
+import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, Clock, IndianRupee, Award, Target, Eye, UserCheck, UserX, AlertCircle, ChevronRight, User } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { getStaff as getStaffFromBackend } from '@/services/backendApi';
+import { getStaff as getStaffFromBackend, invalidateApiCache } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
 
 // Map backend staff to display Staff format
 function mapBackendStaffToDisplayStaff(s: any): Staff {
@@ -46,7 +49,7 @@ function mapBackendStaffToDisplayStaff(s: any): Staff {
     mobile: staffMobile,
     address: s.address || s.full_address || '',
     joinDate: s.join_date || s.created_at || s.date_joined || new Date().toISOString(),
-    employeeId: s.employee_id || s.employeeId || s.emp_id || `EMP${staffId.slice(-4)}`,
+    employeeId: s.employee_id || s.employeeId || s.emp_id || '',
     status: s.status || 'active',
     attendance: s.attendance || {
       percentage: 0,
@@ -78,7 +81,9 @@ function mapBackendStaffToDisplayStaff(s: any): Staff {
       name: s.emergency_contact_name || s.emergencyContactName,
       relation: s.emergency_contact_relation || s.emergencyContactRelation || '',
       phone: s.emergency_contact_phone || s.emergencyContactPhone || ''
-    } : undefined
+    } : undefined,
+    verificationCode: s.verification_code ?? null,
+    hasLoggedIn: !!s.user_id,
   };
 }
 
@@ -132,16 +137,18 @@ interface Staff {
     achievedInvoices: number;
   };
   permissions: string[];
-  salary: {
+  salary?: {
     basic: number;
     allowances: number;
     total: number;
   };
-  emergencyContact: {
+  emergencyContact?: {
     name: string;
     relation: string;
     phone: string;
   };
+  verificationCode?: string | null;
+  hasLoggedIn?: boolean;
 }
 
 export default function StaffScreen() {
@@ -150,6 +157,8 @@ export default function StaffScreen() {
   const [allStaff, setAllStaff] = useState<Staff[]>([]);
   const [filteredStaff, setFilteredStaff] = useState<Staff[]>([]);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     status: [] as string[],
     department: [] as string[],
@@ -161,10 +170,10 @@ export default function StaffScreen() {
 
   const debouncedNavigate = useDebounceNavigation(500);
   const { data: businessData } = useBusinessData();
+  const hasLoadedOnce = useRef(false);
 
-  // ✅ Fetch staff from backend (backend is source of truth)
-  useEffect(() => {
-    const loadStaff = async () => {
+  const loadStaff = useCallback(async () => {
+      if (!hasLoadedOnce.current) setIsLoading(true);
       try {
         console.log('🔄 Fetching staff from backend...');
         // Fetch staff directly from backend
@@ -270,8 +279,36 @@ export default function StaffScreen() {
           }
           
           console.log('✅ Final staff count after filtering:', finalStaff.length);
-          console.log('📋 Staff list:', finalStaff.map(s => ({ name: s.name, role: s.role, mobile: s.mobile })));
-          
+
+          // Supplement/confirm verification codes and login status
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const staffIds = finalStaff.map(s => s.id);
+            if (staffIds.length > 0) {
+              const { data: codeRows, error: codeError } = await supabase
+                .from('staff')
+                .select('id, verification_code, user_id')
+                .in('id', staffIds);
+              console.log('🔑 Verification code query result:', JSON.stringify(codeRows), 'error:', codeError);
+              if (codeRows && codeRows.length > 0) {
+                const codeMap: Record<string, { code: string | null; hasLoggedIn: boolean }> = {};
+                codeRows.forEach((r: any) => {
+                  codeMap[r.id] = { code: r.verification_code, hasLoggedIn: !!r.user_id };
+                });
+                finalStaff.forEach(s => {
+                  if (s.id in codeMap) {
+                    s.verificationCode = codeMap[s.id].code;
+                    s.hasLoggedIn = codeMap[s.id].hasLoggedIn;
+                  }
+                });
+              }
+            }
+          } catch (codeErr) {
+            console.warn('⚠️ Failed to fetch verification codes:', codeErr);
+          }
+
+          console.log('📋 Staff verification codes:', finalStaff.map(s => ({ name: s.name, code: s.verificationCode })));
+
           setAllStaff(finalStaff);
           setFilteredStaff(finalStaff);
         } else {
@@ -284,11 +321,26 @@ export default function StaffScreen() {
         console.error('❌ Error loading staff from backend:', error);
         setAllStaff([]);
         setFilteredStaff([]);
-      }
-    };
-    
-    loadStaff();
+      } finally {
+      hasLoadedOnce.current = true;
+      setIsLoading(false);
+    }
   }, [businessData]);
+
+  // Re-fetch staff every time this screen comes into focus (e.g. after editing a staff member)
+  useFocusEffect(
+    useCallback(() => {
+      invalidateApiCache('staff');
+      loadStaff();
+    }, [loadStaff])
+  );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadStaff().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [loadStaff]);
 
 
   const handleSearch = (query: string) => {
@@ -389,37 +441,14 @@ export default function StaffScreen() {
   };
 
   const handleStaffPress = (staff: Staff) => {
-    // Check if staff is incomplete (missing email, address, salary, or emergency contact)
-    const isIncomplete = !staff.email || !staff.address || !staff.salary || !staff.emergencyContact;
-    
-    if (isIncomplete) {
-      // Navigate to add-staff form with pre-filled data
-      debouncedNavigate({
-        pathname: '/people/add-staff',
-        params: {
-          staffId: staff.id,
-          prefillName: staff.name,
-          prefillMobile: staff.mobile,
-          prefillRole: staff.role,
-        }
-      });
-    } else {
-      debouncedNavigate({
-        pathname: '/people/staff-details',
-        params: { staffId: staff.id }
-      });
-    }
+    debouncedNavigate({
+      pathname: '/people/staff-details',
+      params: { staffId: staff.id }
+    });
   };
 
   const handleAddStaff = () => {
     debouncedNavigate('/people/add-staff');
-  };
-
-  const handleEditStaff = (staffId: string) => {
-    debouncedNavigate({
-      pathname: '/people/add-staff',
-      params: { staffId }
-    });
   };
 
   const getStatusColor = (status: string) => {
@@ -464,23 +493,6 @@ export default function StaffScreen() {
       month: 'short',
       year: 'numeric'
     });
-  };
-
-  const formatDateTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const getPerformanceColor = (score: number) => {
-    if (score >= 90) return Colors.success;
-    if (score >= 80) return Colors.info;
-    if (score >= 70) return Colors.warning;
-    return Colors.error;
   };
 
   const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
@@ -534,213 +546,171 @@ export default function StaffScreen() {
     return Math.round((achieved / target) * 100);
   };
 
+  const getMissingFields = (staff: Staff): string[] => {
+    const missing: string[] = [];
+    if (!staff.address || staff.address.trim() === '') missing.push('address');
+    if (!staff.salary || staff.salary.total <= 0) missing.push('salary');
+    if (!staff.emergencyContact) missing.push('emergency contact');
+    return missing;
+  };
+
+  const handleCompleteProfile = (staff: Staff) => {
+    debouncedNavigate({
+      pathname: '/people/add-staff',
+      params: { staffId: staff.id }
+    });
+  };
+
   const renderStaffCard = (staff: Staff) => {
     const StatusIcon = getStatusIcon(staff.status);
     const statusColor = getStatusColor(staff.status);
-    const performanceColor = getPerformanceColor(staff.performance.score);
-    const salesAchievement = getTargetAchievement(staff.targets.achievedSales, staff.targets.monthlySalesTarget);
-    // Check if staff is incomplete (missing email, address, salary, or emergency contact)
-    const isIncomplete = !staff.email || !staff.address || !staff.salary || !staff.emergencyContact;
+    const hasPerformanceData = staff.performance && staff.performance.score > 0;
+    const hasSalesTarget = staff.targets && staff.targets.monthlySalesTarget > 0;
+    const salesAchievement = hasSalesTarget
+      ? getTargetAchievement(staff.targets.achievedSales, staff.targets.monthlySalesTarget)
+      : 0;
+    const hasContact = !!staff.mobile || !!staff.email;
+    const missingFields = getMissingFields(staff);
+    const isIncomplete = missingFields.length > 0;
 
     return (
       <TouchableOpacity
-        key={staff.id}
-        style={[
-          styles.staffCard,
-          { borderLeftColor: statusColor }
-        ]}
+        style={[styles.staffCard, { borderLeftColor: statusColor }]}
         onPress={() => handleStaffPress(staff)}
         activeOpacity={0.7}
       >
-        {/* Header */}
         <View style={styles.staffHeader}>
-          <View style={styles.staffLeft}>
-            <View style={styles.avatarContainer}>
-              <Image 
-                source={{ uri: staff.avatar }}
-                style={styles.staffAvatar}
-              />
-              {/* Notification icon for incomplete staff */}
-              {isIncomplete && (
-                <View style={styles.incompleteBadge}>
-                  <AlertCircle size={12} color="#FFFFFF" fill="#FFC754" />
-                </View>
-              )}
-            </View>
-            <View style={styles.staffInfo}>
-              <View style={styles.staffNameRow}>
-                <Text style={styles.staffName}>{staff.name}</Text>
-                {isIncomplete && (
-                  <View style={styles.incompleteIndicator}>
-                    <Text style={styles.incompleteText}>Complete Details</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.staffRole}>{staff.role}</Text>
-              <Text style={styles.staffDepartment}>{staff.department}</Text>
-              {staff.employeeId && (
-                <Text style={styles.employeeId}>ID: {staff.employeeId}</Text>
-              )}
-            </View>
-          </View>
-
-          <View style={styles.staffRight}>
-            <View style={[
-              styles.statusBadge,
-              { backgroundColor: `${statusColor}20` }
-            ]}>
-              <StatusIcon size={14} color={statusColor} />
-              <Text style={[
-                styles.statusText,
-                { color: statusColor }
-              ]}>
-                {getStatusText(staff.status)}
-              </Text>
-            </View>
-            
-            {staff.performance.score > 0 && (
-              <View style={[
-                styles.performanceBadge,
-                { backgroundColor: `${performanceColor}20` }
-              ]}>
-                <Award size={14} color={performanceColor} />
-                <Text style={[
-                  styles.performanceScore,
-                  { color: performanceColor }
-                ]}>
-                  {staff.performance.score}/100
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Performance Stats - Only show if staff has performance data */}
-        {!isIncomplete && staff.performance && staff.performance.score > 0 && (
-          <View style={styles.performanceSection}>
-            <View style={styles.performanceGrid}>
-              <View style={styles.performanceStat}>
-                <Text style={styles.performanceLabel}>Attendance</Text>
-                <Text style={[
-                  styles.performanceValue,
-                  { color: staff.attendance.percentage >= 90 ? Colors.success : 
-                           staff.attendance.percentage >= 80 ? Colors.warning : Colors.error }
-                ]}>
-                  {staff.attendance.percentage}%
-                </Text>
-              </View>
-
-              <View style={styles.performanceStat}>
-                <Text style={styles.performanceLabel}>
-                  {staff.performance.salesAmount > 0 ? 'Sales' : 'Tasks'}
-                </Text>
-                <Text style={[
-                  styles.performanceValue, 
-                  { color: staff.performance.salesAmount > 0 ? Colors.success : Colors.primary }
-                ]}>
-                  {staff.performance.salesAmount > 0 
-                    ? formatAmount(staff.performance.salesAmount)
-                    : `${staff.performance.returnsHandled || staff.performance.invoicesProcessed || 0}`
-                  }
-                </Text>
-              </View>
-
-              <View style={styles.performanceStat}>
-                <Text style={styles.performanceLabel}>
-                  {staff.performance.salesAmount > 0 ? 'Invoices' : 'Customers'}
-                </Text>
-                <Text style={styles.performanceValue}>
-                  {staff.performance.salesAmount > 0 
-                    ? staff.performance.invoicesProcessed 
-                    : staff.performance.customersServed
-                  }
-                </Text>
-              </View>
-
-              <View style={styles.performanceStat}>
-                <Text style={styles.performanceLabel}>Rating</Text>
-                <Text style={[styles.performanceValue, { color: Colors.warning }]}>
-                  ⭐ {staff.performance.rating}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Incomplete Info Message */}
-        {isIncomplete && (
-          <View style={styles.incompleteSection}>
-            <AlertCircle size={16} color={Colors.warning} />
-            <Text style={styles.incompleteMessage}>
-              Complete staff details to enable performance tracking
-            </Text>
-          </View>
-        )}
-
-        {/* Target Achievement */}
-        {!isIncomplete && staff.targets && staff.targets.monthlySalesTarget > 0 && (
-          <View style={styles.targetSection}>
-            <View style={styles.targetHeader}>
-              <Target size={16} color={Colors.primary} />
-              <Text style={styles.targetLabel}>Monthly Target Achievement</Text>
-            </View>
-            <View style={styles.targetProgress}>
-              <View style={styles.targetProgressBar}>
-                <View style={[
-                  styles.targetProgressFill,
-                  { 
-                    width: `${Math.min(salesAchievement, 100)}%`,
-                    backgroundColor: salesAchievement >= 100 ? Colors.success : 
-                                   salesAchievement >= 80 ? Colors.warning : Colors.error
-                  }
-                ]} />
-              </View>
-              <Text style={styles.targetPercentage}>
-                {salesAchievement}%
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Contact Info */}
-        <View style={styles.contactSection}>
-          <View style={styles.contactRow}>
-            <Phone size={14} color={Colors.textLight} />
-            <Text style={styles.contactText}>{staff.mobile}</Text>
-          </View>
-          <View style={styles.contactRow}>
-            <Mail size={14} color={Colors.textLight} />
-            <Text style={styles.contactText} numberOfLines={1}>
-              {staff.email}
-            </Text>
-          </View>
-        </View>
-
-        {/* Contact Info - Always show for all staff */}
-        <View style={styles.contactSection}>
-          <View style={styles.contactRow}>
-            <Phone size={14} color={Colors.textLight} />
-            <Text style={styles.contactText}>{staff.mobile}</Text>
-          </View>
-          {staff.email && (
-            <View style={styles.contactRow}>
-              <Mail size={14} color={Colors.textLight} />
-              <Text style={styles.contactText} numberOfLines={1}>
-                {staff.email}
-              </Text>
+          {staff.avatar ? (
+            <Image source={{ uri: staff.avatar }} style={styles.staffAvatar} />
+          ) : (
+            <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+              <User size={16} color="#6B7280" />
             </View>
           )}
-        </View>
-        
-        {/* Last Check-in - Only show if staff has attendance data */}
-        {!isIncomplete && staff.attendance && staff.attendance.lastCheckIn && (
-          <View style={styles.checkInSection}>
-            <Clock size={14} color={Colors.textLight} />
-            <Text style={styles.checkInText}>
-              Last check-in: {formatDateTime(staff.attendance.lastCheckIn)}
+
+          <View style={styles.staffInfo}>
+            <Text style={styles.staffName} numberOfLines={1}>{staff.name}</Text>
+            <Text style={styles.staffRole}>{staff.role}</Text>
+            {staff.department !== 'Operations' && (
+              <Text style={styles.staffDepartment}>{staff.department}</Text>
+            )}
+          </View>
+
+          <View style={[styles.statusBadge, { backgroundColor: `${statusColor}15` }]}>
+            <StatusIcon size={13} color={statusColor} />
+            <Text style={[styles.statusText, { color: statusColor }]}>
+              {getStatusText(staff.status)}
             </Text>
           </View>
+        </View>
+
+        {hasContact && (
+          <View style={styles.contactSection}>
+            {staff.mobile ? (
+              <View style={styles.contactRow}>
+                <Phone size={13} color={Colors.textLight} />
+                <Text style={styles.contactText}>{staff.mobile}</Text>
+              </View>
+            ) : null}
+            {staff.email ? (
+              <View style={styles.contactRow}>
+                <Mail size={13} color={Colors.textLight} />
+                <Text style={styles.contactText} numberOfLines={1}>{staff.email}</Text>
+              </View>
+            ) : null}
+          </View>
         )}
+
+        {!staff.hasLoggedIn && staff.verificationCode && (
+          <View style={styles.verificationCodeRow}>
+            <View style={styles.verificationCodeBadge}>
+              <Text style={styles.verificationCodeLabel}>Pending Verification</Text>
+              <Text style={styles.verificationCodeValue} selectable>{staff.verificationCode}</Text>
+            </View>
+          </View>
+        )}
+
+        {isIncomplete && (
+          <TouchableOpacity
+            style={styles.incompleteBanner}
+            onPress={() => handleCompleteProfile(staff)}
+            activeOpacity={0.7}
+          >
+            <AlertCircle size={14} color={Colors.warning} />
+            <Text style={styles.incompleteBannerText}>
+              Missing {missingFields.join(', ')}
+            </Text>
+            <View style={styles.completeButton}>
+              <Text style={styles.completeButtonText}>Complete</Text>
+              <ChevronRight size={12} color={Colors.primary} />
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {hasSalesTarget && (
+          <View style={styles.targetSection}>
+            <View style={styles.targetHeader}>
+              <Target size={14} color={Colors.primary} />
+              <Text style={styles.targetLabel}>Sales Target</Text>
+              <Text style={styles.targetPercentage}>{salesAchievement}%</Text>
+            </View>
+            <View style={styles.targetProgressBar}>
+              <View style={[
+                styles.targetProgressFill,
+                {
+                  width: `${Math.min(salesAchievement, 100)}%`,
+                  backgroundColor: salesAchievement >= 100 ? Colors.success :
+                                   salesAchievement >= 80 ? Colors.warning : Colors.error,
+                }
+              ]} />
+            </View>
+          </View>
+        )}
+
+        {hasPerformanceData && (
+          <View style={styles.performanceSection}>
+            <View style={styles.performanceStat}>
+              <Text style={styles.performanceLabel}>Attendance</Text>
+              <Text style={[styles.performanceValue, {
+                color: staff.attendance.percentage >= 90 ? Colors.success :
+                       staff.attendance.percentage >= 80 ? Colors.warning : Colors.error
+              }]}>{staff.attendance.percentage}%</Text>
+            </View>
+            <View style={styles.perfDivider} />
+            <View style={styles.performanceStat}>
+              <Text style={styles.performanceLabel}>
+                {staff.performance.salesAmount > 0 ? 'Sales' : 'Tasks'}
+              </Text>
+              <Text style={[styles.performanceValue, { color: Colors.primary }]}>
+                {staff.performance.salesAmount > 0
+                  ? formatAmount(staff.performance.salesAmount)
+                  : `${staff.performance.invoicesProcessed || 0}`}
+              </Text>
+            </View>
+            <View style={styles.perfDivider} />
+            <View style={styles.performanceStat}>
+              <Text style={styles.performanceLabel}>Rating</Text>
+              <Text style={[styles.performanceValue, { color: Colors.warning }]}>
+                {'★'} {staff.performance.rating.toFixed(1)}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {staff.salary && staff.salary.total > 0 && (
+          <View style={styles.salaryRow}>
+            <IndianRupee size={13} color={Colors.textLight} />
+            <Text style={styles.salaryText}>{formatAmount(staff.salary.total)}/month</Text>
+          </View>
+        )}
+
+        <View style={styles.cardFooter}>
+          <Text style={styles.joinDateText}>Joined {formatDate(staff.joinDate)}</Text>
+          <View style={styles.viewDetailsHint}>
+            <Eye size={13} color={Colors.primary} />
+            <Text style={styles.viewDetailsText}>View</Text>
+          </View>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -839,23 +809,30 @@ export default function StaffScreen() {
       <View style={styles.divider} />
 
       {/* Staff List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredStaff.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Users size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Staff Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No staff match your search criteria' : 'No staff members added yet'}
-            </Text>
-          </View>
-        ) : (
-          filteredStaff.map(renderStaffCard)
-        )}
-      </ScrollView>
+      {isLoading ? (
+        <View style={styles.scrollView}>
+          <ListSkeleton itemCount={6} showSearch={false} showFilter={false} />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredStaff}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => renderStaffCard(item)}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Users size={64} color={Colors.textLight} />
+              <Text style={styles.emptyStateTitle}>No Staff Found</Text>
+              <Text style={styles.emptyStateText}>
+                {searchQuery ? 'No staff match your search criteria' : 'No staff members added yet'}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       {/* Add Staff FAB */}
       <TouchableOpacity
@@ -1168,157 +1145,105 @@ const styles = StyleSheet.create({
   },
   staffCard: {
     backgroundColor: Colors.background,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: Colors.grey[200],
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
   },
   staffHeader: {
     flexDirection: 'row',
-    marginBottom: 20,
-  },
-  staffLeft: {
-    flexDirection: 'row',
-    flex: 1,
-    marginRight: 20,
+    alignItems: 'center',
+    gap: 12,
   },
   staffAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    marginRight: 16,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
   staffInfo: {
     flex: 1,
     justifyContent: 'center',
   },
-  staffNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-    flexWrap: 'wrap',
-    gap: 8,
-  },
   staffName: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
     color: Colors.text,
-    flex: 1,
-    marginBottom: 4,
   },
   staffRole: {
-    fontSize: 15,
+    fontSize: 13,
     color: Colors.primary,
     fontWeight: '600',
-    marginBottom: 4,
-  },
-  staffDepartment: {
-    fontSize: 13,
-    color: Colors.textLight,
-    marginBottom: 6,
-  },
-  employeeId: {
-    fontSize: 12,
-    color: Colors.textLight,
-    fontFamily: 'monospace',
     marginTop: 2,
   },
-  staffRight: {
-    alignItems: 'flex-end',
-    gap: 10,
-    justifyContent: 'flex-start',
+  staffDepartment: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+    alignSelf: 'flex-start',
   },
   statusText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
-  performanceBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
-  },
-  performanceScore: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  performanceSection: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  performanceGrid: {
+  contactSection: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: 14,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
   },
-  performanceStat: {
-    flex: 1,
-    minWidth: '22%',
+  contactRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    gap: 6,
   },
-  performanceLabel: {
-    fontSize: 12,
+  contactText: {
+    fontSize: 13,
     color: Colors.textLight,
-    marginBottom: 6,
-    textAlign: 'center',
     fontWeight: '500',
   },
-  performanceValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-    textAlign: 'center',
-  },
   targetSection: {
-    backgroundColor: '#f0f4ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.primary,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
   },
   targetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    gap: 6,
+    marginBottom: 8,
   },
   targetLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.primary,
     fontWeight: '600',
+    flex: 1,
   },
-  targetProgress: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  targetPercentage: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   targetProgressBar: {
-    flex: 1,
-    height: 6,
+    height: 5,
     backgroundColor: Colors.grey[200],
     borderRadius: 3,
     overflow: 'hidden',
@@ -1327,90 +1252,98 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-  targetPercentage: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-    minWidth: 32,
-    textAlign: 'right',
-  },
-  contactSection: {
-    gap: 10,
-    marginBottom: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  contactRow: {
+  performanceSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 2,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 12,
   },
-  contactText: {
-    fontSize: 13,
-    color: Colors.textLight,
+  perfDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 8,
+  },
+  performanceStat: {
     flex: 1,
+    alignItems: 'center',
+  },
+  performanceLabel: {
+    fontSize: 11,
+    color: Colors.textLight,
+    marginBottom: 3,
     fontWeight: '500',
   },
-  checkInSection: {
+  performanceValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  incompleteBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 12,
+    gap: 6,
+  },
+  incompleteBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#92400E',
+    fontWeight: '500',
+  },
+  completeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  completeButtonText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  salaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
     paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[100],
   },
-  checkInText: {
+  salaryText: {
+    fontSize: 13,
+    color: Colors.textLight,
+    fontWeight: '600',
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
+  },
+  joinDateText: {
     fontSize: 12,
     color: Colors.textLight,
     fontWeight: '500',
   },
-  avatarContainer: {
-    position: 'relative',
-  },
-  incompleteBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#FFC754',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: Colors.background,
-    zIndex: 10,
-  },
-  incompleteIndicator: {
-    backgroundColor: '#FFC754',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-    marginLeft: 8,
-  },
-  incompleteText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  incompleteSection: {
+  viewDetailsHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#FFFBEB',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#FFC754',
+    gap: 4,
   },
-  incompleteMessage: {
-    fontSize: 13,
-    color: Colors.warning,
+  viewDetailsText: {
+    fontSize: 12,
+    color: Colors.primary,
     fontWeight: '600',
-    flex: 1,
   },
   addStaffFAB: {
     position: 'absolute',
@@ -1437,26 +1370,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
-  },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
   },
   searchBar: {
     flexDirection: 'row',
@@ -1495,20 +1408,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  editButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
   // New styles for inline search and filter modal
   divider: {
     height: 1,
@@ -1653,5 +1552,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  verificationCodeRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
+  },
+  verificationCodeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fffbeb',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 8,
+  },
+  verificationCodeLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#d97706',
+  },
+  verificationCodeValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#b45309',
+    letterSpacing: 2,
   },
 });

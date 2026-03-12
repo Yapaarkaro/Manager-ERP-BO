@@ -11,18 +11,17 @@ import {
   Alert,
   ScrollView,
   Modal,
-  Keyboard,
-  Dimensions,
 } from 'react-native';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
-import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/utils/dataStore';
+import { BusinessAddress, getStateCode, getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { createAddress, createStaff } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -97,11 +96,15 @@ export default function BranchDetailsScreen() {
     fiscalYear,
   } = useLocalSearchParams();
   
-  // Get branch count for dynamic header
+  const parsedExistingAddresses = React.useMemo(() => {
+    try {
+      const raw = JSON.parse((existingAddresses || allAddresses || '[]') as string);
+      return mapLocationsToAddresses(raw);
+    } catch { return []; }
+  }, [existingAddresses, allAddresses]);
+
   const getBranchCount = () => {
-    const allAddresses = dataStore.getAddresses();
-    const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
-    return branchAddresses.length + 1; // +1 for the new branch being added
+    return parsedExistingAddresses.filter(addr => addr.type === 'branch').length + 1;
   };
 
   // Set status bar to dark for white header
@@ -121,8 +124,7 @@ export default function BranchDetailsScreen() {
   const [selectedState, setSelectedState] = useState<{ name: string; code: string } | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
-  const inputLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
-  const submitButtonLayout = useRef<{ y: number; height: number } | null>(null);
+  
   const [showStateModal, setShowStateModal] = useState(false);
   const [stateSearchQuery, setStateSearchQuery] = useState('');
   const [managerName, setManagerName] = useState('');
@@ -254,66 +256,7 @@ export default function BranchDetailsScreen() {
     setManagerPhone(cleaned);
   };
 
-  // Helper function to handle input layout measurement
-  const handleInputLayout = (inputName: string) => (event: any) => {
-    const { y, height } = event.nativeEvent.layout;
-    inputLayouts.current.set(inputName, { y, height });
-  };
-
-  // Helper function to handle submit button layout
-  const handleSubmitButtonLayout = (event: any) => {
-    const { y, height } = event.nativeEvent.layout;
-    submitButtonLayout.current = { y, height };
-  };
-
-  // Helper function to scroll to input when focused - smart scroll that keeps button visible
-  const handleInputFocus = (inputName: string) => {
-    if (Platform.OS !== 'web' && scrollViewRef.current) {
-      // Small delay to ensure keyboard is shown and layout is measured
-      setTimeout(() => {
-        const inputLayout = inputLayouts.current.get(inputName);
-        const buttonLayout = submitButtonLayout.current;
-        
-        if (inputLayout && buttonLayout) {
-          // Estimate keyboard height (typically 300-400px on mobile, numeric is usually smaller ~250px)
-          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
-          const screenHeight = Dimensions.get('window').height;
-          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
-          
-          // Calculate scroll position to show input above keyboard with some padding
-          const inputBottom = inputLayout.y + inputLayout.height;
-          const targetScrollY = inputBottom - visibleAreaHeight + 100; // 100px padding from top
-          
-          // Ensure button stays visible above keyboard
-          const buttonTop = buttonLayout.y;
-          const maxScrollY = buttonTop - visibleAreaHeight + buttonLayout.height + 20; // Keep button visible with 20px padding
-          
-          // Scroll to the minimum of target (to show input) and max (to keep button visible)
-          const finalScrollY = Math.min(Math.max(0, targetScrollY), Math.max(0, maxScrollY));
-          
-          scrollViewRef.current?.scrollTo({
-            y: finalScrollY,
-            animated: true,
-          });
-        } else if (inputLayout) {
-          // If button layout not measured, just scroll to show input
-          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
-          const screenHeight = Dimensions.get('window').height;
-          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
-          const inputBottom = inputLayout.y + inputLayout.height;
-          const targetScrollY = inputBottom - visibleAreaHeight + 100;
-          
-          scrollViewRef.current?.scrollTo({
-            y: Math.max(0, targetScrollY),
-            animated: true,
-          });
-        } else {
-          // Fallback: scroll to end if layout not measured yet
-          scrollViewRef.current?.scrollToEnd({ animated: true });
-        }
-      }, 300);
-    }
-  };
+  // Removed custom scroll-on-focus logic; KeyboardAvoidingView handles keyboard avoidance.
 
   const isFormValid = () => {
     return (
@@ -334,8 +277,7 @@ export default function BranchDetailsScreen() {
       return;
     }
 
-    // Check for duplicate addresses
-    const allAddresses = dataStore.getAddresses();
+    const allAddresses = parsedExistingAddresses;
     console.log('🔍 Checking for duplicates among', allAddresses.length, 'existing addresses');
     console.log('📍 New branch address to check:', {
       addressLine1: addressLine1.trim(),
@@ -420,9 +362,6 @@ export default function BranchDetailsScreen() {
 
     console.log('Creating new branch:', newBranch);
     
-    // ✅ Save to local dataStore IMMEDIATELY so it shows up in UI
-    dataStore.addAddress(newBranch);
-    
     try {
       // Prepare address JSON for backend
       // Include all additional lines (not just doorNumber)
@@ -462,52 +401,51 @@ export default function BranchDetailsScreen() {
         await geocodePromise;
       }
 
-      // Save to backend (async, update local dataStore when complete)
-      createAddress({
-        name: branchName.trim(),
-        addressJson,
-        type: 'branch',
-        managerName: managerName.trim() || undefined,
-        managerMobileNumber: managerPhone || undefined,
-        isPrimary: false,
-        latitude: addressLatitude,
-        longitude: addressLongitude,
-      }).then(async (result) => {
+      // Save to backend - await to ensure it's saved before navigating
+      let backendResult: any = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const result = await createAddress({
+          name: branchName.trim(),
+          addressJson,
+          type: 'branch',
+          managerName: managerName.trim() || undefined,
+          managerMobileNumber: managerPhone || undefined,
+          isPrimary: false,
+          latitude: addressLatitude,
+          longitude: addressLongitude,
+        });
         if (result.success && result.address) {
-          console.log('✅ Branch created in backend:', result.address);
-          // Update local address with backend ID
-          const updatedAddress = { ...newBranch, backendId: result.address.id };
-          dataStore.updateAddress(newBranch.id, updatedAddress);
-          
-          // ✅ Create staff from manager info directly in backend (backend is source of truth)
-          // Note: This is non-blocking - if it fails, signup continues
-          if (managerName.trim() && managerPhone) {
-            // Run in background - don't await to avoid blocking signup
-            createStaff({
-              name: managerName.trim(),
-              mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
-              role: 'Branch Manager',
-              locationId: result.address.id, // Use backend address ID
-              locationType: 'branch',
-              locationName: branchName.trim(),
-            }).then((staffResult) => {
-              if (staffResult.success) {
-                console.log('✅ Staff created from branch manager in backend:', managerName.trim());
-              } else {
-                console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
-                // Staff will still be created when they visit the staff screen
-              }
-            }).catch((staffError) => {
-              console.warn('⚠️ Staff creation error (non-blocking):', staffError);
-              // Don't block the flow - staff can be created later
-            });
-          }
-        } else {
-          console.warn('⚠️ Backend create failed:', result.error);
+          backendResult = result.address;
+          console.log('✅ Branch saved with backend ID:', result.address.id);
+          break;
         }
-      }).catch((error) => {
-        console.error('Error creating branch in backend:', error);
-      });
+        if (attempt < 2) {
+          console.warn(`⚠️ Branch create attempt ${attempt} failed (${result.error}), retrying...`);
+          await new Promise(r => setTimeout(r, 1000));
+        } else {
+          console.error('❌ Branch creation failed after retries:', result.error);
+        }
+      }
+
+      // Create staff from manager info (non-blocking)
+      if (backendResult && managerName.trim() && managerPhone) {
+        createStaff({
+          name: managerName.trim(),
+          mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
+          role: 'Branch Manager',
+          locationId: backendResult.id,
+          locationType: 'branch',
+          locationName: branchName.trim(),
+        }).then((staffResult) => {
+          if (staffResult.success) {
+            console.log('✅ Staff created from branch manager in backend:', managerName.trim());
+          } else {
+            console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
+          }
+        }).catch((staffError) => {
+          console.warn('⚠️ Staff creation error (non-blocking):', staffError);
+        });
+      }
     } catch (error) {
       console.error('Error preparing branch for backend:', error);
     }
@@ -516,49 +454,29 @@ export default function BranchDetailsScreen() {
     const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
     clearBusinessDataCache();
     
-    // Navigate immediately without delay for instant UX
+    const updatedAddresses = JSON.stringify([...parsedExistingAddresses, newBranch]);
+
     setIsLoading(false);
     if (fromSummary === 'true') {
-      // User came from business summary, navigate back with all data
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/business-summary',
         params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
-          allBankAccounts,
-          initialCashBalance,
-          invoicePrefix,
-          invoicePattern,
-          startingInvoiceNumber,
-          fiscalYear,
+          type, value, gstinData, name, businessName, businessType, customBusinessType,
+          allAddresses: updatedAddresses,
+          allBankAccounts, initialCashBalance, invoicePrefix, invoicePattern, startingInvoiceNumber, fiscalYear,
         }
       });
     } else if (type && value) {
-      // User is in signup flow, go to address confirmation
-      // Use replace to prevent going back to branch details screen
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/address-confirmation',
         params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          mobile,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+          allAddresses: updatedAddresses,
         }
       });
     } else {
       // User is not in signup flow, go to settings
-      router.push('/settings');
+      safeRouter.push('/settings');
     }
   };
 
@@ -647,7 +565,7 @@ export default function BranchDetailsScreen() {
                       })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
-                      onFocus={() => handleInputFocus('branchName')}
+                      
                     />
                   </View>
                 </View>
@@ -656,7 +574,6 @@ export default function BranchDetailsScreen() {
                   <Text style={styles.label}>Door Number / Building Name *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('doorNumber')}
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -668,7 +585,6 @@ export default function BranchDetailsScreen() {
                       })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
-                      onFocus={() => handleInputFocus('doorNumber')}
                     />
                   </View>
                 </View>
@@ -677,7 +593,6 @@ export default function BranchDetailsScreen() {
                   <Text style={styles.label}>Address Line 1 *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('addressLine1')}
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -687,7 +602,6 @@ export default function BranchDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
-                      onFocus={() => handleInputFocus('addressLine1')}
                     />
                   </View>
                 </View>
@@ -696,7 +610,6 @@ export default function BranchDetailsScreen() {
                   <Text style={styles.label}>Address Line 2 *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('addressLine2')}
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -706,7 +619,6 @@ export default function BranchDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
-                      onFocus={() => handleInputFocus('addressLine2')}
                     />
                   </View>
                 </View>
@@ -728,7 +640,6 @@ export default function BranchDetailsScreen() {
                     </View>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout(`additionalLine${index}`)}
                     >
                       <CapitalizedTextInput
                         style={styles.input}
@@ -738,7 +649,6 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
-                        onFocus={() => handleInputFocus(`additionalLine${index}`)}
                       />
                     </View>
                   </View>
@@ -763,7 +673,6 @@ export default function BranchDetailsScreen() {
                     <Text style={styles.label}>City *</Text>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout('city')}
                     >
                       <CapitalizedTextInput
                         style={[
@@ -782,7 +691,6 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
-                        onFocus={() => handleInputFocus('city')}
                       />
                     </View>
                   </View>
@@ -791,7 +699,6 @@ export default function BranchDetailsScreen() {
                     <Text style={styles.label}>Pincode *</Text>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout('pincode')}
                     >
                       <TextInput
                         style={styles.input}
@@ -801,7 +708,6 @@ export default function BranchDetailsScreen() {
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={6}
-                        onFocus={() => handleInputFocus('pincode')}
                       />
                     </View>
                   </View>
@@ -834,7 +740,6 @@ export default function BranchDetailsScreen() {
                     <Text style={styles.contactLabel}>Branch Manager</Text>
                     <View 
                       style={[styles.inputContainer, styles.contactInputContainer]}
-                      onLayout={handleInputLayout('managerName')}
                     >
                       <User size={20} color="#ffc754" style={styles.inputIcon} />
                       <CapitalizedTextInput
@@ -844,7 +749,6 @@ export default function BranchDetailsScreen() {
                         placeholder="Manager name (optional)"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
-                        onFocus={() => handleInputFocus('managerName')}
                       />
                     </View>
                   </View>
@@ -856,7 +760,6 @@ export default function BranchDetailsScreen() {
                         styles.inputContainer,
                         styles.contactInputContainer
                       ]}
-                      onLayout={handleInputLayout('managerPhone')}
                     >
                       <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                       <TextInput
@@ -874,7 +777,6 @@ export default function BranchDetailsScreen() {
                         value={managerPhone}
                         onChangeText={handleManagerPhoneChange}
                         placeholder="Manager phone (optional)"
-                        onFocus={() => handleInputFocus('managerPhone')}
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={10}
@@ -892,7 +794,7 @@ export default function BranchDetailsScreen() {
                 onPress={handleSubmit}
                 disabled={!isFormValid() || isLoading}
                 activeOpacity={0.8}
-                onLayout={handleSubmitButtonLayout}
+                
               >
                 <Text style={[
                   styles.submitButtonText,
@@ -1050,7 +952,7 @@ export default function BranchDetailsScreen() {
                       setShowDuplicateModal(false);
                       // Navigate to edit the existing address
                       if (duplicateAddressInfo) {
-                        router.push({
+                        safeRouter.push({
                           pathname: '/edit-address-simple',
                           params: {
                             editAddressId: duplicateAddressInfo.id,
@@ -1110,46 +1012,45 @@ export default function BranchDetailsScreen() {
                               updatedAt: new Date().toISOString(),
                             };
 
-                            dataStore.addAddress(newBranch);
-                            
+                            createAddress({
+                              name: newBranch.name,
+                              addressJson: {
+                                doorNumber: newBranch.doorNumber,
+                                addressLine1: newBranch.addressLine1,
+                                addressLine2: newBranch.addressLine2,
+                                city: newBranch.city,
+                                pincode: newBranch.pincode,
+                                stateName: newBranch.stateName,
+                                stateCode: newBranch.stateCode,
+                              },
+                              type: 'branch',
+                              managerName: newBranch.manager,
+                              managerMobileNumber: newBranch.phone,
+                              isPrimary: false,
+                            }).catch(() => {});
+
+                            const dupUpdatedAddresses = JSON.stringify([...parsedExistingAddresses, newBranch]);
+
                             setTimeout(() => {
                               if (fromSummary === 'true') {
-                                router.replace({
+                                safeRouter.replace({
                                   pathname: '/auth/business-summary',
                                   params: {
-                                    type,
-                                    value,
-                                    gstinData,
-                                    name,
-                                    businessName,
-                                    businessType,
-                                    customBusinessType,
-                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                                    allBankAccounts,
-                                    initialCashBalance,
-                                    invoicePrefix,
-                                    invoicePattern,
-                                    startingInvoiceNumber,
-                                    fiscalYear,
+                                    type, value, gstinData, name, businessName, businessType, customBusinessType,
+                                    allAddresses: dupUpdatedAddresses,
+                                    allBankAccounts, initialCashBalance, invoicePrefix, invoicePattern, startingInvoiceNumber, fiscalYear,
                                   }
                                 });
                               } else if (type && value) {
-                                router.replace({
+                                safeRouter.replace({
                                   pathname: '/auth/address-confirmation',
                                   params: {
-                                    type,
-                                    value,
-                                    gstinData,
-                                    name,
-                                    businessName,
-                                    businessType,
-                                    customBusinessType,
-                                    mobile,
-                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                                    type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+                                    allAddresses: dupUpdatedAddresses,
                                   }
                                 });
                               } else {
-                                router.push('/settings');
+                                safeRouter.push('/settings');
                               }
                               setIsLoading(false);
                               setDuplicateAddressInfo(null);

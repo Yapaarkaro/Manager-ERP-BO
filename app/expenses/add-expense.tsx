@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,14 @@ import {
   TextInput,
   ScrollView,
   Alert,
-  Image,
+  Modal,
+  Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   ArrowLeft,
-  IndianRupee,
   FileText,
   Image as ImageIcon,
   Camera,
@@ -27,7 +28,14 @@ import {
   Shield,
   FileSpreadsheet,
   MoreHorizontal,
+  Wallet,
+  ChevronDown,
+  X,
 } from 'lucide-react-native';
+import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { safeRouter } from '@/utils/safeRouter';
+import * as ImagePicker from 'expo-image-picker';
+import { addBankTransaction, addCashTransaction, getBankAccounts } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -37,22 +45,8 @@ const Colors = {
   success: '#059669',
   error: '#DC2626',
   warning: '#D97706',
-  grey: {
-    50: '#F9FAFB',
-    100: '#F3F4F6',
-    200: '#E5E7EB',
-    300: '#D1D5DB',
-  }
+  grey: { 50: '#F9FAFB', 100: '#F3F4F6', 200: '#E5E7EB', 300: '#D1D5DB' },
 };
-
-interface ExpenseFormData {
-  type: string;
-  amount: string;
-  paymentMethod: string;
-  notes: string;
-  proofImage: string;
-  customType: string;
-}
 
 const expenseTypes = [
   { id: 'rent', name: 'Rent', icon: Building },
@@ -66,570 +60,260 @@ const expenseTypes = [
   { id: 'other', name: 'Other', icon: MoreHorizontal },
 ];
 
-const paymentMethods = [
-  'Cash',
-  'Bank Transfer',
-  'UPI',
-  'Credit Card',
-  'Debit Card',
-  'Cheque',
-  'Other'
-];
-
 export default function AddExpenseScreen() {
-  const [formData, setFormData] = useState<ExpenseFormData>({
-    type: '',
-    amount: '',
-    paymentMethod: '',
-    notes: '',
-    proofImage: '',
-    customType: '',
-  });
-
+  const { data: businessData } = useBusinessData();
+  const [type, setType] = useState('');
+  const [customType, setCustomType] = useState('');
+  const [amount, setAmount] = useState('');
+  const [notes, setNotes] = useState('');
+  const [proofImage, setProofImage] = useState('');
+  const [paymentAccount, setPaymentAccount] = useState<'cash' | string>('cash');
   const [showTypeModal, setShowTypeModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
 
-  const updateFormData = (field: keyof ExpenseFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  useEffect(() => {
+    const accts = (businessData.bankAccounts || []).filter((a: any) => (a.type || a.account_type) !== 'cash');
+    setBankAccounts(accts);
+  }, [businessData]);
+
+  const isCash = paymentAccount === 'cash';
+  const selectedBank = bankAccounts.find((a: any) => a.id === paymentAccount);
+
+  const getPaymentLabel = () => {
+    if (isCash) return 'Cash';
+    if (selectedBank) {
+      const name = selectedBank.bank_name || selectedBank.bankName || 'Bank';
+      const num = selectedBank.account_number || selectedBank.accountNumber || '';
+      return `${name} ••••${num.slice(-4)}`;
+    }
+    return 'Select Account';
   };
 
-  const handleTypeSelect = (type: string) => {
-    updateFormData('type', type);
-    setShowTypeModal(false);
-  };
+  const isFormValid = () =>
+    type.trim().length > 0 &&
+    amount.trim().length > 0 &&
+    parseFloat(amount) > 0 &&
+    (type !== 'other' || customType.trim().length > 0);
 
-  const handlePaymentSelect = (method: string) => {
-    updateFormData('paymentMethod', method);
-    setShowPaymentModal(false);
-  };
+  const handleSubmit = async () => {
+    if (!isFormValid()) { Alert.alert('Incomplete', 'Please fill required fields'); return; }
+    setIsSubmitting(true);
 
-  const handleImageCapture = () => {
-    // In a real app, this would open camera/gallery
-    // For now, we'll simulate image capture
-    Alert.alert(
-      'Capture Proof',
-      'This would open camera/gallery in a real app',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Simulate Capture', 
-          onPress: () => {
-            updateFormData('proofImage', 'captured_image.jpg');
-            Alert.alert('Success', 'Image captured successfully!');
-          }
-        }
-      ]
-    );
-  };
+    const desc = type === 'other' ? customType : (expenseTypes.find(t => t.id === type)?.name || type);
+    const amt = parseFloat(amount);
 
-  const removeImage = () => {
-    updateFormData('proofImage', '');
-  };
-
-  const isFormValid = () => {
-    return (
-      formData.type.trim().length > 0 &&
-      formData.amount.trim().length > 0 &&
-      formData.paymentMethod.trim().length > 0 &&
-      (formData.type !== 'other' || formData.customType.trim().length > 0)
-    );
-  };
-
-  const handleSubmit = () => {
-    if (!isFormValid()) {
-      Alert.alert('Incomplete Form', 'Please fill in all required fields');
-      return;
+    let res;
+    if (isCash) {
+      res = await addCashTransaction({ type: 'debit', amount: amt, description: `Expense: ${desc}`, category: type, counterpartyName: '', referenceNumber: '' });
+    } else {
+      res = await addBankTransaction({ bankAccountId: paymentAccount, type: 'debit', amount: amt, description: `Expense: ${desc}`, category: type, paymentMode: 'other', counterpartyName: '', referenceNumber: '' });
     }
 
-    // In a real app, this would save to database
-    console.log('Saving expense:', formData);
-    
-    // Navigate to success screen
-    router.push({
-      pathname: '/expenses/success',
-      params: {
-        expenseData: JSON.stringify(formData)
-      }
-    });
+    if (res.success) {
+      clearBusinessDataCache();
+      safeRouter.replace({ pathname: '/expenses/success', params: { expenseData: JSON.stringify({ type, amount, paymentMethod: isCash ? 'Cash' : getPaymentLabel(), notes }) } } as any);
+      setIsSubmitting(false);
+    } else {
+      setIsSubmitting(false);
+      Alert.alert('Error', res.error || 'Failed to save expense');
+    }
   };
 
-  const getTypeIcon = (typeId: string) => {
-    const type = expenseTypes.find(t => t.id === typeId);
-    return type ? type.icon : MoreHorizontal;
+  const handleImageCapture = async () => {
+    Alert.alert('Add Proof Image', 'Choose an option', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Take Photo',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow camera access.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+          if (!result.canceled && result.assets.length > 0) {
+            setProofImage(result.assets[0].uri);
+          }
+        },
+      },
+      {
+        text: 'Choose from Gallery',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow access to your photo library.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.8,
+          });
+          if (!result.canceled && result.assets.length > 0) {
+            setProofImage(result.assets[0].uri);
+          }
+        },
+      },
+    ]);
   };
 
-  const getTypeName = (typeId: string) => {
-    const type = expenseTypes.find(t => t.id === typeId);
-    return type ? type.name : 'Select Type';
-  };
+  const getTypeName = (id: string) => expenseTypes.find(t => t.id === id)?.name || 'Select Type';
+  const getTypeIcon = (id: string) => expenseTypes.find(t => t.id === id)?.icon || MoreHorizontal;
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Add Expense</Text>
+    <View style={st.container}>
+      <SafeAreaView style={{ flex: 1 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={st.header}>
+          <TouchableOpacity style={st.backBtn} onPress={() => router.back()}><ArrowLeft size={24} color={Colors.text} /></TouchableOpacity>
+          <Text style={st.headerTitle}>Add Expense</Text>
         </View>
 
-        <ScrollView 
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {/* Expense Type */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Expense Type *</Text>
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setShowTypeModal(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.dropdownContent}>
-                {formData.type ? (
-                  <>
-                    {React.createElement(getTypeIcon(formData.type), { 
-                      size: 20, 
-                      color: Colors.textLight 
-                    })}
-                    <Text style={styles.dropdownText}>
-                      {getTypeName(formData.type)}
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <MoreHorizontal size={20} color={Colors.textLight} />
-                    <Text style={[styles.dropdownText, styles.placeholderText]}>
-                      Select expense type
-                    </Text>
-                  </>
-                )}
+          <Text style={st.label}>Expense Type *</Text>
+          <TouchableOpacity style={st.dropdown} onPress={() => setShowTypeModal(true)}>
+            {type ? (
+              <View style={st.dropdownRow}>
+                {React.createElement(getTypeIcon(type), { size: 20, color: Colors.textLight })}
+                <Text style={st.dropdownText}>{getTypeName(type)}</Text>
               </View>
-            </TouchableOpacity>
-          </View>
+            ) : (
+              <Text style={st.placeholder}>Select expense type</Text>
+            )}
+            <ChevronDown size={16} color={Colors.textLight} />
+          </TouchableOpacity>
 
-          {/* Custom Type (if Other is selected) */}
-          {formData.type === 'other' && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Specify Expense Type *</Text>
-              <View style={styles.inputContainer}>
-                <FileText size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  value={formData.customType}
-                  onChangeText={(text) => updateFormData('customType', text)}
-                  placeholder="Enter expense type"
-                  placeholderTextColor={Colors.textLight}
-                  autoCapitalize="words"
-                />
-              </View>
-            </View>
+          {type === 'other' && (
+            <>
+              <Text style={st.label}>Specify Type *</Text>
+              <TextInput style={st.input} value={customType} onChangeText={setCustomType} placeholder="Enter expense type" placeholderTextColor={Colors.textLight} />
+            </>
           )}
 
           {/* Amount */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Amount *</Text>
-            <View style={styles.inputContainer}>
-              <Text style={styles.currencySymbol}>₹</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.amount}
-                onChangeText={(text) => updateFormData('amount', text.replace(/[^0-9.]/g, ''))}
-                placeholder="0.00"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="decimal-pad"
-              />
-            </View>
+          <Text style={st.label}>Amount *</Text>
+          <View style={st.amountRow}>
+            <Text style={st.rupee}>₹</Text>
+            <TextInput style={st.amountInput} value={amount} onChangeText={t => setAmount(t.replace(/[^0-9.]/g, ''))} placeholder="0.00" placeholderTextColor={Colors.textLight} keyboardType="decimal-pad" />
           </View>
 
-          {/* Payment Method */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Payment Method *</Text>
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setShowPaymentModal(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.dropdownContent}>
-                <IndianRupee size={20} color={Colors.textLight} />
-                <Text style={[
-                  styles.dropdownText,
-                  !formData.paymentMethod && styles.placeholderText
-                ]}>
-                  {formData.paymentMethod || 'Select payment method'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+          {/* Payment Account */}
+          <Text style={st.label}>Payment Account *</Text>
+          <TouchableOpacity style={st.dropdown} onPress={() => setShowAccountModal(true)}>
+            <View style={st.dropdownRow}>
+              {isCash ? <Wallet size={20} color={Colors.success} /> : <Building size={20} color={Colors.primary} />}
+              <Text style={st.dropdownText}>{getPaymentLabel()}</Text>
+            </View>
+            <ChevronDown size={16} color={Colors.textLight} />
+          </TouchableOpacity>
 
           {/* Notes */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Notes (Optional)</Text>
-            <View style={styles.textAreaContainer}>
-              <TextInput
-                style={styles.textArea}
-                value={formData.notes}
-                onChangeText={(text) => updateFormData('notes', text)}
-                placeholder="Add any additional notes..."
-                placeholderTextColor={Colors.textLight}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
-            </View>
-          </View>
+          <Text style={st.label}>Notes (Optional)</Text>
+          <TextInput style={[st.input, { minHeight: 80, textAlignVertical: 'top' }]} value={notes} onChangeText={setNotes} placeholder="Additional notes..." placeholderTextColor={Colors.textLight} multiline />
 
-          {/* Proof Image */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Proof Image (Optional)</Text>
-            {formData.proofImage !== '' ? (
-              <View style={styles.imageContainer}>
-                <View style={styles.imagePreview}>
-                  <ImageIcon size={40} color={Colors.primary} />
-                  <Text style={styles.imageText}>Image Captured</Text>
+          {/* Proof Image - hidden for cash */}
+          {!isCash && (
+            <>
+              <Text style={st.label}>Proof Image (Optional)</Text>
+              {proofImage ? (
+                <View style={{ alignItems: 'center', gap: 8 }}>
+                  <View style={st.proofPreview}><ImageIcon size={36} color={Colors.primary} /><Text style={{ color: Colors.textLight, marginTop: 4 }}>Image Captured</Text></View>
+                  <TouchableOpacity onPress={() => setProofImage('')} style={st.removeBtn}><Text style={{ color: '#fff', fontWeight: '600' }}>Remove</Text></TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  style={styles.removeImageButton}
-                  onPress={removeImage}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.removeImageText}>Remove</Text>
+              ) : (
+                <TouchableOpacity style={st.captureBtn} onPress={handleImageCapture}>
+                  <Camera size={22} color={Colors.primary} />
+                  <Text style={{ color: Colors.primary, fontWeight: '600', fontSize: 15 }}>Capture Proof</Text>
                 </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.captureButton}
-                onPress={handleImageCapture}
-                activeOpacity={0.7}
-              >
-                <Camera size={24} color={Colors.primary} />
-                <Text style={styles.captureButtonText}>Capture Proof</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+              )}
+            </>
+          )}
 
-          {/* Submit Button */}
-          <View style={styles.submitSection}>
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                !isFormValid() && styles.submitButtonDisabled
-              ]}
-              onPress={handleSubmit}
-              activeOpacity={0.8}
-              disabled={!isFormValid()}
-            >
-              <CheckCircle size={20} color="#ffffff" />
-              <Text style={styles.submitButtonText}>Save Expense</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Submit */}
+          <TouchableOpacity style={[st.submitBtn, (!isFormValid() || isSubmitting) && { backgroundColor: Colors.grey[300] }]}
+            onPress={handleSubmit} disabled={!isFormValid() || isSubmitting} activeOpacity={0.8}>
+            <CheckCircle size={20} color="#fff" />
+            <Text style={st.submitText}>{isSubmitting ? 'Saving...' : 'Save Expense'}</Text>
+          </TouchableOpacity>
         </ScrollView>
 
-        {/* Expense Type Modal */}
-        {showTypeModal && (
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Expense Type</Text>
-                <TouchableOpacity
-                  onPress={() => setShowTypeModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalCloseButton}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent}>
-                {expenseTypes.map((type) => (
-                  <TouchableOpacity
-                    key={type.id}
-                    style={styles.modalOption}
-                    onPress={() => handleTypeSelect(type.id)}
-                    activeOpacity={0.7}
-                  >
-                    {React.createElement(type.icon, { 
-                      size: 20, 
-                      color: Colors.textLight 
-                    })}
-                    <Text style={styles.modalOptionText}>{type.name}</Text>
+        {/* Type Modal */}
+        <Modal visible={showTypeModal} transparent animationType="fade" onRequestClose={() => setShowTypeModal(false)}>
+          <View style={st.overlay}>
+            <View style={st.modal}>
+              <View style={st.modalHead}><Text style={st.modalTitle}>Select Expense Type</Text><TouchableOpacity onPress={() => setShowTypeModal(false)}><X size={22} color={Colors.textLight} /></TouchableOpacity></View>
+              <ScrollView style={{ maxHeight: 400 }}>
+                {expenseTypes.map(t => (
+                  <TouchableOpacity key={t.id} style={st.modalItem} onPress={() => { setType(t.id); setShowTypeModal(false); }}>
+                    {React.createElement(t.icon, { size: 20, color: Colors.textLight })}
+                    <Text style={st.modalItemText}>{t.name}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             </View>
           </View>
-        )}
+        </Modal>
 
-        {/* Payment Method Modal */}
-        {showPaymentModal && (
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Payment Method</Text>
-                <TouchableOpacity
-                  onPress={() => setShowPaymentModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalCloseButton}>✕</Text>
+        {/* Account Modal */}
+        <Modal visible={showAccountModal} transparent animationType="fade" onRequestClose={() => setShowAccountModal(false)}>
+          <View style={st.overlay}>
+            <View style={st.modal}>
+              <View style={st.modalHead}><Text style={st.modalTitle}>Select Payment Account</Text><TouchableOpacity onPress={() => setShowAccountModal(false)}><X size={22} color={Colors.textLight} /></TouchableOpacity></View>
+              <ScrollView style={{ maxHeight: 400 }}>
+                <TouchableOpacity style={[st.modalItem, isCash && st.modalItemActive]} onPress={() => { setPaymentAccount('cash'); setShowAccountModal(false); }}>
+                  <Wallet size={20} color={Colors.success} />
+                  <Text style={st.modalItemText}>Cash</Text>
                 </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent}>
-                {paymentMethods.map((method) => (
-                  <TouchableOpacity
-                    key={method}
-                    style={styles.modalOption}
-                    onPress={() => handlePaymentSelect(method)}
-                    activeOpacity={0.7}
-                  >
-                    <IndianRupee size={20} color={Colors.textLight} />
-                    <Text style={styles.modalOptionText}>{method}</Text>
-                  </TouchableOpacity>
-                ))}
+                {bankAccounts.map((a: any) => {
+                  const name = a.bank_name || a.bankName || 'Bank';
+                  const num = a.account_number || a.accountNumber || '';
+                  return (
+                    <TouchableOpacity key={a.id} style={[st.modalItem, paymentAccount === a.id && st.modalItemActive]}
+                      onPress={() => { setPaymentAccount(a.id); setShowAccountModal(false); }}>
+                      <Building size={20} color={Colors.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.modalItemText}>{name}</Text>
+                        <Text style={{ fontSize: 12, color: Colors.textLight }}>••••{num.slice(-4)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
           </View>
-        )}
+        </Modal>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  header: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  dropdown: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  dropdownContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dropdownText: {
-    fontSize: 16,
-    color: Colors.text,
-    marginLeft: 12,
-    flex: 1,
-  },
-  placeholderText: {
-    color: Colors.textLight,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  inputIcon: {
-    marginRight: 12,
-  },
-  currencySymbol: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginRight: 8,
-  },
-  input: {
-    fontSize: 16,
-    color: Colors.text,
-    flex: 1,
-  },
-  textAreaContainer: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  textArea: {
-    fontSize: 16,
-    color: Colors.text,
-    minHeight: 100,
-  },
-  captureButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderStyle: 'dashed',
-    paddingVertical: 20,
-    gap: 8,
-  },
-  captureButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  imageContainer: {
-    alignItems: 'center',
-  },
-  imagePreview: {
-    alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    paddingVertical: 20,
-    marginBottom: 12,
-  },
-  imageText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginTop: 8,
-  },
-  removeImageButton: {
-    backgroundColor: Colors.error,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  removeImageText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  submitSection: {
-    marginTop: 32,
-    marginBottom: 20,
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    gap: 8,
-  },
-  submitButtonDisabled: {
-    backgroundColor: Colors.grey[300],
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalContainer: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: '90%',
-    maxHeight: '70%',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  modalCloseButton: {
-    fontSize: 20,
-    color: Colors.textLight,
-    fontWeight: '600',
-  },
-  modalContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[100],
-  },
-  modalOptionText: {
-    fontSize: 16,
-    color: Colors.text,
-    marginLeft: 12,
-  },
-}); 
+const st = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.grey[200] },
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.grey[100], justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: Colors.text },
+  label: { fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 8, marginTop: 18 },
+  input: { borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 12, paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 10, fontSize: 15, color: Colors.text, backgroundColor: Colors.grey[50], ...Platform.select({ web: { outlineStyle: 'none' as any } }) },
+  dropdown: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: Colors.grey[50] },
+  dropdownRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  dropdownText: { fontSize: 15, color: Colors.text },
+  placeholder: { fontSize: 15, color: Colors.textLight },
+  amountRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: Colors.grey[200], borderRadius: 12, paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 14 : 4, backgroundColor: Colors.grey[50] },
+  rupee: { fontSize: 18, fontWeight: '700', color: Colors.text, marginRight: 8 },
+  amountInput: { flex: 1, fontSize: 20, fontWeight: '700', color: Colors.text, ...Platform.select({ web: { outlineStyle: 'none' as any } }) },
+  proofPreview: { alignItems: 'center', backgroundColor: Colors.grey[50], borderRadius: 12, borderWidth: 1, borderColor: Colors.grey[200], paddingVertical: 20, width: '100%' },
+  removeBtn: { backgroundColor: Colors.error, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  captureBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed', borderRadius: 12, paddingVertical: 18, gap: 8 },
+  submitBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 16, gap: 8, marginTop: 32 },
+  submitText: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  modal: { backgroundColor: Colors.background, borderRadius: 16, width: '100%', maxWidth: 400 },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: Colors.grey[200] },
+  modalTitle: { fontSize: 18, fontWeight: '600', color: Colors.text },
+  modalItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.grey[100] },
+  modalItemActive: { backgroundColor: Colors.primary + '10' },
+  modalItemText: { fontSize: 15, color: Colors.text },
+});

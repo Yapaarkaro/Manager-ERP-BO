@@ -1,19 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   TextInput,
-  Image,
-  Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import { getPurchaseInvoices, getPurchaseOrders } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
+import { getPurchaseInvoices, getPurchaseOrders, invalidateApiCache } from '@/services/backendApi';
+import { supabase } from '@/lib/supabase';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ShoppingCart, Plus, FileText, User, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, ChevronDown } from 'lucide-react-native';
+import { ListSkeleton } from '@/components/SkeletonLoader';
 
 const Colors = {
   background: '#FFFFFF',
@@ -46,10 +48,15 @@ interface PurchaseInvoice {
   paymentMethod: 'cash' | 'upi' | 'card' | 'bank_transfer';
   amount: number;
   itemCount: number;
+  itemNames: string[];
   date: string;
   expectedDelivery: string;
   actualDelivery?: string;
   supplierAvatar: string;
+  contactPerson?: string;
+  contactPhone?: string;
+  paidAmount: number;
+  balanceDue: number;
 }
 
 interface PurchaseOrder {
@@ -72,7 +79,73 @@ interface PurchaseOrder {
   customerId?: string;
 }
 
-const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=3f66ac&color=fff&name=S';
+const DEFAULT_AVATAR = '';
+
+const INVOICE_SEARCH_HINTS = [
+  'invoice number',
+  'supplier name',
+  'item name',
+  'date',
+  'GSTIN',
+  'contact person',
+  'phone number',
+];
+
+const ORDER_SEARCH_HINTS = [
+  'PO number',
+  'supplier name',
+  'GSTIN',
+  'order date',
+  'supplier contact',
+];
+
+function useTypewriterPlaceholder(phrases: string[], typingSpeed = 60, pauseMs = 1800, deleteSpeed = 30) {
+  const [text, setText] = useState('');
+  const phraseIdx = useRef(0);
+  const charIdx = useRef(0);
+  const isDeleting = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    phraseIdx.current = 0;
+    charIdx.current = 0;
+    isDeleting.current = false;
+    setText('');
+  }, [phrases]);
+
+  useEffect(() => {
+    const tick = () => {
+      const current = phrases[phraseIdx.current];
+      if (!current) return;
+
+      if (!isDeleting.current) {
+        charIdx.current++;
+        setText(current.slice(0, charIdx.current));
+        if (charIdx.current >= current.length) {
+          isDeleting.current = true;
+          timerRef.current = setTimeout(tick, pauseMs);
+          return;
+        }
+        timerRef.current = setTimeout(tick, typingSpeed);
+      } else {
+        charIdx.current--;
+        setText(current.slice(0, charIdx.current));
+        if (charIdx.current <= 0) {
+          isDeleting.current = false;
+          phraseIdx.current = (phraseIdx.current + 1) % phrases.length;
+          timerRef.current = setTimeout(tick, typingSpeed * 2);
+          return;
+        }
+        timerRef.current = setTimeout(tick, deleteSpeed);
+      }
+    };
+
+    timerRef.current = setTimeout(tick, 400);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [phrases, typingSpeed, pauseMs, deleteSpeed]);
+
+  return text;
+}
 
 function mapDbInvoiceToLocal(db: any): PurchaseInvoice {
   const deliveryStatus = (db.delivery_status || 'pending').toLowerCase();
@@ -100,17 +173,23 @@ function mapDbInvoiceToLocal(db: any): PurchaseInvoice {
     invoiceNumber: db.invoice_number || '',
     supplierName: db.supplier_name || '',
     supplierType: 'business',
+    gstin: db.supplier_gstin || db.gstin || '',
     staffName: db.staff_name || '',
     staffAvatar: DEFAULT_AVATAR,
     status: statusMap[deliveryStatus] ?? 'pending',
     paymentStatus: paymentStatusMap[paymentStatus] ?? 'pending',
     paymentMethod: paymentMethodMap[(db.payment_method || 'cash').toLowerCase()] ?? 'cash',
     amount: Number(db.total_amount) || 0,
-    itemCount: 0,
+    itemCount: Array.isArray(db.items) ? db.items.length : 0,
+    itemNames: Array.isArray(db.items) ? db.items.map((i: any) => i.product_name || i.productName || '').filter(Boolean) : [],
     date: db.invoice_date || db.created_at || new Date().toISOString(),
     expectedDelivery: db.expected_delivery ? String(db.expected_delivery) : '',
     actualDelivery: db.actual_delivery ? String(db.actual_delivery) : undefined,
     supplierAvatar: DEFAULT_AVATAR,
+    contactPerson: db.contact_person || db.supplier_contact_person || '',
+    contactPhone: db.contact_phone || db.supplier_phone || '',
+    paidAmount: Number(db.paid_amount || db.amount_paid) || 0,
+    balanceDue: Math.max(0, (Number(db.total_amount) || 0) - (Number(db.paid_amount || db.amount_paid) || 0)),
   };
 }
 
@@ -123,7 +202,6 @@ function mapDbOrderToLocal(db: any): PurchaseOrder {
     received: 'received',
     cancelled: 'cancelled',
   };
-  const type: PurchaseOrder['type'] = status === 'received' || db.actual_delivery ? 'received' : 'created';
   return {
     id: db.id,
     poNumber: db.po_number || '',
@@ -132,9 +210,9 @@ function mapDbOrderToLocal(db: any): PurchaseOrder {
     staffName: db.staff_name || '',
     staffAvatar: DEFAULT_AVATAR,
     status: statusMap[status] ?? 'draft',
-    type,
+    type: 'created',
     amount: Number(db.total_amount) || 0,
-    itemCount: 0,
+    itemCount: Array.isArray(db.items) ? db.items.length : 0,
     date: db.order_date || db.created_at || new Date().toISOString(),
     expectedDelivery: db.expected_delivery ? String(db.expected_delivery) : '',
     supplierAvatar: DEFAULT_AVATAR,
@@ -144,31 +222,122 @@ function mapDbOrderToLocal(db: any): PurchaseOrder {
 
 export default function PurchasesScreen() {
   const { handleBack } = useWebBackNavigation();
+  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'invoices' | 'orders'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchHints = activeTab === 'invoices' ? INVOICE_SEARCH_HINTS : ORDER_SEARCH_HINTS;
+  const typewriterText = useTypewriterPlaceholder(searchHints);
   const [poFilter, setPoFilter] = useState<'all' | 'created' | 'received'>('all');
   const [purchaseInvoices, setPurchaseInvoices] = useState<PurchaseInvoice[]>([]);
+  const [rawInvoices, setRawInvoices] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [rawOrders, setRawOrders] = useState<any[]>([]);
+  const receivedPORawRef = useRef<Record<string, any>>({});
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const [invoicesResult, ordersResult] = await Promise.all([
+        getPurchaseInvoices(),
+        getPurchaseOrders(),
+      ]);
+      if (invoicesResult.success && invoicesResult.invoices) {
+        setRawInvoices(invoicesResult.invoices);
+        setPurchaseInvoices(invoicesResult.invoices.map(mapDbInvoiceToLocal));
+      }
+
+      const createdOrders = (ordersResult.success && ordersResult.orders)
+        ? ordersResult.orders.map(mapDbOrderToLocal)
+        : [];
+
+      // Fetch POs received from other businesses (where I am the supplier)
+      let receivedOrders: PurchaseOrder[] = [];
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: mySupplierRecords } = await supabase
+            .from('suppliers')
+            .select('id')
+            .eq('linked_user_id', session.user.id);
+
+          if (mySupplierRecords && mySupplierRecords.length > 0) {
+            const supplierIds = mySupplierRecords.map(s => s.id);
+            const { data: incomingPOs } = await supabase
+              .from('purchase_orders')
+              .select('*, purchase_order_items(*)')
+              .in('supplier_id', supplierIds)
+              .eq('is_deleted', false)
+              .order('created_at', { ascending: false });
+
+            if (incomingPOs) {
+              const createdIds = new Set(createdOrders.map(o => o.id));
+              const rawMap: Record<string, any> = {};
+              receivedOrders = incomingPOs
+                .filter(po => !createdIds.has(po.id))
+                .map(po => {
+                  rawMap[po.id] = po;
+                  return {
+                    id: po.id,
+                    poNumber: po.po_number || '',
+                    supplierName: po.supplier_name || '',
+                    supplierType: 'business' as const,
+                    staffName: po.staff_name || '',
+                    staffAvatar: DEFAULT_AVATAR,
+                    status: (po.status || 'sent') as PurchaseOrder['status'],
+                    type: 'received' as const,
+                    amount: Number(po.total_amount) || 0,
+                    itemCount: Array.isArray(po.purchase_order_items) ? po.purchase_order_items.length : 0,
+                    date: po.order_date || po.created_at || new Date().toISOString(),
+                    expectedDelivery: po.expected_delivery ? String(po.expected_delivery) : '',
+                    supplierAvatar: DEFAULT_AVATAR,
+                    supplierId: po.supplier_id,
+                  };
+                });
+
+              // Resolve sender business names for received POs
+              const bizIds = [...new Set(incomingPOs.map(po => po.business_id).filter(Boolean))];
+              if (bizIds.length > 0) {
+                const { data: businesses } = await supabase
+                  .from('businesses')
+                  .select('id, legal_name, owner_name')
+                  .in('id', bizIds);
+                if (businesses) {
+                  const bizMap = new Map(businesses.map(b => [b.id, b.legal_name || b.owner_name || 'Unknown Business']));
+                  receivedOrders = receivedOrders.map((ro, idx) => {
+                    const originalPo = incomingPOs.find(p => p.id === ro.id);
+                    const fromBiz = originalPo ? bizMap.get(originalPo.business_id) : undefined;
+                    return { ...ro, supplierName: fromBiz || ro.supplierName };
+                  });
+                }
+              }
+              receivedPORawRef.current = rawMap;
+            }
+          }
+        }
+      } catch {}
+
+      const allRawOrders = ordersResult.success && ordersResult.orders ? ordersResult.orders : [];
+      setRawOrders(allRawOrders);
+      setPurchaseOrders([...createdOrders, ...receivedOrders]);
+    } catch (error) {
+      console.error('Error loading purchases:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [invoicesResult, ordersResult] = await Promise.all([
-          getPurchaseInvoices(),
-          getPurchaseOrders(),
-        ]);
-        if (invoicesResult.success && invoicesResult.invoices) {
-          setPurchaseInvoices(invoicesResult.invoices.map(mapDbInvoiceToLocal));
-        }
-        if (ordersResult.success && ordersResult.orders) {
-          setPurchaseOrders(ordersResult.orders.map(mapDbOrderToLocal));
-        }
-      } catch (error) {
-        console.error('Error loading purchases:', error);
-      }
-    };
     loadData();
-  }, []);
+  }, [loadData]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadData().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [loadData]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
@@ -183,15 +352,28 @@ export default function PurchasesScreen() {
     setPoFilter(filter);
   };
 
-  const filteredInvoices = purchaseInvoices.filter(invoice =>
-    invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    invoice.supplierName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    invoice.poNumber.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredInvoices = purchaseInvoices.filter(invoice => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const dateStr = (() => { try { return new Date(invoice.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).toLowerCase(); } catch { return ''; } })();
+    return (
+      invoice.invoiceNumber.toLowerCase().includes(q) ||
+      invoice.supplierName.toLowerCase().includes(q) ||
+      invoice.poNumber.toLowerCase().includes(q) ||
+      (invoice.gstin || '').toLowerCase().includes(q) ||
+      (invoice.contactPerson || '').toLowerCase().includes(q) ||
+      (invoice.contactPhone || '').includes(q) ||
+      dateStr.includes(q) ||
+      invoice.itemNames.some(name => name.toLowerCase().includes(q))
+    );
+  });
 
   const filteredOrders = purchaseOrders.filter(order => {
-    const matchesSearch = order.poNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.supplierName.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !searchQuery.trim() ||
+      order.poNumber.toLowerCase().includes(q) ||
+      order.supplierName.toLowerCase().includes(q) ||
+      (order.gstin || '').toLowerCase().includes(q);
     
     if (poFilter === 'all') return matchesSearch;
     return matchesSearch && order.type === poFilter;
@@ -291,18 +473,35 @@ export default function PurchasesScreen() {
   };
 
   const handleInvoicePress = (invoice: PurchaseInvoice) => {
-    router.push({
+    const raw = rawInvoices.find(r => r.id === invoice.id);
+    safeRouter.push({
       pathname: '/purchasing/invoice-details',
-      params: { invoiceId: invoice.id }
+      params: { invoiceId: invoice.id, invoiceData: raw ? JSON.stringify(raw) : undefined }
     });
   };
 
   const handleOrderPress = (order: PurchaseOrder) => {
-    router.push({
+    let dataToPass: any;
+    if (order.type === 'received') {
+      const rawReceived = receivedPORawRef.current[order.id];
+      const items = rawReceived?.purchase_order_items?.map((it: any) => ({
+        id: it.id,
+        name: it.product_name || it.name || '',
+        description: it.description || '',
+        quantity: it.quantity || 0,
+        price: it.unit_price || it.price || 0,
+        total: it.total_price || ((it.quantity || 0) * (it.unit_price || it.price || 0)),
+      })) || [];
+      dataToPass = { ...order, items };
+    } else {
+      const raw = rawOrders.find(r => r.id === order.id);
+      dataToPass = raw ? { ...order, items: raw.items } : order;
+    }
+    safeRouter.push({
       pathname: '/purchasing/po-details',
-      params: { 
+      params: {
         poId: order.id,
-        poData: JSON.stringify(order)
+        poData: JSON.stringify(dataToPass)
       }
     });
   };
@@ -310,20 +509,19 @@ export default function PurchasesScreen() {
   const handleCreatePO = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('create purchase order')) return;
-    router.push('/purchasing/create-po');
+    safeRouter.push('/purchasing/select-supplier');
   };
 
   const handleAddPurchaseInvoice = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('add purchase invoice')) return;
-    router.push({
+    safeRouter.push({
       pathname: '/purchasing/add-purchase-invoice' as any
     });
   };
 
   const renderInvoiceCard = (invoice: PurchaseInvoice) => (
     <TouchableOpacity
-      key={invoice.id}
       style={styles.card}
       onPress={() => handleInvoicePress(invoice)}
       activeOpacity={0.7}
@@ -331,40 +529,56 @@ export default function PurchasesScreen() {
       <View style={styles.cardHeader}>
         <View style={styles.cardHeaderLeft}>
           <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
-          <Text style={styles.poNumber}>PO: {invoice.poNumber}</Text>
+          {invoice.poNumber ? <Text style={styles.poNumber}>PO: {invoice.poNumber}</Text> : null}
+          <Text style={styles.cardDate}>{formatDate(invoice.date)}</Text>
         </View>
-        <View style={styles.statusContainer}>
-          {getStatusIcon(invoice.status)}
-          <Text style={[styles.statusText, { color: getStatusColor(invoice.status) }]}>
-            {getStatusText(invoice.status)}
-          </Text>
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <View style={styles.statusContainer}>
+            {getStatusIcon(invoice.status)}
+            <Text style={[styles.statusText, { color: getStatusColor(invoice.status) }]}>
+              {getStatusText(invoice.status)}
+            </Text>
+          </View>
+          <Text style={styles.cardAmount}>{formatAmount(invoice.amount)}</Text>
         </View>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.supplierInfo}>
-          <Image source={{ uri: invoice.supplierAvatar }} style={styles.avatar} />
+          <View style={styles.supplierIconBg}>
+            <Building2 size={18} color={Colors.primary} />
+          </View>
           <View style={styles.supplierDetails}>
-            <Text style={styles.supplierName}>{invoice.supplierName}</Text>
+            <Text style={styles.supplierName}>{invoice.supplierName || ''}</Text>
             {invoice.gstin && (
               <Text style={styles.gstin}>GSTIN: {invoice.gstin}</Text>
             )}
           </View>
         </View>
 
+        {invoice.itemNames.length > 0 && (
+          <Text style={styles.itemNamesList} numberOfLines={1}>
+            {invoice.itemCount === 1
+              ? invoice.itemNames[0]
+              : `${invoice.itemCount} items`}
+          </Text>
+        )}
+
         <View style={styles.cardFooter}>
           <View style={styles.footerLeft}>
-            <Text style={styles.amount}>{formatAmount(invoice.amount)}</Text>
-            <Text style={styles.itemCount}>{invoice.itemCount} items</Text>
+            <Text style={styles.itemCount}>{invoice.itemCount} item{invoice.itemCount !== 1 ? 's' : ''}</Text>
           </View>
           <View style={styles.footerRight}>
             <View style={styles.paymentInfo}>
               {getPaymentMethodIcon(invoice.paymentMethod)}
               <Text style={[styles.paymentStatus, { color: getStatusColor(invoice.paymentStatus) }]}>
-                {getStatusText(invoice.paymentStatus)}
+                {invoice.paymentStatus === 'paid'
+                  ? 'Paid'
+                  : invoice.balanceDue > 0
+                    ? `Due: ${formatAmount(invoice.balanceDue)}`
+                    : `Pending: ${formatAmount(invoice.amount)}`}
               </Text>
             </View>
-            <Text style={styles.date}>{formatDate(invoice.date)}</Text>
           </View>
         </View>
       </View>
@@ -373,7 +587,6 @@ export default function PurchasesScreen() {
 
   const renderOrderCard = (order: PurchaseOrder) => (
     <TouchableOpacity
-      key={order.id}
       style={styles.card}
       onPress={() => handleOrderPress(order)}
       activeOpacity={0.7}
@@ -386,20 +599,28 @@ export default function PurchasesScreen() {
               {order.type === 'created' ? 'Created' : 'Received'}
             </Text>
           </View>
+          <Text style={styles.cardDate}>{formatDate(order.date)}</Text>
         </View>
-        <View style={styles.statusContainer}>
-          {getStatusIcon(order.status)}
-          <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-            {getStatusText(order.status)}
-          </Text>
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <View style={styles.statusContainer}>
+            {getStatusIcon(order.status)}
+            <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
+              {getStatusText(order.status)}
+            </Text>
+          </View>
+          <Text style={styles.cardAmount}>{formatAmount(order.amount)}</Text>
         </View>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.supplierInfo}>
-          <Image source={{ uri: order.supplierAvatar }} style={styles.avatar} />
+          <View style={[styles.supplierIconBg, order.type === 'received' && { backgroundColor: '#ecfdf5' }]}>
+            <Building2 size={18} color={order.type === 'received' ? Colors.success : Colors.primary} />
+          </View>
           <View style={styles.supplierDetails}>
-            <Text style={styles.supplierName}>{order.supplierName}</Text>
+            <Text style={styles.supplierName}>
+              {order.type === 'received' ? `From: ${order.supplierName || 'Unknown'}` : (order.supplierName || '')}
+            </Text>
             {order.gstin && (
               <Text style={styles.gstin}>GSTIN: {order.gstin}</Text>
             )}
@@ -408,12 +629,10 @@ export default function PurchasesScreen() {
 
         <View style={styles.cardFooter}>
           <View style={styles.footerLeft}>
-            <Text style={styles.amount}>{formatAmount(order.amount)}</Text>
-            <Text style={styles.itemCount}>{order.itemCount} items</Text>
+            <Text style={styles.itemCount}>{order.itemCount} item{order.itemCount !== 1 ? 's' : ''}</Text>
           </View>
           <View style={styles.footerRight}>
-            <Text style={styles.date}>{formatDate(order.date)}</Text>
-            <Text style={styles.expectedDelivery}>Expected: {formatDate(order.expectedDelivery)}</Text>
+            {order.expectedDelivery ? <Text style={styles.expectedDelivery}>Expected: {formatDate(order.expectedDelivery)}</Text> : null}
           </View>
         </View>
       </View>
@@ -436,17 +655,30 @@ export default function PurchasesScreen() {
           <Text style={styles.headerTitle}>Purchases</Text>
         </View>
 
+        {isLoading ? (
+          <ListSkeleton itemCount={6} showSearch={true} showFilter={false} />
+        ) : (
+          <>
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={styles.searchBar}>
             <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder={`Search ${activeTab === 'invoices' ? 'invoices' : 'orders'}...`}
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
+            <View style={styles.searchInputWrap}>
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={handleSearch}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+              />
+              {!searchQuery && !searchFocused && (
+                <View style={styles.typewriterWrap} pointerEvents="none">
+                  <Text style={styles.typewriterStatic}>Search by </Text>
+                  <Text style={styles.typewriterText}>{typewriterText}</Text>
+                  <Text style={styles.typewriterCursor}>|</Text>
+                </View>
+              )}
+            </View>
             <TouchableOpacity
               style={styles.filterButton}
               onPress={() => console.log('Filter purchases')}
@@ -516,15 +748,20 @@ export default function PurchasesScreen() {
 
         {/* Content */}
         <View style={styles.content}>
-          <ScrollView 
+          <FlatList
+            data={activeTab === 'invoices' ? filteredInvoices : filteredOrders}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) =>
+              activeTab === 'invoices'
+                ? renderInvoiceCard(item as PurchaseInvoice)
+                : renderOrderCard(item as PurchaseOrder)
+            }
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
-          >
-            {activeTab === 'invoices' ? (
-              filteredInvoices.length > 0 ? (
-                filteredInvoices.map(renderInvoiceCard)
-              ) : (
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            ListEmptyComponent={
+              activeTab === 'invoices' ? (
                 <View style={styles.emptyState}>
                   <FileText size={48} color={Colors.textLight} />
                   <Text style={styles.emptyStateTitle}>No Purchase Invoices</Text>
@@ -532,10 +769,6 @@ export default function PurchasesScreen() {
                     {searchQuery ? 'No invoices found matching your search.' : 'You haven\'t received any purchase invoices yet.'}
                   </Text>
                 </View>
-              )
-            ) : (
-              filteredOrders.length > 0 ? (
-                filteredOrders.map(renderOrderCard)
               ) : (
                 <View style={styles.emptyState}>
                   <ShoppingCart size={48} color={Colors.textLight} />
@@ -545,8 +778,8 @@ export default function PurchasesScreen() {
                   </Text>
                 </View>
               )
-            )}
-          </ScrollView>
+            }
+          />
 
           {/* FAB for both tabs */}
           <TouchableOpacity
@@ -560,6 +793,8 @@ export default function PurchasesScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+          </>
+        )}
       </SafeAreaView>
     </View>
   );
@@ -704,6 +939,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textLight,
   },
+  cardDate: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  cardAmount: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.text,
+  },
   typeBadge: {
     backgroundColor: Colors.grey[100],
     paddingHorizontal: 8,
@@ -733,10 +978,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  supplierIconBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary + '10',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   supplierDetails: {
     flex: 1,
@@ -767,6 +1015,12 @@ const styles = StyleSheet.create({
   itemCount: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  itemNamesList: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginBottom: 8,
+    marginTop: -4,
   },
   footerRight: {
     alignItems: 'flex-end',
@@ -806,12 +1060,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
-  searchInput: {
+  searchInputWrap: {
     flex: 1,
-    fontSize: 16,
-    color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
+    justifyContent: 'center',
+  },
+  searchInput: {
+    fontSize: 16,
+    color: Colors.text,
+  },
+  typewriterWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  typewriterStatic: {
+    fontSize: 16,
+    color: Colors.textLight,
+  },
+  typewriterText: {
+    fontSize: 16,
+    color: Colors.text,
+    fontWeight: '500',
+  },
+  typewriterCursor: {
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '300',
+    marginLeft: 1,
   },
   filterButton: {
     width: 32,

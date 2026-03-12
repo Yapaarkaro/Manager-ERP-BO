@@ -10,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, User, Phone, Mail, MapPin, Calendar, Clock, IndianRupee, FileText, CreditCard, TriangleAlert as AlertTriangle, TrendingUp, TrendingDown, Eye, Download, Share } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -41,7 +43,7 @@ interface TransactionLog {
   balanceAfter: number;
 }
 
-const mockTransactionLogs: TransactionLog[] = [];
+const transactionLogs: TransactionLog[] = [];
 
 export default function CustomerDetailsScreen() {
   const { customerId, customerData } = useLocalSearchParams();
@@ -98,15 +100,15 @@ export default function CustomerDetailsScreen() {
   const handleTransactionPress = (transaction: TransactionLog) => {
     if (transaction.invoiceNumber) {
       const invoiceData = {
-        id: transaction.invoiceNumber.replace('INV-', ''),
+        id: transaction.id || transaction.invoiceNumber,
         invoiceNumber: transaction.invoiceNumber,
         customerName: customer.customerName,
         customerType: customer.customerType,
-        staffName: 'Current User',
-        staffAvatar: customer.customerAvatar,
+        staffName: transaction.staffName || '',
+        staffAvatar: '',
         paymentStatus: transaction.status,
         amount: transaction.amount,
-        itemCount: 2,
+        itemCount: transaction.itemCount || 0,
         date: transaction.date,
         customerDetails: {
           name: customer.customerName,
@@ -118,7 +120,7 @@ export default function CustomerDetailsScreen() {
         }
       };
 
-      router.push({
+      safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
@@ -129,7 +131,7 @@ export default function CustomerDetailsScreen() {
   };
 
   const handleReceivePayment = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/receivables/receive-payment',
       params: {
         customerId: customer.id,
@@ -243,10 +245,18 @@ export default function CustomerDetailsScreen() {
 
       {/* Customer Header */}
       <View style={styles.customerHeader}>
-        <Image 
-          source={{ uri: customer.customerAvatar }}
-          style={styles.customerHeaderAvatar}
-        />
+        {customer.customerAvatar ? (
+          <Image 
+            source={{ uri: customer.customerAvatar }}
+            style={styles.customerHeaderAvatar}
+          />
+        ) : (
+          <View style={[styles.customerHeaderAvatar, { backgroundColor: getAvatarColor(customer.customerType === 'business' ? customer.businessName : customer.customerName), justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#FFFFFF' }}>
+              {getInitials(customer.customerType === 'business' ? customer.businessName || customer.customerName : customer.customerName)}
+            </Text>
+          </View>
+        )}
         <View style={styles.customerHeaderInfo}>
           <Text style={styles.customerHeaderName}>
             {customer.customerType === 'business' ? customer.businessName : customer.customerName}
@@ -445,21 +455,15 @@ export default function CustomerDetailsScreen() {
               <Text style={styles.sectionTitle}>Aging Analysis</Text>
               <View style={styles.agingCard}>
                 <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>Current (0-30 days):</Text>
+                  <Text style={styles.agingLabel}>Current:</Text>
                   <Text style={[styles.agingValue, { color: Colors.success }]}>
                     {formatAmount(customer.totalReceivable - customer.overdueAmount)}
                   </Text>
                 </View>
                 <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>31-60 days:</Text>
-                  <Text style={[styles.agingValue, { color: Colors.warning }]}>
-                    {formatAmount(customer.overdueAmount * 0.6)}
-                  </Text>
-                </View>
-                <View style={styles.agingRow}>
-                  <Text style={styles.agingLabel}>60+ days:</Text>
+                  <Text style={styles.agingLabel}>Overdue:</Text>
                   <Text style={[styles.agingValue, { color: Colors.error }]}>
-                    {formatAmount(customer.overdueAmount * 0.4)}
+                    {formatAmount(customer.overdueAmount)}
                   </Text>
                 </View>
               </View>
@@ -475,7 +479,7 @@ export default function CustomerDetailsScreen() {
             </View>
 
             <View style={styles.transactionLogs}>
-              {mockTransactionLogs.map(renderTransactionLog)}
+              {transactionLogs.map(renderTransactionLog)}
             </View>
           </View>
         )}

@@ -1,14 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { dataStore } from '@/utils/dataStore';
+import { invalidateApiCache, getCustomers, getInvoiceWithItems } from '@/services/backendApi';
+import { formatQty } from '@/utils/formatters';
+import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { 
@@ -24,10 +28,16 @@ import {
   MapPin,
   CreditCard,
   Package,
-  IndianRupee
+  IndianRupee,
+  User,
+  Eye,
+  ExternalLink,
 } from 'lucide-react-native';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
+import { safeRouter } from '@/utils/safeRouter';
+import { DetailSkeleton } from '@/components/SkeletonLoader';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
+import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -58,172 +68,201 @@ interface InvoiceItem {
 
 export default function InvoiceDetailsScreen() {
   const { invoiceId, invoiceData } = useLocalSearchParams();
+  const { data: businessData } = useBusinessData();
   const [invoice, setInvoice] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
   const [isBusinessCustomer, setIsBusinessCustomer] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  console.log('InvoiceDetailsScreen rendered with invoiceId:', invoiceId);
-  console.log('Type of invoiceId:', typeof invoiceId);
-  console.log('Invoice data from params:', invoiceData);
+  const [isItemsLoading, setIsItemsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const resolvedInvoiceId = Array.isArray(invoiceId) ? invoiceId[0] : invoiceId;
 
   useEffect(() => {
+    if (!resolvedInvoiceId) return;
     loadInvoiceData();
-  }, [invoiceId]);
+  }, [resolvedInvoiceId]);
 
-  const loadInvoiceData = () => {
+  const mapRawItems = (rawItems: any[]): InvoiceItem[] => {
+    return rawItems.map((item: any, idx: number) => {
+      const qty = Number(item.quantity) || 1;
+      const unitPrice = parseFloat(item.unit_price || item.unitPrice) || 0;
+      const totalPrice = parseFloat(item.total_price || item.totalPrice) || 0;
+      const taxAmt = parseFloat(item.tax_amount || item.taxAmount) || 0;
+      const cessAmt = parseFloat(item.cess_amount || item.cessAmount) || 0;
+      const preTaxAmount = totalPrice - taxAmt - cessAmt;
+      return {
+        id: item.id || `item-${idx}`,
+        name: item.product_name || item.productName || item.name || '',
+        quantity: qty,
+        rate: unitPrice,
+        amount: preTaxAmount > 0 ? preTaxAmount : unitPrice * qty,
+        taxRate: parseFloat(item.tax_rate || item.taxRate) || 0,
+        taxAmount: taxAmt,
+        total: totalPrice > 0 ? totalPrice : unitPrice * qty + taxAmt + cessAmt,
+      };
+    });
+  };
+
+  const buildInvoiceFromRow = (inv: any, mappedItems: InvoiceItem[]) => {
+    const backendSubtotal = parseFloat(inv.subtotal) || 0;
+    const backendTotalAmount = parseFloat(inv.total_amount) || 0;
+    const backendTaxAmount = parseFloat(inv.tax_amount) || 0;
+    const backendCessAmount = parseFloat(inv.cess_amount) || 0;
+    const itemsSubtotal = mappedItems.reduce((sum: number, item: any) => sum + item.amount, 0);
+    const itemsTax = mappedItems.reduce((sum: number, item: any) => sum + (item.taxAmount || 0), 0);
+    const itemsCess = mappedItems.reduce((sum: number, item: any) => sum + ((item as any).cessAmount || 0), 0);
+
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoice_number,
+      invoiceDate: inv.invoice_date || inv.created_at,
+      customerId: inv.customer_id,
+      customerName: inv.customer_name,
+      customerType: inv.customer_type,
+      totalAmount: backendTotalAmount,
+      amount: backendTotalAmount,
+      subtotal: backendSubtotal > 0 ? backendSubtotal : itemsSubtotal,
+      taxAmount: backendTaxAmount > 0 ? backendTaxAmount : itemsTax,
+      cessAmount: backendCessAmount > 0 ? backendCessAmount : itemsCess,
+      roundOffAmount: parseFloat(inv.round_off_amount) || 0,
+      status: inv.payment_status,
+      paymentMethod: inv.payment_method,
+      paymentStatus: inv.payment_status,
+      paidAmount: parseFloat(inv.paid_amount) || 0,
+      balanceDue: parseFloat(inv.balance_amount) || 0,
+      staffName: inv.staff_name,
+      invoiceExtras: inv.invoice_extras,
+      items: mappedItems,
+    };
+  };
+
+  const loadInvoiceData = async () => {
+    setIsLoading(true);
+    setIsItemsLoading(true);
+
+    const idToFetch = resolvedInvoiceId as string;
+    let finalInv: any = null;
+    let finalItems: any[] = [];
+
+    // Step 1: Try edge function first
     try {
-      setIsLoading(true);
-      
-      console.log('Loading invoice data for ID:', invoiceId);
-      console.log('Invoice data from params:', invoiceData);
-      
-      // First try to use the passed invoiceData parameter
-      if (invoiceData) {
-        try {
-          const parsedInvoiceData = JSON.parse(invoiceData as string);
-          console.log('Parsed invoice data:', parsedInvoiceData);
-          
-          // Set the invoice from the passed data
-          setInvoice(parsedInvoiceData);
-          
-          // Create customer object from the invoice data
-          const customerFromInvoice = {
-            id: parsedInvoiceData.id || 'unknown',
-            name: parsedInvoiceData.customerName || 'Unknown Customer',
-            customerType: parsedInvoiceData.customerType || 'business',
-            contactPerson: parsedInvoiceData.customerDetails?.name || 'N/A',
-            mobile: parsedInvoiceData.customerDetails?.mobile || 'N/A',
-            email: 'N/A',
-            address: parsedInvoiceData.customerDetails?.address || 'N/A',
-            avatar: '👤',
-            customerScore: 0,
-            onTimePayment: 0,
-            satisfactionRating: 0,
-            responseTime: 0,
-            totalOrders: 0,
-            completedOrders: 0,
-            pendingOrders: 0,
-            cancelledOrders: 0,
-            returnedOrders: 0,
-            totalValue: 0,
-            averageOrderValue: 0,
-            returnRate: 0,
-            lastOrderDate: null,
-            joinedDate: new Date().toISOString(),
-            status: 'active',
-            createdAt: new Date().toISOString()
-          };
-          
-          setCustomer(customerFromInvoice);
-          setIsBusinessCustomer(customerFromInvoice.customerType === 'business');
-          console.log('Invoice and customer set from passed data');
-          
-        } catch (parseError) {
-          console.error('Error parsing invoice data:', parseError);
-          // Fall back to dataStore loading
-          loadFromDataStore();
+      const result = await getInvoiceWithItems(idToFetch);
+      if (result.success && result.invoice) {
+        finalInv = result.invoice;
+        const ri = result.items;
+        if (ri && ri.length > 0) {
+          finalItems = ri;
+        } else if (finalInv.items && finalInv.items.length > 0) {
+          finalItems = finalInv.items;
+        } else if (finalInv.invoice_items && finalInv.invoice_items.length > 0) {
+          finalItems = finalInv.invoice_items;
         }
-      } else {
-        // Fall back to dataStore loading
-        loadFromDataStore();
       }
-    } catch (error) {
-      console.error('Error loading invoice data:', error);
-    } finally {
-      setIsLoading(false);
+    } catch (e) {
+      console.warn('Edge function fetch failed:', e);
     }
-  };
-  
-  const loadFromDataStore = () => {
-    console.log('Loading from dataStore...');
-    
-    // Get invoice from dataStore
-    const allInvoices = dataStore.getInvoices();
-    console.log('All invoices from dataStore:', allInvoices.length);
-    console.log('Invoice IDs:', allInvoices.map(inv => inv.id));
-    
-    const foundInvoice = allInvoices.find(inv => inv.id === invoiceId);
-    console.log('Found invoice in dataStore:', foundInvoice);
-    
-    if (foundInvoice) {
-      setInvoice(foundInvoice);
-      console.log('Invoice set from dataStore:', foundInvoice);
-      
-      // Get customer details
-      if (foundInvoice.customerId) {
-        console.log('Looking for customer with ID:', foundInvoice.customerId);
-        const customerData = dataStore.getCustomerById(foundInvoice.customerId);
-        console.log('Found customer:', customerData);
-        
-        if (customerData) {
-          setCustomer(customerData);
-          setIsBusinessCustomer(customerData.customerType === 'business');
-          console.log('Customer set successfully');
-        } else {
-          console.log('Customer not found for ID:', foundInvoice.customerId);
-          // Set a fallback customer object
-          setCustomer({
-            id: foundInvoice.customerId,
-            name: foundInvoice.customerName || 'Unknown Customer',
-            customerType: foundInvoice.customerType || 'business',
-            contactPerson: 'N/A',
-            mobile: 'N/A',
-            email: 'N/A',
-            address: 'N/A',
-            avatar: '👤',
-            customerScore: 0,
-            onTimePayment: 0,
-            satisfactionRating: 0,
-            responseTime: 0,
-            totalOrders: 0,
-            completedOrders: 0,
-            pendingOrders: 0,
-            cancelledOrders: 0,
-            returnedOrders: 0,
-            totalValue: 0,
-            averageOrderValue: 0,
-            returnRate: 0,
-            lastOrderDate: null,
-            joinedDate: new Date().toISOString(),
-            status: 'active',
-            createdAt: new Date().toISOString()
-          });
+
+    // Step 2: If edge function gave no items (or failed), query Supabase directly
+    if (finalItems.length === 0) {
+      try {
+        const { data: directItems } = await supabase
+          .from('invoice_items')
+          .select('*')
+          .eq('invoice_id', idToFetch)
+          .eq('is_deleted', false);
+        if (directItems && directItems.length > 0) {
+          finalItems = directItems;
         }
-      } else {
-        console.log('No customerId in invoice');
-        // Set a fallback customer object
+      } catch (e) {
+        console.warn('Direct invoice_items query failed:', e);
+      }
+    }
+
+    // Step 3: If edge function failed entirely, get invoice row directly
+    if (!finalInv) {
+      try {
+        const { data: directInv } = await supabase
+          .from('invoices')
+          .select('*')
+          .eq('id', idToFetch)
+          .maybeSingle();
+        if (directInv) finalInv = directInv;
+      } catch (e) {
+        console.warn('Direct invoice query failed:', e);
+      }
+    }
+
+    // Step 4: Build and set the invoice state
+    if (finalInv) {
+      const mappedItems = mapRawItems(finalItems);
+      setInvoice(buildInvoiceFromRow(finalInv, mappedItems));
+
+      // Set customer from invoice data as baseline
+      if (finalInv.customer_name) {
         setCustomer({
-          id: 'unknown',
-          name: foundInvoice.customerName || 'Unknown Customer',
-          customerType: foundInvoice.customerType || 'business',
-          contactPerson: 'N/A',
-          mobile: 'N/A',
-          email: 'N/A',
-          address: 'N/A',
-          avatar: '👤',
-          customerScore: 0,
-          onTimePayment: 0,
-          satisfactionRating: 0,
-          responseTime: 0,
-          totalOrders: 0,
-          completedOrders: 0,
-          pendingOrders: 0,
-          cancelledOrders: 0,
-          returnedOrders: 0,
-          totalValue: 0,
-          averageOrderValue: 0,
-          returnRate: 0,
-          lastOrderDate: null,
-          joinedDate: new Date().toISOString(),
-          status: 'active',
-          createdAt: new Date().toISOString()
+          id: finalInv.customer_id || 'unknown',
+          name: finalInv.customer_name || '',
+          customerType: finalInv.customer_type || 'individual',
+          mobile: '',
+          address: '',
+          gstin: '',
+          businessName: '',
         });
+        setIsBusinessCustomer((finalInv.customer_type || 'individual') === 'business');
       }
-    } else {
-      console.log('Invoice not found in dataStore for ID:', invoiceId);
+      // Try to enrich with full customer data
+      if (finalInv.customer_id) {
+        try {
+          const custResult = await getCustomers();
+          if (custResult.success && custResult.customers) {
+            const fc = custResult.customers.find((c: any) => c.id === finalInv.customer_id);
+            if (fc) {
+              setCustomer({
+                id: finalInv.customer_id,
+                name: finalInv.customer_name || fc.name || '',
+                customerType: finalInv.customer_type || 'individual',
+                mobile: fc.mobile || fc.phone || '',
+                address: fc.address || fc.billing_address || '',
+                gstin: fc.gstin || fc.tax_id || '',
+                businessName: fc.business_name || '',
+              });
+              setIsBusinessCustomer((finalInv.customer_type || 'individual') === 'business');
+            }
+          }
+        } catch (e) {
+          console.warn('Could not fetch customer details:', e);
+        }
+      }
+    } else if (invoiceData) {
+      // Last resort: use navigation params for display
+      try {
+        const parsed = JSON.parse(invoiceData as string);
+        parsed.totalAmount = Number(parsed.totalAmount) || Number(parsed.amount) || 0;
+        setInvoice(parsed);
+        setCustomer({
+          id: parsed.customerId || parsed.id || 'unknown',
+          name: parsed.customerName || '',
+          customerType: parsed.customerType || 'individual',
+          mobile: parsed.customerDetails?.mobile || '',
+          address: parsed.customerDetails?.address || '',
+          businessName: parsed.customerDetails?.businessName || '',
+          gstin: parsed.customerDetails?.gstin || '',
+        });
+        setIsBusinessCustomer((parsed.customerType || 'individual') === 'business');
+      } catch { /* ignore */ }
     }
+
+    setIsLoading(false);
+    setIsItemsLoading(false);
   };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    invalidateApiCache();
+    await loadInvoiceData();
+    setRefreshing(false);
+  }, [resolvedInvoiceId]);
 
   // Show loading state
   if (isLoading) {
@@ -242,7 +281,7 @@ export default function InvoiceDetailsScreen() {
           </View>
         </SafeAreaView>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading invoice details...</Text>
+          <DetailSkeleton />
         </View>
       </View>
     );
@@ -278,23 +317,21 @@ export default function InvoiceDetailsScreen() {
     );
   }
 
-  // Get invoice items from the invoice data
-  const invoiceItems: InvoiceItem[] = invoice.items || [
-    {
-      id: `fallback-item-${Date.now()}`,
-      name: '',
-      quantity: 1,
-      rate: invoice.totalAmount || 0,
-      amount: invoice.totalAmount || 0,
-      taxRate: 18,
-      taxAmount: 0,
-      total: invoice.totalAmount || 0
-    }
-  ];
+  const invoiceItems: InvoiceItem[] = invoice.items && invoice.items.length > 0 ? invoice.items : [];
 
-  const subtotal = invoiceItems.reduce((sum, item) => sum + item.amount, 0);
-  const totalTax = invoiceItems.reduce((sum, item) => sum + item.taxAmount, 0);
-  const grandTotal = subtotal + totalTax;
+  const subtotal = invoice.subtotal || invoiceItems.reduce((sum, item) => sum + item.amount, 0);
+  const totalTax = invoice.taxAmount != null ? invoice.taxAmount : invoiceItems.reduce((sum, item) => sum + (item.taxAmount || 0), 0);
+  const totalCess = invoice.cessAmount != null ? invoice.cessAmount : invoiceItems.reduce((sum, item) => sum + ((item as any).cessAmount || 0), 0);
+  const roundOffAmount = invoice.roundOffAmount || 0;
+  const grandTotal = Number(invoice.totalAmount) || Number(invoice.amount) || (subtotal + totalTax + totalCess + roundOffAmount);
+
+  const processedByName = invoice.staffName || '';
+  const processedByRole = '';
+  
+  const hasEInvoiceData = !!(invoice.irn || invoice.acknowledgmentNumber || invoice.invoiceExtras?.irn || invoice.invoiceExtras?.acknowledgmentNumber);
+  
+  const hasInvoiceExtras = invoice.invoiceExtras && typeof invoice.invoiceExtras === 'object' &&
+    Object.entries(invoice.invoiceExtras).some(([key, val]) => key !== 'irn' && key !== 'acknowledgmentNumber' && key !== 'acknowledgmentDate' && val && String(val).trim().length > 0);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -314,239 +351,80 @@ export default function InvoiceDetailsScreen() {
     });
   };
 
+  const buildPDFData = (): InvoicePDFData => {
+    const bizAddr = businessData?.addresses?.[0];
+    return {
+      type: 'sale',
+      invoiceNumber: invoice.invoiceNumber || invoice.invoice_number || '',
+      invoiceDate: invoice.invoiceDate || invoice.invoice_date || '',
+      business: {
+        name: businessData?.business?.legal_name || businessData?.business?.owner_name || invoice.businessName || '',
+        address: bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : invoice.businessAddress,
+        gstin: businessData?.business?.tax_id || invoice.gstin,
+        phone: businessData?.business?.phone || invoice.businessPhone,
+      },
+      customer: customer ? {
+        name: customer.name || '',
+        address: customer.address,
+        gstin: invoice.customerDetails?.gstin || customer.gstin,
+        phone: customer.mobile,
+        businessName: invoice.customerDetails?.businessName || customer.businessName,
+        isBusinessCustomer,
+      } : undefined,
+      items: invoiceItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        rate: item.rate,
+        taxRate: item.taxRate,
+        taxAmount: item.taxAmount,
+        total: item.total,
+      })),
+      subtotal,
+      taxAmount: totalTax,
+      totalAmount: grandTotal,
+      paidAmount: invoice.paidAmount || grandTotal,
+      balanceDue: invoice.balanceDue || 0,
+      paymentMethod: invoice.paymentMethod || invoice.payment_method,
+      paymentStatus: invoice.status || invoice.payment_status,
+      notes: invoice.notes,
+      staffName: invoice.staffName || invoice.staff_name,
+      invoiceExtras: invoice.invoiceExtras || invoice.invoice_extras,
+      invoiceId: invoice.id,
+      businessId: businessData?.business?.id,
+    };
+  };
+
   const handleDownload = async () => {
     try {
-              console.log('Starting download for invoice:', invoice.invoiceNumber || 'Unknown');
-      
-      // Generate HTML content for the invoice
-      const htmlContent = generateInvoiceHTML();
-      
-      // Create a temporary HTML file
-      const fileName = `Invoice_${invoice.invoiceNumber || 'Unknown'}.html`;
-      const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-      
-      console.log('File URI:', fileUri);
-      
-      // Write HTML content to file
-      await FileSystem.writeAsStringAsync(fileUri, htmlContent, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      
-      console.log('File written successfully');
-      
-      // Share the file
-      if (await Sharing.isAvailableAsync()) {
-        console.log('Sharing is available, opening share dialog');
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'text/html',
-          dialogTitle: `Invoice ${invoice.invoiceNumber || 'Unknown'}`,
-        });
-      } else {
-        console.log('Sharing not available, showing success alert');
-        Alert.alert(
-          'Download Successful',
-          `Invoice saved as ${fileName}`,
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('Download error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      Alert.alert('Download Failed', `Error generating invoice file: ${errorMessage}`);
+      const pdfData = buildPDFData();
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, pdfData.invoiceNumber);
+    } catch (error: any) {
+      Alert.alert('Download Failed', error.message || 'Could not generate PDF');
     }
   };
 
-  const generateInvoiceHTML = () => {
-    const itemsHTML = invoiceItems.map(item => `
-      <tr>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.rate)}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.amount)}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.taxRate}%</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.taxAmount)}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${formatAmount(item.total)}</td>
-      </tr>
-    `).join('');
-
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Invoice ${invoice.invoiceNumber || 'Unknown'}</title>
-          <style>
-            @media print {
-              body { margin: 0; padding: 20px; }
-              .no-print { display: none; }
-            }
-            body { 
-              font-family: Arial, sans-serif; 
-              margin: 0; 
-              padding: 20px; 
-              background-color: white;
-              color: #333;
-            }
-            .header { 
-              text-align: center; 
-              margin-bottom: 30px; 
-              border-bottom: 2px solid #3f66ac;
-              padding-bottom: 20px;
-            }
-            .invoice-title { 
-              font-size: 28px; 
-              font-weight: bold; 
-              color: #3f66ac; 
-              margin-bottom: 10px;
-            }
-            .invoice-number {
-              font-size: 18px;
-              color: #666;
-              font-weight: 600;
-            }
-            .invoice-info { 
-              margin-bottom: 20px; 
-              display: flex;
-              justify-content: space-between;
-            }
-            .info-section {
-              flex: 1;
-            }
-            .customer-info { 
-              margin-bottom: 20px; 
-              background-color: #f9f9f9;
-              padding: 15px;
-              border-radius: 8px;
-            }
-            table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              margin-bottom: 20px; 
-              border: 1px solid #ddd;
-            }
-            th { 
-              background-color: #3f66ac; 
-              color: white;
-              padding: 12px; 
-              text-align: left; 
-              font-weight: bold; 
-            }
-            td { 
-              padding: 10px; 
-              border-bottom: 1px solid #eee;
-            }
-            tr:nth-child(even) {
-              background-color: #f9f9f9;
-            }
-            .summary { 
-              margin-top: 20px; 
-              background-color: #f0fdf4;
-              padding: 15px;
-              border-radius: 8px;
-              border: 1px solid #059669;
-            }
-            .summary-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 8px;
-            }
-            .total { 
-              font-weight: bold; 
-              font-size: 20px; 
-              color: #059669; 
-              border-top: 2px solid #059669;
-              padding-top: 10px;
-              margin-top: 10px;
-            }
-            .business-details {
-              background-color: #f0f4ff;
-              padding: 15px;
-              border-radius: 8px;
-              margin-bottom: 20px;
-              border: 1px solid #3f66ac;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="invoice-title">TAX INVOICE</div>
-            <div class="invoice-number">Invoice No: ${invoice.invoiceNumber || 'Unknown'}</div>
-          </div>
-          
-          <div class="invoice-info">
-            <div class="info-section">
-              <p><strong>Date:</strong> ${formatDate(invoice.invoiceDate)}</p>
-              <p><strong>Payment Status:</strong> ${invoice.status || 'Paid'}</p>
-            </div>
-            <div class="info-section">
-              <p><strong>Staff:</strong> N/A</p>
-              <p><strong>Items:</strong> ${invoiceItems.length}</p>
-            </div>
-          </div>
-          
-          <div class="business-details">
-            <h3>Business Details</h3>
-            <p><strong>ABC Electronics Pvt Ltd</strong></p>
-            <p>123 Business Street, Tech City - 560001</p>
-            <p>GSTIN: 29ABCDE1234F1Z5</p>
-            <p>Phone: +91 98765 43210</p>
-          </div>
-          
-          <div class="customer-info">
-            <h3>Customer Details</h3>
-            <p><strong>Name:</strong> ${customer.name}</p>
-            <p><strong>Address:</strong> ${customer.address}</p>
-            <p><strong>Phone:</strong> ${customer.mobile}</p>
-            <p><strong>Type:</strong> ${isBusinessCustomer ? 'Business' : 'Individual'}</p>
-          </div>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Qty</th>
-                <th>Rate</th>
-                <th>Amount</th>
-                <th>Tax %</th>
-                <th>Tax Amount</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHTML}
-            </tbody>
-          </table>
-          
-          <div class="summary">
-            <div class="summary-row">
-              <span><strong>Subtotal:</strong></span>
-              <span>${formatAmount(subtotal)}</span>
-            </div>
-            <div class="summary-row">
-              <span><strong>Total Tax:</strong></span>
-              <span>${formatAmount(totalTax)}</span>
-            </div>
-            <div class="summary-row total">
-              <span><strong>Grand Total:</strong></span>
-              <span><strong>${formatAmount(grandTotal)}</strong></span>
-            </div>
-          </div>
-          
-          <div style="margin-top: 30px; text-align: center; color: #666; font-size: 12px;">
-            <p>Thank you for your business!</p>
-            <p>This is a computer generated invoice.</p>
-          </div>
-        </body>
-      </html>
-    `;
-  };
-
   const handleShare = () => {
-    Alert.alert('Share', 'Invoice sharing functionality will be implemented');
+    const pdfData = buildPDFData();
+    showShareOptions({
+      invoiceNumber: pdfData.invoiceNumber,
+      invoiceId: invoice.id,
+      businessId: businessData?.business?.id,
+      invoiceType: 'sale',
+      invoicePdfData: pdfData,
+      onShareToChat: isBusinessCustomer ? () => {
+        Alert.alert('Share in Chat', 'Navigate to chat to share this invoice with the customer.');
+      } : undefined,
+    });
   };
 
-  const handlePrint = () => {
-    Alert.alert('Print', 'Invoice printing functionality will be implemented');
+  const handlePrint = async () => {
+    try {
+      const pdfData = buildPDFData();
+      await printInvoice(pdfData);
+    } catch (error: any) {
+      Alert.alert('Print Failed', error.message || 'Could not print invoice');
+    }
   };
 
   return (
@@ -594,6 +472,7 @@ export default function InvoiceDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {/* Tax Invoice Header */}
         <View style={styles.invoiceHeader}>
@@ -617,98 +496,141 @@ export default function InvoiceDetailsScreen() {
           </View>
         </View>
 
-        {/* IRN & Acknowledgment Section */}
-        <View style={styles.irnSection}>
-          <Text style={styles.sectionTitle}>E-Invoice Details</Text>
-          
-          <View style={styles.irnCard}>
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>IRN (Invoice Reference Number):</Text>
-              <Text style={styles.irnValue}></Text>
-            </View>
+        {/* E-Invoice Details — only when data exists */}
+        {hasEInvoiceData && (
+          <View style={styles.irnSection}>
+            <Text style={styles.sectionTitle}>E-Invoice Details</Text>
             
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>Acknowledgment Number:</Text>
-              <Text style={styles.irnValue}>112410600000685</Text>
-            </View>
-            
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>Acknowledgment Date:</Text>
-              <Text style={styles.irnValue}>{formatDate(invoice.invoiceDate)} 14:30:25</Text>
+            <View style={styles.irnCard}>
+              {(invoice.irn || invoice.invoiceExtras?.irn) ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>IRN (Invoice Reference Number):</Text>
+                  <Text style={styles.irnValue}>{invoice.irn || invoice.invoiceExtras?.irn}</Text>
+                </View>
+              ) : null}
+              
+              {(invoice.acknowledgmentNumber || invoice.invoiceExtras?.acknowledgmentNumber) ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>Acknowledgment Number:</Text>
+                  <Text style={styles.irnValue}>{invoice.acknowledgmentNumber || invoice.invoiceExtras?.acknowledgmentNumber}</Text>
+                </View>
+              ) : null}
+              
+              {(invoice.acknowledgmentDate || invoice.invoiceExtras?.acknowledgmentDate) ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>Acknowledgment Date:</Text>
+                  <Text style={styles.irnValue}>{formatDate(invoice.acknowledgmentDate || invoice.invoiceExtras?.acknowledgmentDate)}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Business Details */}
-        <View style={styles.businessSection}>
-          <Text style={styles.sectionTitle}>Business Details</Text>
-          
-          <View style={styles.businessCard}>
-            <View style={styles.businessHeader}>
-              <Building2 size={24} color={Colors.primary} />
-              <Text style={styles.businessName}>ABC Electronics Pvt Ltd</Text>
-            </View>
-            
-            <View style={styles.businessDetails}>
-              <View style={styles.businessRow}>
-                <MapPin size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>
-                  123, Electronic City, Phase 1, Bangalore, Karnataka - 560100
-                </Text>
-              </View>
-              
-              <View style={styles.businessRow}>
-                <Hash size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>GSTIN: 29ABCDE1234F1Z5</Text>
-              </View>
-              
-              <View style={styles.businessRow}>
-                <Phone size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>+91 80 1234 5678</Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Customer Details */}
+        {/* Bill To — Customer Details */}
         <View style={styles.customerSection}>
           <Text style={styles.sectionTitle}>Bill To</Text>
           
           <View style={styles.customerCard}>
-            <Text style={styles.customerName}>
-              {isBusinessCustomer ? customer.businessName : customer.name}
-            </Text>
-            {isBusinessCustomer && customer.gstin && (
-              <Text style={styles.customerGstin}>GSTIN: {customer.gstin}</Text>
+            <View style={styles.billToHeader}>
+              <User size={20} color={Colors.primary} />
+              <Text style={styles.customerName}>
+                {customer
+                  ? (isBusinessCustomer && customer.businessName ? customer.businessName : customer.name)
+                  : (invoice?.customerName || 'Customer')}
+              </Text>
+            </View>
+            {customer && isBusinessCustomer && customer.name && customer.businessName && customer.name !== customer.businessName && (
+              <Text style={styles.contactPerson}>{customer.name}</Text>
             )}
-            {!isBusinessCustomer && (
-              <Text style={styles.contactPerson}>Contact: {customer.name}</Text>
-            )}
-            <Text style={styles.customerDetails}>
-              Mobile: {customer.mobile}{'\n'}
-              Address: {customer.address}
-            </Text>
-            {isBusinessCustomer && customer.paymentTerms && (
-              <View style={styles.paymentTermsSection}>
-                <Text style={styles.paymentTermsLabel}>Payment Terms:</Text>
-                <Text style={styles.paymentTermsValue}>{customer.paymentTerms}</Text>
+            {customer && isBusinessCustomer && customer.gstin ? (
+              <View style={styles.billToRow}>
+                <Hash size={14} color={Colors.textLight} />
+                <Text style={styles.customerGstin}>GSTIN: {customer.gstin}</Text>
               </View>
-            )}
+            ) : null}
+            {customer?.mobile ? (
+              <View style={styles.billToRow}>
+                <Phone size={14} color={Colors.textLight} />
+                <Text style={styles.billToText}>{customer.mobile}</Text>
+              </View>
+            ) : null}
+            {customer?.address ? (
+              <View style={styles.billToRow}>
+                <MapPin size={14} color={Colors.textLight} />
+                <Text style={styles.billToText}>{customer.address}</Text>
+              </View>
+            ) : null}
+
+            {(customer?.id && customer.id !== 'unknown') || invoice?.customerId ? (
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.grey[100] }}
+                onPress={() => safeRouter.push(`/people/customer-details?customerId=${customer?.id !== 'unknown' ? customer?.id : invoice?.customerId}` as any)}
+                activeOpacity={0.7}
+              >
+                <ExternalLink size={15} color={Colors.primary} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.primary }}>View Customer Details</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
 
         {/* Ship To Address (only for business customers with different shipping address) */}
-        {isBusinessCustomer && customer.shipToAddress && customer.shipToAddress.trim() !== '' && customer.shipToAddress !== customer.address && (
+        {isBusinessCustomer && customer?.shipToAddress && customer.shipToAddress.trim() !== '' && customer.shipToAddress !== customer.address && (
           <View style={styles.shipToSection}>
             <Text style={styles.sectionTitle}>Ship To</Text>
             
             <View style={styles.shipToCard}>
               <Text style={styles.shipToName}>
-                {customer.businessName}
+                {customer.businessName || customer.name}
               </Text>
               <Text style={styles.shipToDetails}>
-                Address: {customer.shipToAddress}
+                {customer.shipToAddress}
               </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Advanced Invoice Details (invoice extras from settings) */}
+        {hasInvoiceExtras && (
+          <View style={styles.extrasSection}>
+            <Text style={styles.sectionTitle}>Additional Details</Text>
+            <View style={styles.extrasCard}>
+              {invoice.invoiceExtras.deliveryNote ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Delivery Note:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.deliveryNote}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.paymentTermsMode ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Payment Terms:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.paymentTermsMode}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.referenceNo ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Reference No:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.referenceNo}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.referenceDate ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Reference Date:</Text><Text style={styles.extrasValue}>{formatDate(invoice.invoiceExtras.referenceDate)}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.buyerOrderNumber ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Buyer's Order No:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.buyerOrderNumber}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.buyerOrderDate ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Buyer's Order Date:</Text><Text style={styles.extrasValue}>{formatDate(invoice.invoiceExtras.buyerOrderDate)}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.dispatchDocNo ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Dispatch Doc No:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.dispatchDocNo}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.deliveryNoteDate ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Delivery Note Date:</Text><Text style={styles.extrasValue}>{formatDate(invoice.invoiceExtras.deliveryNoteDate)}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.dispatchedVia ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Dispatched Through:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.dispatchedVia}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.destination ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Destination:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.destination}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.termsOfDelivery ? (
+                <View style={styles.extrasRow}><Text style={styles.extrasLabel}>Terms of Delivery:</Text><Text style={styles.extrasValue}>{invoice.invoiceExtras.termsOfDelivery}</Text></View>
+              ) : null}
+              {invoice.invoiceExtras.customFields && Object.entries(invoice.invoiceExtras.customFields).map(([key, val]) => val ? (
+                <View key={key} style={styles.extrasRow}><Text style={styles.extrasLabel}>{key}:</Text><Text style={styles.extrasValue}>{String(val)}</Text></View>
+              ) : null)}
             </View>
           </View>
         )}
@@ -718,7 +640,6 @@ export default function InvoiceDetailsScreen() {
           <Text style={styles.sectionTitle}>Invoice Items</Text>
           
           <View style={styles.itemsTable}>
-            {/* Table Header */}
             <View style={styles.tableHeader}>
               <Text style={[styles.tableHeaderText, styles.itemNameHeader]}>Item</Text>
               <Text style={[styles.tableHeaderText, styles.qtyHeader]}>Qty</Text>
@@ -726,14 +647,18 @@ export default function InvoiceDetailsScreen() {
               <Text style={[styles.tableHeaderText, styles.amountHeader]}>Amount</Text>
             </View>
             
-            {/* Table Rows */}
-            {invoiceItems.map((item, index) => (
+            {isItemsLoading && invoiceItems.length === 0 ? (
+              <View style={styles.itemsLoadingContainer}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.itemsLoadingText}>Loading items...</Text>
+              </View>
+            ) : invoiceItems.length > 0 ? invoiceItems.map((item, index) => (
               <View key={item.id || `item-${index}`} style={styles.tableRow}>
                 <View style={styles.itemNameCell}>
                   <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemTax}>GST @ {item.taxRate}%</Text>
+                  {item.taxRate > 0 && <Text style={styles.itemTax}>GST @ {item.taxRate}%</Text>}
                 </View>
-                <Text style={[styles.tableCellText, styles.qtyCell]}>{item.quantity}</Text>
+                <Text style={[styles.tableCellText, styles.qtyCell]}>{formatQty(item.quantity)}</Text>
                 <Text style={[styles.tableCellText, styles.rateCell]}>
                   {formatAmount(item.rate)}
                 </Text>
@@ -741,7 +666,11 @@ export default function InvoiceDetailsScreen() {
                   {formatAmount(item.total)}
                 </Text>
               </View>
-            ))}
+            )) : (
+              <View style={styles.itemsLoadingContainer}>
+                <Text style={styles.itemsLoadingText}>No items found</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -756,19 +685,41 @@ export default function InvoiceDetailsScreen() {
             </View>
             
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>CGST (9%):</Text>
-              <Text style={styles.summaryValue}>{formatAmount(totalTax / 2)}</Text>
+              <Text style={styles.summaryLabel}>GST:</Text>
+              <Text style={styles.summaryValue}>{formatAmount(totalTax)}</Text>
             </View>
-            
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>SGST (9%):</Text>
-              <Text style={styles.summaryValue}>{formatAmount(totalTax / 2)}</Text>
-            </View>
+
+            {totalCess > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Cess:</Text>
+                <Text style={styles.summaryValue}>{formatAmount(totalCess)}</Text>
+              </View>
+            )}
+
+            {roundOffAmount !== 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Round Off:</Text>
+                <Text style={styles.summaryValue}>{roundOffAmount >= 0 ? '+' : ''}{formatAmount(roundOffAmount)}</Text>
+              </View>
+            )}
             
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Grand Total:</Text>
               <Text style={styles.totalValue}>{formatAmount(grandTotal)}</Text>
             </View>
+
+            {invoice.balanceDue > 0 && (
+              <>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Paid:</Text>
+                  <Text style={styles.summaryValue}>{formatAmount(invoice.paidAmount || 0)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: Colors.error }]}>Balance Due:</Text>
+                  <Text style={[styles.summaryValue, { color: Colors.error, fontWeight: '700' }]}>{formatAmount(invoice.balanceDue)}</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
 
@@ -780,17 +731,23 @@ export default function InvoiceDetailsScreen() {
             <View style={styles.paymentRow}>
               <CreditCard size={20} color={Colors.success} />
               <View style={styles.paymentInfo}>
-                <Text style={styles.paymentMethod}>Cash Payment</Text>
-                <Text style={styles.paymentStatus}>Paid</Text>
+                <Text style={styles.paymentMethod}>
+                  {(invoice.paymentMethod || '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) || 'N/A'}
+                </Text>
+                <Text style={styles.paymentStatus}>
+                  {(invoice.status || invoice.paymentStatus || '').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                </Text>
               </View>
-              <Text style={styles.paymentAmount}>{formatAmount(grandTotal)}</Text>
+              <Text style={styles.paymentAmount}>{formatAmount(invoice.paidAmount || grandTotal)}</Text>
             </View>
             
-            <View style={styles.paymentDetails}>
-              <Text style={styles.paymentDetailText}>
-                Payment received on {formatDate(invoice.invoiceDate)} at 14:30
-              </Text>
-            </View>
+            {invoice.paymentDate ? (
+              <View style={styles.paymentDetails}>
+                <Text style={styles.paymentDetailText}>
+                  Payment received on {formatDate(invoice.paymentDate)}{invoice.paymentTime ? ` at ${invoice.paymentTime}` : ''}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -799,8 +756,15 @@ export default function InvoiceDetailsScreen() {
           <Text style={styles.sectionTitle}>Processed By</Text>
           
           <View style={styles.staffCard}>
-            <Text style={styles.staffName}>N/A</Text>
-            <Text style={styles.staffRole}>Sales Executive</Text>
+            <View style={styles.staffRow}>
+              <View style={styles.staffAvatar}>
+                <User size={18} color={Colors.primary} />
+              </View>
+              <View style={styles.staffInfo}>
+                <Text style={styles.staffName}>{processedByName || 'N/A'}</Text>
+                {processedByRole ? <Text style={styles.staffRole}>{processedByRole}</Text> : null}
+              </View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -937,94 +901,55 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     lineHeight: 20,
   },
-  businessSection: {
-    marginBottom: 16,
-  },
-  businessCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  businessHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  businessName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-    marginLeft: 12,
-  },
-  businessDetails: {
-    gap: 8,
-  },
-  businessRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  businessText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    flex: 1,
-    lineHeight: 20,
-  },
   customerSection: {
-    marginBottom: 12, // Reduced margin
+    marginBottom: 12,
   },
   customerCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 12, // Reduced padding
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
+  billToHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
   customerName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.text,
-    marginBottom: 8,
+    flex: 1,
   },
   customerGstin: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: Colors.primary,
-    marginBottom: 8,
     fontFamily: 'monospace',
   },
   contactPerson: {
     fontSize: 14,
     color: Colors.textLight,
-    marginBottom: 8,
+    marginBottom: 6,
+    marginLeft: 30,
   },
-  customerDetails: {
-    fontSize: 14,
-    color: Colors.textLight,
-    lineHeight: 20,
-  },
-  paymentTermsSection: {
+  billToRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 6,
+    marginLeft: 30,
   },
-  paymentTermsLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginRight: 8,
-  },
-  paymentTermsValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#3f66ac',
+  billToText: {
+    fontSize: 14,
+    color: Colors.text,
+    flex: 1,
+    lineHeight: 20,
   },
   shipToSection: {
     marginBottom: 16,
@@ -1208,24 +1133,80 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   staffSection: {
-    marginBottom: 12, // Reduced margin
+    marginBottom: 12,
   },
   staffCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 12, // Reduced padding
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+  },
+  staffRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  staffAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.grey[200],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  staffInfo: {
+    flex: 1,
   },
   staffName: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
-    marginBottom: 4,
   },
   staffRole: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textLight,
+    marginTop: 2,
+  },
+  itemsLoadingContainer: {
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  itemsLoadingText: {
+    color: Colors.textLight,
+    fontSize: 13,
+  },
+  extrasSection: {
+    marginBottom: 12,
+  },
+  extrasCard: {
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    gap: 8,
+  },
+  extrasRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  extrasLabel: {
+    fontSize: 13,
+    color: Colors.textLight,
+    fontWeight: '500',
+    flex: 1,
+  },
+  extrasValue: {
+    fontSize: 13,
+    color: Colors.text,
+    fontWeight: '600',
+    flex: 1.5,
+    textAlign: 'right',
   },
   
   // Loading State

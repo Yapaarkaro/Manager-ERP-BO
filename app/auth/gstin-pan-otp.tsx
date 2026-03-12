@@ -22,6 +22,7 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { verifyGSTINOTP, verifyPAN, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { autoFormatDateInput, parseDDMMYYYY } from '@/utils/formatters';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -287,54 +288,21 @@ export default function GstinPanOTPScreen() {
   };
   
   const handleDobTextChange = (text: string) => {
-    // Remove all non-numeric characters
-    const cleaned = text.replace(/[^0-9]/g, '');
-    
-    // Format as DD/MM/YYYY
-    let formatted = '';
-    if (cleaned.length > 0) {
-      formatted = cleaned.substring(0, 2);
-      if (cleaned.length >= 3) {
-        formatted += '/' + cleaned.substring(2, 4);
-      }
-      if (cleaned.length >= 5) {
-        formatted += '/' + cleaned.substring(4, 8);
-      }
-    }
-    
+    const formatted = autoFormatDateInput(text, '/');
     setDobText(formatted);
     
-    // Parse and validate complete date
-    if (cleaned.length === 8) {
-      const day = parseInt(cleaned.substring(0, 2), 10);
-      const month = parseInt(cleaned.substring(2, 4), 10);
-      const year = parseInt(cleaned.substring(4, 8), 10);
-      
-      // Validate date components
-      if (
-        day >= 1 && day <= 31 &&
-        month >= 1 && month <= 12 &&
-        year >= 1950 && year <= new Date().getFullYear()
-      ) {
-        const date = new Date(year, month - 1, day);
-        
-        // Check if date is valid (handles invalid dates like Feb 30)
-        if (
-          date.getDate() === day &&
-          date.getMonth() === month - 1 &&
-          date.getFullYear() === year &&
-          date <= new Date()
-        ) {
-          setDateOfBirth(date);
-          setHasSelectedDate(true);
-        }
-      }
-    } else {
-      // Clear date if input is incomplete
-      if (dateOfBirth !== null) {
+    if (formatted.length === 10) {
+      const parsed = parseDDMMYYYY(formatted);
+      if (parsed && parsed <= new Date() && parsed.getFullYear() >= 1950) {
+        setDateOfBirth(parsed);
+        setHasSelectedDate(true);
+      } else {
         setDateOfBirth(null);
         setHasSelectedDate(false);
       }
+    } else if (dateOfBirth !== null) {
+      setDateOfBirth(null);
+      setHasSelectedDate(false);
     }
   };
   
@@ -365,7 +333,7 @@ export default function GstinPanOTPScreen() {
   };
 
   const changeGstinPan = () => {
-    router.back();
+    router.canGoBack() ? router.back() : router.replace('/auth/gstin-pan');
   };
 
   const maskedValue = value ? 
@@ -531,7 +499,7 @@ export default function GstinPanOTPScreen() {
                   onChangeText={handleDobTextChange}
                   placeholder="DD/MM/YYYY"
                   placeholderTextColor="#999999"
-                  keyboardType="default"
+                  keyboardType="numeric"
                   maxLength={10}
                   returnKeyType="done"
                   contextMenuHidden={true}
@@ -545,6 +513,9 @@ export default function GstinPanOTPScreen() {
                   <Calendar size={20} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
+              {dobText.length === 10 && !dateOfBirth && (
+                <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 4 }}>Invalid date</Text>
+              )}
             </View>
 
             {/* Continue Button for PAN */}
@@ -627,13 +598,6 @@ export default function GstinPanOTPScreen() {
           )}
         </View>
 
-        {type === 'GSTIN' && (
-        <View style={styles.demoContainer}>
-          <Text style={styles.demoText}>
-              Demo: Use OTP 654321
-          </Text>
-        </View>
-        )}
       </ScrollView>
       </KeyboardAvoidingView>
 

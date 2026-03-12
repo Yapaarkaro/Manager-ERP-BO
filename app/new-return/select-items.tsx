@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, Check, Square, SquareCheck as CheckSquare, Package, FileText, User, Building2 } from 'lucide-react-native';
 
 const Colors = {
@@ -110,7 +111,7 @@ export default function SelectItemsScreen() {
       return;
     }
 
-    router.push({
+    safeRouter.push({
       pathname: '/new-return/return-reasons',
       params: {
         invoiceData: JSON.stringify(invoice),

@@ -1,9 +1,4 @@
-/**
- * Bank Accounts Screen
- * Shows only Bank Accounts (not cash accounts)
- */
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,504 +6,231 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
-  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, CreditCard, Banknote, Plus, Building2, Wallet } from 'lucide-react-native';
+import { ArrowLeft, Building2, ChevronRight, Plus, Landmark } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import ResponsiveContainer from '@/components/ResponsiveContainer';
-import { getWebContainerStyles } from '@/utils/platformUtils';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { onTransactionChange } from '@/utils/transactionEvents';
+import { invalidateApiCache } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
-const Colors = {
-  background: '#FFFFFF',
+const C = {
+  bg: '#FFFFFF',
+  surface: '#F9FAFB',
   text: '#1F2937',
-  textLight: '#6B7280',
+  textMuted: '#6B7280',
   primary: '#3f66ac',
+  primaryBg: '#EFF3FB',
   success: '#059669',
-  error: '#DC2626',
-  warning: '#D97706',
-  grey: {
-    50: '#F9FAFB',
-    100: '#F3F4F6',
-    200: '#E5E7EB',
-    300: '#D1D5DB',
-  }
+  border: '#E5E7EB',
+  divider: '#F3F4F6',
 };
 
-// Interface for backend bank account
-interface BackendBankAccount {
-  id: string;
-  bank_name?: string;
-  bankName?: string;
-  account_holder_name?: string;
-  accountHolderName?: string;
-  account_number?: string;
-  accountNumber?: string;
-  ifsc_code?: string;
-  ifscCode?: string;
-  account_type?: string;
-  accountType?: string;
-  initial_balance?: number;
-  initialBalance?: number;
-  current_balance?: number;
-  currentBalance?: number;
-  balance?: number;
-  is_primary?: boolean;
-  isPrimary?: boolean;
-  type?: 'bank' | 'cash';
-  upi_id?: string;
-  upiId?: string;
-  created_at?: string;
-  createdAt?: string;
-}
+const fmt = (n: number) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(n);
 
 export default function BankAccountsScreen() {
-  const { handleBack } = useWebBackNavigation();
   const { data: businessData, refetch } = useBusinessData();
 
-  // Use cached data immediately for fast loading
-  const bankAccountsData = useMemo(() => {
+  const bankAccounts = useMemo(() => {
     if (!businessData?.bankAccounts) return [];
-    return businessData.bankAccounts;
+    return businessData.bankAccounts.filter(
+      (a: any) => a.type !== 'cash' && a.account_type !== 'cash'
+    );
   }, [businessData?.bankAccounts]);
 
-  // Filter only bank accounts (exclude cash accounts)
-  const bankAccounts = useMemo(() => {
-    return bankAccountsData.filter((account: any) => {
-      // Exclude cash accounts - only show bank accounts
-      return account.type !== 'cash' && account.account_type !== 'cash';
-    });
-  }, [bankAccountsData]);
-
-  // Refetch when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      refetch();
-    }, [refetch])
-  );
-
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
-  // Map backend account to display format
-  const mapAccountToDisplay = (account: any) => {
-    return {
-      id: account.id || account.backend_id || '',
-      bankName: account.bank_name || account.bankName || 'Unknown Bank',
-      accountHolderName: account.account_holder_name || account.accountHolderName || '',
-      accountNumber: account.account_number || account.accountNumber || '',
-      ifscCode: account.ifsc_code || account.ifscCode || '',
-      accountType: account.account_type || account.accountType || 'Savings',
-      currentBalance: account.current_balance || account.currentBalance || account.balance || account.initial_balance || account.initialBalance || 0,
-      isPrimary: account.is_primary || account.isPrimary || false,
-      upiId: account.upi_id || account.upiId || '',
-    };
-  };
-
-  const handleViewBankAccount = (accountId: string) => {
-    router.push({
-      pathname: '/bank-details',
-      params: { bankAccountId: accountId }
-    });
-  };
-
-  const handleAddBankAccount = () => {
-    router.push('/auth/banking-details');
-  };
-
-  const handleAddCashAccount = () => {
-    // For now, cash is managed through the cash balance
-    router.push('/cash-details');
-  };
-
-  // Calculate total bank balance
   const totalBankBalance = useMemo(() => {
-    return bankAccounts.reduce((sum, acc) => {
-      const balance = acc.current_balance || acc.currentBalance || acc.balance || acc.initial_balance || acc.initialBalance || 0;
-      return sum + (typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0);
+    if (!bankAccounts.length) {
+      return businessData?.business?.current_total_bank_balance ?? 0;
+    }
+    return bankAccounts.reduce((sum: number, a: any) => {
+      const bal = a.current_balance ?? a.currentBalance ?? a.balance ?? a.initial_balance ?? 0;
+      return sum + (typeof bal === 'number' ? bal : parseFloat(String(bal)) || 0);
     }, 0);
-  }, [bankAccounts]);
+  }, [bankAccounts, businessData?.business?.current_total_bank_balance]);
 
-  const webContainerStyles = getWebContainerStyles();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    refetch().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [refetch]);
+
+  useFocusEffect(React.useCallback(() => { refetch(); }, [refetch]));
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsub = onTransactionChange(() => { if (mountedRef.current) refetch(); });
+    return () => { mountedRef.current = false; unsub(); };
+  }, [refetch]);
+
+  const handleView = (id: string) => safeRouter.push({ pathname: '/bank-details', params: { bankAccountId: id } });
 
   return (
-    <ResponsiveContainer>
-      <SafeAreaView style={styles.container}>
+    <View style={s.container}>
+      <SafeAreaView style={{ flex: 1 }}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBack}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} style={s.backBtn} activeOpacity={0.7}>
+            <ArrowLeft size={22} color={C.text} />
           </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Bank Accounts</Text>
+          <Text style={s.headerTitle}>Bank Accounts</Text>
+          <TouchableOpacity onPress={() => safeRouter.push('/auth/banking-details')} style={s.addBtn} activeOpacity={0.7}>
+            <Plus size={18} color={C.primary} />
+          </TouchableOpacity>
         </View>
 
-        <ScrollView 
-          style={styles.content}
-          contentContainerStyle={[
-            styles.scrollContent,
-            Platform.OS === 'web' ? webContainerStyles.webScrollContent : {}
-          ]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Bank Accounts Section */}
-          <View style={[styles.section, styles.bankSection]}>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionHeaderLeft}>
-                <CreditCard size={24} color={Colors.primary} />
-                <Text style={styles.sectionTitle}>Bank Accounts</Text>
-                {bankAccounts.length > 0 && (
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countBadgeText}>{bankAccounts.length}</Text>
-                  </View>
-                )}
-              </View>
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={handleAddBankAccount}
-                activeOpacity={0.7}
-              >
-                <Plus size={20} color={Colors.primary} />
-                <Text style={styles.addButtonText}>Add Account</Text>
-              </TouchableOpacity>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          {/* Summary card */}
+          <View style={s.summaryCard}>
+            <View style={s.summaryIconWrap}>
+              <Landmark size={28} color={C.primary} />
             </View>
-
-            {bankAccounts.length > 0 ? (
-              <View style={styles.accountsList}>
-                {bankAccounts.map((account) => {
-                  const displayAccount = mapAccountToDisplay(account);
-                  return (
-                    <TouchableOpacity
-                      key={account.id || displayAccount.id}
-                      style={styles.accountCard}
-                      onPress={() => handleViewBankAccount(displayAccount.id)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.accountCardHeader}>
-                        <View style={styles.accountInfo}>
-                          <Building2 size={20} color={Colors.primary} />
-                          <View style={styles.accountDetails}>
-                            <Text style={styles.accountName}>{displayAccount.bankName}</Text>
-                            <Text style={styles.accountNumber}>
-                              {displayAccount.accountNumber ? `****${displayAccount.accountNumber.slice(-4)}` : 'N/A'}
-                            </Text>
-                          </View>
-                        </View>
-                        {displayAccount.isPrimary && (
-                          <View style={styles.primaryBadge}>
-                            <Text style={styles.primaryBadgeText}>Primary</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.accountBalance}>
-                        <Text style={styles.balanceLabel}>Balance</Text>
-                        <Text style={styles.balanceAmount}>
-                          {formatAmount(displayAccount.currentBalance)}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ) : (
-              <View style={styles.emptyState}>
-                <CreditCard size={48} color={Colors.grey[300]} />
-                <Text style={styles.emptyStateText}>No bank accounts added</Text>
-                <TouchableOpacity
-                  style={styles.emptyStateButton}
-                  onPress={handleAddBankAccount}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.emptyStateButtonText}>Add Bank Account</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-
-          {/* Summary */}
-          <View style={styles.summarySection}>
-            <Text style={styles.summaryTitle}>Total Bank Balance</Text>
-            <Text style={styles.summaryAmount}>
-              {formatAmount(totalBankBalance)}
+            <Text style={s.summaryLabel}>Total Bank Balance</Text>
+            <Text style={s.summaryAmount}>{fmt(totalBankBalance)}</Text>
+            <Text style={s.summaryAccounts}>
+              {bankAccounts.length} account{bankAccounts.length !== 1 ? 's' : ''}
             </Text>
           </View>
+
+          {/* Account list */}
+          {bankAccounts.length > 0 ? (
+            <View style={s.listWrap}>
+              <Text style={s.sectionLabel}>Your Accounts</Text>
+              {bankAccounts.map((account: any, idx: number) => {
+                const name = account.bank_name || account.bankName || 'Bank Account';
+                const accNum = account.account_number || account.accountNumber || '';
+                const balance = account.current_balance ?? account.currentBalance ?? account.balance ?? account.initial_balance ?? 0;
+                const isPrimary = account.is_primary || account.isPrimary;
+                const isLast = idx === bankAccounts.length - 1;
+
+                return (
+                  <TouchableOpacity
+                    key={account.id}
+                    style={[s.accountCard, isLast && { marginBottom: 0 }]}
+                    onPress={() => handleView(account.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={s.accountRow}>
+                      <View style={s.accountIconWrap}>
+                        <Building2 size={20} color={C.primary} />
+                      </View>
+                      <View style={s.accountInfo}>
+                        <View style={s.accountNameRow}>
+                          <Text style={s.accountName} numberOfLines={1}>{name}</Text>
+                          {isPrimary && (
+                            <View style={s.primaryPill}>
+                              <Text style={s.primaryPillText}>Primary</Text>
+                            </View>
+                          )}
+                        </View>
+                        {accNum ? (
+                          <Text style={s.accountNum}>{'•••• ' + accNum.slice(-4)}</Text>
+                        ) : null}
+                      </View>
+                      <View style={s.accountRight}>
+                        <Text style={s.accountBal}>{fmt(typeof balance === 'number' ? balance : parseFloat(String(balance)) || 0)}</Text>
+                        <ChevronRight size={16} color={C.textMuted} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={s.emptyWrap}>
+              <View style={s.emptyIconWrap}>
+                <Building2 size={40} color={C.border} />
+              </View>
+              <Text style={s.emptyTitle}>No bank accounts yet</Text>
+              <Text style={s.emptySub}>Add a bank account to track your balance and transactions</Text>
+              <TouchableOpacity
+                style={s.emptyBtn}
+                onPress={() => safeRouter.push('/auth/banking-details')}
+                activeOpacity={0.7}
+              >
+                <Plus size={16} color="#fff" />
+                <Text style={s.emptyBtnText}>Add Bank Account</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </ScrollView>
       </SafeAreaView>
-    </ResponsiveContainer>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-    backgroundColor: Colors.background,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: C.text },
+  addBtn: {
+    width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: C.primaryBg,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.text,
+  scroll: { padding: 16, paddingBottom: 40 },
+
+  summaryCard: {
+    backgroundColor: C.bg, borderRadius: 16, padding: 24, alignItems: 'center',
+    borderWidth: 1, borderColor: C.border, marginBottom: 20,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 }, android: { elevation: 3 } }),
   },
-  content: {
-    flex: 1,
+  summaryIconWrap: {
+    width: 52, height: 52, borderRadius: 14, backgroundColor: C.primaryBg,
+    justifyContent: 'center', alignItems: 'center', marginBottom: 14,
   },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  section: {
-    marginBottom: 24,
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
-      },
-    }),
-  },
-  bankSection: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.primary,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginLeft: 8,
-  },
-  countBadge: {
-    backgroundColor: Colors.primary + '15',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginLeft: 8,
-  },
-  countBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: Colors.primary + '15',
-    gap: 6,
-  },
-  addButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  accountsList: {
-    gap: 12,
-  },
+  summaryLabel: { fontSize: 14, color: C.textMuted, fontWeight: '500', marginBottom: 6 },
+  summaryAmount: { fontSize: 32, fontWeight: '800', color: C.text, letterSpacing: -0.5, marginBottom: 4 },
+  summaryAccounts: { fontSize: 13, color: C.textMuted },
+
+  listWrap: { marginBottom: 16 },
+  sectionLabel: { fontSize: 14, fontWeight: '600', color: C.textMuted, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   accountCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    marginBottom: 12,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-      },
-    }),
+    backgroundColor: C.bg, borderRadius: 14, padding: 16,
+    borderWidth: 1, borderColor: C.border, marginBottom: 10,
+    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4 }, android: { elevation: 1 } }),
   },
-  cashAccountCard: {
-    borderColor: Colors.success + '40',
-    backgroundColor: Colors.success + '05',
+  accountRow: { flexDirection: 'row', alignItems: 'center' },
+  accountIconWrap: {
+    width: 42, height: 42, borderRadius: 12, backgroundColor: C.primaryBg,
+    justifyContent: 'center', alignItems: 'center', marginRight: 14,
   },
-  accountCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+  accountInfo: { flex: 1 },
+  accountNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  accountName: { fontSize: 15, fontWeight: '600', color: C.text, flexShrink: 1 },
+  accountNum: { fontSize: 13, color: C.textMuted },
+  accountRight: { alignItems: 'flex-end', marginLeft: 8, gap: 4 },
+  accountBal: { fontSize: 15, fontWeight: '700', color: C.text },
+
+  primaryPill: {
+    backgroundColor: C.primaryBg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2,
   },
-  accountInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
+  primaryPillText: { fontSize: 11, fontWeight: '600', color: C.primary },
+
+  emptyWrap: {
+    alignItems: 'center', paddingVertical: 48, paddingHorizontal: 32,
+    backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.divider,
   },
-  accountDetails: {
-    flex: 1,
+  emptyIconWrap: {
+    width: 72, height: 72, borderRadius: 20, backgroundColor: C.divider,
+    justifyContent: 'center', alignItems: 'center', marginBottom: 16,
   },
-  accountName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 4,
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: C.text, marginBottom: 6 },
+  emptySub: { fontSize: 13, color: C.textMuted, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
+  emptyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.primary, borderRadius: 10, paddingHorizontal: 20, paddingVertical: 12,
   },
-  accountNumber: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  primaryBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: Colors.primary + '15',
-  },
-  primaryBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  accountBalance: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  balanceAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 32,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: Colors.textLight,
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  emptyStateButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: Colors.primary,
-  },
-  emptyStateButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  cashCard: {
-    backgroundColor: Colors.success + '10',
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: Colors.success + '30',
-  },
-  cashCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 16,
-  },
-  cashDetails: {
-    flex: 1,
-  },
-  cashLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  cashAmount: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: Colors.success,
-  },
-  viewCashButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: Colors.success,
-    alignItems: 'center',
-  },
-  viewCashButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.background,
-  },
-  summarySection: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 8,
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textLight,
-    marginBottom: 8,
-  },
-  summaryAmount: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 16,
-  },
-  summaryBreakdown: {
-    gap: 12,
-  },
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryItemLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  summaryItemValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
+  emptyBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 });

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, MessageSquare, Check, X, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 
 const Colors = {
@@ -29,7 +30,7 @@ const Colors = {
   }
 };
 
-const presetReasons = [
+const customerReturnReasons = [
   'Defective product',
   'Wrong item delivered',
   'Damaged during shipping',
@@ -42,6 +43,19 @@ const presetReasons = [
   'Others'
 ];
 
+const supplierReturnReasons = [
+  'Defective/damaged goods',
+  'Wrong items received',
+  'Quality below standards',
+  'Expired products',
+  'Incorrect quantity',
+  'Wrong specifications',
+  'Duplicate shipment',
+  'Not as per PO',
+  'Packaging damaged',
+  'Others'
+];
+
 interface ItemReason {
   itemId: string;
   reason: string;
@@ -51,6 +65,8 @@ export default function ReturnReasonsScreen() {
   const { invoiceData, selectedItems, returnAmount } = useLocalSearchParams();
   const invoice = JSON.parse(invoiceData as string);
   const items = JSON.parse(selectedItems as string);
+  const isSupplierReturn = invoice.returnType === 'supplier';
+  const presetReasons = isSupplierReturn ? supplierReturnReasons : customerReturnReasons;
   
   const [itemReasons, setItemReasons] = useState<ItemReason[]>(
     items.map((item: any) => ({ itemId: item.id, reason: '' }))
@@ -124,7 +140,7 @@ export default function ReturnReasonsScreen() {
       return;
     }
 
-    router.push({
+    safeRouter.push({
       pathname: '/new-return/refund-method',
       params: {
         invoiceData: JSON.stringify(invoice),

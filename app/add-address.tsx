@@ -23,31 +23,32 @@ import {
   X,
 } from 'lucide-react-native';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
-import { dataStore, BusinessAddress, getStateCode } from '@/utils/dataStore';
-import { createStaff } from '@/services/backendApi';
+import { BusinessAddress, getStateCode } from '@/utils/dataStore';
+import { supabase } from '@/lib/supabase';
+import { createAddress, updateAddress, createStaff } from '@/services/backendApi';
 
 const Colors = {
-  primary: '#007AFF',
-  secondary: '#5856D6',
-  success: '#34C759',
-  warning: '#FF9500',
-  error: '#FF3B30',
-  background: '#F2F2F7',
+  primary: '#3F66AC',
+  secondary: '#F5C754',
+  success: '#10b981',
+  warning: '#f59e0b',
+  error: '#ef4444',
+  background: '#F8FAFC',
   card: '#FFFFFF',
-  text: '#000000',
-  textSecondary: '#8E8E93',
-  border: '#C6C6C8',
+  text: '#1F2937',
+  textSecondary: '#6B7280',
+  border: '#E5E7EB',
   grey: {
-    50: '#F9F9F9',
-    100: '#F2F2F7',
-    200: '#E5E5EA',
-    300: '#D1D1D6',
-    400: '#C7C7CC',
-    500: '#AEAEB2',
-    600: '#8E8E93',
-    700: '#636366',
-    800: '#48484A',
-    900: '#1C1C1E',
+    50: '#F9FAFB',
+    100: '#F3F4F6',
+    200: '#E5E7EB',
+    300: '#D1D5DB',
+    400: '#9CA3AF',
+    500: '#6B7280',
+    600: '#4B5563',
+    700: '#374151',
+    800: '#1F2937',
+    900: '#111827',
   },
 };
 
@@ -118,7 +119,7 @@ export default function AddAddress() {
       console.log('Initializing form with existing address:', existingAddress);
       
       setAddressName(existingAddress.name || '');
-      // Handle both data structures - from dataStore and from settings mapping
+      // Handle both data structures - from backend and from settings mapping
       const doorNum = existingAddress.doorNumber || existingAddress.addressLine1 || '';
       const line1 = existingAddress.addressLine1 || existingAddress.street || '';
       const line2 = existingAddress.addressLine2 || '';
@@ -201,7 +202,9 @@ export default function AddAddress() {
     state.name.toLowerCase().includes(stateSearchQuery.toLowerCase())
   );
 
-  const handleConfirmAddress = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleConfirmAddress = async () => {
     console.log('Form values:', {
       addressName: addressName.trim(),
       doorNumber: doorNumber.trim(),
@@ -219,137 +222,106 @@ export default function AddAddress() {
       Alert.alert('Missing Information', 'Please fill in all required fields including state selection.');
       return;
     }
+
+    setIsSaving(true);
     
-    // Check for duplicate addresses
-    const allAddresses = dataStore.getAddresses();
-    const isDuplicate = allAddresses.some(addr => {
-      return addr.addressLine1.toLowerCase() === addressLine1.trim().toLowerCase() &&
-             addr.city.toLowerCase() === city.trim().toLowerCase() &&
-             addr.pincode === pincode &&
-             addr.stateName.toLowerCase() === selectedState.name.toLowerCase() &&
-             addr.type === addressType &&
-             (!isEditMode || addr.id !== existingAddress?.id);
-    });
-
-    if (isDuplicate) {
-      Alert.alert('Duplicate Address', 'An address with these details already exists. Please use a different location or edit the existing one.');
-      return;
-    }
-
-    if (isEditMode && existingAddress) {
-      // Update existing address
-      const updatedAddressData = {
-        name: addressName.trim(),
-        doorNumber: doorNumber.trim(),
-        addressLine1: addressLine1.trim(),
-        addressLine2: addressLine2.trim(),
+    try {
+      const addressJson = {
+        door_number: doorNumber.trim(),
+        address_line_1: addressLine1.trim(),
+        address_line_2: addressLine2.trim(),
         city: city.trim(),
         pincode: pincode,
-        stateName: selectedState.name,
-        stateCode: getStateCode(selectedState.name), // Use the proper state code function
-        type: addressType,
-        manager: manager.trim(),
-        phone: phone.trim(),
-        isPrimary: primaryAddress,
-        updatedAt: new Date().toISOString(),
+        state: selectedState.name,
+        state_code: getStateCode(selectedState.name),
       };
-      
-      dataStore.updateAddress(existingAddress.id, updatedAddressData);
-      
-      // ✅ Create/update staff if manager info provided
-      if (manager.trim() && phone.trim()) {
-        const updatedAddress = dataStore.getAddressById(existingAddress.id);
-        if (updatedAddress) {
-          dataStore.createStaffFromAddress(updatedAddress).then(async (staffId) => {
-            if (staffId && updatedAddress.backendId) {
-              const staffData = dataStore.getStaffById(staffId);
-              if (staffData && !staffData.employeeId) {
-                try {
-                  await createStaff({
-                    name: staffData.name,
-                    mobile: staffData.mobile,
-                    role: staffData.role,
-                    locationId: updatedAddress.backendId,
-                    locationType: staffData.locationType,
-                    locationName: staffData.locationName,
-                  });
-                  console.log('✅ Staff created from address update');
-                } catch (error) {
-                  console.error('Error creating staff from address update:', error);
-                }
-              }
-            }
-          }).catch(error => {
-            console.error('Error creating staff from address:', error);
-          });
-        }
-      }
-      
-      // If setting as primary, update the dataStore
-      if (primaryAddress) {
-        dataStore.setPrimaryAddress(existingAddress.id);
-      }
-      
-      Alert.alert('Success', 'Address updated successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
-    } else {
-      // Add new address
-      const newAddress: BusinessAddress = {
-        id: `${addressType}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: addressName.trim(),
-        type: addressType,
-        doorNumber: doorNumber.trim(),
-        addressLine1: addressLine1.trim(),
-        addressLine2: addressLine2.trim(),
-        city: city.trim(),
-        pincode: pincode,
-        stateName: selectedState.name,
-        stateCode: selectedState.code,
-        manager: manager.trim(),
-        phone: phone.trim(),
-        isPrimary: primaryAddress,
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      
-      dataStore.addAddress(newAddress);
-      
-      // ✅ Create staff if manager info provided
-      if (manager.trim() && phone.trim()) {
-        dataStore.createStaffFromAddress(newAddress).then(async (staffId) => {
-          if (staffId) {
-            const staffData = dataStore.getStaffById(staffId);
-            if (staffData) {
-              try {
-                await createStaff({
-                  name: staffData.name,
-                  mobile: staffData.mobile,
-                  role: staffData.role,
-                  locationId: newAddress.backendId || newAddress.id,
-                  locationType: staffData.locationType,
-                  locationName: staffData.locationName,
-                });
-                console.log('✅ Staff created from new address');
-              } catch (error) {
-                console.error('Error creating staff from new address:', error);
-              }
-            }
-          }
-        }).catch(error => {
-          console.error('Error creating staff from address:', error);
+
+      if (isEditMode && existingAddress) {
+        const addressId = existingAddress.backendId || existingAddress.id;
+        const result = await updateAddress({
+          addressId,
+          name: addressName.trim(),
+          addressJson,
+          type: addressType,
+          managerName: manager.trim() || undefined,
+          managerMobileNumber: phone.trim() || undefined,
+          isPrimary: primaryAddress,
         });
+
+        if (!result.success) {
+          Alert.alert('Error', result.error || 'Failed to update address.');
+          setIsSaving(false);
+          return;
+        }
+
+        // Create staff via backend if manager info provided
+        if (manager.trim() && phone.trim()) {
+          try {
+            await createStaff({
+              name: manager.trim(),
+              mobile: phone.trim(),
+              role: addressType === 'branch' ? 'branch_manager' : 'warehouse_manager',
+              locationId: addressId,
+              locationType: addressType,
+              locationName: addressName.trim(),
+            });
+            console.log('✅ Staff created from address update');
+          } catch (error) {
+            console.error('Error creating staff from address update:', error);
+          }
+        }
+
+        const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+        clearBusinessDataCache();
+
+        Alert.alert('Success', 'Address updated successfully!', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
+      } else {
+        const result = await createAddress({
+          name: addressName.trim(),
+          addressJson,
+          type: addressType,
+          managerName: manager.trim() || undefined,
+          managerMobileNumber: phone.trim() || undefined,
+          isPrimary: primaryAddress,
+        });
+
+        if (!result.success) {
+          Alert.alert('Error', result.error || 'Failed to add address.');
+          setIsSaving(false);
+          return;
+        }
+
+        // Create staff via backend if manager info provided
+        if (manager.trim() && phone.trim() && result.address?.id) {
+          try {
+            await createStaff({
+              name: manager.trim(),
+              mobile: phone.trim(),
+              role: addressType === 'branch' ? 'branch_manager' : 'warehouse_manager',
+              locationId: result.address.id,
+              locationType: addressType,
+              locationName: addressName.trim(),
+            });
+            console.log('✅ Staff created from new address');
+          } catch (error) {
+            console.error('Error creating staff from new address:', error);
+          }
+        }
+
+        const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+        clearBusinessDataCache();
+
+        Alert.alert('Success', 'Address added successfully!', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
       }
-      
-      // If setting as primary, update the dataStore
-      if (primaryAddress) {
-        dataStore.setPrimaryAddress(newAddress.id);
-      }
-      
-      Alert.alert('Success', 'Address added successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+    } catch (error) {
+      console.error('Error saving address:', error);
+      Alert.alert('Error', 'Failed to save address. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -784,12 +756,13 @@ export default function AddAddress() {
             </View>
 
         <TouchableOpacity
-            style={styles.confirmButton}
+            style={[styles.confirmButton, isSaving && { opacity: 0.6 }]}
             onPress={handleConfirmAddress}
+            disabled={isSaving}
             activeOpacity={0.8}
           >
             <Text style={styles.confirmButtonText}>
-              {isEditMode ? 'Update Address' : `Add ${addressType === 'branch' ? 'Branch' : 'Warehouse'}`}
+              {isSaving ? 'Saving...' : isEditMode ? 'Update Address' : `Add ${addressType === 'branch' ? 'Branch' : 'Warehouse'}`}
           </Text>
         </TouchableOpacity>
         </ScrollView>

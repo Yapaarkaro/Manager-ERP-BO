@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   CheckCircle,
   Home,
@@ -32,33 +34,43 @@ const Colors = {
 };
 
 export default function SuccessScreen() {
-  // Log successful stock out completion
-  React.useEffect(() => {
-    console.log('=== STOCK OUT COMPLETED SUCCESSFULLY ===');
-    console.log('Completed at:', new Date().toISOString());
-    console.log('User can now view updated inventory levels');
-    console.log('==========================================');
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      safeRouter.replace('/dashboard');
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const handleGoToDashboard = () => {
     console.log('=== NAVIGATING TO DASHBOARD ===');
     console.log('Timestamp:', new Date().toISOString());
     console.log('===============================');
-    router.replace('/dashboard');
+    safeRouter.replace('/dashboard');
   };
 
   const handleViewInventory = () => {
     console.log('=== NAVIGATING TO INVENTORY ===');
     console.log('Timestamp:', new Date().toISOString());
     console.log('================================');
-    router.replace('/inventory');
+    safeRouter.replace('/inventory');
   };
 
   const handleNewStockOut = () => {
     console.log('=== STARTING NEW STOCK OUT ===');
     console.log('Timestamp:', new Date().toISOString());
     console.log('=============================');
-    router.replace('/inventory/stock-out');
+    safeRouter.replace('/inventory/stock-out');
   };
 
   return (
@@ -77,9 +89,9 @@ export default function SuccessScreen() {
 
         {/* Success Message */}
         <View style={styles.messageContainer}>
-          <Text style={styles.successTitle}>Stock Out Successful!</Text>
+          <Text style={styles.successTitle}>Write-Off Successful!</Text>
           <Text style={styles.successDescription}>
-            Your inventory has been updated successfully. The stock out has been recorded in your system.
+            Your inventory has been updated successfully. The write-off has been recorded in your system.
           </Text>
         </View>
 
@@ -97,7 +109,7 @@ export default function SuccessScreen() {
           <View style={styles.summaryItem}>
             <CheckCircle size={20} color={Colors.success} />
             <Text style={styles.summaryText}>
-              Stock out transaction has been recorded with all details
+              Write-off transaction has been recorded with all details
             </Text>
           </View>
 
@@ -139,9 +151,9 @@ export default function SuccessScreen() {
               <Package size={24} color={Colors.warning} />
             </View>
             <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Another Stock Out</Text>
+              <Text style={styles.actionTitle}>Another Write-Off</Text>
               <Text style={styles.actionDescription}>
-                Process another stock out transaction
+                Process another write-off transaction
               </Text>
             </View>
             <ArrowRight size={20} color={Colors.warning} />

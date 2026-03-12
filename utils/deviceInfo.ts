@@ -1,15 +1,14 @@
 /**
  * Device Information Collection Utility
- * Collects comprehensive device information using expo-device and other APIs
+ * Collects comprehensive device, network, storage, battery, and screen data
  */
 
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import { Platform, Dimensions, PixelRatio } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface DeviceSnapshot {
-  // Device Information
   deviceName?: string;
   deviceBrand?: string;
   deviceModel?: string;
@@ -18,80 +17,85 @@ export interface DeviceSnapshot {
   osName?: string;
   osVersion?: string;
   platformApiLevel?: number;
-  
-  // Network Information
+
   networkServiceProvider?: string;
   internetServiceProvider?: string;
+  networkType?: string;
   wifiName?: string;
   bluetoothName?: string;
-  
-  // Additional Device Details
+  ipAddress?: string;
+
   deviceId?: string;
   manufacturer?: string;
   totalMemory?: number;
   isDevice?: boolean;
   isEmulator?: boolean;
   isTablet?: boolean;
-  
-  // App Information
+
+  screenWidth?: number;
+  screenHeight?: number;
+  screenScale?: number;
+  pixelDensity?: number;
+
+  totalStorage?: number;
+  freeStorage?: number;
+
+  batteryLevel?: number;
+  batteryState?: string;
+
+  carrierName?: string;
+  mobileCountryCode?: string;
+  mobileNetworkCode?: string;
+
   appVersion?: string;
   appBuildNumber?: string;
+  expoSdkVersion?: string;
+  locale?: string;
+  timezone?: string;
 }
 
-/**
- * Collect comprehensive device information
- */
 export async function collectDeviceSnapshot(): Promise<DeviceSnapshot> {
   const snapshot: DeviceSnapshot = {};
 
   try {
-    // Basic Device Information
-    if (Device.deviceName) {
-      snapshot.deviceName = Device.deviceName;
-    }
-    
-    if (Device.brand) {
-      snapshot.deviceBrand = Device.brand;
-    }
-    
-    if (Device.modelName) {
-      snapshot.deviceModel = Device.modelName;
-    }
-    
-    if (Device.deviceType !== undefined && Device.deviceType !== null) {
+    if (Device.deviceName) snapshot.deviceName = Device.deviceName;
+    if (Device.brand) snapshot.deviceBrand = Device.brand;
+    if (Device.modelName) snapshot.deviceModel = Device.modelName;
+    if (Device.deviceType !== undefined && Device.deviceType !== null)
       snapshot.deviceType = String(Device.deviceType);
-    }
-    
-    if (Device.deviceYearClass) {
-      snapshot.deviceYearClass = Device.deviceYearClass;
-    }
-    
-    if (Device.osName) {
-      snapshot.osName = Device.osName;
-    }
-    
-    if (Device.osVersion) {
-      snapshot.osVersion = Device.osVersion;
-    }
-    
-    if (Device.platformApiLevel) {
-      snapshot.platformApiLevel = Device.platformApiLevel;
-    }
-    
-    // Device Capabilities
+    if (Device.deviceYearClass) snapshot.deviceYearClass = Device.deviceYearClass;
+    if (Device.osName) snapshot.osName = Device.osName;
+    if (Device.osVersion) snapshot.osVersion = Device.osVersion;
+    if (Device.platformApiLevel) snapshot.platformApiLevel = Device.platformApiLevel;
+    if (Device.manufacturer) snapshot.manufacturer = Device.manufacturer;
+
     snapshot.isDevice = Device.isDevice ?? false;
     snapshot.isEmulator = !Device.isDevice;
-    
     if (Device.deviceType !== undefined && Device.DeviceType) {
       snapshot.isTablet = Device.deviceType === Device.DeviceType.TABLET;
     }
-    
-    // Manufacturer (if available)
-    if (Device.manufacturer) {
-      snapshot.manufacturer = Device.manufacturer;
+
+    // Total RAM
+    if (Device.totalMemory) {
+      snapshot.totalMemory = Device.totalMemory;
     }
-    
-    // Device ID (using installation ID from Constants, with fallback)
+
+    // Screen dimensions
+    const screen = Dimensions.get('screen');
+    snapshot.screenWidth = Math.round(screen.width);
+    snapshot.screenHeight = Math.round(screen.height);
+    snapshot.screenScale = screen.scale;
+    snapshot.pixelDensity = PixelRatio.get();
+
+    // Locale & timezone
+    try {
+      if (typeof Intl !== 'undefined') {
+        snapshot.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        snapshot.locale = Intl.DateTimeFormat().resolvedOptions().locale;
+      }
+    } catch { /* non-critical */ }
+
+    // Device ID
     if (Constants.installationId) {
       snapshot.deviceId = Constants.installationId;
     } else {
@@ -114,110 +118,114 @@ export async function collectDeviceSnapshot(): Promise<DeviceSnapshot> {
           }
           snapshot.deviceId = deviceId;
         }
-      } catch {
-        // Non-critical: device ID generation failed
-      }
+      } catch { /* non-critical */ }
     }
-    
-    // App Information
-    if (Constants.expoConfig?.version) {
-      snapshot.appVersion = Constants.expoConfig.version;
-    }
-    
+
+    // App info
+    if (Constants.expoConfig?.version) snapshot.appVersion = Constants.expoConfig.version;
     if (Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode) {
-      snapshot.appBuildNumber = Platform.OS === 'ios' 
+      snapshot.appBuildNumber = Platform.OS === 'ios'
         ? Constants.expoConfig?.ios?.buildNumber?.toString()
         : Constants.expoConfig?.android?.versionCode?.toString();
     }
-    
-    // Network Information (Platform-specific)
-    if (Platform.OS === 'web') {
-      // Web-specific information
-      snapshot.internetServiceProvider = 'Web Browser';
-      
-      // Try to get connection info if available
-      if (typeof navigator !== 'undefined' && 'connection' in navigator) {
-        const connection = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-        if (connection) {
-          snapshot.internetServiceProvider = connection.effectiveType || 'Unknown';
-        }
-      }
-    } else {
-      // Mobile-specific information
-      // Note: Network service provider and WiFi name require additional permissions
-      // These may not be available on all platforms
-      snapshot.networkServiceProvider = 'Mobile Network';
-      
-      // WiFi and Bluetooth names typically require additional native modules
-      // For now, we'll leave these as optional and can be enhanced later
+    if (Constants.expoConfig?.sdkVersion) snapshot.expoSdkVersion = Constants.expoConfig.sdkVersion;
+
+    // --- Enhanced: Battery ---
+    if (Platform.OS !== 'web') {
+      try {
+        const Battery = require('expo-battery');
+        const level = await Battery.getBatteryLevelAsync();
+        if (level >= 0) snapshot.batteryLevel = Math.round(level * 100);
+
+        const state = await Battery.getBatteryStateAsync();
+        const stateMap: Record<number, string> = {
+          0: 'unknown', 1: 'unplugged', 2: 'charging', 3: 'full',
+        };
+        snapshot.batteryState = stateMap[state] || 'unknown';
+      } catch { /* expo-battery may not be available */ }
     }
-    
-    // Additional platform-specific information
+
+    // --- Enhanced: Cellular / carrier ---
+    if (Platform.OS !== 'web') {
+      try {
+        const Cellular = require('expo-cellular');
+        const carrierName = await Cellular.getCarrierNameAsync();
+        if (carrierName) snapshot.carrierName = carrierName;
+
+        const mcc = await Cellular.getMobileCountryCodeAsync();
+        if (mcc) snapshot.mobileCountryCode = mcc;
+
+        const mnc = await Cellular.getMobileNetworkCodeAsync();
+        if (mnc) snapshot.mobileNetworkCode = mnc;
+
+        snapshot.networkServiceProvider = carrierName || 'Unknown Carrier';
+      } catch { /* expo-cellular may not be available */ }
+    }
+
+    // --- Enhanced: Network ---
+    try {
+      const Network = require('expo-network');
+      const networkState = await Network.getNetworkStateAsync();
+      if (networkState) {
+        const typeMap: Record<string, string> = {
+          '0': 'none', '1': 'wifi', '2': 'cellular', '3': 'bluetooth', '4': 'ethernet', '5': 'wimax', '6': 'vpn', '99': 'other',
+        };
+        snapshot.networkType = typeMap[String(networkState.type)] || networkState.type?.toString() || 'unknown';
+        snapshot.internetServiceProvider = networkState.isInternetReachable ? 'Connected' : 'Offline';
+      }
+
+      if (Platform.OS !== 'web') {
+        const ip = await Network.getIpAddressAsync();
+        if (ip) snapshot.ipAddress = ip;
+      }
+    } catch { /* expo-network may not be available */ }
+
+    // --- Enhanced: Storage ---
+    if (Platform.OS !== 'web') {
+      try {
+        const FileSystem = require('expo-file-system');
+        const freeBytes = await FileSystem.getFreeDiskStorageAsync();
+        const totalBytes = await FileSystem.getTotalDiskCapacityAsync();
+        if (totalBytes > 0) snapshot.totalStorage = totalBytes;
+        if (freeBytes >= 0) snapshot.freeStorage = freeBytes;
+      } catch { /* expo-file-system may not be available */ }
+    }
+
+    // Platform-specific overrides
     if (Platform.OS === 'android') {
-      // Android-specific info
       snapshot.osName = 'Android';
     } else if (Platform.OS === 'ios') {
-      // iOS-specific info
       snapshot.osName = 'iOS';
     } else if (Platform.OS === 'web') {
-      // Web-specific info
       snapshot.osName = 'Web';
-      
-      // Try to detect browser and OS from user agent
       if (typeof navigator !== 'undefined') {
-        const userAgent = navigator.userAgent;
-        
-        // Detect browser
-        if (userAgent.includes('Chrome')) {
-          snapshot.deviceBrand = 'Chrome';
-        } else if (userAgent.includes('Firefox')) {
-          snapshot.deviceBrand = 'Firefox';
-        } else if (userAgent.includes('Safari')) {
-          snapshot.deviceBrand = 'Safari';
-        } else if (userAgent.includes('Edge')) {
-          snapshot.deviceBrand = 'Edge';
-        }
-        
-        // Detect OS from user agent
-        if (userAgent.includes('Windows')) {
-          snapshot.osName = 'Windows';
-        } else if (userAgent.includes('Mac')) {
-          snapshot.osName = 'macOS';
-        } else if (userAgent.includes('Linux')) {
-          snapshot.osName = 'Linux';
-        } else if (userAgent.includes('Android')) {
-          snapshot.osName = 'Android';
-        } else if (userAgent.includes('iPhone') || userAgent.includes('iPad')) {
-          snapshot.osName = 'iOS';
-        }
+        const ua = navigator.userAgent;
+        if (ua.includes('Chrome')) snapshot.deviceBrand = 'Chrome';
+        else if (ua.includes('Firefox')) snapshot.deviceBrand = 'Firefox';
+        else if (ua.includes('Safari')) snapshot.deviceBrand = 'Safari';
+        else if (ua.includes('Edge')) snapshot.deviceBrand = 'Edge';
+
+        if (ua.includes('Windows')) snapshot.osName = 'Windows';
+        else if (ua.includes('Mac')) snapshot.osName = 'macOS';
+        else if (ua.includes('Linux')) snapshot.osName = 'Linux';
+        else if (ua.includes('Android')) snapshot.osName = 'Android';
+        else if (ua.includes('iPhone') || ua.includes('iPad')) snapshot.osName = 'iOS';
       }
     }
-    
-    console.log('✅ Device snapshot collected:', snapshot);
-    
-  } catch (error) {
-    console.error('❌ Error collecting device snapshot:', error);
-  }
-  
+  } catch { /* non-critical */ }
+
   return snapshot;
 }
 
-/**
- * Get a simplified device identifier for logging
- */
 export function getDeviceIdentifier(): string {
   try {
     const parts: string[] = [];
-    
     if (Device.brand) parts.push(Device.brand);
     if (Device.modelName) parts.push(Device.modelName);
     if (Device.osName) parts.push(Device.osName);
     if (Device.osVersion) parts.push(Device.osVersion);
-    
     return parts.length > 0 ? parts.join(' ') : 'Unknown Device';
-  } catch (error) {
-    console.error('Error getting device identifier:', error);
+  } catch {
     return 'Unknown Device';
   }
 }
-

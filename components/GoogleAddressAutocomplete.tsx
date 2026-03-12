@@ -2,14 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   TextInput,
-  FlatList,
   TouchableOpacity,
   Text,
   StyleSheet,
   ActivityIndicator,
-  Platform,
+  ScrollView,
 } from 'react-native';
-import { MapPin, Navigation } from 'lucide-react-native';
+import { MapPin, Navigation, X } from 'lucide-react-native';
 import { getPlacePredictions, getPlaceDetails, extractAddressComponents } from '../services/googleMapsApi';
 
 interface AddressSuggestion {
@@ -40,9 +39,13 @@ const GoogleAddressAutocomplete: React.FC<GoogleAddressAutocompleteProps> = ({
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [addressSelected, setAddressSelected] = useState(false);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
+    if (addressSelected) return;
+
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
     }
@@ -61,7 +64,7 @@ const GoogleAddressAutocomplete: React.FC<GoogleAddressAutocompleteProps> = ({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [query, debounceMs]);
+  }, [query, debounceMs, addressSelected]);
 
   const searchPlaces = async (searchQuery: string) => {
     setIsLoading(true);
@@ -88,15 +91,15 @@ const GoogleAddressAutocomplete: React.FC<GoogleAddressAutocompleteProps> = ({
   const handleAddressSelect = async (suggestion: AddressSuggestion) => {
     setQuery(suggestion.description);
     setShowSuggestions(false);
+    setSuggestions([]);
+    setAddressSelected(true);
     setIsLoading(true);
 
     try {
       const placeDetails = await getPlaceDetails(suggestion.place_id);
       if (placeDetails) {
         const addressData = extractAddressComponents(placeDetails);
-        // Include the place name from the search suggestion for better premise extraction
         addressData.placeName = suggestion.main_text;
-        console.log('📍 Place name from suggestion:', suggestion.main_text);
         onAddressSelect(addressData);
       }
     } catch (error) {
@@ -106,68 +109,87 @@ const GoogleAddressAutocomplete: React.FC<GoogleAddressAutocompleteProps> = ({
     }
   };
 
-  const renderSuggestion = ({ item, index }: { item: AddressSuggestion; index: number }) => (
-    <TouchableOpacity
-      style={[
-        styles.suggestionItem,
-        index === suggestions.length - 1 && styles.lastSuggestionItem
-      ]}
-      onPress={() => handleAddressSelect(item)}
-      activeOpacity={0.6}
-    >
-      <View style={styles.suggestionIconContainer}>
-        <MapPin size={18} color="#3f66ac" strokeWidth={2.5} />
-      </View>
-      <View style={styles.suggestionContent}>
-        <Text style={styles.mainText} numberOfLines={1}>{item.main_text}</Text>
-        <Text style={styles.secondaryText} numberOfLines={1}>{item.secondary_text}</Text>
-      </View>
-      <View style={styles.suggestionArrow}>
-        <Navigation size={16} color="#94a3b8" />
-      </View>
-    </TouchableOpacity>
-  );
+  const handleFocus = () => {
+    if (addressSelected) {
+      setQuery('');
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setAddressSelected(false);
+    } else if (suggestions.length > 0) {
+      setShowSuggestions(true);
+    }
+  };
+
+  const handleClear = () => {
+    setQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setAddressSelected(false);
+    inputRef.current?.focus();
+  };
 
   return (
     <View style={[styles.container, containerStyle]}>
       <View style={[styles.inputContainer, style]}>
         <TextInput
+          ref={inputRef}
           style={[styles.input, inputStyle]}
           value={query}
-          onChangeText={setQuery}
+          onChangeText={(text) => {
+            if (addressSelected) {
+              setAddressSelected(false);
+            }
+            setQuery(text);
+          }}
           placeholder={placeholder}
           placeholderTextColor="#999"
           autoCorrect={false}
           autoCapitalize="none"
-          onFocus={() => {
-            if (suggestions.length > 0) {
-              setShowSuggestions(true);
-            }
-          }}
-          onBlur={() => {
-            // Delay hiding suggestions to allow for selection
-            setTimeout(() => setShowSuggestions(false), 200);
-          }}
+          onFocus={handleFocus}
         />
         {isLoading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color="#3f66ac" />
           </View>
         )}
+        {!isLoading && query.length > 0 && (
+          <TouchableOpacity style={styles.clearButton} onPress={handleClear} activeOpacity={0.6}>
+            <X size={16} color="#94a3b8" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {showSuggestions && suggestions.length > 0 && (
-        <View style={styles.suggestionsContainer}>
-          <FlatList
-            data={suggestions}
-            renderItem={renderSuggestion}
-            keyExtractor={(item) => item.place_id}
-            style={styles.suggestionsList}
+        <View style={styles.suggestionsWrapper}>
+          <ScrollView
+            style={styles.suggestionsContainer}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-          />
+            nestedScrollEnabled
+          >
+            {suggestions.map((item, index) => (
+              <TouchableOpacity
+                key={item.place_id}
+                style={[
+                  styles.suggestionItem,
+                  index === suggestions.length - 1 && styles.lastSuggestionItem
+                ]}
+                onPress={() => handleAddressSelect(item)}
+                activeOpacity={0.6}
+              >
+                <View style={styles.suggestionIconContainer}>
+                  <MapPin size={18} color="#3f66ac" strokeWidth={2.5} />
+                </View>
+                <View style={styles.suggestionContent}>
+                  <Text style={styles.mainText} numberOfLines={1}>{item.main_text}</Text>
+                  <Text style={styles.secondaryText} numberOfLines={1}>{item.secondary_text}</Text>
+                </View>
+                <View style={styles.suggestionArrow}>
+                  <Navigation size={16} color="#94a3b8" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
       )}
     </View>
@@ -196,6 +218,7 @@ const styles = StyleSheet.create({
   },
   input: {
     paddingHorizontal: 16,
+    paddingRight: 40,
     paddingVertical: 14,
     fontSize: 16,
     color: '#1e293b',
@@ -210,30 +233,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  suggestionsContainer: {
+  clearButton: {
     position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: '#ffffff',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  suggestionsWrapper: {
+    marginTop: 4,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-    marginTop: 4,
+    backgroundColor: '#ffffff',
     maxHeight: 280,
     shadowColor: '#3f66ac',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 8,
     elevation: 8,
-    zIndex: 1001,
     overflow: 'hidden',
   },
-  suggestionsList: {
-    flexGrow: 0,
+  suggestionsContainer: {
+    maxHeight: 280,
   },
   suggestionItem: {
     flexDirection: 'row',

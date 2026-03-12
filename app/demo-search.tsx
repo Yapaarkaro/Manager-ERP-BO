@@ -27,14 +27,7 @@ const Colors = {
   }
 };
 
-// Mock data for demonstration
-const mockItems = [
-  { id: '1', title: 'Sales Invoice INV-001', subtitle: 'Customer: John Doe', amount: '₹15,000' },
-  { id: '2', title: 'Sales Invoice INV-002', subtitle: 'Customer: Jane Smith', amount: '₹25,000' },
-  { id: '3', title: 'Return RET-001', subtitle: 'Customer: Bob Johnson', amount: '₹5,000' },
-  { id: '4', title: 'Purchase Order PO-001', subtitle: 'Supplier: ABC Corp', amount: '₹50,000' },
-  { id: '5', title: 'Stock Item iPhone 14', subtitle: 'Category: Electronics', amount: '₹129,999' },
-];
+const mockItems: { id: string; title: string; subtitle: string; amount: string }[] = [];
 
 export default function DemoSearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');

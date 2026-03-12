@@ -5,14 +5,33 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { CheckCircle, Home, CreditCard } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
 
 export default function SubscriptionSuccessScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      e.preventDefault();
+      safeRouter.replace('/dashboard');
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   useEffect(() => {
     Animated.parallel([
@@ -31,11 +50,11 @@ export default function SubscriptionSuccessScreen() {
   }, []);
 
   const handleGoToDashboard = () => {
-    router.push('/dashboard');
+    safeRouter.replace('/dashboard');
   };
 
   const handleViewSubscription = () => {
-    router.push('/subscription');
+    safeRouter.push('/subscription');
   };
 
   return (

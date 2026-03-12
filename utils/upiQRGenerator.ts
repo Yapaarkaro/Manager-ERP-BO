@@ -244,44 +244,5 @@ export function formatUPIAmountDisplay(amount: number): string {
  * Example usage and logging helper
  */
 export function logUPIPaymentExample() {
-  console.log('=== UPI Payment URL Examples ===');
-  
-  // Example 1: Invoice payment
-  const invoiceUrl = generateInvoiceUPIURL(
-    'business@paytm',
-    'ABC Electronics',
-    1234.56,
-    'INV-2024-001',
-    'https://example.com/invoice/INV-2024-001'
-  );
-  console.log('Invoice Payment URL:', invoiceUrl);
-  
-  // Example 2: Rounded amount
-  const roundedUrl = generateInvoiceUPIURL(
-    'business@paytm',
-    'ABC Electronics',
-    1234.56,
-    'INV-2024-002',
-    undefined,
-    true
-  );
-  console.log('Rounded Amount URL:', roundedUrl);
-  
-  // Example 3: General payment
-  const generalUrl = generateGeneralUPIURL(
-    'business@paytm',
-    'ABC Electronics',
-    500.00,
-    'Service payment'
-  );
-  console.log('General Payment URL:', generalUrl);
-  
-  // Example 4: No amount (user enters amount)
-  const noAmountUrl = generateGeneralUPIURL(
-    'business@paytm',
-    'ABC Electronics'
-  );
-  console.log('No Amount URL:', noAmountUrl);
-  
-  console.log('================================');
+  // No-op: examples removed. Use generateInvoiceUPIURL / generateGeneralUPIURL directly.
 }

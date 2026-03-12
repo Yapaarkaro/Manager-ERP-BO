@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -42,8 +43,9 @@ export default function RefundMethodScreen() {
   const invoice = JSON.parse(invoiceData as string);
   const items = JSON.parse(selectedItems as string);
   const reasons = JSON.parse(itemReasons as string);
+  const isSupplierReturn = invoice.returnType === 'supplier';
   
-  const [selectedRefundMethod, setSelectedRefundMethod] = useState<RefundMethod>('same');
+  const [selectedRefundMethod, setSelectedRefundMethod] = useState<RefundMethod>(isSupplierReturn ? 'bank_transfer' : 'same');
 
   const getOriginalPaymentMethodText = () => {
     switch (invoice.paymentMethod) {
@@ -79,7 +81,7 @@ export default function RefundMethodScreen() {
       return;
     }
 
-    router.push({
+    safeRouter.push({
       pathname: '/new-return/confirmation',
       params: {
         invoiceData: JSON.stringify(invoice),
@@ -159,7 +161,7 @@ export default function RefundMethodScreen() {
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Refund Method</Text>
+          <Text style={styles.headerTitle}>{isSupplierReturn ? 'Credit Method' : 'Refund Method'}</Text>
           
           <View style={styles.headerRight}>
             <Text style={styles.returnAmountHeader}>
@@ -192,38 +194,73 @@ export default function RefundMethodScreen() {
 
         {/* Refund Methods */}
         <View style={styles.refundMethodsContainer}>
-          <Text style={styles.sectionTitle}>Select Refund Method</Text>
+          <Text style={styles.sectionTitle}>{isSupplierReturn ? 'Select Credit/Adjustment Method' : 'Select Refund Method'}</Text>
           
-          {renderRefundMethodCard(
-            'same',
-            getOriginalPaymentIcon(),
-            `Refund to ${getOriginalPaymentMethodText()}`,
-            'Refund to the same payment method used originally',
-            true
+          {isSupplierReturn ? (
+            <>
+              {renderRefundMethodCard(
+                'bank_transfer',
+                Building2,
+                'Deduct from Payables',
+                'Adjust the return amount against outstanding payables to this supplier',
+                true
+              )}
+              
+              {renderRefundMethodCard(
+                'same',
+                getOriginalPaymentIcon(),
+                'Credit Note',
+                'Supplier issues a credit note for future purchases'
+              )}
+              
+              {renderRefundMethodCard(
+                'cash',
+                Banknote,
+                'Cash Refund',
+                'Receive cash refund from supplier'
+              )}
+              
+              {renderRefundMethodCard(
+                'upi',
+                Smartphone,
+                'UPI Transfer',
+                'Receive refund via UPI from supplier'
+              )}
+            </>
+          ) : (
+            <>
+              {renderRefundMethodCard(
+                'same',
+                getOriginalPaymentIcon(),
+                `Refund to ${getOriginalPaymentMethodText()}`,
+                'Refund to the same payment method used originally',
+                true
+              )}
+              
+              {invoice.paymentMethod !== 'cash' && renderRefundMethodCard(
+                'cash',
+                Banknote,
+                'Cash Refund',
+                'Provide cash refund to customer'
+              )}
+              
+              {invoice.paymentMethod !== 'upi' && renderRefundMethodCard(
+                'upi',
+                Smartphone,
+                'UPI Transfer',
+                'Transfer refund via UPI'
+              )}
+            </>
           )}
           
-          {invoice.paymentMethod !== 'cash' && renderRefundMethodCard(
-            'cash',
-            Banknote,
-            'Cash Refund',
-            'Provide cash refund to customer'
-          )}
-          
-          {invoice.paymentMethod !== 'upi' && renderRefundMethodCard(
-            'upi',
-            Smartphone,
-            'UPI Transfer',
-            'Transfer refund via UPI'
-          )}
-          
-          {invoice.paymentMethod !== 'card' && renderRefundMethodCard(
+          {!isSupplierReturn && invoice.paymentMethod !== 'card' && renderRefundMethodCard(
             'card',
             CreditCard,
             'Card Refund',
             'Process refund to customer\'s card'
           )}
           
-          {invoice.paymentMethod !== 'others' && renderRefundMethodCard(
+          {!isSupplierReturn && invoice.paymentMethod !== 'others' && renderRefundMethodCard(
             'bank_transfer',
             Building2,
             'Bank Transfer',

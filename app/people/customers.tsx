@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -6,17 +6,23 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Image,
   Linking,
   Alert,
-  ActivityIndicator,
+  Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
-import { getCustomers } from '@/services/backendApi';
+import { getCustomers, getAllCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
+import { getInitials as getNameInitials, getAvatarColor } from '@/utils/formatters';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { onTransactionChange } from '@/utils/transactionEvents';
 
 const Colors = {
   background: '#FFFFFF',
@@ -54,10 +60,14 @@ interface Customer {
   pendingOrders: number;
   cancelledOrders: number;
   returnedOrders: number;
+  overdueOrders?: number;
   totalValue: number;
+  totalPaid?: number;
+  totalDue?: number;
   averageOrderValue: number;
   returnRate: number;
-  lastOrderDate: string;
+  avgPaymentDays?: number;
+  lastOrderDate: string | null;
   joinedDate: string;
   status: 'active' | 'inactive' | 'suspended';
   paymentTerms?: string;
@@ -65,7 +75,7 @@ interface Customer {
   categories: string[];
 }
 
-const DEFAULT_AVATAR = 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1';
+const DEFAULT_AVATAR = '';
 
 function mapDbCustomerToLocal(db: any): Customer {
   const custType = (db.customer_type === 'business' || db.customer_type === 'individual')
@@ -113,28 +123,116 @@ export default function CustomersScreen() {
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'business' | 'individual' | 'high_score'>('all');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true);
-    const { success, customers: apiCustomers, error } = await getCustomers();
-    if (success && apiCustomers) {
-      setCustomers(apiCustomers.map(mapDbCustomerToLocal));
-    } else {
-      if (error) console.error('Failed to fetch customers:', error);
-      setCustomers([]);
+  const mountedRef = useRef(true);
+
+  const fetchCustomers = useCallback(async (showLoader = true) => {
+    if (showLoader) setLoading(true);
+    try {
+      const [custResult, metricsResult, invoicesResult, returnsResult] = await Promise.all([
+        getCustomers(),
+        typeof getAllCustomerMetrics === 'function' ? getAllCustomerMetrics() : Promise.resolve({ success: false }),
+        typeof getInvoices === 'function' ? getInvoices() : Promise.resolve({ success: false }),
+        typeof getReturns === 'function' ? getReturns().catch(() => ({ success: false })) : Promise.resolve({ success: false }),
+      ]);
+      if (!mountedRef.current) return;
+      if (custResult.success && custResult.customers) {
+        const metricsMap = new Map<string, any>();
+        if (metricsResult.success && metricsResult.metrics) {
+          metricsResult.metrics.forEach((m: any) => metricsMap.set(m.customer_id, m));
+        }
+
+        const categoryMap = new Map<string, Set<string>>();
+        const invoiceCountByCustomer = new Map<string, number>();
+        if (invoicesResult.success && invoicesResult.invoices) {
+          invoicesResult.invoices.forEach((inv: any) => {
+            if (!inv.customer_id) return;
+            invoiceCountByCustomer.set(inv.customer_id, (invoiceCountByCustomer.get(inv.customer_id) || 0) + 1);
+            const items = inv.items || [];
+            items.forEach((item: any) => {
+              const cat = item.category || item.product_category;
+              if (cat) {
+                if (!categoryMap.has(inv.customer_id)) categoryMap.set(inv.customer_id, new Set());
+                categoryMap.get(inv.customer_id)!.add(cat);
+              }
+            });
+          });
+        }
+
+        const returnCountByCustomer = new Map<string, number>();
+        if ((returnsResult as any).success && (returnsResult as any).returns) {
+          (returnsResult as any).returns.forEach((ret: any) => {
+            const custId = ret.customer_id;
+            if (custId) returnCountByCustomer.set(custId, (returnCountByCustomer.get(custId) || 0) + 1);
+          });
+        }
+
+        const enriched = custResult.customers.map((db: any) => {
+          const base = mapDbCustomerToLocal(db);
+          const m = metricsMap.get(base.id);
+          if (m) {
+            const totalInv = m.total_invoices || 0;
+            const paidInv = m.paid_invoices || 0;
+            const onTimeCount = m.on_time_payment_count || 0;
+            const lateCount = m.late_payment_count || 0;
+            base.totalOrders = totalInv;
+            base.completedOrders = paidInv;
+            base.pendingOrders = m.pending_invoices || 0;
+            base.overdueOrders = m.overdue_invoices || 0;
+            base.totalValue = m.total_value || 0;
+            base.totalPaid = m.total_paid || 0;
+            base.totalDue = m.total_due || 0;
+            base.customerScore = m.payment_score || 0;
+            base.onTimePayment = (onTimeCount + lateCount > 0)
+              ? Math.round((onTimeCount / (onTimeCount + lateCount)) * 100) : 0;
+            base.averageOrderValue = totalInv > 0 ? Math.round(m.total_value / totalInv) : 0;
+            base.lastOrderDate = m.last_invoice_date || base.lastOrderDate;
+            base.avgPaymentDays = m.avg_payment_duration_days || 0;
+            base.satisfactionRating = m.satisfaction_rating || db.satisfaction_rating || 0;
+          }
+
+          const returnCount = returnCountByCustomer.get(base.id) || 0;
+          const invoiceCount = invoiceCountByCustomer.get(base.id) || base.totalOrders || 0;
+          base.returnRate = invoiceCount > 0 ? Math.round((returnCount / invoiceCount) * 100) : 0;
+          base.returnedOrders = returnCount;
+
+          const cats = categoryMap.get(base.id);
+          if (cats && cats.size > 0) {
+            base.categories = Array.from(cats);
+          }
+          return base;
+        });
+        setCustomers(enriched);
+      } else {
+        if (custResult.error) console.error('Failed to fetch customers:', custResult.error);
+        setCustomers([]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch customers:', err);
+      if (mountedRef.current) setCustomers([]);
     }
-    setLoading(false);
+    if (mountedRef.current) setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchCustomers();
+  useFocusEffect(useCallback(() => { fetchCustomers(); }, [fetchCustomers]));
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    fetchCustomers(false).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
   }, [fetchCustomers]);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchCustomers();
-    }, [fetchCustomers])
-  );
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsubscribe = onTransactionChange((source) => {
+      if (mountedRef.current && (source === 'customer' || !source)) {
+        fetchCustomers(false);
+      }
+    });
+    return () => { mountedRef.current = false; unsubscribe(); };
+  }, [fetchCustomers]);
 
   // Apply filters whenever customers or filter changes
   React.useEffect(() => {
@@ -192,7 +290,7 @@ export default function CustomersScreen() {
   };
 
   const handleCustomerPress = (customer: Customer) => {
-    router.push({
+    safeRouter.push({
       pathname: '/people/customer-details',
       params: {
         customerId: customer.id,
@@ -204,20 +302,20 @@ export default function CustomersScreen() {
   const handleAddCustomer = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('add customer')) return;
-    router.push('/people/add-customer');
+    safeRouter.push('/people/add-customer');
   };
 
   const handleChatPress = (customer: Customer) => {
-    if (customer.customerType === 'business') {
-      router.push({
-        pathname: '/people/customer-chat',
-        params: {
-          customerId: customer.id,
-          customerName: customer.businessName || customer.name,
-          customerAvatar: customer.avatar
-        }
-      });
-    }
+    safeRouter.push({
+      pathname: '/people/customer-chat',
+      params: {
+        customerId: customer.id,
+        customerName: customer.businessName || customer.name,
+        customerAvatar: customer.avatar || '',
+        customerPhone: customer.mobile || (customer as any).mobile_number || (customer as any).phone || '',
+        isOnManager: (customer as any).business_id ? 'true' : 'false',
+      }
+    });
   };
 
   const handlePhoneCall = (phoneNumber: string) => {
@@ -257,7 +355,9 @@ export default function CustomersScreen() {
   };
 
   const formatDate = (dateString: string) => {
+    if (!dateString) return 'N/A';
     const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'N/A';
     return date.toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'short',
@@ -287,10 +387,15 @@ export default function CustomersScreen() {
         {/* Header */}
         <View style={styles.customerHeader}>
           <View style={styles.customerLeft}>
-            <Image 
-              source={{ uri: customer.avatar }}
-              style={styles.customerAvatar}
-            />
+            {customer.avatar ? (
+              <Image source={{ uri: customer.avatar }} style={styles.customerAvatar} />
+            ) : (
+              <View style={[styles.customerAvatar, { backgroundColor: getAvatarColor(customer.customerType === 'business' ? customer.businessName : customer.name), justifyContent: 'center', alignItems: 'center' }]}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                  {getNameInitials(customer.customerType === 'business' ? customer.businessName || customer.name : customer.name)}
+                </Text>
+              </View>
+            )}
             <View style={styles.customerInfo}>
               <Text style={styles.customerName}>
                 {customer.customerType === 'business' ? customer.businessName : customer.name}
@@ -418,23 +523,25 @@ export default function CustomersScreen() {
         </View>
 
         {/* Categories */}
-        <View style={styles.categoriesSection}>
-          <Text style={styles.categoriesLabel}>Purchase Categories:</Text>
-          <View style={styles.categoriesContainer}>
-            {customer.categories.slice(0, 3).map((category, index) => (
-              <View key={index} style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>{category}</Text>
-              </View>
-            ))}
-            {customer.categories.length > 3 && (
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>
-                  +{customer.categories.length - 3}
-                </Text>
-              </View>
-            )}
+        {customer.categories.length > 0 && (
+          <View style={styles.categoriesSection}>
+            <Text style={styles.categoriesLabel}>Purchase Categories:</Text>
+            <View style={styles.categoriesContainer}>
+              {customer.categories.slice(0, 3).map((category, index) => (
+                <View key={index} style={styles.categoryChip}>
+                  <Text style={styles.categoryChipText}>{category}</Text>
+                </View>
+              ))}
+              {customer.categories.length > 3 && (
+                <View style={styles.categoryChip}>
+                  <Text style={styles.categoryChipText}>
+                    +{customer.categories.length - 3}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Contact Info */}
         <View style={styles.contactSection}>
@@ -528,6 +635,20 @@ export default function CustomersScreen() {
         </View>
       </View>
 
+      {/* Search Bar - Inline between summary and content */}
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search customers..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+        </View>
+      </View>
+
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
         <ScrollView 
@@ -573,32 +694,30 @@ export default function CustomersScreen() {
       </View>
 
       {/* Customers List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredCustomers.length === 0 ? (
-          <View style={styles.emptyState}>
-            {loading ? (
-              <>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.emptyStateTitle}>Loading customers...</Text>
-              </>
-            ) : (
-              <>
-                <User size={64} color={Colors.textLight} />
-                <Text style={styles.emptyStateTitle}>No Customers Found</Text>
-                <Text style={styles.emptyStateText}>
-                  {searchQuery ? 'No customers match your search criteria' : 'No customers available'}
-                </Text>
-              </>
-            )}
-          </View>
-        ) : (
-          filteredCustomers.map(renderCustomerCard)
-        )}
-      </ScrollView>
+      {loading ? (
+        <View style={styles.scrollView}>
+          <ListSkeleton itemCount={6} showSearch={false} showFilter={false} />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredCustomers}
+          renderItem={({item}) => renderCustomerCard(item)}
+          keyExtractor={(item) => item.id}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <User size={64} color={Colors.textLight} />
+              <Text style={styles.emptyStateTitle}>No Customers Found</Text>
+              <Text style={styles.emptyStateText}>
+                {searchQuery ? 'No customers match your search criteria' : 'No customers available'}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       {/* Add Customer FAB */}
       <TouchableOpacity
@@ -610,28 +729,7 @@ export default function CustomersScreen() {
         <Text style={styles.addCustomerText}>Add Customer</Text>
       </TouchableOpacity>
 
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search customers..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Advanced filter')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      
     </SafeAreaView>
   );
 }
@@ -973,35 +1071,20 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     paddingHorizontal: 4,
   },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+  inlineSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
   },
   searchInput: {
     flex: 1,
@@ -1009,21 +1092,22 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginLeft: 12,
     marginRight: 12,
-    
-  },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+    padding: 0,
+    fontWeight: '500',
+    ...Platform.select({
+      web: {
+        textShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+      },
+      default: {
+        textShadowColor: 'rgba(0, 0, 0, 0.1)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+      },
+    }),
   },
   addCustomerFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: 24,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',

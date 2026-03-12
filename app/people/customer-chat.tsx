@@ -9,10 +9,13 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Send, Search, X, Phone, Video, Paperclip, Camera, Mic, Check, CheckCheck } from 'lucide-react-native';
+import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -47,7 +50,8 @@ interface ChatMessage {
 const mockMessages: ChatMessage[] = [];
 
 export default function CustomerChatScreen() {
-  const { customerId, customerName, customerAvatar } = useLocalSearchParams();
+  const { customerId, customerName, customerAvatar, customerPhone, isOnManager } = useLocalSearchParams();
+  const customerOnManager = isOnManager === 'true';
   const [messages, setMessages] = useState<ChatMessage[]>(mockMessages);
   const [newMessage, setNewMessage] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -219,10 +223,16 @@ export default function CustomerChatScreen() {
             </TouchableOpacity>
             
             <View style={styles.headerInfo}>
-              <Image 
-                source={{ uri: customerAvatar as string }}
-                style={styles.headerAvatar}
-              />
+              {customerAvatar ? (
+                <Image
+                  source={{ uri: customerAvatar as string }}
+                  style={styles.headerAvatar}
+                />
+              ) : (
+                <View style={[styles.headerAvatar, { backgroundColor: getAvatarColor(customerName as string), justifyContent: 'center', alignItems: 'center' }]}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>{getInitials(customerName as string)}</Text>
+                </View>
+              )}
               <View style={styles.headerText}>
                 <Text style={styles.headerName}>{customerName}</Text>
                 <Text style={styles.headerStatus}>Online</Text>
@@ -288,58 +298,94 @@ export default function CustomerChatScreen() {
           )}
         </SafeAreaView>
 
-        {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {displayMessages.map((message, index) => renderMessage(message, index))}
-        </ScrollView>
-
-        {/* Message Input */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputRow}>
+        {!customerOnManager ? (
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
+            <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.grey[200], justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+              <Send size={28} color={Colors.textLight} />
+            </View>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text, textAlign: 'center', marginBottom: 8 }}>
+              {customerName} is not on Manager
+            </Text>
+            <Text style={{ fontSize: 14, color: Colors.textLight, textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+              Invite them to join Manager so you can chat, share invoices, and manage orders seamlessly.
+            </Text>
             <TouchableOpacity
-              style={styles.attachButton}
-              onPress={() => console.log('Attach file')}
+              style={{ backgroundColor: Colors.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+              onPress={() => {
+                const phone = (customerPhone as string || '').replace(/\D/g, '');
+                const msg = encodeURIComponent(`Hi ${customerName}, I'm using Manager ERP to manage my business. Join Manager to view invoices and manage your orders! Download here: https://managererp.app/invite`);
+                if (phone.length >= 10) {
+                  Linking.openURL(`sms:${phone}?body=${msg}`).catch(() =>
+                    Linking.openURL(`whatsapp://send?phone=${phone}&text=${msg}`).catch(() =>
+                      Alert.alert('Cannot Send', 'Please send the invite link manually.')
+                    )
+                  );
+                } else {
+                  Alert.alert('No Phone Number', 'This customer does not have a phone number on file.');
+                }
+              }}
               activeOpacity={0.7}
             >
-              <Paperclip size={20} color={Colors.textLight} />
+              <Send size={16} color="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600' }}>Send Invite</Text>
             </TouchableOpacity>
-
-            <View style={styles.textInputContainer}>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type a message..."
-                placeholderTextColor={Colors.textLight}
-                value={newMessage}
-                onChangeText={setNewMessage}
-                multiline
-                maxLength={1000}
-              />
-            </View>
-
-            {newMessage.trim() ? (
-              <TouchableOpacity
-                style={styles.sendButton}
-                onPress={handleSendMessage}
-                activeOpacity={0.7}
-              >
-                <Send size={20} color="#ffffff" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.micButton}
-                onPress={() => console.log('Voice message')}
-                activeOpacity={0.7}
-              >
-                <Mic size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            )}
           </View>
-        </View>
+        ) : (
+          <>
+            {/* Messages */}
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {displayMessages.map((message, index) => renderMessage(message, index))}
+            </ScrollView>
+
+            {/* Message Input */}
+            <View style={styles.inputContainer}>
+              <View style={styles.inputRow}>
+                <TouchableOpacity
+                  style={styles.attachButton}
+                  onPress={() => console.log('Attach file')}
+                  activeOpacity={0.7}
+                >
+                  <Paperclip size={20} color={Colors.textLight} />
+                </TouchableOpacity>
+
+                <View style={styles.textInputContainer}>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor={Colors.textLight}
+                    value={newMessage}
+                    onChangeText={setNewMessage}
+                    multiline
+                    maxLength={1000}
+                  />
+                </View>
+
+                {newMessage.trim() ? (
+                  <TouchableOpacity
+                    style={styles.sendButton}
+                    onPress={handleSendMessage}
+                    activeOpacity={0.7}
+                  >
+                    <Send size={20} color="#ffffff" />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.micButton}
+                    onPress={() => console.log('Voice message')}
+                    activeOpacity={0.7}
+                  >
+                    <Mic size={20} color={Colors.textLight} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </View>
   );

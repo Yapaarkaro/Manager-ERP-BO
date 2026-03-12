@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,22 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
+  Alert,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, ShoppingCart, FileText, X } from 'lucide-react-native';
-import { dataStore, Sale, SaleItem } from '@/utils/dataStore';
-import { createInvoice, getNextInvoiceNumber } from '@/services/backendApi';
+import { Sale, SaleItem } from '@/utils/dataStore';
+import { createInvoice, getNextInvoiceNumber, createCustomer, createInAppNotification } from '@/services/backendApi';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { paymentDataBridge, saleFlowBridge } from '@/utils/productStore';
+import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
+import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
+import { supabase } from '@/lib/supabase';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -40,91 +50,64 @@ const generateInvoiceNumber = () => {
 
 export default function SaleSuccessScreen() {
   const { paymentData } = useLocalSearchParams();
-  let payment: any = null;
-  try { payment = paymentData ? JSON.parse(paymentData as string) : null; } catch { payment = null; }
+
+  const paymentRef = useRef<any>(null);
+  if (!paymentRef.current) {
+    const bridgeData = paymentDataBridge.consumePaymentData();
+    if (bridgeData) {
+      paymentRef.current = bridgeData;
+    } else {
+      try { paymentRef.current = paymentData ? JSON.parse(paymentData as string) : null; } catch { paymentRef.current = null; }
+    }
+  }
+  const payment = paymentRef.current;
+  const invoiceExtrasRef = useRef(saleFlowBridge.getInvoiceExtras?.() || undefined);
+
   const [showInvoice, setShowInvoice] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState(() => generateInvoiceNumber());
   const hasSavedRef = useRef(false);
+  const createdInvoiceIdRef = useRef<string | undefined>(undefined);
+  const { businessData } = useBusinessData();
+  const { isStaff, staffId, staffName, staffBusinessId } = usePermissions();
 
-  // Safety check for payment data
-  if (!payment || !payment.customer || !payment.cartItems || !Array.isArray(payment.cartItems)) {
-    console.error('=== ERROR: Invalid payment data ===');
-    console.error('Payment data:', payment);
-    console.error('Customer:', payment?.customer);
-    console.error('CartItems:', payment?.cartItems);
-    console.error('====================================');
-    
-    return (
-      <View style={styles.container}>
-        <SafeAreaView style={styles.headerSafeArea}>
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.headerTitle}>← Back</Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>⚠️ Invalid Payment Data</Text>
-          <Text style={styles.errorMessage}>
-            The payment data is missing or invalid. Please go back and try again.
-          </Text>
-          <TouchableOpacity
-            style={styles.errorButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.errorButtonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const isValid = payment && payment.customer && payment.cartItems && Array.isArray(payment.cartItems);
+  const navigation = useNavigation();
 
-  // Debug: Log customer data
-  React.useEffect(() => {
-    // Safety check for customer data
-    if (!payment.customer) {
-      console.error('=== ERROR: Customer data is missing ===');
-      console.error('Payment data:', payment);
-      console.error('====================================');
-      return;
-    }
-
-    console.log('=== SUCCESS SCREEN CUSTOMER DATA ===');
-    console.log('Customer:', payment.customer);
-    console.log('Payment Terms:', payment.customer.paymentTerms);
-    console.log('Business Name:', payment.customer.businessName);
-    console.log('Is Business Customer:', payment.customer.isBusinessCustomer);
-    console.log('====================================');
+  // Prevent hardware/gesture back - redirect to dashboard instead
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      safeRouter.replace('/dashboard');
+      return true;
+    });
+    return () => backHandler.remove();
   }, []);
 
-  // Log successful sale completion, add to data store, and create backend invoice
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (e.data.action.type === 'GO_BACK' || e.data.action.type === 'POP') {
+        e.preventDefault();
+        safeRouter.replace('/dashboard');
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
+    saleFlowBridge.clear();
+  }, []);
+
   React.useEffect(() => {
-    // Safety check for customer data
-    if (!payment.customer) {
-      console.error('=== ERROR: Customer data is missing ===');
-      console.error('Payment data:', payment);
-      console.error('====================================');
-      return;
-    }
-
-    // Safety check for cartItems
-    if (!payment.cartItems || !Array.isArray(payment.cartItems)) {
-      console.error('=== ERROR: cartItems is missing or invalid ===');
-      console.error('Payment data:', payment);
-      console.error('CartItems:', payment.cartItems);
-      console.error('==============================================');
-      return;
-    }
-
-    if (hasSavedRef.current) return;
+    if (!isValid || hasSavedRef.current) return;
     hasSavedRef.current = true;
 
     const runSave = async () => {
+      // Ensure session is fresh before making backend calls
+      try {
+        await supabase.auth.refreshSession();
+      } catch (e) {
+        console.error('Session refresh failed:', e);
+      }
+
       // Try to get invoice number from backend first; fallback to local
       let finalInvoiceNumber = invoiceNumber;
       const nextResult = await getNextInvoiceNumber();
@@ -133,30 +116,31 @@ export default function SaleSuccessScreen() {
         setInvoiceNumber(finalInvoiceNumber);
       }
 
-      console.log('=== SALE COMPLETED SUCCESSFULLY ===');
-      console.log('Invoice Number:', finalInvoiceNumber);
-      console.log('Customer:', payment.customer.name);
-      console.log('Customer Type:', payment.customer.customerType);
-      console.log('Total Amount:', formatAmount(payment.amount || payment.total || 0));
-      console.log('Payment Method:', getPaymentMethodText());
-      console.log('Items Count:', payment.cartItems.length);
-      console.log('Completed at:', new Date().toISOString());
-      payment.cartItems.forEach((item: any, index: number) => {
-        console.log(`Item ${index + 1}:`);
-        console.log('  Product Name:', item.name);
-        console.log('  Quantity:', item.quantity);
-        console.log('  Unit Price:', formatAmount(item.price));
-        console.log('  Total:', formatAmount(item.price * item.quantity));
-        console.log('  Tax Rate:', item.taxRate + '%');
-        console.log('  HSN Code:', item.hsnCode);
-        console.log('  Batch Number:', item.batchNumber);
-        console.log('  Primary Unit:', item.primaryUnit);
-      });
-      console.log('==================================');
+      // Save customer to backend if new
+      let customerId = payment.customer.id;
+      if (!customerId || customerId.startsWith('CUST_')) {
+        try {
+          const custResult = await createCustomer({
+            name: payment.customer.name,
+            businessName: payment.customer.businessName || undefined,
+            customerType: payment.customer.isBusinessCustomer ? 'business' : 'individual',
+            mobile: payment.customer.mobile,
+            email: payment.customer.email || undefined,
+            gstin: payment.customer.gstin || undefined,
+            address: payment.customer.address || payment.customer.businessAddress || undefined,
+            paymentTerms: payment.customer.paymentTerms || undefined,
+          });
+          if (custResult.success && custResult.customer?.id) {
+            customerId = custResult.customer.id;
+          }
+        } catch (e) {
+          console.error('Customer save failed:', e);
+        }
+      }
 
       // Create sale data
       const saleItems: SaleItem[] = payment.cartItems.map((item: any) => ({
-        productId: item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        productId: item.productDbId || item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         productName: item.name,
         quantity: item.quantity,
         unitPrice: item.price,
@@ -174,14 +158,27 @@ export default function SaleSuccessScreen() {
       const subtotal = saleItems.reduce((sum, item) => sum + item.totalPrice, 0);
       const taxAmountTotal = saleItems.reduce((sum, item) => sum + item.taxAmount, 0);
       const cessAmountTotal = saleItems.reduce((sum, item) => sum + (item.cessAmount ?? 0), 0);
-      const totalAmount = subtotal + taxAmountTotal + cessAmountTotal;
-      const paidAmount = payment.amount || payment.total || 0;
-      const balanceAmount = payment.balance || 0;
+      const roundOffAmount = payment.roundOffAmount || 0;
+      const totalAmount = subtotal + taxAmountTotal + cessAmountTotal + roundOffAmount;
+
+      // Determine actual paid amount based on payment type
+      let paidAmount = totalAmount;
+      let balanceAmount = 0;
+      if (payment.paymentType === 'add_to_receivables') {
+        paidAmount = payment.cashAmount || 0;
+        balanceAmount = totalAmount - paidAmount;
+      } else if (payment.paymentType === 'part_payment') {
+        paidAmount = payment.cashAmount || 0;
+        balanceAmount = totalAmount - paidAmount;
+      } else {
+        paidAmount = totalAmount;
+        balanceAmount = 0;
+      }
 
       const sale: Sale = {
         id: `SALE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         invoiceNumber: finalInvoiceNumber,
-        customerId: payment.customer.id || `CUST_${Date.now()}`,
+        customerId: customerId || `CUST_${Date.now()}`,
         customerName: payment.customer.name,
         customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
         items: saleItems,
@@ -198,10 +195,7 @@ export default function SaleSuccessScreen() {
         createdAt: new Date().toISOString(),
       };
 
-      // Add sale to data store (local fallback)
-      dataStore.addSale(sale);
-
-      // Create invoice in backend (primary)
+      // Create invoice in backend
       const paymentStatus: 'paid' | 'partial' | 'unpaid' =
         paidAmount >= totalAmount ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
       const paymentMethodStr =
@@ -209,7 +203,7 @@ export default function SaleSuccessScreen() {
 
       const createResult = await createInvoice({
         invoiceNumber: finalInvoiceNumber,
-        customerId: payment.customer.id,
+        customerId: customerId || undefined,
         customerName: payment.customer.name,
         customerType: payment.customer.customerType || (payment.customer.isBusinessCustomer ? 'business' : 'individual'),
         items: saleItems.map(item => ({
@@ -232,15 +226,40 @@ export default function SaleSuccessScreen() {
         subtotal,
         taxAmount: taxAmountTotal,
         cessAmount: cessAmountTotal,
+        roundOffAmount,
         totalAmount,
         paidAmount,
         balanceAmount,
         paymentMethod: paymentMethodStr,
         paymentStatus,
         invoiceDate: new Date().toISOString(),
+        staffId: staffId || undefined,
+        staffName: staffName || undefined,
+        invoiceExtras: invoiceExtrasRef.current,
+        bankAccountId: payment.bankAccount || undefined,
       });
       if (!createResult.success) {
         console.error('Backend createInvoice failed:', createResult.error);
+      }
+
+      if (createResult.success && isStaff && staffId && staffBusinessId) {
+        createInAppNotification({
+          businessId: staffBusinessId,
+          recipientId: 'owner',
+          recipientType: 'owner',
+          title: `New Sale by ${staffName || 'Staff'}`,
+          message: `Invoice ${finalInvoiceNumber} - ${formatCurrencyINR(totalAmount)}`,
+          type: 'info',
+          category: 'sale',
+          sourceStaffId: staffId,
+          sourceStaffName: staffName || undefined,
+          relatedEntityType: 'invoice',
+          relatedEntityId: createResult.invoice?.id,
+        }).catch(() => {});
+      }
+
+      if (createResult.success) {
+        createdInvoiceIdRef.current = createResult.invoice?.id;
       }
     };
 
@@ -280,19 +299,79 @@ export default function SaleSuccessScreen() {
     }
   };
 
-  const handleDownloadInvoice = () => {
-    console.log('Download invoice:', invoiceNumber);
-    // Implement download functionality
+  const buildSalePDFData = (): InvoicePDFData => {
+    const customer = payment?.customer;
+    const items = payment?.cartItems || [];
+    const invoiceExtras = invoiceExtrasRef.current;
+    return {
+      type: 'sale',
+      invoiceNumber,
+      invoiceDate: new Date().toISOString(),
+      business: {
+        name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
+        gstin: businessData?.business?.tax_id || '',
+        phone: businessData?.business?.phone,
+      },
+      customer: customer ? {
+        name: customer.name || '',
+        address: customer.address || customer.businessAddress,
+        gstin: customer.gstin,
+        phone: customer.mobile,
+        businessName: customer.businessName,
+        isBusinessCustomer: customer.isBusinessCustomer,
+      } : undefined,
+      items: items.map((item: any) => ({
+        name: item.name || item.productName || '',
+        hsnCode: item.hsnCode || item.hsn_code,
+        quantity: Number(item.quantity) || 1,
+        unit: item.primaryUnit || item.unit,
+        rate: Number(item.price || item.sellingPrice || item.rate) || 0,
+        discount: Number(item.discount) || 0,
+        taxRate: Number(item.gstRate || item.taxRate) || 0,
+        taxAmount: Number(item.taxAmount || item.gstAmount) || 0,
+        cessAmount: Number(item.cessAmount) || 0,
+        total: Number(item.totalWithTax || item.total || item.lineTotal) || 0,
+      })),
+      subtotal: items.reduce((s: number, i: any) => s + (Number(i.lineTotal || i.total || 0)), 0),
+      taxAmount: items.reduce((s: number, i: any) => s + (Number(i.gstAmount || i.taxAmount || 0)), 0),
+      totalAmount: Number(payment?.total || payment?.amount) || 0,
+      paidAmount: Number(payment?.total || payment?.amount) || 0,
+      paymentMethod: payment?.method,
+      paymentStatus: 'paid',
+      invoiceExtras,
+      invoiceId: createdInvoiceIdRef.current,
+      businessId: businessData?.business?.id,
+    };
+  };
+
+  const handleDownloadInvoice = async () => {
+    try {
+      const pdfData = buildSalePDFData();
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, invoiceNumber);
+    } catch (error: any) {
+      Alert.alert('Download Failed', error.message || 'Could not generate PDF');
+    }
   };
 
   const handleShareInvoice = () => {
-    console.log('Share invoice:', invoiceNumber);
-    // Implement share functionality
+    const pdfData = buildSalePDFData();
+    showShareOptions({
+      invoiceNumber,
+      invoiceId: createdInvoiceIdRef.current,
+      businessId: businessData?.business?.id,
+      invoiceType: 'sale',
+      invoicePdfData: pdfData,
+    });
   };
 
-  const handlePrintInvoice = () => {
-    console.log('Print invoice:', invoiceNumber);
-    // Implement print functionality
+  const handlePrintInvoice = async () => {
+    try {
+      const pdfData = buildSalePDFData();
+      await printInvoice(pdfData);
+    } catch (error: any) {
+      Alert.alert('Print Failed', error.message || 'Could not print invoice');
+    }
   };
 
   const handleViewInvoice = () => {
@@ -300,12 +379,43 @@ export default function SaleSuccessScreen() {
   };
 
   const handleNewSale = () => {
-    router.push('/new-sale');
+    safeRouter.push('/new-sale');
   };
 
   const handleGoToDashboard = () => {
-    router.push('/dashboard');
+    safeRouter.replace('/dashboard');
   };
+
+  if (!isValid) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => safeRouter.replace('/dashboard')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.headerTitle}>← Dashboard</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Invalid Payment Data</Text>
+          <Text style={styles.errorMessage}>
+            The payment data is missing or invalid. Please return to the dashboard and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.errorButton}
+            onPress={() => safeRouter.replace('/dashboard')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.errorButtonText}>Go to Dashboard</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -470,10 +580,9 @@ export default function SaleSuccessScreen() {
               {/* Business Details */}
               <View style={styles.businessSection}>
                 <Text style={styles.sectionTitle}>Business Details:</Text>
-                <Text style={styles.companyName}>Your Company Name</Text>
-                <Text style={styles.companyAddress}>123 Business Street</Text>
-                <Text style={styles.companyAddress}>City, State - PIN</Text>
-                <Text style={styles.companyGSTIN}>GSTIN: 12ABCDE1234F1Z5</Text>
+                <Text style={styles.companyName}>{businessData?.legal_name || ''}</Text>
+                {businessData?.address ? <Text style={styles.companyAddress}>{businessData.address}</Text> : null}
+                {businessData?.tax_id ? <Text style={styles.companyGSTIN}>GSTIN: {businessData.tax_id}</Text> : null}
               </View>
 
               {/* Customer Details */}

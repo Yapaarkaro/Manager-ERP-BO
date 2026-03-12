@@ -11,18 +11,17 @@ import {
   Alert,
   ScrollView,
   Modal,
-  Keyboard,
-  Dimensions,
 } from 'react-native';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Warehouse, ChevronDown, Search, X, Plus, User, Phone, Package } from 'lucide-react-native';
-import { dataStore, BusinessAddress, getStateCode, getGSTINStateCode } from '@/utils/dataStore';
+import { BusinessAddress, getStateCode, getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { createAddress, createStaff } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -97,11 +96,15 @@ export default function WarehouseDetailsScreen() {
     fiscalYear,
   } = useLocalSearchParams();
   
-  // Get warehouse count for dynamic header
+  const parsedExistingAddresses = React.useMemo(() => {
+    try {
+      const raw = JSON.parse((existingAddresses || allAddresses || '[]') as string);
+      return mapLocationsToAddresses(raw);
+    } catch { return []; }
+  }, [existingAddresses, allAddresses]);
+
   const getWarehouseCount = () => {
-    const allAddresses = dataStore.getAddresses();
-    const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
-    return warehouseAddresses.length + 1; // +1 for the new warehouse being added
+    return parsedExistingAddresses.filter(addr => addr.type === 'warehouse').length + 1;
   };
 
   // Set status bar to dark for white header
@@ -121,8 +124,7 @@ export default function WarehouseDetailsScreen() {
   const [selectedState, setSelectedState] = useState<{ name: string; code: string } | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
-  const inputLayouts = useRef<Map<string, { y: number; height: number }>>(new Map());
-  const submitButtonLayout = useRef<{ y: number; height: number } | null>(null);
+  
 
   // Update state when prefilled values are received
   useEffect(() => {
@@ -254,66 +256,7 @@ export default function WarehouseDetailsScreen() {
     setManagerPhone(cleaned);
   };
 
-  // Helper function to handle input layout measurement
-  const handleInputLayout = (inputName: string) => (event: any) => {
-    const { y, height } = event.nativeEvent.layout;
-    inputLayouts.current.set(inputName, { y, height });
-  };
-
-  // Helper function to handle submit button layout
-  const handleSubmitButtonLayout = (event: any) => {
-    const { y, height } = event.nativeEvent.layout;
-    submitButtonLayout.current = { y, height };
-  };
-
-  // Helper function to scroll to input when focused - smart scroll that keeps button visible
-  const handleInputFocus = (inputName: string) => {
-    if (Platform.OS !== 'web' && scrollViewRef.current) {
-      // Small delay to ensure keyboard is shown and layout is measured
-      setTimeout(() => {
-        const inputLayout = inputLayouts.current.get(inputName);
-        const buttonLayout = submitButtonLayout.current;
-        
-        if (inputLayout && buttonLayout) {
-          // Estimate keyboard height (typically 300-400px on mobile, numeric is usually smaller ~250px)
-          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
-          const screenHeight = Dimensions.get('window').height;
-          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
-          
-          // Calculate scroll position to show input above keyboard with some padding
-          const inputBottom = inputLayout.y + inputLayout.height;
-          const targetScrollY = inputBottom - visibleAreaHeight + 100; // 100px padding from top
-          
-          // Ensure button stays visible above keyboard
-          const buttonTop = buttonLayout.y;
-          const maxScrollY = buttonTop - visibleAreaHeight + buttonLayout.height + 20; // Keep button visible with 20px padding
-          
-          // Scroll to the minimum of target (to show input) and max (to keep button visible)
-          const finalScrollY = Math.min(Math.max(0, targetScrollY), Math.max(0, maxScrollY));
-          
-          scrollViewRef.current?.scrollTo({
-            y: finalScrollY,
-            animated: true,
-          });
-        } else if (inputLayout) {
-          // If button layout not measured, just scroll to show input
-          const estimatedKeyboardHeight = inputName.includes('Phone') || inputName.includes('Pincode') ? 250 : 350;
-          const screenHeight = Dimensions.get('window').height;
-          const visibleAreaHeight = screenHeight - estimatedKeyboardHeight;
-          const inputBottom = inputLayout.y + inputLayout.height;
-          const targetScrollY = inputBottom - visibleAreaHeight + 100;
-          
-          scrollViewRef.current?.scrollTo({
-            y: Math.max(0, targetScrollY),
-            animated: true,
-          });
-        } else {
-          // Fallback: scroll to end if layout not measured yet
-          scrollViewRef.current?.scrollToEnd({ animated: true });
-        }
-      }, 300);
-    }
-  };
+  // Removed custom scroll-on-focus logic; KeyboardAvoidingView handles keyboard avoidance.
 
 
   const isFormValid = () => {
@@ -335,8 +278,7 @@ export default function WarehouseDetailsScreen() {
       return;
     }
 
-    // Check for duplicate addresses BEFORE setting loading state
-    const allAddresses = dataStore.getAddresses();
+    const allAddresses = parsedExistingAddresses;
     console.log('🔍 Checking for duplicates among', allAddresses.length, 'existing addresses');
     console.log('📍 New warehouse address to check:', {
       addressLine1: addressLine1.trim(),
@@ -421,9 +363,6 @@ export default function WarehouseDetailsScreen() {
 
     console.log('Creating new warehouse:', newWarehouse);
     
-    // ✅ Save to local dataStore IMMEDIATELY so it shows up in UI
-    dataStore.addAddress(newWarehouse);
-    
     try {
       // Prepare address JSON for backend
       // Include all additional lines (not just doorNumber)
@@ -463,55 +402,51 @@ export default function WarehouseDetailsScreen() {
         await geocodePromise;
       }
 
-      // Save to backend (async, update local dataStore when complete)
-      createAddress({
-        name: warehouseName.trim(),
-        addressJson,
-        type: 'warehouse',
-        managerName: managerName.trim() || undefined,
-        managerMobileNumber: managerPhone || undefined,
-        isPrimary: false,
-        latitude: addressLatitude,
-        longitude: addressLongitude,
-      }).then(async (result) => {
+      // Save to backend - await to ensure it's saved before navigating
+      let backendResult: any = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const result = await createAddress({
+          name: warehouseName.trim(),
+          addressJson,
+          type: 'warehouse',
+          managerName: managerName.trim() || undefined,
+          managerMobileNumber: managerPhone || undefined,
+          isPrimary: false,
+          latitude: addressLatitude,
+          longitude: addressLongitude,
+        });
         if (result.success && result.address) {
-          console.log('✅ Warehouse created in backend:', result.address);
-          // Update local address with backend ID
-          const updatedAddress = { ...newWarehouse, backendId: result.address.id };
-          const index = dataStore.getAddresses().findIndex(addr => addr.id === newWarehouse.id);
-          if (index !== -1) {
-            dataStore.updateAddress(newWarehouse.id, updatedAddress);
-          }
-          
-          // ✅ Create staff from manager info directly in backend (backend is source of truth)
-          // Note: This is non-blocking - if it fails, signup continues
-          if (managerName.trim() && managerPhone) {
-            // Run in background - don't await to avoid blocking signup
-            createStaff({
-              name: managerName.trim(),
-              mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
-              role: 'Warehouse Manager',
-              locationId: result.address.id, // Use backend address ID
-              locationType: 'warehouse',
-              locationName: warehouseName.trim(),
-            }).then((staffResult) => {
-              if (staffResult.success) {
-                console.log('✅ Staff created from warehouse manager in backend:', managerName.trim());
-              } else {
-                console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
-                // Staff will still be created when they visit the staff screen
-              }
-            }).catch((staffError) => {
-              console.warn('⚠️ Staff creation error (non-blocking):', staffError);
-              // Don't block the flow - staff can be created later
-            });
-          }
-        } else {
-          console.warn('⚠️ Backend create failed:', result.error);
+          backendResult = result.address;
+          console.log('✅ Warehouse saved with backend ID:', result.address.id);
+          break;
         }
-      }).catch((error) => {
-        console.error('Error creating warehouse in backend:', error);
-      });
+        if (attempt < 2) {
+          console.warn(`⚠️ Warehouse create attempt ${attempt} failed (${result.error}), retrying...`);
+          await new Promise(r => setTimeout(r, 1000));
+        } else {
+          console.error('❌ Warehouse creation failed after retries:', result.error);
+        }
+      }
+
+      // Create staff from manager info (non-blocking)
+      if (backendResult && managerName.trim() && managerPhone) {
+        createStaff({
+          name: managerName.trim(),
+          mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
+          role: 'Warehouse Manager',
+          locationId: backendResult.id,
+          locationType: 'warehouse',
+          locationName: warehouseName.trim(),
+        }).then((staffResult) => {
+          if (staffResult.success) {
+            console.log('✅ Staff created from warehouse manager in backend:', managerName.trim());
+          } else {
+            console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
+          }
+        }).catch((staffError) => {
+          console.warn('⚠️ Staff creation error (non-blocking):', staffError);
+        });
+      }
     } catch (error) {
       console.error('Error preparing warehouse for backend:', error);
     }
@@ -520,49 +455,29 @@ export default function WarehouseDetailsScreen() {
     const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
     clearBusinessDataCache();
     
-    // Navigate immediately without delay for instant UX
+    const updatedAddresses = JSON.stringify([...parsedExistingAddresses, newWarehouse]);
+
     setIsLoading(false);
     if (fromSummary === 'true') {
-      // User came from business summary, navigate back with all data
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/business-summary',
         params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
-          allBankAccounts,
-          initialCashBalance,
-          invoicePrefix,
-          invoicePattern,
-          startingInvoiceNumber,
-          fiscalYear,
+          type, value, gstinData, name, businessName, businessType, customBusinessType,
+          allAddresses: updatedAddresses,
+          allBankAccounts, initialCashBalance, invoicePrefix, invoicePattern, startingInvoiceNumber, fiscalYear,
         }
       });
     } else if (type && value) {
-      // User is in signup flow, go to address confirmation
-      // Use replace to prevent going back to warehouse details screen
-      router.replace({
+      safeRouter.replace({
         pathname: '/auth/address-confirmation',
         params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          mobile,
-          allAddresses: JSON.stringify(dataStore.getAddresses()),
+          type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+          allAddresses: updatedAddresses,
         }
       });
     } else {
       // User is not in signup flow, go to settings
-      router.push('/settings');
+      safeRouter.push('/settings');
     }
   };
 
@@ -641,7 +556,7 @@ export default function WarehouseDetailsScreen() {
                     <Text style={styles.label}>Warehouse Name *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('warehouseName')}
+                    
                   >
                     <Warehouse size={20} color="#64748b" style={styles.inputIcon} />
                     <CapitalizedTextInput
@@ -654,7 +569,7 @@ export default function WarehouseDetailsScreen() {
                       })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
-                      onFocus={() => handleInputFocus('warehouseName')}
+                      
                     />
                   </View>
                 </View>
@@ -663,7 +578,7 @@ export default function WarehouseDetailsScreen() {
                   <Text style={styles.label}>Door Number / Building Name *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('doorNumber')}
+                    
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -675,7 +590,7 @@ export default function WarehouseDetailsScreen() {
                       })}
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
-                      onFocus={() => handleInputFocus('doorNumber')}
+                      
                     />
                   </View>
                 </View>
@@ -684,7 +599,7 @@ export default function WarehouseDetailsScreen() {
                   <Text style={styles.label}>Address Line 1 *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('addressLine1')}
+                    
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -694,7 +609,7 @@ export default function WarehouseDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
-                      onFocus={() => handleInputFocus('addressLine1')}
+                      
                     />
                   </View>
                 </View>
@@ -703,7 +618,7 @@ export default function WarehouseDetailsScreen() {
                   <Text style={styles.label}>Address Line 2 *</Text>
                   <View 
                     style={styles.inputContainer}
-                    onLayout={handleInputLayout('addressLine2')}
+                    
                   >
                     <CapitalizedTextInput
                       style={styles.input}
@@ -713,7 +628,7 @@ export default function WarehouseDetailsScreen() {
                       placeholderTextColor="#999999"
                       autoCapitalize="words"
                       editable={true}
-                      onFocus={() => handleInputFocus('addressLine2')}
+                      
                     />
                   </View>
                 </View>
@@ -735,7 +650,7 @@ export default function WarehouseDetailsScreen() {
                     </View>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout(`additionalLine${index}`)}
+                      
                     >
                       <CapitalizedTextInput
                         style={styles.input}
@@ -745,7 +660,7 @@ export default function WarehouseDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
-                        onFocus={() => handleInputFocus(`additionalLine${index}`)}
+                        
                       />
                     </View>
                   </View>
@@ -770,7 +685,7 @@ export default function WarehouseDetailsScreen() {
                     <Text style={styles.label}>City *</Text>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout('city')}
+                      
                     >
                       <CapitalizedTextInput
                         style={[
@@ -789,7 +704,7 @@ export default function WarehouseDetailsScreen() {
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
                         editable={true}
-                        onFocus={() => handleInputFocus('city')}
+                        
                       />
                     </View>
                   </View>
@@ -798,7 +713,7 @@ export default function WarehouseDetailsScreen() {
                     <Text style={styles.label}>Pincode *</Text>
                     <View 
                       style={styles.inputContainer}
-                      onLayout={handleInputLayout('pincode')}
+                      
                     >
                       <TextInput
                         style={styles.input}
@@ -808,7 +723,7 @@ export default function WarehouseDetailsScreen() {
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={6}
-                        onFocus={() => handleInputFocus('pincode')}
+                        
                       />
                     </View>
                   </View>
@@ -841,7 +756,7 @@ export default function WarehouseDetailsScreen() {
                     <Text style={styles.contactLabel}>Warehouse Manager</Text>
                     <View 
                       style={[styles.inputContainer, styles.contactInputContainer]}
-                      onLayout={handleInputLayout('managerName')}
+                      
                     >
                       <User size={20} color="#ffc754" style={styles.inputIcon} />
                       <CapitalizedTextInput
@@ -851,7 +766,7 @@ export default function WarehouseDetailsScreen() {
                         placeholder="Manager name (optional)"
                         placeholderTextColor="#999999"
                         autoCapitalize="words"
-                        onFocus={() => handleInputFocus('managerName')}
+                        
                       />
                     </View>
                   </View>
@@ -863,7 +778,7 @@ export default function WarehouseDetailsScreen() {
                         styles.inputContainer,
                         styles.contactInputContainer
                       ]}
-                      onLayout={handleInputLayout('managerPhone')}
+                      
                     >
                       <Phone size={20} color="#ffc754" style={styles.inputIcon} />
                       <TextInput
@@ -884,7 +799,7 @@ export default function WarehouseDetailsScreen() {
                         placeholderTextColor="#999999"
                         keyboardType="numeric"
                         maxLength={10}
-                        onFocus={() => handleInputFocus('managerPhone')}
+                        
                       />
                     </View>
                   </View>
@@ -900,7 +815,7 @@ export default function WarehouseDetailsScreen() {
                 onPress={handleSubmit}
                 disabled={!isFormValid() || isLoading}
                 activeOpacity={0.8}
-                onLayout={handleSubmitButtonLayout}
+                
               >
                 <Text style={[
                   styles.submitButtonText,
@@ -1058,7 +973,7 @@ export default function WarehouseDetailsScreen() {
                       setShowDuplicateModal(false);
                       // Navigate to edit the existing address
                       if (duplicateAddressInfo) {
-                        router.push({
+                        safeRouter.push({
                           pathname: '/edit-address-simple',
                           params: {
                             editAddressId: duplicateAddressInfo.id,
@@ -1118,46 +1033,45 @@ export default function WarehouseDetailsScreen() {
                               updatedAt: new Date().toISOString(),
                             };
 
-                            dataStore.addAddress(newWarehouse);
-                            
+                            createAddress({
+                              name: newWarehouse.name,
+                              addressJson: {
+                                doorNumber: newWarehouse.doorNumber,
+                                addressLine1: newWarehouse.addressLine1,
+                                addressLine2: newWarehouse.addressLine2,
+                                city: newWarehouse.city,
+                                pincode: newWarehouse.pincode,
+                                stateName: newWarehouse.stateName,
+                                stateCode: newWarehouse.stateCode,
+                              },
+                              type: 'warehouse',
+                              managerName: newWarehouse.manager,
+                              managerMobileNumber: newWarehouse.phone,
+                              isPrimary: false,
+                            }).catch(() => {});
+
+                            const dupUpdatedAddresses = JSON.stringify([...parsedExistingAddresses, newWarehouse]);
+
                             setTimeout(() => {
                               if (fromSummary === 'true') {
-                                router.replace({
+                                safeRouter.replace({
                                   pathname: '/auth/business-summary',
                                   params: {
-                                    type,
-                                    value,
-                                    gstinData,
-                                    name,
-                                    businessName,
-                                    businessType,
-                                    customBusinessType,
-                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
-                                    allBankAccounts,
-                                    initialCashBalance,
-                                    invoicePrefix,
-                                    invoicePattern,
-                                    startingInvoiceNumber,
-                                    fiscalYear,
+                                    type, value, gstinData, name, businessName, businessType, customBusinessType,
+                                    allAddresses: dupUpdatedAddresses,
+                                    allBankAccounts, initialCashBalance, invoicePrefix, invoicePattern, startingInvoiceNumber, fiscalYear,
                                   }
                                 });
                               } else if (type && value) {
-                                router.replace({
+                                safeRouter.replace({
                                   pathname: '/auth/address-confirmation',
                                   params: {
-                                    type,
-                                    value,
-                                    gstinData,
-                                    name,
-                                    businessName,
-                                    businessType,
-                                    customBusinessType,
-                                    mobile,
-                                    allAddresses: JSON.stringify(dataStore.getAddresses()),
+                                    type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+                                    allAddresses: dupUpdatedAddresses,
                                   }
                                 });
                               } else {
-                                router.push('/settings');
+                                safeRouter.push('/settings');
                               }
                               setIsLoading(false);
                               setDuplicateAddressInfo(null);

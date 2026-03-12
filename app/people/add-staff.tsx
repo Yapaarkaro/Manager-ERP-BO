@@ -10,6 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -25,15 +26,27 @@ import {
   Shield,
   Users,
   ChevronDown,
+  ChevronUp,
   Search,
   X,
   Check,
-  MessageSquare
+  MessageSquare,
+  Hash,
+  ShoppingCart,
+  Package,
+  Wallet,
+  BarChart3,
+  UserCog,
+  Crown,
+  Clock,
+  Locate,
+  Radio,
 } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { dataStore, Staff as DataStoreStaff } from '@/utils/dataStore';
-import { createStaff, updateStaff } from '@/services/backendApi';
+import { createStaff, updateStaff, getStaff, invalidateApiCache } from '@/services/backendApi';
 import { getInputFocusStyles } from '@/utils/platformUtils';
+import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
+import TimeInputWithPicker from '@/components/TimeInputWithPicker';
 
 const Colors = {
   background: '#FFFFFF',
@@ -77,14 +90,58 @@ const departments = [
 ];
 
 const permissions = [
-  { id: 'sales', label: 'Sales Management', description: 'Create and manage sales transactions' },
-  { id: 'inventory', label: 'Inventory Management', description: 'Manage stock and inventory' },
-  { id: 'customer_management', label: 'Customer Management', description: 'Manage customer information' },
-  { id: 'payment_processing', label: 'Payment Processing', description: 'Process payments and refunds' },
-  { id: 'reports', label: 'Reports Access', description: 'View and generate reports' },
-  { id: 'staff_management', label: 'Staff Management', description: 'Manage other staff members' },
-  { id: 'settings', label: 'Settings Access', description: 'Access system settings' },
+  {
+    id: 'sales',
+    label: 'Sales Management',
+    icon: ShoppingCart,
+    color: '#059669',
+    description: 'Staff will be able to create sales invoices only.',
+  },
+  {
+    id: 'inventory',
+    label: 'Inventory Management',
+    icon: Package,
+    color: '#0EA5E9',
+    description: 'Staff will be able to create sales, purchase, and return invoices, manage stock-in entries, and create write-off entries.',
+  },
+  {
+    id: 'customer_management',
+    label: 'Customer Management',
+    icon: Users,
+    color: '#8B5CF6',
+    description: 'Staff will be able to access all customer data and manage their profiles, addresses, and order history.',
+  },
+  {
+    id: 'payment_processing',
+    label: 'Payment Processing',
+    icon: Wallet,
+    color: '#D97706',
+    description: 'Staff will be able to access all supplier and customer details, view payables and receivables, update bank and cash transactions, and add income and expenses.',
+  },
+  {
+    id: 'reports',
+    label: 'Reports Access',
+    icon: BarChart3,
+    color: '#EC4899',
+    description: 'Staff will be able to access all classified business reports — P&L, balance sheet, cashbook, transactions, profit margins, receivables, payables, and business health details.',
+  },
+  {
+    id: 'staff_management',
+    label: 'Staff Management',
+    icon: UserCog,
+    color: '#6366F1',
+    description: 'Staff will be able to access all staff details and update, edit, or delete them.',
+  },
+  {
+    id: 'master_access',
+    label: 'Master Access',
+    icon: Crown,
+    color: '#DC2626',
+    description: 'This gives the staff full access to everything the business owner has — complete control over all business operations and settings.',
+  },
 ];
+
+const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
 interface StaffFormData {
   name: string;
@@ -95,6 +152,7 @@ interface StaffFormData {
   department: string;
   customDepartment: string;
   address: string;
+  employeeId: string;
   basicSalary: string;
   allowances: string;
   emergencyContactName: string;
@@ -103,6 +161,17 @@ interface StaffFormData {
   permissions: string[];
   monthlySalesTarget: string;
   monthlyInvoiceTarget: string;
+  workStartTime: string;
+  workEndTime: string;
+  workingDays: string[];
+  attendanceMode: 'geofence' | 'manual';
+  geofenceRadius: string;
+}
+
+function generateEmployeeId() {
+  const prefix = 'EMP';
+  const number = Math.floor(Math.random() * 9000) + 1000;
+  return `${prefix}${number}`;
 }
 
 export default function AddStaffScreen() {
@@ -137,6 +206,7 @@ export default function AddStaffScreen() {
     department: '',
     customDepartment: '',
     address: '',
+    employeeId: editMode ? '' : generateEmployeeId(),
     basicSalary: '',
     allowances: '',
     emergencyContactName: '',
@@ -145,7 +215,14 @@ export default function AddStaffScreen() {
     permissions: [],
     monthlySalesTarget: '',
     monthlyInvoiceTarget: '',
+    workStartTime: '09:00',
+    workEndTime: '18:00',
+    workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    attendanceMode: 'geofence',
+    geofenceRadius: '100',
   });
+
+  const [useCustomEmployeeId, setUseCustomEmployeeId] = useState(false);
 
   const [selectedLocation, setSelectedLocation] = useState<string>(prefillLocationId || '');
   const [showLocationModal, setShowLocationModal] = useState(false);
@@ -153,13 +230,15 @@ export default function AddStaffScreen() {
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
-  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [expandedPermission, setExpandedPermission] = useState<string | null>(null);
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [roleSearch, setRoleSearch] = useState('');
   const [departmentSearch, setDepartmentSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingEdit, setIsLoadingEdit] = useState(editMode);
   const [generatedEmployeeId, setGeneratedEmployeeId] = useState('');
   const [generatedOtp, setGeneratedOtp] = useState('');
+  const [existingVerificationCode, setExistingVerificationCode] = useState<string | null>(null);
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
   const roleSearchRef = useRef<TextInput>(null);
@@ -190,13 +269,32 @@ export default function AddStaffScreen() {
     setShowDepartmentModal(false);
   };
 
+  const allPermissionIds = permissions.map(p => p.id);
+
   const handlePermissionToggle = (permissionId: string) => {
     const currentPermissions = formData.permissions;
-    if (currentPermissions.includes(permissionId)) {
-      updateFormData('permissions', currentPermissions.filter(p => p !== permissionId));
-    } else {
-      updateFormData('permissions', [...currentPermissions, permissionId]);
+    const isCurrentlySelected = currentPermissions.includes(permissionId);
+
+    if (permissionId === 'master_access') {
+      if (isCurrentlySelected) {
+        updateFormData('permissions', []);
+      } else {
+        updateFormData('permissions', [...allPermissionIds]);
+      }
+      return;
     }
+
+    let next: string[];
+    if (isCurrentlySelected) {
+      next = currentPermissions.filter(p => p !== permissionId && p !== 'master_access');
+    } else {
+      next = [...currentPermissions, permissionId];
+      const nonMasterIds = allPermissionIds.filter(id => id !== 'master_access');
+      if (nonMasterIds.every(id => next.includes(id))) {
+        next = [...allPermissionIds];
+      }
+    }
+    updateFormData('permissions', next);
   };
 
   const handleMobileChange = (text: string) => {
@@ -219,12 +317,19 @@ export default function AddStaffScreen() {
     updateFormData(field, cleaned);
   };
 
+  const handleWorkingDayToggle = (day: string) => {
+    const current = formData.workingDays;
+    if (current.includes(day)) {
+      updateFormData('workingDays', current.filter(d => d !== day));
+    } else {
+      updateFormData('workingDays', [...current, day]);
+    }
+  };
+
   const isFormValid = () => {
     return (
       formData.name.trim().length > 0 &&
       formData.mobile.length === 10 &&
-      formData.email.trim().length > 0 &&
-      formData.email.includes('@') &&
       formData.role.trim().length > 0 &&
       (formData.role !== 'Others' || formData.customRole.trim().length > 0) &&
       formData.department.trim().length > 0 &&
@@ -237,15 +342,62 @@ export default function AddStaffScreen() {
     );
   };
 
-  const generateEmployeeId = () => {
-    const prefix = 'EMP';
-    const number = Math.floor(Math.random() * 9000) + 1000;
-    return `${prefix}${number}`;
-  };
-
   const generateOtp = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
   };
+
+  const getCleanStaffFields = () => ({
+    name: formData.name.trim(),
+    mobile: formData.mobile,
+    email: formData.email.trim() || undefined,
+    role: formData.role === 'Others' ? formData.customRole.trim() : formData.role,
+    department: formData.department === 'Others' ? formData.customDepartment.trim() : formData.department,
+    address: formData.address.trim() || undefined,
+    employeeId: formData.employeeId.trim() || undefined,
+    locationId: selectedLocation || undefined,
+    locationType: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.type : undefined,
+    locationName: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.name : undefined,
+    basicSalary: formData.basicSalary ? parseFloat(formData.basicSalary) : undefined,
+    allowances: formData.allowances ? parseFloat(formData.allowances) : undefined,
+    emergencyContactName: formData.emergencyContactName.trim() || undefined,
+    emergencyContactRelation: formData.emergencyContactRelation.trim() || undefined,
+    emergencyContactPhone: formData.emergencyContactPhone || undefined,
+    permissions: formData.permissions,
+    monthlySalesTarget: formData.monthlySalesTarget ? parseFloat(formData.monthlySalesTarget) : undefined,
+    monthlyInvoiceTarget: formData.monthlyInvoiceTarget ? parseFloat(formData.monthlyInvoiceTarget) : undefined,
+    workStartTime: formData.workStartTime || undefined,
+    workEndTime: formData.workEndTime || undefined,
+    workingDays: formData.workingDays,
+    attendanceMode: formData.attendanceMode,
+    geofenceRadius: formData.geofenceRadius ? parseInt(formData.geofenceRadius) : 100,
+  });
+
+  const getSnakeCaseFields = (employeeId?: string, verificationCode?: string) => ({
+    name: formData.name.trim(),
+    mobile: formData.mobile,
+    email: formData.email.trim() || null,
+    role: formData.role === 'Others' ? formData.customRole.trim() : formData.role,
+    department: formData.department === 'Others' ? formData.customDepartment.trim() : formData.department,
+    address: formData.address.trim() || null,
+    ...(employeeId ? { employee_id: employeeId } : {}),
+    ...(verificationCode ? { verification_code: verificationCode } : {}),
+    location_id: selectedLocation || null,
+    location_type: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.type : null,
+    location_name: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.name : null,
+    basic_salary: formData.basicSalary ? parseFloat(formData.basicSalary) : null,
+    allowances: formData.allowances ? parseFloat(formData.allowances) : null,
+    emergency_contact_name: formData.emergencyContactName.trim() || null,
+    emergency_contact_relation: formData.emergencyContactRelation.trim() || null,
+    emergency_contact_phone: formData.emergencyContactPhone || null,
+    permissions: formData.permissions,
+    monthly_sales_target: formData.monthlySalesTarget ? parseFloat(formData.monthlySalesTarget) : null,
+    monthly_invoice_target: formData.monthlyInvoiceTarget ? parseFloat(formData.monthlyInvoiceTarget) : null,
+    work_start_time: formData.workStartTime || null,
+    work_end_time: formData.workEndTime || null,
+    working_days: formData.workingDays,
+    attendance_mode: formData.attendanceMode,
+    geofence_radius: formData.geofenceRadius ? parseInt(formData.geofenceRadius) : 100,
+  });
 
   const handleSubmit = async () => {
     if (!isFormValid()) {
@@ -255,84 +407,150 @@ export default function AddStaffScreen() {
 
     setIsSubmitting(true);
 
-    // Generate employee ID and OTP
-    const employeeId = generateEmployeeId();
-    const otp = generateOtp();
-    
-    setGeneratedEmployeeId(employeeId);
-    setGeneratedOtp(otp);
+    const employeeId = formData.employeeId.trim() || (editMode ? undefined : generateEmployeeId());
+    const otp = editMode ? undefined : generateOtp();
 
-    // Create staff object
-    const staffData: DataStoreStaff = {
-      id: editMode && params.staffId ? params.staffId as string : `staff_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: formData.name.trim(),
-      mobile: formData.mobile,
-      email: formData.email.trim(),
-      role: formData.role === 'Others' ? formData.customRole.trim() : formData.role,
-      department: formData.department === 'Others' ? formData.customDepartment.trim() : formData.department,
-      address: formData.address.trim(),
-      employeeId: employeeId,
-      locationId: selectedLocation || undefined,
-      locationType: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.type : undefined,
-      locationName: selectedLocation ? locationsForDropdown.find(loc => loc.id === selectedLocation)?.name : undefined,
-      status: 'active',
-      basicSalary: formData.basicSalary ? parseFloat(formData.basicSalary) : undefined,
-      allowances: formData.allowances ? parseFloat(formData.allowances) : undefined,
-      emergencyContactName: formData.emergencyContactName.trim(),
-      emergencyContactRelation: formData.emergencyContactRelation.trim() || undefined,
-      emergencyContactPhone: formData.emergencyContactPhone,
-      permissions: formData.permissions,
-      monthlySalesTarget: formData.monthlySalesTarget ? parseFloat(formData.monthlySalesTarget) : undefined,
-      monthlyInvoiceTarget: formData.monthlyInvoiceTarget ? parseFloat(formData.monthlyInvoiceTarget) : undefined,
-      isIncomplete: false, // Mark as complete since all details are filled
-      createdAt: editMode && params.staffId ? dataStore.getStaffById(params.staffId as string)?.createdAt || new Date().toISOString() : new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save to backend
     try {
+      let saveSuccess = false;
+
       if (editMode && params.staffId) {
         const updateResult = await updateStaff({
           staffId: params.staffId as string,
-          ...staffData,
+          ...getCleanStaffFields(),
         });
-        
-        if (!updateResult.success) {
-          Alert.alert('Error', updateResult.error || 'Failed to update staff');
-          setIsSubmitting(false);
-          return;
-        }
-        
-        // Also update local dataStore
-        dataStore.updateStaff(params.staffId as string, staffData);
-      } else {
-        const createResult = await createStaff(staffData);
-        
-        if (!createResult.success) {
-          Alert.alert('Error', createResult.error || 'Failed to create staff');
-          setIsSubmitting(false);
-          return;
-        }
-        
-        // Also add to local dataStore
-        if (createResult.staff) {
-          const createdStaff: DataStoreStaff = {
-            ...staffData,
-            id: createResult.staff.id || createResult.staff.staff_id || staffData.id,
-            createdAt: createResult.staff.created_at || staffData.createdAt,
-            updatedAt: createResult.staff.updated_at || staffData.updatedAt,
-          };
-          dataStore.addStaff(createdStaff);
+
+        if (updateResult.success) {
+          saveSuccess = true;
         } else {
-          dataStore.addStaff(staffData);
+          // Fallback: direct Supabase update
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { error: updateError } = await supabase
+                .from('staff')
+                .update({
+                  ...getSnakeCaseFields(),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', params.staffId as string);
+
+              if (!updateError) {
+                saveSuccess = true;
+                invalidateApiCache('staff');
+              }
+            }
+          } catch (fallbackError) {
+            console.error('Fallback update failed:', fallbackError);
+          }
+
+          if (!saveSuccess) {
+            Alert.alert('Error', updateResult.error || 'Failed to update staff');
+            setIsSubmitting(false);
+            return;
+          }
+        }
+      } else {
+        const createResult = await createStaff({
+          ...getCleanStaffFields(),
+          employeeId: employeeId,
+          verificationCode: otp,
+        });
+
+        if (createResult.success) {
+          saveSuccess = true;
+          // Edge function may not persist verification_code — patch it directly
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const staffId = createResult.staff?.id || createResult.staff?.staff_id;
+            if (staffId && otp) {
+              await supabase
+                .from('staff')
+                .update({ verification_code: otp })
+                .eq('id', staffId);
+              console.log('✅ Patched verification_code for staff', staffId);
+            } else if (otp) {
+              // No staff ID returned — find by mobile + business
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user) {
+                const { data: userData } = await supabase
+                  .from('users')
+                  .select('business_id')
+                  .eq('id', session.user.id)
+                  .single();
+                const businessId = userData?.business_id || businessData?.business?.id;
+                if (businessId) {
+                  await supabase
+                    .from('staff')
+                    .update({ verification_code: otp })
+                    .eq('business_id', businessId)
+                    .eq('mobile', formData.mobile);
+                  console.log('✅ Patched verification_code by mobile', formData.mobile);
+                }
+              }
+            }
+          } catch (patchErr) {
+            console.warn('⚠️ Could not patch verification_code:', patchErr);
+          }
+        } else {
+          // Fallback: direct Supabase insert
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { data: userData } = await supabase
+                .from('users')
+                .select('business_id')
+                .eq('id', session.user.id)
+                .single();
+
+              const businessId = userData?.business_id || businessData?.business?.id;
+              if (businessId) {
+                const { error: insertError } = await supabase
+                  .from('staff')
+                  .insert({
+                    business_id: businessId,
+                    ...getSnakeCaseFields(employeeId, otp),
+                    status: 'active',
+                  });
+
+                if (!insertError) {
+                  saveSuccess = true;
+                  invalidateApiCache('staff');
+                }
+              }
+            }
+          } catch (fallbackError) {
+            console.error('Fallback insert failed:', fallbackError);
+          }
+
+          if (!saveSuccess) {
+            Alert.alert('Error', createResult.error || 'Failed to create staff');
+            setIsSubmitting(false);
+            return;
+          }
         }
       }
-      
-      // Generate OTP for display
-      setGeneratedEmployeeId(employeeId);
-      setGeneratedOtp(otp);
+
       setIsSubmitting(false);
-      setShowOtpModal(true);
+
+      if (editMode) {
+        if (existingVerificationCode) {
+          setGeneratedEmployeeId(formData.employeeId || '');
+          setGeneratedOtp(existingVerificationCode);
+          setShowOtpModal(true);
+        } else {
+          Alert.alert(
+            'Staff Updated',
+            `${formData.name}'s details have been updated successfully.`,
+            [{ text: 'OK', onPress: () => router.back() }]
+          );
+        }
+      } else {
+        setGeneratedEmployeeId(employeeId!);
+        setGeneratedOtp(otp!);
+        setShowOtpModal(true);
+      }
     } catch (error: any) {
       console.error('Error saving staff:', error);
       Alert.alert('Error', error.message || 'Failed to save staff');
@@ -387,33 +605,109 @@ export default function AddStaffScreen() {
     setShowLocationModal(false);
   };
 
-  // Load existing staff data if editing
+  const populateFormFromStaff = (s: any) => {
+    const staffRole = s.role || s.job_role || '';
+    const staffDept = s.department || s.department_name || '';
+
+    const roleIsPreset = roles.filter(r => r !== 'Others').includes(staffRole);
+    const deptIsPreset = departments.filter(d => d !== 'Others').includes(staffDept);
+
+    const existingEmpId = s.employee_id || s.employeeId || s.emp_id || '';
+    setFormData({
+      name: s.name || s.staff_name || '',
+      mobile: s.mobile || s.mobile_number || s.phone || '',
+      email: s.email || s.email_address || '',
+      role: roleIsPreset ? staffRole : (staffRole ? 'Others' : ''),
+      customRole: roleIsPreset ? '' : staffRole,
+      department: deptIsPreset ? staffDept : (staffDept ? 'Others' : ''),
+      customDepartment: deptIsPreset ? '' : staffDept,
+      address: s.address || s.full_address || '',
+      employeeId: existingEmpId,
+      basicSalary: s.basic_salary?.toString() || s.basicSalary?.toString() || '',
+      allowances: s.allowances?.toString() || '',
+      emergencyContactName: s.emergency_contact_name || s.emergencyContactName || '',
+      emergencyContactRelation: s.emergency_contact_relation || s.emergencyContactRelation || '',
+      emergencyContactPhone: s.emergency_contact_phone || s.emergencyContactPhone || '',
+      permissions: (s.permissions || s.permission_list || []).map((p: string) => p === 'settings' ? 'master_access' : p),
+      monthlySalesTarget: s.monthly_sales_target?.toString() || s.monthlySalesTarget?.toString() || '',
+      monthlyInvoiceTarget: s.monthly_invoice_target?.toString() || s.monthlyInvoiceTarget?.toString() || '',
+      workStartTime: (s.work_start_time || s.workStartTime || '09:00').substring(0, 5),
+      workEndTime: (s.work_end_time || s.workEndTime || '18:00').substring(0, 5),
+      workingDays: s.working_days || s.workingDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      attendanceMode: s.attendance_mode || s.attendanceMode || 'geofence',
+      geofenceRadius: (s.geofence_radius || s.geofenceRadius || 100).toString(),
+    });
+
+    if (existingEmpId) {
+      setUseCustomEmployeeId(true);
+    }
+
+    const locId = s.location_id || s.locationId;
+    if (locId) {
+      setSelectedLocation(locId);
+    }
+  };
+
   useEffect(() => {
     if (editMode && params.staffId) {
-      const existingStaff = dataStore.getStaffById(params.staffId as string);
-      if (existingStaff) {
-        setFormData({
-          name: existingStaff.name,
-          mobile: existingStaff.mobile,
-          email: existingStaff.email || '',
-          role: existingStaff.role,
-          customRole: '',
-          department: existingStaff.department || '',
-          customDepartment: '',
-          address: existingStaff.address || '',
-          basicSalary: existingStaff.basicSalary?.toString() || '',
-          allowances: existingStaff.allowances?.toString() || '',
-          emergencyContactName: existingStaff.emergencyContactName || '',
-          emergencyContactRelation: existingStaff.emergencyContactRelation || '',
-          emergencyContactPhone: existingStaff.emergencyContactPhone || '',
-          permissions: existingStaff.permissions || [],
-          monthlySalesTarget: existingStaff.monthlySalesTarget?.toString() || '',
-          monthlyInvoiceTarget: existingStaff.monthlyInvoiceTarget?.toString() || '',
-        });
-        if (existingStaff.locationId) {
-          setSelectedLocation(existingStaff.locationId);
+      const loadStaffData = async () => {
+        setIsLoadingEdit(true);
+        let staffFound = false;
+
+        try {
+          const result = await getStaff();
+          if (result.success && result.staff) {
+            const existing = result.staff.find(
+              (s: any) => s.id === params.staffId || s.staff_id === params.staffId || s.staffId === params.staffId
+            );
+            if (existing) {
+              populateFormFromStaff(existing);
+              staffFound = true;
+            }
+          }
+        } catch (error) {
+          console.error('Edge function staff fetch failed:', error);
         }
-      }
+
+        if (!staffFound) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: staffRow, error: dbError } = await supabase
+              .from('staff')
+              .select('*')
+              .eq('id', params.staffId as string)
+              .single();
+
+            if (!dbError && staffRow) {
+              populateFormFromStaff(staffRow);
+              if (staffRow.verification_code) {
+                setExistingVerificationCode(staffRow.verification_code);
+              }
+              staffFound = true;
+            }
+          } catch (fallbackError) {
+            console.error('Direct Supabase staff fetch also failed:', fallbackError);
+          }
+        }
+
+        // Always try to get verification code from Supabase (edge function may not include it)
+        if (staffFound && !existingVerificationCode) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: codeRow } = await supabase
+              .from('staff')
+              .select('verification_code')
+              .eq('id', params.staffId as string)
+              .maybeSingle();
+            if (codeRow?.verification_code) {
+              setExistingVerificationCode(codeRow.verification_code);
+            }
+          } catch {}
+        }
+
+        setIsLoadingEdit(false);
+      };
+      loadStaffData();
     }
   }, [editMode, params.staffId]);
 
@@ -433,9 +727,15 @@ export default function AddStaffScreen() {
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
           
-          <Text style={styles.headerTitle}>Add New Staff</Text>
+          <Text style={styles.headerTitle}>{editMode ? 'Update Staff' : 'Add New Staff'}</Text>
         </View>
 
+        {isLoadingEdit ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>Loading staff details...</Text>
+          </View>
+        ) : (
         <ScrollView 
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -500,7 +800,7 @@ export default function AddStaffScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email Address *</Text>
+              <Text style={styles.label}>Email Address</Text>
               <View style={Platform.select({
                 web: [
                   inputFocusStyles.inputContainer,
@@ -526,8 +826,23 @@ export default function AddStaffScreen() {
               </View>
             </View>
 
-            <View style={styles.inputGroup}>
+            <View style={[styles.inputGroup, { zIndex: 1000 }]}>
               <Text style={styles.label}>Address *</Text>
+              <GoogleAddressAutocomplete
+                placeholder="Search for an address..."
+                onAddressSelect={(addressData) => {
+                  const parts = [
+                    addressData.placeName || addressData.premise || '',
+                    addressData.street || '',
+                    addressData.area || '',
+                    addressData.city || '',
+                    addressData.state || '',
+                    addressData.pincode || '',
+                  ].filter(Boolean);
+                  updateFormData('address', parts.join(', '));
+                }}
+                containerStyle={{ marginBottom: 8 }}
+              />
               <View style={Platform.select({
                 web: [
                   inputFocusStyles.inputContainer,
@@ -543,7 +858,7 @@ export default function AddStaffScreen() {
                   style={[Platform.OS === 'web' ? inputFocusStyles.input : styles.input, styles.addressInput]}
                   value={formData.address}
                   onChangeText={(text) => updateFormData('address', text)}
-                  placeholder="Enter complete address"
+                  placeholder="Or type address manually"
                   placeholderTextColor={Colors.textLight}
                   multiline
                   numberOfLines={3}
@@ -585,7 +900,7 @@ export default function AddStaffScreen() {
               <Text style={styles.label}>Role *</Text>
               {formData.role === 'Others' ? (
                 <View style={styles.customInputContainer}>
-                  <View style={styles.inputContainer}>
+                  <View style={[styles.inputContainer, { flex: 1 }]}>
                     <TextInput
                       style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.customRole}
@@ -629,10 +944,12 @@ export default function AddStaffScreen() {
                   <View style={Platform.select({
                     web: [
                       inputFocusStyles.inputContainer,
+                      { flex: 1 },
                       focusedField === 'customDepartment' && inputFocusStyles.inputContainerFocused,
                     ].filter(Boolean) as any,
                     default: [
                       styles.inputContainer,
+                      { flex: 1 },
                       focusedField === 'customDepartment' && styles.inputContainerFocused,
                     ].filter(Boolean) as any,
                   }) as any}>
@@ -674,37 +991,152 @@ export default function AddStaffScreen() {
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Permissions *</Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowPermissionsModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={[
-                  styles.dropdownText,
-                  formData.permissions.length === 0 && styles.placeholderText
-                ]}>
-                  {formData.permissions.length === 0 
-                    ? 'Select permissions' 
-                    : `${formData.permissions.length} permissions selected`
-                  }
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-              {formData.permissions.length > 0 && (
-                <View style={styles.selectedPermissions}>
-                  {formData.permissions.map(permissionId => {
-                    const permission = permissions.find(p => p.id === permissionId);
-                    return (
-                      <View key={permissionId} style={styles.permissionChip}>
-                        <Text style={styles.permissionChipText}>
-                          {permission?.label}
+              <Text style={styles.permSectionHint}>
+                Select what this staff member can access. Tap a card to see details.
+              </Text>
+              <View style={styles.permCardsContainer}>
+                {permissions.map((perm) => {
+                  const isSelected = formData.permissions.includes(perm.id);
+                  const isExpanded = expandedPermission === perm.id;
+                  const hasMasterAccess = formData.permissions.includes('master_access');
+                  const autoGranted = hasMasterAccess && perm.id !== 'master_access';
+                  const PermIcon = perm.icon;
+                  return (
+                    <View
+                      key={perm.id}
+                      style={[
+                        styles.permCard,
+                        isSelected && { borderColor: perm.color, backgroundColor: `${perm.color}08` },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        style={styles.permCardHeader}
+                        onPress={() => setExpandedPermission(isExpanded ? null : perm.id)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.permIconWrap, { backgroundColor: `${perm.color}15` }]}>
+                          <PermIcon size={18} color={perm.color} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.permCardTitle, isSelected && { color: perm.color }]} numberOfLines={1}>
+                            {perm.label}
+                          </Text>
+                          {autoGranted && (
+                            <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
+                              Auto-granted via Master Access
+                            </Text>
+                          )}
+                        </View>
+                        {isExpanded
+                          ? <ChevronUp size={16} color={Colors.textLight} />
+                          : <ChevronDown size={16} color={Colors.textLight} />
+                        }
+                      </TouchableOpacity>
+
+                      {isExpanded && (
+                        <Text style={styles.permCardDesc}>{perm.description}</Text>
+                      )}
+
+                      <TouchableOpacity
+                        style={[
+                          styles.permToggleBtn,
+                          isSelected && { backgroundColor: perm.color },
+                          autoGranted && { opacity: 0.7 },
+                        ]}
+                        onPress={() => handlePermissionToggle(perm.id)}
+                        activeOpacity={0.7}
+                        disabled={autoGranted}
+                      >
+                        {isSelected && <Check size={14} color="#fff" style={{ marginRight: 4 }} />}
+                        <Text style={[
+                          styles.permToggleText,
+                          isSelected && { color: '#fff' },
+                        ]}>
+                          {autoGranted ? 'Included' : (isSelected ? 'Granted' : 'Grant Access')}
                         </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
+
+            {!editMode && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Employee ID</Text>
+                <View style={styles.employeeIdToggle}>
+                  <TouchableOpacity
+                    style={[styles.toggleOption, !useCustomEmployeeId && styles.toggleOptionActive]}
+                    onPress={() => {
+                      setUseCustomEmployeeId(false);
+                      updateFormData('employeeId', generateEmployeeId());
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleOptionText, !useCustomEmployeeId && styles.toggleOptionTextActive]}>
+                      Auto-generate
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.toggleOption, useCustomEmployeeId && styles.toggleOptionActive]}
+                    onPress={() => { setUseCustomEmployeeId(true); updateFormData('employeeId', ''); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleOptionText, useCustomEmployeeId && styles.toggleOptionTextActive]}>
+                      Enter manually
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {useCustomEmployeeId ? (
+                  <View style={[styles.inputContainer, { marginTop: 8 }]}>
+                    <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                    <TextInput
+                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
+                      value={formData.employeeId}
+                      onChangeText={(text) => updateFormData('employeeId', text.toUpperCase())}
+                      placeholder="e.g. EMP001"
+                      placeholderTextColor={Colors.textLight}
+                      autoCapitalize="characters"
+                      onFocus={() => setFocusedField('employeeId')}
+                      onBlur={() => setFocusedField(null)}
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.autoIdContainer}>
+                    <View style={styles.autoIdDisplay}>
+                      <Hash size={18} color={Colors.primary} />
+                      <Text style={styles.autoIdValue}>{formData.employeeId || '—'}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.regenerateBtn}
+                      onPress={() => updateFormData('employeeId', generateEmployeeId())}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.regenerateBtnText}>Regenerate</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {editMode && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Employee ID</Text>
+                <View style={[styles.inputContainer, { marginTop: 0 }]}>
+                  <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
+                    value={formData.employeeId}
+                    onChangeText={(text) => updateFormData('employeeId', text.toUpperCase())}
+                    placeholder="Employee ID"
+                    placeholderTextColor={Colors.textLight}
+                    autoCapitalize="characters"
+                    onFocus={() => setFocusedField('employeeId')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
+              </View>
+            )}
           </View>
 
           {/* Salary Information */}
@@ -771,6 +1203,162 @@ export default function AddStaffScreen() {
                 <Text style={styles.totalSalaryValue}>
                   {formatAmount(getTotalSalary().toString())}
                 </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Working Hours */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Working Hours</Text>
+
+            <View style={styles.rowContainer}>
+              <View style={[styles.inputGroup, styles.halfWidth]}>
+                <TimeInputWithPicker
+                  label="Start Time"
+                  value={formData.workStartTime}
+                  onChangeTime={(time) => updateFormData('workStartTime', time)}
+                  placeholder="Select start time"
+                />
+              </View>
+
+              <View style={[styles.inputGroup, styles.halfWidth]}>
+                <TimeInputWithPicker
+                  label="End Time"
+                  value={formData.workEndTime}
+                  onChangeTime={(time) => updateFormData('workEndTime', time)}
+                  placeholder="Select end time"
+                />
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Working Days</Text>
+              <View style={styles.daysRow}>
+                {ALL_DAYS.map((day) => {
+                  const isActive = formData.workingDays.includes(day);
+                  return (
+                    <TouchableOpacity
+                      key={day}
+                      style={[styles.dayButton, isActive && styles.dayButtonActive]}
+                      onPress={() => handleWorkingDayToggle(day)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.dayButtonText, isActive && styles.dayButtonTextActive]}>
+                        {day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+
+          {/* Attendance Controls */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Attendance Controls</Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Attendance Mode</Text>
+              <Text style={{ fontSize: 13, color: Colors.textLight, marginBottom: 10, lineHeight: 18 }}>
+                Choose how this staff member marks attendance.
+              </Text>
+              <View style={styles.employeeIdToggle}>
+                <TouchableOpacity
+                  style={[styles.toggleOption, formData.attendanceMode === 'geofence' && styles.toggleOptionActive]}
+                  onPress={() => updateFormData('attendanceMode', 'geofence')}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 }}>
+                    <Locate size={14} color={formData.attendanceMode === 'geofence' ? '#fff' : Colors.textLight} />
+                    <Text style={[styles.toggleOptionText, formData.attendanceMode === 'geofence' && styles.toggleOptionTextActive]}>
+                      Geofence
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toggleOption, formData.attendanceMode === 'manual' && styles.toggleOptionActive]}
+                  onPress={() => updateFormData('attendanceMode', 'manual')}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 }}>
+                    <Radio size={14} color={formData.attendanceMode === 'manual' ? '#fff' : Colors.textLight} />
+                    <Text style={[styles.toggleOptionText, formData.attendanceMode === 'manual' && styles.toggleOptionTextActive]}>
+                      One-Time Check-in
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {formData.attendanceMode === 'geofence' && (
+                <View style={{
+                  backgroundColor: '#EFF6FF', borderRadius: 10, padding: 12, marginTop: 10,
+                  borderWidth: 1, borderColor: '#BFDBFE',
+                }}>
+                  <Text style={{ fontSize: 12, color: '#1E40AF', lineHeight: 17 }}>
+                    Staff must be within the geofence radius of their assigned location to stay checked in. They will be auto-checked-out if they leave the radius for more than 60 seconds.
+                  </Text>
+                </View>
+              )}
+
+              {formData.attendanceMode === 'manual' && (
+                <View style={{
+                  backgroundColor: '#F0FDF4', borderRadius: 10, padding: 12, marginTop: 10,
+                  borderWidth: 1, borderColor: '#BBF7D0',
+                }}>
+                  <Text style={{ fontSize: 12, color: '#166534', lineHeight: 17 }}>
+                    Staff marks attendance once per day with a single check-in. No continuous location tracking. They must manually check out when done.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {formData.attendanceMode === 'geofence' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Geofence Radius (meters)</Text>
+                <Text style={{ fontSize: 13, color: Colors.textLight, marginBottom: 8, lineHeight: 18 }}>
+                  How far from the work location the staff can be before being auto-checked-out.
+                </Text>
+                <View style={styles.rowContainer}>
+                  {['50', '100', '200', '500'].map(radius => (
+                    <TouchableOpacity
+                      key={radius}
+                      style={[
+                        styles.dayButton,
+                        formData.geofenceRadius === radius && styles.dayButtonActive,
+                        { flex: 1 },
+                      ]}
+                      onPress={() => updateFormData('geofenceRadius', radius)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.dayButtonText,
+                        formData.geofenceRadius === radius && styles.dayButtonTextActive,
+                      ]}>
+                        {radius}m
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={[
+                  Platform.OS === 'web'
+                    ? inputFocusStyles.inputContainer
+                    : styles.inputContainer,
+                  { marginTop: 10 },
+                ] as any}>
+                  <MapPin size={20} color={Colors.textLight} style={styles.inputIcon} />
+                  <TextInput
+                    style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
+                    value={formData.geofenceRadius}
+                    onChangeText={(text) => updateFormData('geofenceRadius', text.replace(/[^0-9]/g, ''))}
+                    placeholder="Custom radius in meters"
+                    placeholderTextColor={Colors.textLight}
+                    keyboardType="numeric"
+                    maxLength={5}
+                    onFocus={() => setFocusedField('geofenceRadius')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                  <Text style={{ fontSize: 14, color: Colors.textLight, fontWeight: '500' }}>m</Text>
+                </View>
               </View>
             )}
           </View>
@@ -932,10 +1520,13 @@ export default function AddStaffScreen() {
               styles.submitButtonText,
               isFormValid() ? styles.enabledButtonText : styles.disabledButtonText
             ]}>
-              {isSubmitting ? 'Adding Staff...' : 'Add Staff Member'}
+              {isSubmitting
+                ? (editMode ? 'Updating Staff...' : 'Adding Staff...')
+                : (editMode ? 'Update Staff Member' : 'Add Staff Member')}
             </Text>
           </TouchableOpacity>
         </ScrollView>
+        )}
 
         {/* Role Selection Modal */}
         <Modal
@@ -1055,57 +1646,7 @@ export default function AddStaffScreen() {
           </View>
         </Modal>
 
-        {/* Permissions Selection Modal */}
-        <Modal
-          visible={showPermissionsModal}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowPermissionsModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Select Permissions</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowPermissionsModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <X size={24} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {permissions.map((permission) => (
-                  <TouchableOpacity
-                    key={permission.id}
-                    style={[
-                      styles.permissionOption,
-                      formData.permissions.includes(permission.id) && styles.selectedPermissionOption
-                    ]}
-                    onPress={() => handlePermissionToggle(permission.id)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.permissionInfo}>
-                      <Text style={[
-                        styles.permissionLabel,
-                        formData.permissions.includes(permission.id) && styles.selectedPermissionLabel
-                      ]}>
-                        {permission.label}
-                      </Text>
-                      <Text style={styles.permissionDescription}>
-                        {permission.description}
-                      </Text>
-                    </View>
-                    {formData.permissions.includes(permission.id) && (
-                      <Check size={20} color={Colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
+        {/* Permissions modal removed — inline cards used instead */}
 
         {/* Location Selection Modal */}
         {hasMultipleLocations && (
@@ -1283,6 +1824,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.text,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 15,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
   scrollView: {
     flex: 1,
   },
@@ -1336,6 +1888,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  inputContainerFocused: {
+    borderColor: '#3f66ac',
+  },
   inputIcon: {
     marginRight: 12,
     alignSelf: 'center',
@@ -1387,6 +1942,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  employeeIdToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.grey[100],
+    borderRadius: 10,
+    padding: 3,
+    gap: 4,
+  },
+  toggleOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  toggleOptionActive: {
+    backgroundColor: Colors.primary,
+  },
+  toggleOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  toggleOptionTextActive: {
+    color: '#FFFFFF',
+  },
+  autoIdContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 10,
+  },
+  autoIdDisplay: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.grey[50],
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  autoIdValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+    letterSpacing: 1,
+  },
+  regenerateBtn: {
+    backgroundColor: Colors.grey[100],
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  regenerateBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
   changeButton: {
     backgroundColor: Colors.primary,
     paddingHorizontal: 12,
@@ -1398,22 +2012,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  selectedPermissions: {
+  permSectionHint: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  permCardsContainer: {
+    gap: 10,
+  },
+  permCard: {
+    borderWidth: 1.5,
+    borderColor: Colors.grey[200],
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: Colors.background,
+  },
+  permCardHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 10,
   },
-  permissionChip: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+  permIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  permissionChipText: {
-    fontSize: 12,
-    color: Colors.background,
-    fontWeight: '500',
+  permCardTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  permCardDesc: {
+    fontSize: 13,
+    color: Colors.textLight,
+    lineHeight: 19,
+    marginTop: 10,
+    paddingLeft: 46,
+  },
+  permToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.grey[100],
+  },
+  permToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textLight,
   },
   rowContainer: {
     flexDirection: 'row',
@@ -1447,6 +2099,33 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: Colors.success,
+  },
+  daysRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  dayButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1.5,
+    borderColor: Colors.grey[200],
+    minWidth: 48,
+    alignItems: 'center',
+  },
+  dayButtonActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  dayButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  dayButtonTextActive: {
+    color: '#FFFFFF',
   },
   submitButton: {
     borderRadius: 12,
@@ -1553,35 +2232,6 @@ const styles = StyleSheet.create({
   selectedOptionText: {
     color: Colors.primary,
     fontWeight: '600',
-  },
-  permissionOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[100],
-    gap: 12,
-  },
-  selectedPermissionOption: {
-    backgroundColor: '#f0f4ff',
-  },
-  permissionInfo: {
-    flex: 1,
-  },
-  permissionLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  selectedPermissionLabel: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  permissionDescription: {
-    fontSize: 14,
-    color: Colors.textLight,
   },
   otpModalContainer: {
     backgroundColor: Colors.background,

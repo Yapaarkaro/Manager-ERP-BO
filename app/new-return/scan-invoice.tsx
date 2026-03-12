@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { 
   ArrowLeft, 
@@ -93,7 +94,7 @@ export default function ScanInvoiceScreen() {
         {
           text: 'Process Return',
           onPress: () => {
-            router.push({
+            safeRouter.push({
               pathname: '/new-return/select-items',
               params: {
                 invoiceData: JSON.stringify(scannedInvoice)

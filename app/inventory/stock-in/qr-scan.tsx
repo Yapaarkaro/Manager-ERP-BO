@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   QrCode,
@@ -64,7 +65,7 @@ export default function QRScanScreen() {
       };
       
       // Navigate to verify stock with QR data
-      router.push({
+      safeRouter.push({
         pathname: '/inventory/stock-in/verify-stock',
         params: {
           qrData: JSON.stringify(qrData)
@@ -84,7 +85,7 @@ export default function QRScanScreen() {
         },
         {
           text: 'Manual Entry',
-          onPress: () => router.push('/inventory/stock-in/manual')
+          onPress: () => safeRouter.push('/inventory/stock-in/manual')
         }
       ]
     );
@@ -101,7 +102,7 @@ export default function QRScanScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-in');
+              safeRouter.replace('/inventory/stock-in');
             }
           }}
           activeOpacity={0.7}

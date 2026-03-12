@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { formatIndianNumber, formatCurrencyINR, validateDateDDMMYYYY } from '@/utils/formatters';
 import {
   View,
   Text,
@@ -10,9 +11,11 @@ import {
   Alert,
   Dimensions,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   FileText,
@@ -25,10 +28,12 @@ import {
   IndianRupee,
   Percent,
   Hash,
-  Camera,
   Ruler,
   ChevronDown,
+  ChevronUp,
   Edit,
+  MapPin,
+  ClipboardList,
 } from 'lucide-react-native';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -81,6 +86,20 @@ const cessTypes = [
   { value: 'value_and_quantity', label: 'Based on Value & Quantity' },
 ];
 
+const INVOICE_FIELD_OPTIONS = [
+  { key: 'delivery_note', label: 'Delivery Note', isDate: false },
+  { key: 'payment_terms', label: 'Mode/Terms of Payment', isDate: false },
+  { key: 'reference_no', label: 'Reference No.', isDate: false },
+  { key: 'reference_date', label: 'Date (for Reference No.)', isDate: true },
+  { key: 'buyers_order_no', label: "Buyer's Order No.", isDate: false },
+  { key: 'buyers_order_date', label: "Date (for Buyer's Order No.)", isDate: true },
+  { key: 'dispatch_doc_no', label: 'Dispatch Doc No.', isDate: false },
+  { key: 'delivery_note_date', label: 'Delivery Note Date', isDate: true },
+  { key: 'dispatched_through', label: 'Dispatched Through', isDate: false },
+  { key: 'destination', label: 'Destination', isDate: false },
+  { key: 'terms_of_delivery', label: 'Terms of Delivery', isDate: false },
+];
+
 interface StockInProduct {
   id: string;
   name: string;
@@ -101,6 +120,7 @@ interface StockInProduct {
   conversionRatio: string;
   priceUnit: 'primary' | 'secondary';
   hsnCode?: string;
+  pendingProductData?: any;
 }
 
 interface ManualStockInData {
@@ -111,25 +131,43 @@ interface ManualStockInData {
   vehicleNumber: string;
   vehicleType: string;
   supplier: {
+    id?: string;
     name: string;
     gstin: string;
     businessName: string;
     address: string;
   } | null;
+  locationId: string | null;
+  locationName: string;
   products: StockInProduct[];
   totalAmount: number;
   discountType: 'percentage' | 'amount';
   discountValue: number;
+  applyRoundOff: boolean;
   roundOffAmount: number;
   finalAmount: number;
   notes: string;
+  additionalFields?: Record<string, string>;
 }
 
-const mockProducts = [];
+import { getSuppliers, getProducts } from '@/services/backendApi';
+import { useBusinessData } from '@/hooks/useBusinessData';
+
+// Bridge to persist form data across navigation (e.g. when creating a new product)
+let _savedFormData: ManualStockInData | null = null;
+export function saveStockInFormData(data: ManualStockInData) { _savedFormData = data; }
+export function popStockInFormData(): ManualStockInData | null {
+  const d = _savedFormData;
+  _savedFormData = null;
+  return d;
+}
 
 export default function ManualStockInScreen() {
   const { newProduct: newProductParam, newSupplier: newSupplierParam } = useLocalSearchParams();
-  const [formData, setFormData] = useState<ManualStockInData>({
+  const { data: businessData } = useBusinessData();
+
+  const restoredData = useMemo(() => popStockInFormData(), []);
+  const [formData, setFormData] = useState<ManualStockInData>(restoredData || {
     invoiceNumber: '',
     invoiceDate: '',
     hasEwayBill: false,
@@ -137,24 +175,99 @@ export default function ManualStockInScreen() {
     vehicleNumber: '',
     vehicleType: '',
     supplier: null,
+    locationId: null,
+    locationName: '',
     products: [],
     totalAmount: 0,
     discountType: 'amount',
     discountValue: 0,
+    applyRoundOff: true,
     roundOffAmount: 0,
     finalAmount: 0,
     notes: '',
   });
 
+  const locations = useMemo(() => {
+    if (!businessData?.addresses) return [];
+    return businessData.addresses.map((addr: any) => {
+      const name = addr.name || addr.label || 'Main Location';
+      const addressParts = [
+        addr.address_line_1 || addr.addressLine1,
+        addr.address_line_2 || addr.addressLine2,
+        addr.city,
+        addr.state || addr.stateName,
+        addr.pincode,
+      ].filter(Boolean);
+      const fullAddress = addressParts.join(', ');
+      return {
+        id: addr.id,
+        name,
+        fullAddress,
+        type: addr.type || addr.address_type || 'primary',
+      };
+    });
+  }, [businessData?.addresses]);
+
+  useEffect(() => {
+    if (locations.length > 0 && !formData.locationId) {
+      const primary = locations.find((l: any) => l.type === 'primary') || locations[0];
+      if (primary) {
+        setFormData(prev => ({ ...prev, locationId: primary.id, locationName: primary.name }));
+      }
+    }
+  }, [locations]);
+
+  useEffect(() => {
+    (async () => {
+      setProductsLoading(true);
+      try {
+        const result = await getProducts();
+        if (result.success && result.products) {
+          setExistingProducts(result.products);
+        }
+      } catch (e) {
+        console.error('Error loading products:', e);
+      } finally {
+        setProductsLoading(false);
+      }
+    })();
+  }, []);
+
+  const formatDateField = (text: string, prev: string): string => {
+    const isDeleting = text.length < prev.length;
+    if (isDeleting) {
+      if (prev.length === 4 && prev[2] === '-') return text.slice(0, 2);
+      if (prev.length === 7 && prev[5] === '-') return text.slice(0, 5);
+      return text;
+    }
+    let digits = text.replace(/[^0-9]/g, '');
+    if (digits.length > 8) digits = digits.slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return digits.slice(0, 2) + '-' + digits.slice(2);
+    return digits.slice(0, 2) + '-' + digits.slice(2, 4) + '-' + digits.slice(4);
+  };
+
+  const updateAdditionalField = (key: string, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      additionalFields: { ...(prev.additionalFields || {}), [key]: value },
+    }));
+  };
+
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [showProductModal, setShowProductModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [suppliersList, setSuppliersList] = useState<any[]>([]);
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [showTaxModal, setShowTaxModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [existingProducts, setExistingProducts] = useState<any[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [newSupplier, setNewSupplier] = useState<any>(null);
   const [newProduct, setNewProduct] = useState<any>(null);
-  const [showCreateProductModal, setShowCreateProductModal] = useState(false);
   const [showPrimaryUnitModal, setShowPrimaryUnitModal] = useState(false);
   const [showSecondaryUnitModal, setShowSecondaryUnitModal] = useState(false);
   const [showPrimaryUnitDropdown, setShowPrimaryUnitDropdown] = useState(false);
@@ -163,6 +276,8 @@ export default function ManualStockInScreen() {
   const [secondaryUnitSearch, setSecondaryUnitSearch] = useState('');
   const [editingProduct, setEditingProduct] = useState<StockInProduct | null>(null);
   const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
+  const [showAdditionalFields, setShowAdditionalFields] = useState(false);
   const [newProductData, setNewProductData] = useState({
     name: '',
     category: '',
@@ -188,75 +303,103 @@ export default function ManualStockInScreen() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const loadSuppliers = async () => {
+    setSuppliersLoading(true);
+    try {
+      const result = await getSuppliers();
+      if (result.success && result.suppliers) {
+        setSuppliersList(result.suppliers);
+      }
+    } catch (_) { /* ignore */ }
+    setSuppliersLoading(false);
+  };
+
+  const handleOpenSupplierModal = () => {
+    setSupplierSearch('');
+    setShowSupplierModal(true);
+    loadSuppliers();
+  };
+
   const handleSupplierSelect = (supplier: any) => {
-    updateFormData('supplier', supplier);
+    updateFormData('supplier', {
+      id: supplier.id || undefined,
+      name: supplier.contact_person || supplier.contactPerson || supplier.business_name || '',
+      gstin: supplier.gstin_pan || supplier.gstinPan || '',
+      businessName: supplier.business_name || supplier.businessName || '',
+      address: supplier.address || '',
+    });
     setShowSupplierModal(false);
   };
 
   const handleAddProduct = () => {
     if (!selectedProduct) return;
-    
+
+    const alreadyAdded = formData.products.some(p => p.id === selectedProduct.id);
+    if (alreadyAdded) {
+      Alert.alert('Already Added', 'This product is already in the stock-in list. You can edit its quantity from the list.');
+      return;
+    }
+
+    const purchasePrice = parseFloat(selectedProduct.unitPrice || selectedProduct.unit_price || selectedProduct.purchasePrice || selectedProduct.purchase_price || '0') || 0;
     const newProduct: StockInProduct = {
       id: selectedProduct.id,
-      name: selectedProduct.name,
+      name: selectedProduct.name || '',
       barcode: selectedProduct.barcode || '',
       quantity: 1,
-      purchasePrice: 0,
+      purchasePrice,
       discount: 0,
-      totalPrice: 0,
+      totalPrice: purchasePrice,
       isNewProduct: false,
-      gstRate: 18, // Default GST rate
-      cessRate: 0,
-      cessType: 'value',
-      cessAmount: 0,
-      cessUnit: '',
-      primaryUnit: 'Piece', // Default unit
-      secondaryUnit: 'None',
-      useCompoundUnit: false,
-      conversionRatio: '',
+      gstRate: parseFloat(selectedProduct.gstRate || selectedProduct.gst_rate || selectedProduct.taxRate || selectedProduct.tax_rate || '18') || 18,
+      cessRate: parseFloat(selectedProduct.cessRate || selectedProduct.cess_rate || '0') || 0,
+      cessType: selectedProduct.cessType || selectedProduct.cess_type || 'none',
+      cessAmount: parseFloat(selectedProduct.cessAmount || selectedProduct.cess_amount || '0') || 0,
+      cessUnit: selectedProduct.cessUnit || selectedProduct.cess_unit || '',
+      primaryUnit: selectedProduct.primaryUnit || selectedProduct.primary_unit || 'Piece',
+      secondaryUnit: selectedProduct.secondaryUnit || selectedProduct.secondary_unit || 'None',
+      useCompoundUnit: selectedProduct.useCompoundUnit || selectedProduct.use_compound_unit || false,
+      conversionRatio: selectedProduct.conversionRatio || selectedProduct.conversion_ratio || '',
       priceUnit: 'primary',
-      hsnCode: '',
+      hsnCode: selectedProduct.hsnCode || selectedProduct.hsn_code || '',
     };
-    
-    // Check if this is a new product that needs tax configuration
-    if (selectedProduct.isNewProduct) {
-      setShowTaxModal(true);
-    } else {
-      const updatedProducts = [...formData.products, newProduct];
-      updateFormData('products', updatedProducts);
-      
-      // Recalculate total amount immediately
-      const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
-      updateFormData('totalAmount', total);
-      
-      setSelectedProduct(null);
-      setShowProductModal(false);
-    }
+
+    const updatedProducts = [...formData.products, newProduct];
+    updateFormData('products', updatedProducts);
+
+    const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
+    updateFormData('totalAmount', total);
+
+    // Auto-expand the newly added product
+    setExpandedProducts(prev => new Set(prev).add(newProduct.id));
+
+    setSelectedProduct(null);
+    setShowProductModal(false);
   };
 
   const handleTaxConfiguration = (gstRate: number, cessRate: number, cessType: string, cessAmount: number) => {
     if (!selectedProduct) return;
-    
+
+    const purchasePrice = parseFloat(selectedProduct.unitPrice || selectedProduct.unit_price || selectedProduct.purchasePrice || selectedProduct.purchase_price || '0') || 0;
     const newProduct: StockInProduct = {
-      id: selectedProduct.id,
-      name: selectedProduct.name,
+      id: selectedProduct.id || `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: selectedProduct.name || '',
       barcode: selectedProduct.barcode || '',
       quantity: 1,
-      purchasePrice: 0,
+      purchasePrice,
       discount: 0,
-      totalPrice: 0,
+      totalPrice: purchasePrice,
       isNewProduct: false,
       gstRate,
       cessRate,
-      cessType: cessType as 'value' | 'quantity' | 'value_and_quantity',
+      cessType: cessType as 'none' | 'value' | 'quantity' | 'value_and_quantity',
       cessAmount,
-      cessUnit: '',
-      primaryUnit: 'Piece', // Default unit
-      secondaryUnit: 'None',
-      useCompoundUnit: false,
-      conversionRatio: '',
+      cessUnit: selectedProduct.cessUnit || selectedProduct.cess_unit || '',
+      primaryUnit: selectedProduct.primaryUnit || selectedProduct.primary_unit || 'Piece',
+      secondaryUnit: selectedProduct.secondaryUnit || selectedProduct.secondary_unit || 'None',
+      useCompoundUnit: selectedProduct.useCompoundUnit || selectedProduct.use_compound_unit || false,
+      conversionRatio: selectedProduct.conversionRatio || selectedProduct.conversion_ratio || '',
       priceUnit: 'primary',
-      hsnCode: '',
+      hsnCode: selectedProduct.hsnCode || selectedProduct.hsn_code || '',
     };
     
     const updatedProducts = [...formData.products, newProduct];
@@ -272,36 +415,12 @@ export default function ManualStockInScreen() {
   };
 
   const handleCreateNewProduct = () => {
-    // Close product selection modal and show create product modal
     setShowProductModal(false);
-    setShowCreateProductModal(true);
-  };
-
-  const handleScanProduct = () => {
-    // Simulate scanning and auto-fill product details
-    const scannedProduct = {
-      name: '',
-      category: '',
-      barcode: '',
-      hsnCode: '',
-      purchasePrice: '',
-      salePrice: '',
-      mrp: '',
-      priceUnit: 'primary' as 'primary' | 'secondary',
-      gstRate: 18,
-      cessRate: 0,
-      cessType: 'none' as 'none' | 'value' | 'quantity' | 'value_and_quantity',
-      cessAmount: 0,
-      cessUnit: '',
-      cessAmountType: 'percentage' as 'percentage' | 'amount',
-      primaryUnit: 'Piece',
-      secondaryUnit: 'None',
-      useCompoundUnit: false,
-      conversionRatio: '',
-    };
-    
-    setNewProductData(scannedProduct);
-    Alert.alert('Product Scanned', 'Product details have been auto-filled from barcode scan.');
+    saveStockInFormData(formData);
+    safeRouter.push({
+      pathname: '/inventory/manual-product',
+      params: { returnToStockIn: 'true' },
+    });
   };
 
   const handlePrimaryUnitSelect = (unit: string) => {
@@ -331,7 +450,7 @@ export default function ManualStockInScreen() {
     if (newProduct) {
       // Add the new product to the products list
       const productToAdd: StockInProduct = {
-        id: newProduct.id,
+        id: newProduct.id || `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         name: newProduct.name,
         barcode: newProduct.barcode || '',
         quantity: 1,
@@ -341,8 +460,9 @@ export default function ManualStockInScreen() {
         isNewProduct: false,
         gstRate: newProduct.gstRate || 18,
         cessRate: newProduct.cessRate || 0,
-        cessType: newProduct.cessType || 'value',
+        cessType: newProduct.cessType || 'none',
         cessAmount: newProduct.cessAmount || 0,
+        cessUnit: newProduct.cessUnit || '',
         primaryUnit: newProduct.primaryUnit || 'Piece',
         secondaryUnit: newProduct.secondaryUnit || 'None',
         useCompoundUnit: newProduct.useCompoundUnit || false,
@@ -362,27 +482,30 @@ export default function ManualStockInScreen() {
       try {
         const productData = JSON.parse(newProductParam);
         const productToAdd: StockInProduct = {
-          id: productData.id,
+          id: productData.id || `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           name: productData.name,
           barcode: productData.barcode || '',
           quantity: 1,
-          purchasePrice: productData.price || 0,
+          purchasePrice: productData.purchasePrice || productData.price || 0,
           discount: 0,
-          totalPrice: productData.price || 0,
-          isNewProduct: false,
+          totalPrice: productData.purchasePrice || productData.price || 0,
+          isNewProduct: !!productData.pendingProductData,
           gstRate: productData.gstRate || 18,
           cessRate: productData.cessRate || 0,
-          cessType: productData.cessType || 'value',
+          cessType: productData.cessType || 'none',
           cessAmount: productData.cessAmount || 0,
+          cessUnit: productData.cessUnit || '',
           primaryUnit: productData.primaryUnit || 'Piece',
           secondaryUnit: productData.secondaryUnit || 'None',
           useCompoundUnit: productData.useCompoundUnit || false,
           conversionRatio: productData.conversionRatio || '',
           priceUnit: 'primary',
           hsnCode: productData.hsnCode || '',
+          pendingProductData: productData.pendingProductData || undefined,
         };
         
-        updateFormData('products', [...formData.products, productToAdd]);
+        setFormData(prev => ({ ...prev, products: [...prev.products, productToAdd] }));
+        setExpandedProducts(prev => new Set(prev).add(productToAdd.id));
       } catch (error) {
         console.error('Error parsing new product data:', error);
       }
@@ -418,7 +541,6 @@ export default function ManualStockInScreen() {
     const total = formData.products.reduce((sum, product) => sum + product.totalPrice, 0);
     updateFormData('totalAmount', total);
     
-    // Calculate amount after discount
     let amountAfterDiscount = total;
     if (formData.discountValue > 0) {
       if (formData.discountType === 'percentage') {
@@ -428,14 +550,12 @@ export default function ManualStockInScreen() {
       }
     }
     
-    // Calculate round-off amount based on amount after discount
-    const roundOffAmount = calculateRoundOff(amountAfterDiscount);
+    const roundOffAmount = formData.applyRoundOff ? calculateRoundOff(amountAfterDiscount) : 0;
     updateFormData('roundOffAmount', roundOffAmount);
     
-    // Calculate final amount
     const finalAmount = amountAfterDiscount + roundOffAmount;
     updateFormData('finalAmount', finalAmount);
-  }, [formData.products, formData.discountValue, formData.discountType]);
+  }, [formData.products, formData.discountValue, formData.discountType, formData.applyRoundOff]);
 
   // Helper function to calculate effective price for compound units
   const calculateEffectivePrice = (product: StockInProduct) => {
@@ -515,7 +635,7 @@ export default function ManualStockInScreen() {
   };
 
   const handleEditProduct = (product: StockInProduct) => {
-    setEditingProduct(product);
+    setEditingProduct({ ...product });
     setShowEditProductModal(true);
   };
 
@@ -558,6 +678,10 @@ export default function ManualStockInScreen() {
         product.id === editingProduct.id ? updatedProduct : product
       );
       updateFormData('products', updatedProducts);
+
+      const total = updatedProducts.reduce((sum, product) => sum + product.totalPrice, 0);
+      updateFormData('totalAmount', total);
+
       setShowEditProductModal(false);
       setEditingProduct(null);
     } else {
@@ -574,22 +698,35 @@ export default function ManualStockInScreen() {
   };
 
   const isFormValid = () => {
-    return (
-      formData.invoiceNumber.trim().length > 0 &&
-      formData.invoiceDate.trim().length > 0 &&
-      formData.supplier !== null &&
-      formData.products.length > 0
-    );
+    if (
+      formData.invoiceNumber.trim().length === 0 ||
+      formData.invoiceDate.trim().length === 0 ||
+      formData.supplier === null ||
+      formData.products.length === 0
+    ) return false;
+    if (formData.invoiceDate.length === 10 && validateDateDDMMYYYY(formData.invoiceDate)) return false;
+    return true;
   };
 
   const handleSave = () => {
     if (!isFormValid()) {
-      Alert.alert('Incomplete Form', 'Please fill in all required fields');
+      const dateErr = formData.invoiceDate.length === 10 ? validateDateDDMMYYYY(formData.invoiceDate) : null;
+      Alert.alert('Incomplete Form', dateErr || 'Please fill in all required fields');
       return;
     }
 
-    // Navigate to confirmation screen
-    router.push({
+    const additionalFields = formData.additionalFields || {};
+    for (const [key, value] of Object.entries(additionalFields)) {
+      if (value && value.length === 10) {
+        const err = validateDateDDMMYYYY(value);
+        if (err) {
+          Alert.alert('Invalid Date', `${key}: ${err}`);
+          return;
+        }
+      }
+    }
+
+    safeRouter.push({
       pathname: '/inventory/stock-in/confirmation',
       params: {
         stockInData: JSON.stringify(formData)
@@ -597,9 +734,13 @@ export default function ManualStockInScreen() {
     });
   };
 
-  const filteredProducts = mockProducts.filter(product =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProducts = existingProducts.filter((product: any) => {
+    const q = searchQuery.toLowerCase();
+    const name = (product.name || '').toLowerCase();
+    const barcode = (product.barcode || '').toLowerCase();
+    const category = (product.category || '').toLowerCase();
+    return name.includes(q) || barcode.includes(q) || category.includes(q);
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -612,7 +753,7 @@ export default function ManualStockInScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-in');
+              safeRouter.replace('/inventory/stock-in');
             }
           }}
           activeOpacity={0.7}
@@ -634,6 +775,67 @@ export default function ManualStockInScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          {/* Supplier Selection */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Supplier *</Text>
+            <TouchableOpacity
+              style={[styles.dropdown, formData.supplier ? styles.dropdownSelected : null]}
+              onPress={handleOpenSupplierModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.dropdownContent}>
+                <Building2 size={20} color={formData.supplier ? Colors.primary : Colors.textLight} />
+                <Text style={[
+                  styles.dropdownText,
+                  formData.supplier ? styles.dropdownTextSelected : styles.placeholderText
+                ]} numberOfLines={1}>
+                  {formData.supplier ? formData.supplier.businessName : 'Select supplier'}
+                </Text>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Receiving Location */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Receiving Location *</Text>
+            <TouchableOpacity
+              style={[styles.dropdown, formData.locationId ? styles.dropdownSelected : null]}
+              onPress={() => setShowLocationModal(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.dropdownContent}>
+                <MapPin size={20} color={formData.locationId ? Colors.primary : Colors.textLight} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[
+                    styles.dropdownText,
+                    formData.locationId ? styles.dropdownTextSelected : styles.placeholderText
+                  ]} numberOfLines={1}>
+                    {formData.locationName || (locations.length === 0 ? 'No locations added' : 'Select receiving location')}
+                  </Text>
+                  {formData.locationId && (() => {
+                    const loc = locations.find((l: any) => l.id === formData.locationId);
+                    if (!loc) return null;
+                    const typeLabel = loc.type === 'primary' ? 'Primary Address' : loc.type === 'warehouse' ? 'Warehouse' : 'Branch';
+                    return (
+                      <>
+                        {loc.fullAddress ? (
+                          <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 2 }} numberOfLines={2}>
+                            {loc.fullAddress}
+                          </Text>
+                        ) : null}
+                        <Text style={{ fontSize: 11, color: Colors.primary, marginTop: 2, fontWeight: '500' as const }}>
+                          {typeLabel}
+                        </Text>
+                      </>
+                    );
+                  })()}
+                </View>
+                <ChevronDown size={20} color={Colors.textLight} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
           {/* Invoice Number */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Invoice Number *</Text>
@@ -659,25 +861,98 @@ export default function ManualStockInScreen() {
                 style={styles.input}
                 value={formData.invoiceDate}
                 onChangeText={(text) => {
-                  // Format date as DD-MM-YYYY
-                  let formattedText = text.replace(/[^0-9]/g, '');
-                  if (formattedText.length >= 2) {
-                    formattedText = formattedText.slice(0, 2) + '-' + formattedText.slice(2);
+                  const prev = formData.invoiceDate;
+                  const isDeleting = text.length < prev.length;
+
+                  if (isDeleting) {
+                    if (prev.length === 4 && prev[2] === '-') {
+                      updateFormData('invoiceDate', text.slice(0, 2));
+                      return;
+                    }
+                    if (prev.length === 7 && prev[5] === '-') {
+                      updateFormData('invoiceDate', text.slice(0, 5));
+                      return;
+                    }
+                    updateFormData('invoiceDate', text);
+                    return;
                   }
-                  if (formattedText.length >= 5) {
-                    formattedText = formattedText.slice(0, 5) + '-' + formattedText.slice(5);
+
+                  let digits = text.replace(/[^0-9]/g, '');
+                  if (digits.length > 8) digits = digits.slice(0, 8);
+
+                  let formatted = '';
+                  if (digits.length <= 2) {
+                    formatted = digits;
+                  } else if (digits.length <= 4) {
+                    formatted = digits.slice(0, 2) + '-' + digits.slice(2);
+                  } else {
+                    formatted = digits.slice(0, 2) + '-' + digits.slice(2, 4) + '-' + digits.slice(4);
                   }
-                  if (formattedText.length > 10) {
-                    formattedText = formattedText.slice(0, 10);
-                  }
-                  updateFormData('invoiceDate', formattedText);
+                  updateFormData('invoiceDate', formatted);
                 }}
                 placeholder="DD-MM-YYYY"
                 placeholderTextColor={Colors.textLight}
                 keyboardType="numeric"
                 maxLength={10}
               />
+              {formData.invoiceDate && formData.invoiceDate.length === 10 && validateDateDDMMYYYY(formData.invoiceDate) && (
+                <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 2 }}>{validateDateDDMMYYYY(formData.invoiceDate)}</Text>
+              )}
             </View>
+          </View>
+
+          {/* Additional Invoice Fields */}
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row' as const, alignItems: 'center' as const,
+                justifyContent: 'space-between' as const, paddingVertical: 4,
+              }}
+              onPress={() => setShowAdditionalFields(!showAdditionalFields)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const }}>
+                <ClipboardList size={18} color={Colors.primary} />
+                <Text style={[styles.sectionTitle, { marginBottom: 0, marginLeft: 8, color: Colors.primary }]}>
+                  Additional Invoice Fields
+                </Text>
+              </View>
+              {showAdditionalFields
+                ? <ChevronUp size={18} color={Colors.textLight} />
+                : <ChevronDown size={18} color={Colors.textLight} />}
+            </TouchableOpacity>
+
+            {showAdditionalFields && (
+              <View style={{ marginTop: 12 }}>
+                {INVOICE_FIELD_OPTIONS.map((field) => (
+                  <View key={field.key} style={{ marginBottom: 12 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '500' as const, color: Colors.text, marginBottom: 6 }}>
+                      {field.label}
+                    </Text>
+                    <View style={styles.inputContainer}>
+                      <TextInput
+                        style={[styles.input, { paddingLeft: 14 }]}
+                        value={formData.additionalFields?.[field.key] || ''}
+                        onChangeText={(text) => {
+                          if (field.isDate) {
+                            updateAdditionalField(field.key, formatDateField(text, formData.additionalFields?.[field.key] || ''));
+                          } else {
+                            updateAdditionalField(field.key, text);
+                          }
+                        }}
+                        placeholder={field.isDate ? 'DD-MM-YYYY' : `Enter ${field.label.toLowerCase()}`}
+                        placeholderTextColor={Colors.textLight}
+                        keyboardType={field.isDate ? 'numeric' : 'default'}
+                        maxLength={field.isDate ? 10 : undefined}
+                      />
+                    </View>
+                    {field.isDate && (formData.additionalFields?.[field.key] || '').length === 10 && validateDateDDMMYYYY(formData.additionalFields?.[field.key] || '') && (
+                      <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 2 }}>{validateDateDDMMYYYY(formData.additionalFields?.[field.key] || '')}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* E-Way Bill */}
@@ -685,11 +960,11 @@ export default function ManualStockInScreen() {
             <Text style={styles.sectionTitle}>E-Way Bill</Text>
             <View style={styles.checkboxContainer}>
               <TouchableOpacity
-                style={styles.checkbox}
+                style={[styles.checkbox, formData.hasEwayBill && styles.checkboxChecked]}
                 onPress={() => updateFormData('hasEwayBill', !formData.hasEwayBill)}
                 activeOpacity={0.7}
               >
-                {formData.hasEwayBill && <Check size={16} color={Colors.background} />}
+                {formData.hasEwayBill && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
               </TouchableOpacity>
               <Text style={styles.checkboxLabel}>Invoice has E-Way Bill</Text>
             </View>
@@ -737,26 +1012,6 @@ export default function ManualStockInScreen() {
             </View>
           )}
 
-          {/* Supplier Selection */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Supplier *</Text>
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setShowSupplierModal(true)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.dropdownContent}>
-                <Building2 size={20} color={Colors.textLight} />
-                <Text style={[
-                  styles.dropdownText,
-                  !formData.supplier && styles.placeholderText
-                ]}>
-                  {formData.supplier ? formData.supplier.businessName : 'Select supplier'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
           {/* Products */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -781,98 +1036,156 @@ export default function ManualStockInScreen() {
               </View>
             ) : (
               <View style={styles.productsList}>
-                {formData.products.map((product, index) => (
-                  <View key={product.id} style={styles.productCard}>
-                    <View style={styles.productHeader}>
-                      <Text style={styles.productName}>{product.name}</Text>
-                      <View style={styles.productActions}>
-                        <TouchableOpacity
-                          onPress={() => handleEditProduct(product)}
-                          activeOpacity={0.7}
-                          style={styles.editButton}
-                        >
-                          <Edit size={16} color={Colors.primary} />
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => removeProduct(product.id)}
-                          activeOpacity={0.7}
-                        >
-                          <X size={16} color={Colors.error} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    
-                    <View style={styles.productDetails}>
-                      <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>
-                          Quantity ({product.primaryUnit}):
-                          {product.useCompoundUnit && product.conversionRatio && (
-                            <Text style={styles.piecesInfo}> ({product.conversionRatio} pieces per {product.primaryUnit})</Text>
-                          )}
-                        </Text>
-                        <TextInput
-                          style={styles.quantityInput}
-                          value={product.quantity.toString()}
-                          onChangeText={(text) => updateProduct(product.id, 'quantity', parseInt(text) || 0)}
-                          keyboardType="numeric"
-                          placeholder="0"
-                        />
-                      </View>
-                      
-                      <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>Purchase Price:</Text>
-                        <View style={styles.priceInputContainer}>
-                          <IndianRupee size={16} color={Colors.textLight} />
-                          <TextInput
-                            style={styles.priceInput}
-                            value={product.purchasePrice.toString()}
-                            onChangeText={(text) => updateProduct(product.id, 'purchasePrice', parseFloat(text) || 0)}
-                            keyboardType="decimal-pad"
-                            placeholder="0.00"
-                          />
-                        </View>
-                      </View>
-                      
+                {formData.products.map((product, index) => {
+                  const productKey = product.id || `product_${index}`;
+                  const isExpanded = expandedProducts.has(productKey);
+                  const toggleExpand = () => {
+                    setExpandedProducts(prev => {
+                      const next = new Set(prev);
+                      if (next.has(productKey)) next.delete(productKey);
+                      else next.add(productKey);
+                      return next;
+                    });
+                  };
 
-                      
-                      <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>GST ({product.gstRate}%):</Text>
-                        <Text style={styles.taxAmount}>
-                          ₹{(calculateBasePrice(product) * product.gstRate / 100).toFixed(2)}
-                        </Text>
-                      </View>
-                      
-                      {product.cessType !== 'none' && (
-                        <View style={styles.productRow}>
-                          <Text style={styles.productLabel}>
-                            CESS {(() => {
-                              switch (product.cessType) {
-                                case 'value':
-                                  return `(${product.cessRate}%)`;
-                                case 'quantity':
-                                  return `(₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
-                                case 'value_and_quantity':
-                                  return `(${product.cessRate}% + ₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
-                                default:
-                                  return '';
-                              }
-                            })()}:
-                          </Text>
-                          <Text style={styles.taxAmount}>
-                            ₹{calculateCessAmount(product).toFixed(2)}
-                          </Text>
+                  return (
+                    <View key={productKey} style={styles.productCard}>
+                      <TouchableOpacity
+                        style={styles.productHeader}
+                        onPress={toggleExpand}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                          {!isExpanded && (
+                            <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 2 }}>
+                              Qty: {product.quantity} {product.primaryUnit}  •  {formatCurrencyINR(product.totalPrice, 4)}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.productActions}>
+                          <TouchableOpacity
+                            onPress={() => handleEditProduct(product)}
+                            activeOpacity={0.7}
+                            style={styles.editButton}
+                          >
+                            <Edit size={16} color={Colors.primary} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => removeProduct(product.id)}
+                            activeOpacity={0.7}
+                          >
+                            <X size={16} color={Colors.error} />
+                          </TouchableOpacity>
+                          {isExpanded
+                            ? <ChevronUp size={16} color={Colors.textLight} />
+                            : <ChevronDown size={16} color={Colors.textLight} />
+                          }
+                        </View>
+                      </TouchableOpacity>
+
+                      {isExpanded && (
+                        <View style={styles.productDetails}>
+                          {product.useCompoundUnit && product.secondaryUnit && product.secondaryUnit !== 'None' && product.conversionRatio && (
+                            <View style={styles.uomSelectorRow}>
+                              <Text style={styles.productLabel}>Price per:</Text>
+                              <View style={styles.uomToggle}>
+                                <TouchableOpacity
+                                  style={[styles.uomOption, product.priceUnit === 'primary' && styles.uomOptionActive]}
+                                  onPress={() => updateProduct(product.id, 'priceUnit', 'primary')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.uomOptionText, product.priceUnit === 'primary' && styles.uomOptionTextActive]}>
+                                    {product.primaryUnit}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.uomOption, product.priceUnit === 'secondary' && styles.uomOptionActive]}
+                                  onPress={() => updateProduct(product.id, 'priceUnit', 'secondary')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.uomOptionText, product.priceUnit === 'secondary' && styles.uomOptionTextActive]}>
+                                    {product.secondaryUnit}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
+
+                          <View style={styles.productRow}>
+                            <Text style={styles.productLabel}>
+                              Quantity ({product.primaryUnit}):
+                              {product.useCompoundUnit && product.conversionRatio && (
+                                <Text style={styles.piecesInfo}> ({product.conversionRatio} {product.secondaryUnit} per {product.primaryUnit})</Text>
+                              )}
+                            </Text>
+                            <TextInput
+                              style={styles.quantityInput}
+                              value={product.quantity.toString()}
+                              onChangeText={(text) => updateProduct(product.id, 'quantity', parseInt(text) || 0)}
+                              keyboardType="numeric"
+                              placeholder="0"
+                            />
+                          </View>
+
+                          <View style={styles.productRow}>
+                            <Text style={styles.productLabel}>
+                              Purchase Price{product.useCompoundUnit && product.conversionRatio
+                                ? ` (per ${product.priceUnit === 'secondary' ? product.secondaryUnit : product.primaryUnit})`
+                                : ''}:
+                            </Text>
+                            <View style={styles.priceInputContainer}>
+                              <IndianRupee size={16} color={Colors.textLight} />
+                              <TextInput
+                                style={styles.priceInput}
+                                value={product.purchasePrice.toString()}
+                                onChangeText={(text) => updateProduct(product.id, 'purchasePrice', parseFloat(text) || 0)}
+                                keyboardType="decimal-pad"
+                                placeholder="0.00"
+                              />
+                            </View>
+                          </View>
+
+                          <View style={styles.productRow}>
+                            <Text style={styles.productLabel}>GST ({product.gstRate}%):</Text>
+                            <Text style={styles.taxAmount}>
+                              {formatCurrencyINR(calculateBasePrice(product) * product.gstRate / 100, 4)}
+                            </Text>
+                          </View>
+
+                          {product.cessType !== 'none' && (
+                            <View style={styles.productRow}>
+                              <Text style={styles.productLabel}>
+                                CESS {(() => {
+                                  switch (product.cessType) {
+                                    case 'value':
+                                      return `(${product.cessRate}%)`;
+                                    case 'quantity':
+                                      return `(₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                    case 'value_and_quantity':
+                                      return `(${product.cessRate}% + ₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                    default:
+                                      return '';
+                                  }
+                                })()}:
+                              </Text>
+                              <Text style={styles.taxAmount}>
+                                {formatCurrencyINR(calculateCessAmount(product), 4)}
+                              </Text>
+                            </View>
+                          )}
+
+                          <View style={styles.productRow}>
+                            <Text style={styles.productLabel}>Total:</Text>
+                            <Text style={styles.totalPrice}>
+                              {formatCurrencyINR(product.totalPrice, 4)}
+                            </Text>
+                          </View>
                         </View>
                       )}
-                      
-                      <View style={styles.productRow}>
-                        <Text style={styles.productLabel}>Total:</Text>
-                        <Text style={styles.totalPrice}>
-                          ₹{product.totalPrice.toFixed(2)}
-                        </Text>
-                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -883,10 +1196,10 @@ export default function ManualStockInScreen() {
               <Text style={styles.sectionTitle}>Supplier Discount</Text>
               <Text style={styles.sectionSubtitle}>
                 {formData.discountValue > 0 ? 
-                  `Saving: ₹${formData.discountType === 'percentage' 
-                    ? (formData.totalAmount * formData.discountValue / 100).toFixed(2)
-                    : formData.discountValue.toFixed(2)
-                  }` : 'No discount applied'
+                  `Saving: ${formatCurrencyINR(formData.discountType === 'percentage' 
+                    ? (formData.totalAmount * formData.discountValue / 100)
+                    : formData.discountValue
+                  )}` : 'No discount applied'
                 }
               </Text>
             </View>
@@ -943,7 +1256,7 @@ export default function ManualStockInScreen() {
                 <Text style={styles.discountHelperText}>
                   {formData.discountType === 'percentage' 
                     ? `${formData.discountValue}% off total amount`
-                    : `₹${formData.discountValue.toFixed(2)} off total amount`
+                    : `${formatCurrencyINR(formData.discountValue)} off total amount`
                   }
                 </Text>
               )}
@@ -954,7 +1267,7 @@ export default function ManualStockInScreen() {
           <View style={styles.section}>
             <View style={styles.totalSection}>
               <Text style={styles.totalLabel}>Total Amount:</Text>
-              <Text style={styles.totalAmount}>₹{formData.totalAmount.toFixed(2)}</Text>
+              <Text style={styles.totalAmount}>{formatCurrencyINR(formData.totalAmount)}</Text>
             </View>
           </View>
 
@@ -964,9 +1277,9 @@ export default function ManualStockInScreen() {
               <View style={styles.totalSection}>
                 <Text style={styles.totalLabel}>After Discount:</Text>
                 <Text style={styles.totalAmount}>
-                  ₹{(formData.totalAmount - (formData.discountType === 'percentage' 
+                  {formatCurrencyINR(formData.totalAmount - (formData.discountType === 'percentage' 
                     ? (formData.totalAmount * formData.discountValue / 100) 
-                    : formData.discountValue)).toFixed(2)}
+                    : formData.discountValue))}
                 </Text>
               </View>
             </View>
@@ -975,12 +1288,23 @@ export default function ManualStockInScreen() {
           {/* Round Off */}
           <View style={styles.section}>
             <View style={styles.totalSection}>
-              <Text style={styles.totalLabel}>Round Off:</Text>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                onPress={() => updateFormData('applyRoundOff', !formData.applyRoundOff)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, formData.applyRoundOff && styles.checkboxChecked]}>
+                  {formData.applyRoundOff && <Check size={14} color="#fff" />}
+                </View>
+                <Text style={styles.totalLabel}>Round Off:</Text>
+              </TouchableOpacity>
               <Text style={[
                 styles.totalAmount, 
-                { color: formData.roundOffAmount > 0 ? Colors.success : formData.roundOffAmount < 0 ? Colors.error : Colors.text }
+                { color: formData.applyRoundOff ? (formData.roundOffAmount > 0 ? Colors.success : formData.roundOffAmount < 0 ? Colors.error : Colors.text) : Colors.textLight }
               ]}>
-                {formData.roundOffAmount > 0 ? '+' : ''}₹{formData.roundOffAmount.toFixed(2)}
+                {formData.applyRoundOff
+                  ? `${formData.roundOffAmount > 0 ? '+' : ''}${formatCurrencyINR(formData.roundOffAmount)}`
+                  : '—'}
               </Text>
             </View>
           </View>
@@ -990,7 +1314,7 @@ export default function ManualStockInScreen() {
             <View style={styles.totalSection}>
               <Text style={[styles.totalLabel, { fontWeight: 'bold' }]}>Final Amount:</Text>
               <Text style={[styles.totalAmount, { fontWeight: 'bold', color: Colors.primary }]}>
-                ₹{formData.finalAmount.toFixed(0)}
+                {formatCurrencyINR(formData.finalAmount)}
               </Text>
             </View>
           </View>
@@ -1023,7 +1347,7 @@ export default function ManualStockInScreen() {
             disabled={!isFormValid() || isSaving}
           >
             <Text style={styles.saveButtonText}>
-              {isSaving ? 'Saving...' : 'Save Stock In'}
+              {isSaving ? 'Saving...' : 'Review & Confirm'}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -1048,38 +1372,78 @@ export default function ManualStockInScreen() {
               </View>
               
               <View style={styles.modalContent}>
+                <View style={styles.searchContainer}>
+                  <Search size={20} color={Colors.textLight} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search suppliers..."
+                    placeholderTextColor={Colors.textLight}
+                    value={supplierSearch}
+                    onChangeText={setSupplierSearch}
+                  />
+                </View>
+
+                <ScrollView style={styles.productList}>
+                  {suppliersLoading ? (
+                    <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                      <Text style={[styles.modalOptionText, { marginTop: 8 }]}>Loading suppliers...</Text>
+                    </View>
+                  ) : (
+                    <>
+                      {suppliersList
+                        .filter((s: any) => {
+                          if (!supplierSearch.trim()) return true;
+                          const q = supplierSearch.toLowerCase();
+                          return (
+                            (s.business_name || '').toLowerCase().includes(q) ||
+                            (s.contact_person || '').toLowerCase().includes(q) ||
+                            (s.gstin_pan || '').toLowerCase().includes(q) ||
+                            (s.mobile_number || '').toLowerCase().includes(q)
+                          );
+                        })
+                        .map((supplier: any) => (
+                          <TouchableOpacity
+                            key={supplier.id}
+                            style={styles.modalOption}
+                            onPress={() => handleSupplierSelect(supplier)}
+                            activeOpacity={0.7}
+                          >
+                            <Building2 size={20} color={Colors.textLight} />
+                            <View style={{ flex: 1, marginLeft: 8 }}>
+                              <Text style={styles.modalOptionText}>{supplier.business_name || supplier.contact_person || 'Unnamed'}</Text>
+                              {supplier.gstin_pan ? (
+                                <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 2 }}>GSTIN: {supplier.gstin_pan}</Text>
+                              ) : null}
+                            </View>
+                          </TouchableOpacity>
+                        ))
+                      }
+                      {!suppliersLoading && suppliersList.length === 0 && (
+                        <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                          <Text style={[styles.modalOptionText, { color: Colors.textLight }]}>No suppliers found</Text>
+                        </View>
+                      )}
+                    </>
+                  )}
+                </ScrollView>
+
                 <TouchableOpacity
-                  style={styles.modalOption}
+                  style={[styles.modalOption, { borderTopWidth: 1, borderTopColor: Colors.grey[200], marginTop: 8, paddingTop: 12 }]}
                   onPress={() => {
-                    // Navigate to add supplier and remember the new supplier
                     setShowSupplierModal(false);
+                    saveStockInFormData(formData);
                     setTimeout(() => {
-                      router.push({
+                      safeRouter.push({
                         pathname: '/purchasing/add-supplier',
-                        params: {
-                          returnToStockIn: 'true'
-                        }
+                        params: { returnToStockIn: 'true' },
                       });
                     }, 100);
                   }}
                   activeOpacity={0.7}
                 >
                   <Plus size={20} color={Colors.primary} />
-                  <Text style={styles.modalOptionText}>Add New Supplier</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={styles.modalOption}
-                  onPress={() => handleSupplierSelect({
-                    name: 'ABC Suppliers',
-                    gstin: '27ABCDE1234F1Z5',
-                    businessName: 'ABC Suppliers Pvt Ltd',
-                    address: 'Mumbai, Maharashtra'
-                  })}
-                  activeOpacity={0.7}
-                >
-                  <Building2 size={20} color={Colors.textLight} />
-                  <Text style={styles.modalOptionText}>ABC Suppliers Pvt Ltd</Text>
+                  <Text style={[styles.modalOptionText, { color: Colors.primary }]}>Add New Supplier</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1118,20 +1482,47 @@ export default function ManualStockInScreen() {
                 </View>
                 
                 <ScrollView style={styles.productList}>
-                  {filteredProducts.map((product) => (
-                    <TouchableOpacity
-                      key={product.id}
-                      style={styles.productOption}
-                      onPress={() => setSelectedProduct(product)}
-                      activeOpacity={0.7}
-                    >
-                      <Package size={20} color={Colors.textLight} />
-                      <Text style={styles.productOptionText}>{product.name}</Text>
-                      {selectedProduct?.id === product.id && (
-                        <Check size={20} color={Colors.primary} />
-                      )}
-                    </TouchableOpacity>
-                  ))}
+                  {productsLoading ? (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                      <Text style={{ marginTop: 8, color: Colors.textLight, fontSize: 13 }}>Loading products...</Text>
+                    </View>
+                  ) : filteredProducts.length === 0 ? (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <Package size={32} color={Colors.grey[300]} />
+                      <Text style={{ marginTop: 8, color: Colors.textLight, fontSize: 13 }}>
+                        {searchQuery ? 'No products match your search' : 'No products yet'}
+                      </Text>
+                    </View>
+                  ) : (
+                    filteredProducts.map((product: any) => {
+                      const isAlreadyAdded = formData.products.some(p => p.id === product.id);
+                      return (
+                        <TouchableOpacity
+                          key={product.id}
+                          style={[styles.productOption, isAlreadyAdded && { opacity: 0.5, backgroundColor: Colors.grey[100] }]}
+                          onPress={() => !isAlreadyAdded && setSelectedProduct(product)}
+                          activeOpacity={0.7}
+                          disabled={isAlreadyAdded}
+                        >
+                          <Package size={20} color={isAlreadyAdded ? Colors.grey[300] : Colors.textLight} />
+                          <View style={{ flex: 1, marginLeft: 8 }}>
+                            <Text style={styles.productOptionText}>{product.name}</Text>
+                            <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 1 }}>
+                              {product.category || ''}
+                              {product.barcode ? ` • ${product.barcode}` : ''}
+                              {(product.unitPrice || product.unit_price) ? ` • ${formatCurrencyINR(parseFloat(product.unitPrice || product.unit_price || 0), 4)}` : ''}
+                            </Text>
+                          </View>
+                          {isAlreadyAdded ? (
+                            <Text style={{ fontSize: 10, color: Colors.textLight, fontWeight: '500' }}>Added</Text>
+                          ) : selectedProduct?.id === product.id ? (
+                            <Check size={20} color={Colors.primary} />
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
                 </ScrollView>
                 
                 <TouchableOpacity
@@ -1234,670 +1625,6 @@ export default function ManualStockInScreen() {
             </View>
           </Modal>
 
-          {/* Create Product Modal */}
-          <Modal
-            visible={showCreateProductModal}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setShowCreateProductModal(false)}
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Create New Product</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowCreateProductModal(false)}
-                    activeOpacity={0.7}
-                  >
-                    <X size={24} color={Colors.textLight} />
-                  </TouchableOpacity>
-                </View>
-                
-                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                  {/* Scan Product Button */}
-                  <TouchableOpacity
-                    style={styles.scanButton}
-                    onPress={handleScanProduct}
-                    activeOpacity={0.8}
-                  >
-                    <Camera size={20} color={Colors.background} />
-                    <Text style={styles.scanButtonText}>Scan Product Barcode</Text>
-                  </TouchableOpacity>
-
-                  {/* Basic Information */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Basic Information</Text>
-                    
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>Product Name *</Text>
-                      <View style={styles.inputContainer}>
-                        <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.name}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, name: text }))}
-                          placeholder="Enter product name"
-                          placeholderTextColor={Colors.textLight}
-                        />
-                      </View>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>Category *</Text>
-                      <View style={styles.inputContainer}>
-                        <Package size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.category}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, category: text }))}
-                          placeholder="Enter category"
-                          placeholderTextColor={Colors.textLight}
-                        />
-                      </View>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>Barcode</Text>
-                      <View style={styles.inputContainer}>
-                        <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.barcode}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, barcode: text }))}
-                          placeholder="Enter barcode or scan"
-                          placeholderTextColor={Colors.textLight}
-                        />
-                        <TouchableOpacity
-                          style={styles.scanIcon}
-                          onPress={handleScanProduct}
-                          activeOpacity={0.7}
-                        >
-                          <Camera size={16} color={Colors.primary} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>HSN Code</Text>
-                      <View style={styles.inputContainer}>
-                        <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.hsnCode}
-                          onChangeText={(text) => {
-                            const numericText = text.replace(/[^0-9]/g, '');
-                            setNewProductData(prev => ({ ...prev, hsnCode: numericText }))
-                          }}
-                          placeholder="Enter HSN code (numbers only)"
-                          placeholderTextColor={Colors.textLight}
-                          keyboardType="numeric"
-                          maxLength={8}
-                        />
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Unit of Measurement Section */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Unit of Measurement</Text>
-                    
-                    <View style={styles.unitTypeContainer}>
-                      <Text style={styles.unitSubLabel}>Unit Type:</Text>
-                      <View style={styles.unitTypeButtons}>
-                        <TouchableOpacity
-                          style={[
-                            styles.unitTypeButton,
-                            { backgroundColor: !newProductData.useCompoundUnit ? Colors.primary : Colors.primary + '20' }
-                          ]}
-                          onPress={() => setNewProductData(prev => ({ ...prev, useCompoundUnit: false }))}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.unitTypeButtonText, 
-                            { color: !newProductData.useCompoundUnit ? Colors.background : Colors.primary }
-                          ]}>
-                            Primary Only
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[
-                            styles.unitTypeButton,
-                            { backgroundColor: newProductData.useCompoundUnit ? Colors.primary : Colors.primary + '20' }
-                          ]}
-                          onPress={() => setNewProductData(prev => ({ ...prev, useCompoundUnit: true }))}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[
-                            styles.unitTypeButtonText, 
-                            { color: newProductData.useCompoundUnit ? Colors.background : Colors.primary }
-                          ]}>
-                            Compound
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    <View style={styles.rowContainer}>
-                      <View style={[styles.inputGroup, styles.halfWidth]}>
-                        <Text style={styles.label}>Primary Unit *</Text>
-                        <TouchableOpacity
-                          style={styles.dropdown}
-                          onPress={() => {
-                            console.log('Primary unit dropdown pressed');
-                            setShowPrimaryUnitDropdown(!showPrimaryUnitDropdown);
-                            setShowSecondaryUnitDropdown(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={styles.dropdownContent}>
-                            <Ruler size={20} color={Colors.textLight} />
-                            <Text style={styles.dropdownText}>
-                              {newProductData.primaryUnit}
-                            </Text>
-                            <ChevronDown size={20} color={Colors.textLight} />
-                          </View>
-                        </TouchableOpacity>
-                        
-                        {showPrimaryUnitDropdown && (
-                          <View style={styles.dropdownOptions}>
-                            <View style={styles.dropdownSearchContainer}>
-                              <Search size={16} color={Colors.textLight} />
-                              <TextInput
-                                style={styles.dropdownSearchInput}
-                                placeholder="Search units..."
-                                placeholderTextColor={Colors.textLight}
-                                value={primaryUnitSearch}
-                                onChangeText={setPrimaryUnitSearch}
-                                autoFocus
-                              />
-                            </View>
-                            <ScrollView style={styles.dropdownScrollView} showsVerticalScrollIndicator={false}>
-                              {primaryUnits
-                                .filter(unit => 
-                                  unit.toLowerCase().includes(primaryUnitSearch.toLowerCase())
-                                )
-                                .slice(0, 8) // Limit to 8 results
-                                .map((unit) => (
-                                  <TouchableOpacity
-                                    key={unit}
-                                    style={styles.dropdownOption}
-                                    onPress={() => {
-                                      setNewProductData(prev => ({ ...prev, primaryUnit: unit }));
-                                      setShowPrimaryUnitDropdown(false);
-                                      setPrimaryUnitSearch('');
-                                    }}
-                                    activeOpacity={0.7}
-                                  >
-                                    <Text style={styles.dropdownOptionText}>{unit}</Text>
-                                  </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                          </View>
-                        )}
-                      </View>
-
-                      {newProductData.useCompoundUnit && (
-                        <View style={[styles.inputGroup, styles.halfWidth]}>
-                          <Text style={styles.label}>Secondary Unit</Text>
-                          <TouchableOpacity
-                            style={styles.dropdown}
-                            onPress={() => {
-                              console.log('Secondary unit dropdown pressed');
-                              setShowSecondaryUnitDropdown(!showSecondaryUnitDropdown);
-                              setShowPrimaryUnitDropdown(false);
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <View style={styles.dropdownContent}>
-                              <Ruler size={20} color={Colors.textLight} />
-                              <Text style={styles.dropdownText}>
-                                {newProductData.secondaryUnit}
-                              </Text>
-                              <ChevronDown size={20} color={Colors.textLight} />
-                            </View>
-                          </TouchableOpacity>
-                          
-                          {showSecondaryUnitDropdown && (
-                            <View style={styles.dropdownOptions}>
-                              <View style={styles.dropdownSearchContainer}>
-                                <Search size={16} color={Colors.textLight} />
-                                <TextInput
-                                  style={styles.dropdownSearchInput}
-                                  placeholder="Search units..."
-                                  placeholderTextColor={Colors.textLight}
-                                  value={secondaryUnitSearch}
-                                  onChangeText={setSecondaryUnitSearch}
-                                  autoFocus
-                                />
-                              </View>
-                              <ScrollView style={styles.dropdownScrollView} showsVerticalScrollIndicator={false}>
-                                {secondaryUnits
-                                  .filter(unit => 
-                                    unit.toLowerCase().includes(secondaryUnitSearch.toLowerCase())
-                                  )
-                                  .slice(0, 8) // Limit to 8 results
-                                  .map((unit) => (
-                                    <TouchableOpacity
-                                      key={unit}
-                                      style={styles.dropdownOption}
-                                      onPress={() => {
-                                        setNewProductData(prev => ({ ...prev, secondaryUnit: unit }));
-                                        setShowSecondaryUnitDropdown(false);
-                                        setSecondaryUnitSearch('');
-                                      }}
-                                      activeOpacity={0.7}
-                                    >
-                                      <Text style={styles.dropdownOptionText}>{unit}</Text>
-                                    </TouchableOpacity>
-                                  ))}
-                              </ScrollView>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                    </View>
-
-                    {newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None' && (
-                      <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Conversion Ratio</Text>
-                        <View style={styles.conversionContainer}>
-                          <View style={styles.conversionInputGroup}>
-                            <Text style={styles.conversionLabel}>1 {newProductData.primaryUnit}</Text>
-                            <Text style={styles.conversionEquals}>=</Text>
-                            <View style={styles.conversionInputContainer}>
-                              <TextInput
-                                style={styles.conversionInput}
-                                value={newProductData.conversionRatio}
-                                onChangeText={(text) => {
-                                  // Only allow numbers and decimal points
-                                  const cleanedText = text.replace(/[^0-9.]/g, '');
-                                  setNewProductData(prev => ({ ...prev, conversionRatio: cleanedText }));
-                                }}
-                                placeholder="0"
-                                placeholderTextColor={Colors.textLight}
-                                keyboardType="decimal-pad"
-                                maxLength={10}
-                              />
-                            </View>
-                            <Text style={styles.conversionLabel}>{newProductData.secondaryUnit}</Text>
-                          </View>
-                          {newProductData.conversionRatio && parseFloat(newProductData.conversionRatio) > 0 && (
-                            <View style={styles.conversionPreview}>
-                              <Text style={styles.conversionPreviewText}>
-                                Preview: 1 {newProductData.primaryUnit} = {newProductData.conversionRatio} {newProductData.secondaryUnit}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    )}
-                  </View>
-
-                  
-
-                  {/* Tax Information Section */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Tax Information</Text>
-                    
-                    <View style={styles.taxSection}>
-                      <Text style={styles.taxLabel}>GST Rate (%)</Text>
-                      <View style={styles.taxButtons}>
-                        {[0, 5, 12, 18, 28].map((rate) => (
-                          <TouchableOpacity
-                            key={rate}
-                            style={[
-                              styles.taxButton,
-                              { backgroundColor: newProductData.gstRate === rate ? Colors.primary : Colors.primary + '20' }
-                            ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, gstRate: rate }))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.taxButtonText, 
-                              { color: newProductData.gstRate === rate ? Colors.background : Colors.primary }
-                            ]}>
-                              {rate}%
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </View>
-
-                    {/* CESS Calculation Section */}
-                    <View style={styles.cessSection}>
-                      <Text style={styles.cessLabel}>CESS Calculation (Optional)</Text>
-                    
-                      <View style={styles.cessTypeContainer}>
-                        <Text style={styles.cessSubLabel}>CESS Type:</Text>
-                        <View style={styles.cessTypeButtons}>
-                          {[
-                            { value: 'none', label: 'No CESS' },
-                            { value: 'value', label: 'Value Based (%)' },
-                            { value: 'quantity', label: 'Quantity Based (₹/unit)' },
-                            { value: 'value_and_quantity', label: 'Value + Quantity' }
-                          ].map((type) => (
-                            <TouchableOpacity
-                              key={type.value}
-                              style={[
-                                styles.cessTypeButton,
-                                { backgroundColor: newProductData.cessType === type.value ? Colors.primary : Colors.primary + '20' }
-                              ]}
-                              onPress={() => setNewProductData(prev => ({ ...prev, cessType: type.value as 'none' | 'value' | 'quantity' | 'value_and_quantity' }))}
-                              activeOpacity={0.7}
-                            >
-                              <Text style={[
-                                styles.cessTypeButtonText, 
-                                { color: newProductData.cessType === type.value ? Colors.background : Colors.primary }
-                              ]}>
-                                {type.label}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-
-                      {/* CESS Rate (%) - Show for 'value' and 'value_and_quantity' */}
-                      {(newProductData.cessType === 'value' || newProductData.cessType === 'value_and_quantity') && (
-                        <View style={styles.inputGroup}>
-                          <Text style={styles.label}>CESS Rate (%) *</Text>
-                          <View style={styles.inputContainer}>
-                            <Percent size={20} color={Colors.textLight} style={styles.inputIcon} />
-                            <TextInput
-                              style={styles.input}
-                              value={newProductData.cessRate.toString()}
-                              onChangeText={(text) => setNewProductData(prev => ({ ...prev, cessRate: parseFloat(text) || 0 }))}
-                              placeholder="0"
-                              placeholderTextColor={Colors.textLight}
-                              keyboardType="numeric"
-                            />
-                          </View>
-                        </View>
-                      )}
-
-                      {/* CESS Amount (₹ per unit) - Show for 'quantity' and 'value_and_quantity' */}
-                      {(newProductData.cessType === 'quantity' || newProductData.cessType === 'value_and_quantity') && (
-                        <>
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.label}>CESS Amount (₹ per unit) *</Text>
-                            <View style={styles.inputContainer}>
-                              <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                              <TextInput
-                                style={styles.input}
-                                value={newProductData.cessAmount.toString()}
-                                onChangeText={(text) => setNewProductData(prev => ({ ...prev, cessAmount: parseFloat(text) || 0 }))}
-                                placeholder="0.00"
-                                placeholderTextColor={Colors.textLight}
-                                keyboardType="decimal-pad"
-                              />
-                            </View>
-                          </View>
-                          
-                          <View style={styles.inputGroup}>
-                            <Text style={styles.label}>CESS Unit *</Text>
-                            <TouchableOpacity
-                              style={styles.inputContainer}
-                              onPress={() => {
-                                const availableUnits = [newProductData.primaryUnit];
-                                if (newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None') {
-                                  availableUnits.push(newProductData.secondaryUnit);
-                                }
-                                
-                                Alert.alert(
-                                  'Select CESS Unit',
-                                  'Choose the unit for CESS calculation',
-                                  [
-                                    ...availableUnits.map(unit => ({
-                                      text: unit,
-                                      onPress: () => setNewProductData(prev => ({ ...prev, cessUnit: unit }))
-                                    })),
-                                    { text: 'Cancel', style: 'cancel' }
-                                  ]
-                                );
-                              }}
-                              activeOpacity={0.7}
-                            >
-                              <Ruler size={20} color={Colors.textLight} style={styles.inputIcon} />
-                              <Text style={[styles.input, { color: newProductData.cessUnit ? Colors.text : Colors.textLight }]}>
-                                {newProductData.cessUnit || 'Select unit'}
-                              </Text>
-                              <ChevronDown size={16} color={Colors.textLight} style={{ marginLeft: 'auto' }} />
-                            </TouchableOpacity>
-                          </View>
-                        </>
-                      )}
-                    </View>
-                  </View>
-
-                  {/* Pricing Information Section */}
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Pricing Information</Text>
-                    
-                    {/* Price Unit Selection */}
-                    {newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None' ? (
-                      <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Price Unit *</Text>
-                        <View style={styles.priceUnitContainer}>
-                          <TouchableOpacity
-                            style={[
-                              styles.priceUnitButton,
-                              newProductData.priceUnit === 'primary' && styles.activePriceUnitButton
-                            ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'primary' }))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.priceUnitButtonText,
-                              newProductData.priceUnit === 'primary' && styles.activePriceUnitButtonText
-                            ]}>
-                              Per {newProductData.primaryUnit}
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.priceUnitButton,
-                              newProductData.priceUnit === 'secondary' && styles.activePriceUnitButton
-                            ]}
-                            onPress={() => setNewProductData(prev => ({ ...prev, priceUnit: 'secondary' }))}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.priceUnitButtonText,
-                              newProductData.priceUnit === 'secondary' && styles.activePriceUnitButtonText
-                            ]}>
-                              Per {newProductData.secondaryUnit}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    ) : (
-                      <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Price Unit *</Text>
-                        <View style={styles.priceUnitContainer}>
-                          <TouchableOpacity
-                            style={[
-                              styles.priceUnitButton,
-                              styles.activePriceUnitButton
-                            ]}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[
-                              styles.priceUnitButtonText,
-                              styles.activePriceUnitButtonText
-                            ]}>
-                              Per {newProductData.primaryUnit}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Purchase Price */}
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>
-                        Purchase Price {newProductData.useCompoundUnit && newProductData.secondaryUnit !== 'None' 
-                          ? `per ${newProductData.priceUnit === 'primary' ? newProductData.primaryUnit : newProductData.secondaryUnit}` 
-                          : ''} *
-                      </Text>
-                      <View style={styles.inputContainer}>
-                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.purchasePrice}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, purchasePrice: text }))}
-                          placeholder="0.00"
-                          placeholderTextColor={Colors.textLight}
-                          keyboardType="decimal-pad"
-                        />
-                      </View>
-                    </View>
-
-                    {/* Sale Price */}
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>Sale Price *</Text>
-                      <View style={styles.inputContainer}>
-                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.salePrice}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, salePrice: text }))}
-                          placeholder="0.00"
-                          placeholderTextColor={Colors.textLight}
-                          keyboardType="decimal-pad"
-                        />
-                      </View>
-                    </View>
-
-                    {/* MRP */}
-                    <View style={styles.inputGroup}>
-                      <Text style={styles.label}>MRP *</Text>
-                      <View style={styles.inputContainer}>
-                        <IndianRupee size={20} color={Colors.textLight} style={styles.inputIcon} />
-                        <TextInput
-                          style={styles.input}
-                          value={newProductData.mrp}
-                          onChangeText={(text) => setNewProductData(prev => ({ ...prev, mrp: text }))}
-                          placeholder="0.00"
-                          placeholderTextColor={Colors.textLight}
-                          keyboardType="decimal-pad"
-                        />
-                      </View>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[styles.addSelectedButton, { marginTop: 30, marginBottom: 30 }]}
-                    onPress={() => {
-                      // Basic validation
-                      if (!newProductData.name || !newProductData.category || !newProductData.purchasePrice || !newProductData.salePrice || !newProductData.mrp || !newProductData.primaryUnit) {
-                        Alert.alert('Incomplete Form', 'Please fill in all required fields');
-                        return;
-                      }
-                      
-                      // CESS validation based on type
-                      if (newProductData.cessType === 'value' && newProductData.cessRate <= 0) {
-                        Alert.alert('CESS Configuration', 'Please enter CESS rate for value-based CESS');
-                        return;
-                      }
-                      
-                      if (newProductData.cessType === 'quantity' && (newProductData.cessAmount <= 0 || !newProductData.cessUnit)) {
-                        Alert.alert('CESS Configuration', 'Please enter CESS amount and select unit for quantity-based CESS');
-                        return;
-                      }
-                      
-                      if (newProductData.cessType === 'value_and_quantity' && (newProductData.cessRate <= 0 || newProductData.cessAmount <= 0 || !newProductData.cessUnit)) {
-                        Alert.alert('CESS Configuration', 'Please enter both CESS rate and amount, and select unit for value and quantity CESS');
-                        return;
-                      }
-                      
-                      if (newProductData.name && newProductData.category && newProductData.purchasePrice && newProductData.primaryUnit) {
-                        const productToAdd: StockInProduct = {
-                          id: `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                          name: newProductData.name,
-                          barcode: newProductData.barcode || '',
-                          quantity: 1,
-                          purchasePrice: parseFloat(newProductData.purchasePrice),
-                          discount: 0,
-                          totalPrice: 0, // Will be calculated properly
-                          isNewProduct: true,
-                          gstRate: newProductData.gstRate,
-                          cessRate: newProductData.cessType === 'none' ? 0 : newProductData.cessRate,
-                          cessType: newProductData.cessType,
-                          cessAmount: newProductData.cessType === 'none' ? 0 : newProductData.cessAmount,
-                          cessUnit: newProductData.cessUnit || '',
-                          primaryUnit: newProductData.primaryUnit,
-                          secondaryUnit: newProductData.secondaryUnit,
-                          useCompoundUnit: newProductData.useCompoundUnit,
-                          conversionRatio: newProductData.conversionRatio,
-                          priceUnit: newProductData.priceUnit,
-                        };
-                        
-                        // Calculate proper total price including GST and CESS
-                        const basePrice = calculateBasePrice(productToAdd);
-                        const gstAmount = basePrice * (productToAdd.gstRate / 100);
-                        const cessAmount = calculateCessAmount(productToAdd);
-                        productToAdd.totalPrice = basePrice + gstAmount + cessAmount;
-                        
-                        // Save to inventory (mock implementation)
-                        const inventoryProduct = {
-                          id: productToAdd.id,
-                          name: productToAdd.name,
-                          category: newProductData.category,
-                          barcode: productToAdd.barcode,
-                          hsnCode: newProductData.hsnCode,
-                          purchasePrice: parseFloat(newProductData.purchasePrice),
-                          salePrice: parseFloat(newProductData.salePrice),
-                          mrp: parseFloat(newProductData.mrp),
-                          gstRate: productToAdd.gstRate,
-                          cessRate: productToAdd.cessRate,
-                          cessType: productToAdd.cessType,
-                          cessAmount: productToAdd.cessAmount,
-                          cessUnit: productToAdd.cessUnit,
-                          primaryUnit: productToAdd.primaryUnit,
-                          secondaryUnit: productToAdd.secondaryUnit,
-                          useCompoundUnit: productToAdd.useCompoundUnit,
-                          conversionRatio: productToAdd.conversionRatio,
-                          priceUnit: productToAdd.priceUnit,
-                          stockQuantity: 0, // Will be updated when stock-in is completed
-                        };
-                        
-                        // In a real app, this would save to a database
-                        console.log('Product saved to inventory:', inventoryProduct);
-                        
-                        const updatedProducts = [...formData.products, productToAdd];
-                        updateFormData('products', updatedProducts);
-                        setShowCreateProductModal(false);
-                        setNewProductData({
-                          name: '',
-                          category: '',
-                          barcode: '',
-                          hsnCode: '',
-                          purchasePrice: '',
-                          salePrice: '',
-                          mrp: '',
-                          priceUnit: 'primary',
-                          gstRate: 18,
-                          cessRate: 0,
-                          cessType: 'none',
-                          cessAmount: 0,
-                          cessUnit: '',
-                          cessAmountType: 'percentage',
-                          primaryUnit: 'Piece',
-                          secondaryUnit: 'None',
-                          useCompoundUnit: false,
-                          conversionRatio: '',
-                        });
-                      } else {
-                        Alert.alert('Incomplete Form', 'Please fill in all required fields');
-                      }
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.addSelectedButtonText}>Save to Inventory & Add to Stock In</Text>
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
 
           {/* Edit Product Modal */}
           <Modal
@@ -1968,10 +1695,37 @@ export default function ManualStockInScreen() {
                         </View>
                       </View>
 
+                      {/* UoM Toggle (for compound units) */}
+                      {editingProduct.useCompoundUnit && editingProduct.secondaryUnit && editingProduct.secondaryUnit !== 'None' && (
+                        <View style={styles.inputGroup}>
+                          <Text style={styles.label}>Price per</Text>
+                          <View style={styles.uomToggle}>
+                            <TouchableOpacity
+                              style={[styles.uomOption, editingProduct.priceUnit === 'primary' && styles.uomOptionActive]}
+                              onPress={() => setEditingProduct(prev => prev ? { ...prev, priceUnit: 'primary' } : null)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[styles.uomOptionText, editingProduct.priceUnit === 'primary' && styles.uomOptionTextActive]}>
+                                {editingProduct.primaryUnit}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.uomOption, editingProduct.priceUnit === 'secondary' && styles.uomOptionActive]}
+                              onPress={() => setEditingProduct(prev => prev ? { ...prev, priceUnit: 'secondary' } : null)}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={[styles.uomOptionText, editingProduct.priceUnit === 'secondary' && styles.uomOptionTextActive]}>
+                                {editingProduct.secondaryUnit}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+
                       {/* Pieces per Box (for compound units) */}
                       {editingProduct.useCompoundUnit && (
                         <View style={styles.inputGroup}>
-                          <Text style={styles.label}>Pieces per {editingProduct.primaryUnit}</Text>
+                          <Text style={styles.label}>{editingProduct.secondaryUnit || 'Pieces'} per {editingProduct.primaryUnit}</Text>
                           <View style={styles.inputContainer}>
                             <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
                             <TextInput
@@ -2297,6 +2051,108 @@ export default function ManualStockInScreen() {
               </View>
             </View>
           </Modal>
+
+          {/* Location Selection Modal */}
+          <Modal
+            visible={showLocationModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowLocationModal(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Select Receiving Location</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowLocationModal(false)}
+                    activeOpacity={0.7}
+                  >
+                    <X size={24} color={Colors.textLight} />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                  {locations.map((loc: any) => {
+                    const isSelected = formData.locationId === loc.id;
+                    const typeLabel = loc.type === 'primary' ? 'Primary' : loc.type === 'warehouse' ? 'Warehouse' : 'Branch';
+                    return (
+                      <TouchableOpacity
+                        key={loc.id}
+                        style={[
+                          styles.locationOptionItem,
+                          isSelected && styles.locationOptionSelected,
+                        ]}
+                        onPress={() => {
+                          setFormData(prev => ({ ...prev, locationId: loc.id, locationName: loc.name }));
+                          setShowLocationModal(false);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.locationIconCircle, isSelected && { backgroundColor: Colors.primary + '15' }]}>
+                          <MapPin size={18} color={isSelected ? Colors.primary : Colors.textLight} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.locationOptionName, isSelected && { color: Colors.primary, fontWeight: '600' }]} numberOfLines={1}>
+                            {loc.name}
+                          </Text>
+                          {loc.fullAddress ? (
+                            <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 1 }} numberOfLines={2}>
+                              {loc.fullAddress}
+                            </Text>
+                          ) : null}
+                          <Text style={styles.locationOptionType}>{typeLabel}</Text>
+                        </View>
+                        {isSelected && (
+                          <View style={styles.locationCheckCircle}>
+                            <Check size={14} color="#FFFFFF" />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+
+                  {locations.length === 0 && (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.grey[100], alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                        <MapPin size={28} color={Colors.grey[300]} />
+                      </View>
+                      <Text style={{ color: Colors.text, fontSize: 15, fontWeight: '600', marginBottom: 4 }}>No locations added</Text>
+                      <Text style={{ color: Colors.textLight, fontSize: 13, textAlign: 'center' }}>Add a branch or warehouse to get started</Text>
+                    </View>
+                  )}
+                </ScrollView>
+
+                <View style={styles.locationModalFooter}>
+                  <TouchableOpacity
+                    style={styles.locationAddButton}
+                    onPress={() => {
+                      setShowLocationModal(false);
+                      safeRouter.push('/locations/add-branch');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.locationAddIconCircle}>
+                      <Plus size={16} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.locationAddButtonText}>Add Branch</Text>
+                  </TouchableOpacity>
+                  <View style={styles.locationFooterDivider} />
+                  <TouchableOpacity
+                    style={styles.locationAddButton}
+                    onPress={() => {
+                      setShowLocationModal(false);
+                      safeRouter.push('/locations/add-warehouse');
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.locationAddIconCircle}>
+                      <Plus size={16} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.locationAddButtonText}>Add Warehouse</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
         </SafeAreaView>
     );
   }
@@ -2403,6 +2259,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
     flex: 1,
+  },
+  dropdownSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '08',
+  },
+  dropdownTextSelected: {
+    color: Colors.text,
+    fontWeight: '600',
   },
   placeholderText: {
     color: Colors.textLight,
@@ -2635,6 +2499,82 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.primary,
   },
+  locationOptionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 6,
+    gap: 12,
+    backgroundColor: Colors.grey[50],
+  },
+  locationOptionSelected: {
+    backgroundColor: Colors.primary + '0A',
+    borderWidth: 1,
+    borderColor: Colors.primary + '30',
+  },
+  locationIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.grey[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationOptionName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  locationOptionType: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  locationCheckCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationModalFooter: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    paddingTop: 4,
+    paddingBottom: Platform.OS === 'ios' ? 8 : 4,
+    paddingHorizontal: 8,
+  },
+  locationAddButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    gap: 8,
+    borderRadius: 10,
+  },
+  locationAddIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.primary + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationAddButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  locationFooterDivider: {
+    width: 1,
+    backgroundColor: Colors.grey[200],
+    marginVertical: 8,
+  },
   addSelectedButton: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
@@ -2684,15 +2624,19 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 5,
     borderWidth: 2,
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primary,
+    borderColor: Colors.grey[300],
+    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  checkboxChecked: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
   },
   checkboxLabel: {
     fontSize: 16,
@@ -3060,5 +3004,37 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textLight,
     fontStyle: 'italic',
+  },
+  uomSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  uomToggle: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  uomOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: Colors.background,
+  },
+  uomOptionActive: {
+    backgroundColor: Colors.primary,
+  },
+  uomOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  uomOptionTextActive: {
+    color: '#FFFFFF',
   },
 }); 

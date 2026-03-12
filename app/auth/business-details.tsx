@@ -16,7 +16,7 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { User, Building2, ChevronDown, Check } from 'lucide-react-native';
-import { dataStore, getGSTINStateCode, toTitleCase, type BusinessAddress } from '@/utils/dataStore';
+import { getGSTINStateCode, toTitleCase, mapLocationsToAddresses, type BusinessAddress } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { submitBusinessDetails } from '@/services/backendApi';
 import { supabase, withTimeout } from '@/lib/supabase';
@@ -290,19 +290,8 @@ export default function BusinessDetailsScreen() {
   // This prevents saving incomplete data like "M L", "M La", etc.
   const saveProgressIfValid = () => {
     if (isFormValid()) {
-      dataStore.updateSignupProgress({
-        mobile: mobile as string,
-        mobileVerified: true,
-        taxIdType: type as 'GSTIN' | 'PAN',
-        taxIdValue: value as string,
-        taxIdVerified: true,
-        ownerName: name,
-        ownerDob: panDob as string,
-        businessName: businessName,
-        businessType: businessType !== 'Others' ? businessType : customBusinessType,
-        currentStep: 'businessDetails',
-      });
-      console.log('💾 Saved complete signup progress for', mobile);
+      // Signup progress is saved to Supabase backend via saveSignupProgress (called in handleComplete)
+      console.log('💾 Form valid, ready for submission');
     }
   };
 
@@ -431,9 +420,15 @@ export default function BusinessDetailsScreen() {
         let parsedGstinDataForAddress: any = null;
         try { parsedGstinDataForAddress = JSON.parse(gstinData as string); } catch { /* malformed */ }
       
-        // Check if a primary address already exists
-        const existingAddresses = dataStore.getAddresses();
-        const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+        // Check backend for existing addresses (Supabase is source of truth)
+        let existingAddresses: any[] = [];
+        try {
+          const { data: locations } = await supabase.from('locations')
+            .select('*')
+            .eq('business_id', businessResult.businessId);
+          existingAddresses = locations || [];
+        } catch {}
+        const hasPrimaryAddress = existingAddresses.some((addr: any) => addr.is_primary);
         
         if (!hasPrimaryAddress) {
           // Extract address from GSTIN data
@@ -527,7 +522,7 @@ export default function BusinessDetailsScreen() {
             businessType: businessType !== 'Others' ? businessType : customBusinessType,
             customBusinessType: businessType === 'Others' ? customBusinessType : '',
             mobile,
-            allAddresses: JSON.stringify(dataStore.getAddresses()),
+            allAddresses: JSON.stringify(mapLocationsToAddresses(existingAddresses)),
             // Pass invoice configuration for returning users
             initialCashBalance,
             invoicePrefix,
@@ -539,9 +534,15 @@ export default function BusinessDetailsScreen() {
         setIsCompleting(false);
         setIsNavigating(false);
       } else {
-        // For PAN users, check if primary address already exists
-        const existingAddresses = dataStore.getAddresses();
-        const hasPrimaryAddress = existingAddresses.some(addr => addr.isPrimary);
+        // For PAN users, check backend for existing addresses
+        let panAddresses: any[] = [];
+        try {
+          const { data: locations } = await supabase.from('locations')
+            .select('*')
+            .eq('business_id', businessResult.businessId);
+          panAddresses = locations || [];
+        } catch {}
+        const hasPrimaryAddress = panAddresses.some((addr: any) => addr.is_primary);
         
         if (hasPrimaryAddress) {
           // Primary address exists, skip to address confirmation (navigate immediately)
@@ -556,7 +557,7 @@ export default function BusinessDetailsScreen() {
               businessType: businessType !== 'Others' ? businessType : customBusinessType,
               customBusinessType: businessType === 'Others' ? customBusinessType : '',
               mobile,
-              allAddresses: JSON.stringify(existingAddresses),
+              allAddresses: JSON.stringify(mapLocationsToAddresses(panAddresses)),
             }
           });
           setIsCompleting(false);

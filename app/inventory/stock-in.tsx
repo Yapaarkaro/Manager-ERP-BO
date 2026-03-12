@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   FileText,
@@ -46,15 +47,15 @@ const Colors = {
 
 export default function StockInScreen() {
   const handleManualEntry = () => {
-    router.push('/inventory/stock-in/manual');
+    safeRouter.push('/inventory/stock-in/manual');
   };
 
   const handlePOSearch = () => {
-    router.push('/inventory/stock-in/po-search');
+    safeRouter.push('/inventory/stock-in/po-search');
   };
 
   const handleQRCode = () => {
-    router.push('/inventory/stock-in/qr-scan');
+    safeRouter.push('/inventory/stock-in/qr-scan');
   };
 
   return (
@@ -68,7 +69,7 @@ export default function StockInScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-management');
+              safeRouter.replace('/inventory/stock-management');
             }
           }}
           activeOpacity={0.7}

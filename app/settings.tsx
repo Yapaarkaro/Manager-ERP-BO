@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   View,
   Text,
@@ -44,8 +46,12 @@ import {
   LogOut,
   Shield,
   FileText as FileTextIcon,
+  User,
+  Check,
+  Send,
+  MessageSquare,
 } from 'lucide-react-native';
-import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import { getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
@@ -53,9 +59,11 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { showAlert, showConfirm } from '@/utils/webAlert';
 import CustomAlert from '@/components/CustomAlert';
+import { SettingsSkeleton } from '@/components/SkeletonLoader';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import { supabase, withTimeout } from '@/lib/supabase';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { getStaffAttendance, getStaffSessions } from '@/services/backendApi';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -106,10 +114,10 @@ const Colors = {
 };
 
 const DEFAULT_USER_PROFILE = {
-  name: 'John Doe',
-  position: 'Business Owner',
-  businessName: 'ABC Electronics',
-  gstin: '22AAAAA0000A1Z5',
+  name: '',
+  position: '',
+  businessName: '',
+  gstin: '',
   profilePhoto: null as string | null,
 };
 
@@ -139,8 +147,7 @@ export default function SettingsScreen() {
   const { setStatusBarStyle } = useStatusBar();
   
   // ✅ Use unified business data hook FIRST (before any useEffects that use it)
-  const { data: businessData, refetch } = useBusinessData();
-  const webNav = useWebNavigation(); // For web navigation
+  const { data: businessData, loading: isLoading, refetch } = useBusinessData();
   
   // ✅ Initialize userProfile with cached business data if available, otherwise use empty strings (not mock data)
   const getInitialUserProfile = () => {
@@ -173,6 +180,14 @@ export default function SettingsScreen() {
   const [userProfile, setUserProfile] = useState(getInitialUserProfile());
   const [subscription, setSubscription] = useState(subscriptionStore.getSubscription());
   const [trialProgress, setTrialProgress] = useState(subscriptionStore.getTrialProgress());
+  const { isStaff, staffId, staffName, staffLocationId, hasPermission } = usePermissions();
+  const [staffProfile, setStaffProfile] = useState<any>(null);
+  const [attendanceData, setAttendanceData] = useState<any[]>([]);
+  const [attendanceSessions, setAttendanceSessions] = useState<any[]>([]);
+  const [attendanceExpanded, setAttendanceExpanded] = useState(false);
+  const [invoiceExtraFieldsEnabled, setInvoiceExtraFieldsEnabled] = useState(false);
+  const [selectedInvoiceFields, setSelectedInvoiceFields] = useState<string[]>([]);
+  const [showInvoiceFieldsPicker, setShowInvoiceFieldsPicker] = useState(false);
   const [alertState, setAlertState] = useState<{
     visible: boolean;
     title: string;
@@ -185,6 +200,14 @@ export default function SettingsScreen() {
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
+
+  useEffect(() => {
+    AsyncStorage.getItem('autoSendSettings').then(saved => {
+      if (saved) {
+        try { setAutoSendSettings(JSON.parse(saved)); } catch {}
+      }
+    }).catch(() => {});
+  }, []);
 
   // Subscribe to alert state changes
   useEffect(() => {
@@ -229,6 +252,106 @@ export default function SettingsScreen() {
     setTrialProgress(subscriptionStore.getTrialProgress());
   }, []);
 
+  const INVOICE_FIELD_OPTIONS = [
+    { key: 'delivery_note', label: 'Delivery Note' },
+    { key: 'payment_terms', label: 'Mode/Terms of Payment' },
+    { key: 'reference_no', label: 'Reference No.' },
+    { key: 'reference_date', label: 'Date (for Reference No.)' },
+    { key: 'buyers_order_no', label: "Buyer's Order No." },
+    { key: 'buyers_order_date', label: "Date (for Buyer's Order No.)" },
+    { key: 'dispatch_doc_no', label: 'Dispatch Doc No.' },
+    { key: 'delivery_note_date', label: 'Delivery Note Date' },
+    { key: 'dispatched_through', label: 'Dispatched Through' },
+    { key: 'destination', label: 'Destination' },
+    { key: 'terms_of_delivery', label: 'Terms of Delivery' },
+  ];
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const val = await AsyncStorage.getItem('@invoice_extra_fields_enabled');
+        if (val === 'true') setInvoiceExtraFieldsEnabled(true);
+        const fields = await AsyncStorage.getItem('@invoice_selected_fields');
+        if (fields) {
+          try { setSelectedInvoiceFields(JSON.parse(fields)); } catch {}
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const handleInvoiceExtraFieldsToggle = async () => {
+    const newVal = !invoiceExtraFieldsEnabled;
+    setInvoiceExtraFieldsEnabled(newVal);
+    try {
+      await AsyncStorage.setItem('@invoice_extra_fields_enabled', newVal ? 'true' : 'false');
+    } catch {}
+  };
+
+  const toggleInvoiceField = async (key: string) => {
+    const updated = selectedInvoiceFields.includes(key)
+      ? selectedInvoiceFields.filter(f => f !== key)
+      : [...selectedInvoiceFields, key];
+    setSelectedInvoiceFields(updated);
+    try { await AsyncStorage.setItem('@invoice_selected_fields', JSON.stringify(updated)); } catch {}
+    const shouldEnable = updated.length > 0;
+    if (shouldEnable !== invoiceExtraFieldsEnabled) {
+      setInvoiceExtraFieldsEnabled(shouldEnable);
+      try { await AsyncStorage.setItem('@invoice_extra_fields_enabled', shouldEnable ? 'true' : 'false'); } catch {}
+    }
+  };
+
+  const selectAllInvoiceFields = async () => {
+    const allKeys = INVOICE_FIELD_OPTIONS.map(f => f.key);
+    const allSelected = allKeys.every(k => selectedInvoiceFields.includes(k));
+    const updated = allSelected ? [] : allKeys;
+    setSelectedInvoiceFields(updated);
+    try { await AsyncStorage.setItem('@invoice_selected_fields', JSON.stringify(updated)); } catch {}
+    if (updated.length > 0 && !invoiceExtraFieldsEnabled) {
+      setInvoiceExtraFieldsEnabled(true);
+      try { await AsyncStorage.setItem('@invoice_extra_fields_enabled', 'true'); } catch {}
+    }
+    if (updated.length === 0 && invoiceExtraFieldsEnabled) {
+      setInvoiceExtraFieldsEnabled(false);
+      try { await AsyncStorage.setItem('@invoice_extra_fields_enabled', 'false'); } catch {}
+    }
+  };
+
+  // Load staff profile details
+  useEffect(() => {
+    if (!isStaff || !staffId) return;
+    (async () => {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data } = await supabase
+          .from('staff')
+          .select('*, locations(name, city)')
+          .eq('id', staffId)
+          .single();
+        if (data) setStaffProfile(data);
+      } catch {}
+    })();
+  }, [isStaff, staffId]);
+
+  // Load staff attendance when settings screen is visible
+  useEffect(() => {
+    if (!isStaff || !staffId) return;
+    let cancelled = false;
+    (async () => {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const today = now.toISOString().split('T')[0];
+
+      const [attResult, sessResult] = await Promise.all([
+        getStaffAttendance(staffId),
+        getStaffSessions({ staffId, startDate: startOfMonth, endDate: today }),
+      ]);
+      if (cancelled) return;
+      if (attResult.success && attResult.attendance) setAttendanceData(attResult.attendance);
+      if (sessResult.success && sessResult.sessions) setAttendanceSessions(sessResult.sessions);
+    })();
+    return () => { cancelled = true; };
+  }, [isStaff, staffId]);
+
   const [addresses, setAddresses] = useState<BusinessAddress[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -251,6 +374,12 @@ export default function SettingsScreen() {
     overduePayables: true,
   });
 
+  const [autoSendSettings, setAutoSendSettings] = useState({
+    autoSendPO: true,
+    autoSendReturnInvoice: true,
+    autoSendDiscrepancy: false,
+  });
+
   // Payment settings state
   const [paymentMethods, setPaymentMethods] = useState({
     cash: true,
@@ -264,41 +393,7 @@ export default function SettingsScreen() {
   const [activeBankAccounts, setActiveBankAccounts] = useState<Set<string>>(new Set());
 
   // Subscription state
-  const [subscriptions, setSubscriptions] = useState([
-    {
-      id: '1',
-      name: 'ERP Pro Plan',
-      amount: 2999,
-      currency: '₹',
-      status: 'current',
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
-      nextBilling: '2024-12-31',
-      invoiceId: 'INV-001',
-    },
-    {
-      id: '2',
-      name: 'Inventory Management',
-      amount: 999,
-      currency: '₹',
-      status: 'paid',
-      startDate: '2024-01-01',
-      endDate: '2024-03-31',
-      nextBilling: '2024-03-31',
-      invoiceId: 'INV-002',
-    },
-    {
-      id: '3',
-      name: 'Analytics Dashboard',
-      amount: 1499,
-      currency: '₹',
-      status: 'failed',
-      startDate: '2024-02-01',
-      endDate: '2024-04-30',
-      nextBilling: '2024-04-30',
-      invoiceId: 'INV-003',
-    },
-  ]);
+  const [subscriptions, setSubscriptions] = useState([]);
 
   const [showPaymentMethodsModal, setShowPaymentMethodsModal] = useState(false);
   const [showBankAccountsModal, setShowBankAccountsModal] = useState(false);
@@ -306,38 +401,7 @@ export default function SettingsScreen() {
   // ✅ Use useMemo for instant derived data from cached businessData (no delay)
   const formattedAddresses = useMemo(() => {
     if (!businessData?.addresses) return [];
-    return businessData.addresses.map((addr: any) => {
-      const formattedAddress = {
-        id: addr.id,
-        backendId: addr.id,
-        name: addr.name,
-        type: addr.type,
-        doorNumber: addr.door_number || '',
-        addressLine1: addr.address_line1 || '',
-        addressLine2: addr.address_line2 || '',
-        additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [],
-        city: addr.city || '',
-        pincode: addr.pincode || '',
-        stateName: addr.state || '',
-        stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-        isPrimary: addr.is_primary || false,
-        manager: addr.manager_name || '',
-        phone: addr.manager_mobile_number || '',
-        status: 'active' as const,
-        createdAt: addr.created_at || new Date().toISOString(),
-        updatedAt: addr.updated_at || new Date().toISOString(),
-      };
-      
-      // ✅ Sync address to DataStore so edit-address-simple can find it
-      const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
-      if (!existingAddress) {
-        dataStore.addAddress(formattedAddress as any);
-      } else {
-        dataStore.updateAddress(existingAddress.id, formattedAddress as any);
-      }
-      
-      return formattedAddress;
-    });
+    return mapLocationsToAddresses(businessData.addresses);
   }, [businessData?.addresses]);
 
   const formattedBankAccounts = useMemo(() => {
@@ -418,9 +482,9 @@ export default function SettingsScreen() {
     
     // Navigate to the correct address flow based on type
     if (type === 'branch') {
-      router.push('/locations/add-branch');
+      safeRouter.push('/locations/add-branch');
     } else if (type === 'warehouse') {
-      router.push('/locations/add-warehouse');
+      safeRouter.push('/locations/add-warehouse');
     }
   };
 
@@ -437,12 +501,12 @@ export default function SettingsScreen() {
     // Use backendId if available, otherwise use local ID
     const addressId = address.backendId || address.id;
     
-    router.push({
+    safeRouter.push({
       pathname: '/edit-address-simple',
       params: {
-        editAddressId: addressId, // ✅ Use backendId if available for proper editing
+        editAddressId: addressId,
         addressType: address.type,
-        fromSettings: 'true', // ✅ Flag to indicate coming from settings
+        fromSettings: 'true',
       }
     });
   };
@@ -461,7 +525,7 @@ export default function SettingsScreen() {
     setIsAddingBankAccount(true);
     
     // Navigate to add bank account page
-    router.push({
+    safeRouter.push({
       pathname: '/add-bank-account'
     } as any);
   };
@@ -475,7 +539,7 @@ export default function SettingsScreen() {
     setIsAddingBankAccount(true);
     
     // Navigate to edit bank account page
-    router.push({
+    safeRouter.push({
       pathname: '/add-bank-account',
       params: { 
         account: JSON.stringify(account)
@@ -521,11 +585,12 @@ export default function SettingsScreen() {
           if (error) {
             throw error;
           }
-          await dataStore.clearAllDataForTesting();
           await subscriptionStore.clearSubscriptionData();
           const { clearBusinessContext } = await import('@/services/backendApi');
           clearBusinessContext();
-          router.replace('/auth/mobile');
+          const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+          clearBusinessDataCache();
+          safeRouter.replace('/auth/mobile');
         } catch (error) {
           console.error('Error logging out:', error);
           showAlert(
@@ -551,6 +616,17 @@ export default function SettingsScreen() {
     }));
     // TODO: Implement notification setting save logic
     console.log(`${key} toggled to:`, !notificationSettings[key]);
+  };
+
+  const handleAutoSendToggle = (key: keyof typeof autoSendSettings) => {
+    setAutoSendSettings(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+    AsyncStorage.setItem('autoSendSettings', JSON.stringify({
+      ...autoSendSettings,
+      [key]: !autoSendSettings[key],
+    })).catch(() => {});
   };
 
   const handlePaymentMethodToggle = (method: keyof typeof paymentMethods) => {
@@ -621,8 +697,9 @@ export default function SettingsScreen() {
 
     try {
       setIsDeletingAccount(true);
-      await dataStore.clearAllDataForTesting();
       await subscriptionStore.clearSubscriptionData();
+      const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+      clearBusinessDataCache();
 
       setAddresses([]);
       setBankAccounts([]);
@@ -649,7 +726,7 @@ export default function SettingsScreen() {
       setUserProfile({ ...DEFAULT_USER_PROFILE });
 
       setShowDeleteAccountModal(false);
-      router.replace('/auth/mobile');
+      safeRouter.replace('/auth/mobile');
     } catch (error) {
       console.error('Error deleting account:', error);
       Alert.alert('Delete Account Failed', 'Something went wrong while deleting the account. Please try again.');
@@ -743,7 +820,7 @@ export default function SettingsScreen() {
                     // Get business data for navigation
                     const business = businessData?.business;
                     const user = businessData?.user;
-                    router.push({
+                    safeRouter.push({
                       pathname: '/auth/business-address',
                       params: { 
                         addressType: 'primary',
@@ -753,7 +830,7 @@ export default function SettingsScreen() {
                         ...(business?.tax_id && { value: business.tax_id }),
                         ...(business?.tax_id && business.tax_id.length === 15 && { type: 'GSTIN' }),
                         ...(business?.tax_id && business.tax_id.length === 10 && { type: 'PAN' }),
-                        ...(user?.full_name && { name: user.full_name }),
+                        ...(user?.name && { name: user.name }),
                         existingAddresses: JSON.stringify(addresses)
                       }
                     });
@@ -1131,10 +1208,19 @@ export default function SettingsScreen() {
           {!account.isPrimary && (
             <TouchableOpacity 
               style={styles.actionIconButton}
-              onPress={() => {
-                // Set primary in data store
-                dataStore.setPrimaryBankAccount(account.id);
-                setBankAccounts([...dataStore.getBankAccounts()] as any);
+              onPress={async () => {
+                try {
+                  const { updateBusinessPrimaryBankAccount } = await import('@/services/backendApi');
+                  const result = await updateBusinessPrimaryBankAccount(account.id);
+                  if (result.success) {
+                    refetch();
+                  } else {
+                    Alert.alert('Error', result.error || 'Failed to set primary bank account');
+                  }
+                } catch (error) {
+                  console.error('Error setting primary bank account:', error);
+                  Alert.alert('Error', 'Failed to set primary bank account');
+                }
               }}
               activeOpacity={0.7}
             >
@@ -1187,20 +1273,17 @@ export default function SettingsScreen() {
         <Text style={styles.headerTitle}>Settings</Text>
       </View>
 
+      {isLoading ? (
+        <View style={styles.content}>
+          <SettingsSkeleton />
+        </View>
+      ) : (
       <ScrollView style={styles.content} contentContainerStyle={webContainerStyles.webScrollContent} showsVerticalScrollIndicator={false}>
-        {/* Profile Section */}
-        <View style={styles.profileSection}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileImageContainer}>
-              {userProfile.profilePhoto ? (
-                <View style={styles.profileImage}>
-                  <Text style={styles.profileImageText}>
-                    {userProfile.name 
-                      ? userProfile.name.split(' ').map((n: string) => n[0]).join('').toUpperCase() 
-                      : 'U'}
-                  </Text>
-                </View>
-              ) : (
+        {/* Profile Section - Owner View */}
+        {!isStaff && (
+          <View style={styles.profileSection}>
+            <View style={styles.profileHeader}>
+              <View style={styles.profileImageContainer}>
                 <View style={[styles.profileImage, { backgroundColor: Colors.primary }]}>
                   <Text style={styles.profileImageText}>
                     {userProfile.name 
@@ -1208,32 +1291,228 @@ export default function SettingsScreen() {
                       : 'U'}
                   </Text>
                 </View>
-              )}
+              </View>
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>
+                  {userProfile.name || 'Loading...'}
+                </Text>
+                <Text style={styles.profilePosition}>{userProfile.position}</Text>
+                <Text style={styles.profileBusiness}>
+                  {userProfile.businessName || 'Loading...'}
+                </Text>
+                <Text style={styles.profileGstin}>
+                  {userProfile.gstin || 'Loading...'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.editProfileButton}
+                onPress={handleEditProfile}
+                activeOpacity={0.7}
+              >
+                <Edit3 size={20} color={Colors.primary} />
+              </TouchableOpacity>
             </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>
-                {userProfile.name || 'Loading...'}
-              </Text>
-              <Text style={styles.profilePosition}>{userProfile.position}</Text>
-              <Text style={styles.profileBusiness}>
-                {userProfile.businessName || 'Loading...'}
-              </Text>
-              <Text style={styles.profileGstin}>
-                {userProfile.gstin || 'Loading...'}
-              </Text>
+          </View>
+        )}
+
+        {/* Profile Section - Staff View */}
+        {isStaff && (
+          <View style={styles.staffProfileCard}>
+            <View style={styles.staffProfileTop}>
+              <View style={styles.staffAvatar}>
+                <Text style={styles.staffAvatarText}>
+                  {(staffProfile?.name || staffName || '?')[0].toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.staffProfileHeaderInfo}>
+                <Text style={styles.staffProfileName}>{staffProfile?.name || staffName || 'Staff'}</Text>
+                <Text style={styles.staffProfileRole}>{staffProfile?.role || staffProfile?.job_role || 'Staff Member'}</Text>
+                {staffProfile?.department ? (
+                  <View style={styles.staffDeptBadge}>
+                    <Text style={styles.staffDeptBadgeText}>{staffProfile.department}</Text>
+                  </View>
+                ) : null}
+              </View>
             </View>
+
+            {staffProfile && (
+              <View style={styles.staffDetailsGrid}>
+                {staffProfile.employee_id ? (
+                  <View style={styles.staffDetailRow}>
+                    <Text style={styles.staffDetailLabel}>Employee ID</Text>
+                    <Text style={styles.staffDetailValue}>{staffProfile.employee_id}</Text>
+                  </View>
+                ) : null}
+                {staffProfile.mobile ? (
+                  <View style={styles.staffDetailRow}>
+                    <Text style={styles.staffDetailLabel}>Mobile</Text>
+                    <Text style={styles.staffDetailValue}>{staffProfile.mobile}</Text>
+                  </View>
+                ) : null}
+                {staffProfile.email ? (
+                  <View style={styles.staffDetailRow}>
+                    <Text style={styles.staffDetailLabel}>Email</Text>
+                    <Text style={[styles.staffDetailValue, { fontSize: 12 }]}>{staffProfile.email}</Text>
+                  </View>
+                ) : null}
+                {staffProfile.locations ? (
+                  <View style={styles.staffDetailRow}>
+                    <Text style={styles.staffDetailLabel}>Location</Text>
+                    <Text style={styles.staffDetailValue}>
+                      {staffProfile.locations.name}{staffProfile.locations.city ? `, ${staffProfile.locations.city}` : ''}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+
+            {staffProfile?.permissions && staffProfile.permissions.length > 0 ? (
+              <View style={styles.staffPermissionsSection}>
+                <Text style={styles.staffPermissionsLabel}>Permissions</Text>
+                <View style={styles.staffPermissionsWrap}>
+                  {staffProfile.permissions.map((p: string) => (
+                    <View key={p} style={styles.staffPermissionChip}>
+                      <Text style={styles.staffPermissionChipText}>
+                        {p.replace(/_/g, ' ')}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {userProfile.businessName ? (
+              <View style={styles.staffBusinessInfo}>
+                <Building2 size={14} color={Colors.textLight} />
+                <Text style={styles.staffBusinessName}>{userProfile.businessName}</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {/* My Attendance Section (Staff Only) */}
+        {isStaff && staffId && (
+          <View style={styles.section}>
             <TouchableOpacity
-              style={styles.editProfileButton}
-              onPress={handleEditProfile}
+              style={styles.mainSectionHeader}
+              onPress={() => setAttendanceExpanded(!attendanceExpanded)}
               activeOpacity={0.7}
             >
-              <Edit3 size={20} color={Colors.primary} />
+              <View style={styles.mainSectionHeaderContent}>
+                <Clock size={20} color={Colors.primary} />
+                <Text style={styles.mainSectionTitle}>My Attendance</Text>
+              </View>
+              {attendanceExpanded ? (
+                <ChevronUp size={20} color={Colors.textLight} />
+              ) : (
+                <ChevronDown size={20} color={Colors.textLight} />
+              )}
             </TouchableOpacity>
+
+            {attendanceExpanded && (() => {
+              const now = new Date();
+              const todayStr = now.toISOString().split('T')[0];
+              const todaySessions = attendanceSessions.filter((s: any) => s.date === todayStr);
+              const todayTotalSec = todaySessions.reduce((acc: number, s: any) => {
+                const start = new Date(s.check_in).getTime();
+                const end = s.check_out ? new Date(s.check_out).getTime() : Date.now();
+                return acc + (end - start) / 1000;
+              }, 0);
+
+              const startOfWeek = new Date(now);
+              startOfWeek.setDate(now.getDate() - now.getDay());
+              const weekStr = startOfWeek.toISOString().split('T')[0];
+              const weekSessions = attendanceSessions.filter((s: any) => s.date >= weekStr);
+              const weekDays = new Set(weekSessions.map((s: any) => s.date)).size;
+              const weekHrs = weekSessions.reduce((acc: number, s: any) => {
+                const start = new Date(s.check_in).getTime();
+                const end = s.check_out ? new Date(s.check_out).getTime() : Date.now();
+                return acc + (end - start) / 3_600_000;
+              }, 0);
+
+              const daysPassed = now.getDate();
+              const monthDays = new Set(attendanceSessions.map((s: any) => s.date)).size;
+              const attendancePct = daysPassed > 0 ? Math.round((monthDays / daysPassed) * 100) : 0;
+
+              const formatHrs = (sec: number) => {
+                const h = Math.floor(sec / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                return h > 0 ? `${h}h ${m}m` : `${m}m`;
+              };
+
+              return (
+                <View style={styles.attendanceContent}>
+                  <View style={styles.attendanceStatsRow}>
+                    <View style={[styles.attendanceStatCard, { backgroundColor: '#f0f9ff' }]}>
+                      <Text style={styles.attendanceStatLabel}>Today</Text>
+                      <Text style={styles.attendanceStatValue}>{formatHrs(todayTotalSec)}</Text>
+                      <Text style={styles.attendanceStatSub}>{todaySessions.length} session{todaySessions.length !== 1 ? 's' : ''}</Text>
+                    </View>
+                    <View style={[styles.attendanceStatCard, { backgroundColor: '#f0fdf4' }]}>
+                      <Text style={styles.attendanceStatLabel}>This Week</Text>
+                      <Text style={styles.attendanceStatValue}>{weekDays} day{weekDays !== 1 ? 's' : ''}</Text>
+                      <Text style={styles.attendanceStatSub}>{weekHrs.toFixed(1)} hrs total</Text>
+                    </View>
+                    <View style={[styles.attendanceStatCard, { backgroundColor: '#fef3c7' }]}>
+                      <Text style={styles.attendanceStatLabel}>Month</Text>
+                      <Text style={styles.attendanceStatValue}>{attendancePct}%</Text>
+                      <Text style={styles.attendanceStatSub}>{monthDays}/{daysPassed} days</Text>
+                    </View>
+                  </View>
+
+                  {attendanceSessions.length > 0 && (
+                    <View>
+                      <Text style={styles.sessionsTitle}>Recent Sessions</Text>
+                      {attendanceSessions.slice(0, 10).map((session: any, idx: number) => {
+                        const checkIn = new Date(session.check_in);
+                        const checkOut = session.check_out ? new Date(session.check_out) : null;
+                        const isGeoExit = session.check_out_reason === 'geofence_exit';
+
+                        return (
+                          <View key={session.id || idx} style={[
+                            styles.sessionRow,
+                            idx < Math.min(attendanceSessions.length, 10) - 1 && styles.sessionRowBorder,
+                          ]}>
+                            <View style={[styles.sessionDot, { backgroundColor: isGeoExit ? '#DC2626' : '#059669' }]} />
+                            <View style={styles.sessionInfo}>
+                              <Text style={styles.sessionDate}>
+                                {checkIn.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+                              </Text>
+                              <Text style={styles.sessionTime}>
+                                {checkIn.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {' → '}
+                                {checkOut ? checkOut.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                              </Text>
+                            </View>
+                            {isGeoExit ? (
+                              <View style={styles.geoExitBadge}>
+                                <Text style={styles.geoExitText}>Geofence exit</Text>
+                              </View>
+                            ) : null}
+                            {checkOut ? (
+                              <Text style={styles.sessionDuration}>
+                                {formatHrs((checkOut.getTime() - checkIn.getTime()) / 1000)}
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {attendanceSessions.length === 0 && (
+                    <Text style={styles.noAttendanceText}>
+                      No attendance records yet
+                    </Text>
+                  )}
+                </View>
+              );
+            })()}
           </View>
-        </View>
+        )}
 
         {/* Subscription Section */}
-        {subscription.isOnTrial && (
+        {!isStaff && subscription.isOnTrial && (
           <View style={styles.subscriptionSection}>
             <View style={styles.subscriptionHeader}>
               <CreditCard size={20} color="#3f66ac" />
@@ -1276,7 +1555,7 @@ export default function SettingsScreen() {
             </View>
             <TouchableOpacity
               style={styles.upgradeButton}
-              onPress={() => router.push('/subscription')}
+              onPress={() => safeRouter.push('/subscription')}
               activeOpacity={0.8}
             >
               <Text style={styles.upgradeButtonText}>Upgrade Now</Text>
@@ -1286,37 +1565,63 @@ export default function SettingsScreen() {
         )}
         
         {/* Show subscription status if not on trial */}
-        {!subscription.isOnTrial && businessData?.business?.subscription_status && (
-          <View style={styles.subscriptionSection}>
-            <View style={styles.subscriptionHeader}>
-              <CreditCard size={20} color="#3f66ac" />
-              <Text style={styles.subscriptionTitle}>Subscription Status</Text>
-            </View>
-            <Text style={styles.subscriptionSubtitle}>
-              Status: {businessData.business.subscription_status}
-            </Text>
-            {businessData.business.trial_start_date && (
-              <Text style={styles.trialDateText}>
-                Trial Started: {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </Text>
-            )}
-            {businessData.business.trial_end_date && (
-              <Text style={styles.trialDateText}>
-                Trial Ended: {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </Text>
-            )}
-          </View>
-        )}
+        {!isStaff && !subscription.isOnTrial && businessData?.business?.subscription_status && (() => {
+          const status = businessData.business.subscription_status;
+          const isActive = status === 'active' || status === 'paid';
+          const isExpired = status === 'expired' || status === 'cancelled';
+          const statusColor = isActive ? Colors.success : isExpired ? Colors.error : '#D97706';
+          const statusBg = isActive ? '#ECFDF5' : isExpired ? '#FEF2F2' : '#FFFBEB';
+          const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
-        {/* Business Addresses Section */}
+          return (
+            <View style={styles.subscriptionSection}>
+              <View style={styles.subscriptionHeader}>
+                <CreditCard size={20} color={Colors.primary} />
+                <Text style={styles.subscriptionTitle}>Subscription</Text>
+              </View>
+              <View style={styles.subStatusRow}>
+                <View style={[styles.subStatusBadge, { backgroundColor: statusBg }]}>
+                  <View style={[styles.subStatusDot, { backgroundColor: statusColor }]} />
+                  <Text style={[styles.subStatusText, { color: statusColor }]}>{statusLabel}</Text>
+                </View>
+              </View>
+              <View style={styles.subDatesContainer}>
+                {businessData.business.trial_start_date ? (
+                  <View style={styles.subDateRow}>
+                    <Text style={styles.subDateLabel}>Trial Started</Text>
+                    <Text style={styles.subDateValue}>
+                      {new Date(businessData.business.trial_start_date).toLocaleDateString('en-IN', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                      })}
+                    </Text>
+                  </View>
+                ) : null}
+                {businessData.business.trial_end_date ? (
+                  <View style={styles.subDateRow}>
+                    <Text style={styles.subDateLabel}>Trial Ended</Text>
+                    <Text style={styles.subDateValue}>
+                      {new Date(businessData.business.trial_end_date).toLocaleDateString('en-IN', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                      })}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              {isExpired && (
+                <TouchableOpacity
+                  style={styles.upgradeButton}
+                  onPress={() => safeRouter.push('/subscription')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.upgradeButtonText}>Renew Subscription</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })()}
+
+        {/* Business Addresses Section (Owner or Master Access Staff) */}
+        {(!isStaff || hasPermission('master_access')) && (
         <View style={styles.section}>
             <TouchableOpacity 
             style={styles.mainSectionHeader}
@@ -1339,8 +1644,10 @@ export default function SettingsScreen() {
               </View>
             )}
           </View>
+        )}
           
-        {/* Bank Accounts Section */}
+        {/* Bank Accounts Section (Owner or Master Access Staff) */}
+        {(!isStaff || hasPermission('master_access')) && (
         <View style={styles.section}>
             <TouchableOpacity 
             style={styles.mainSectionHeader}
@@ -1361,7 +1668,81 @@ export default function SettingsScreen() {
               </View>
                 )}
               </View>
+        )}
 
+
+        {/* Invoice Settings Section */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.mainSectionHeader}
+            onPress={() => toggleCardExpansion('invoice-settings')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.mainSectionHeaderContent}>
+              <Receipt size={20} color={Colors.primary} />
+              <Text style={styles.mainSectionTitle}>Invoice Settings</Text>
+            </View>
+            <ChevronDown size={16} color={Colors.textLight} />
+          </TouchableOpacity>
+
+          {expandedCards.has('invoice-settings') && (
+            <View style={[styles.mainExpandedContent, { padding: 16 }]}>
+              <Text style={{ fontSize: 14, color: Colors.text, fontWeight: '600', marginBottom: 6 }}>Professional Invoice Fields</Text>
+              <Text style={{ fontSize: 13, color: Colors.textLight, marginBottom: 14, lineHeight: 18 }}>Select which additional fields to show on your sales invoices.</Text>
+
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.grey[50], borderRadius: 10, padding: 14, borderWidth: 1, borderColor: Colors.grey[200] }}
+                onPress={() => setShowInvoiceFieldsPicker(!showInvoiceFieldsPicker)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: selectedInvoiceFields.length > 0 ? Colors.text : Colors.textLight }}>
+                    {selectedInvoiceFields.length === 0
+                      ? 'No fields selected'
+                      : `${selectedInvoiceFields.length} of ${INVOICE_FIELD_OPTIONS.length} fields selected`}
+                  </Text>
+                </View>
+                {showInvoiceFieldsPicker
+                  ? <ChevronUp size={18} color={Colors.textLight} />
+                  : <ChevronDown size={18} color={Colors.textLight} />}
+              </TouchableOpacity>
+
+              {showInvoiceFieldsPicker && (
+                <View style={{ marginTop: 8, borderRadius: 10, borderWidth: 1, borderColor: Colors.grey[200], overflow: 'hidden' }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, backgroundColor: Colors.primary + '08', borderBottomWidth: 1, borderBottomColor: Colors.grey[200] }}
+                    onPress={selectAllInvoiceFields}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: Colors.primary, backgroundColor: INVOICE_FIELD_OPTIONS.every(f => selectedInvoiceFields.includes(f.key)) ? Colors.primary : 'transparent', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                      {INVOICE_FIELD_OPTIONS.every(f => selectedInvoiceFields.includes(f.key)) && <Check size={14} color="#fff" />}
+                    </View>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.primary }}>
+                      {INVOICE_FIELD_OPTIONS.every(f => selectedInvoiceFields.includes(f.key)) ? 'Deselect All' : 'Select All'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {INVOICE_FIELD_OPTIONS.map((field, idx) => {
+                    const isSelected = selectedInvoiceFields.includes(field.key);
+                    return (
+                      <TouchableOpacity
+                        key={field.key}
+                        style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, backgroundColor: isSelected ? Colors.primary + '06' : Colors.background, borderBottomWidth: idx < INVOICE_FIELD_OPTIONS.length - 1 ? 1 : 0, borderBottomColor: Colors.grey[100] }}
+                        onPress={() => toggleInvoiceField(field.key)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={{ width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: isSelected ? Colors.primary : Colors.grey[300], backgroundColor: isSelected ? Colors.primary : 'transparent', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                          {isSelected && <Check size={14} color="#fff" />}
+                        </View>
+                        <Text style={{ fontSize: 14, color: Colors.text, fontWeight: isSelected ? '500' : '400' }}>{field.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
 
         {/* Notification Settings Section */}
         <View style={styles.section}>
@@ -1537,7 +1918,73 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Payments Section */}
+        {/* Chat Auto-Send Section */}
+        {(!isStaff || hasPermission('master_access')) && (
+        <View style={styles.section}>
+          <View style={styles.mainSectionHeader}>
+            <View style={styles.mainSectionHeaderContent}>
+              <MessageSquare size={20} color={Colors.primary} />
+              <Text style={styles.mainSectionTitle}>Chat Auto-Send</Text>
+            </View>
+          </View>
+          <View style={styles.mainExpandedContent}>
+            <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 12, paddingHorizontal: 4 }}>
+              Automatically send documents to suppliers/customers in chat when they're on Manager
+            </Text>
+            <View style={styles.notificationItem}>
+              <View style={styles.notificationInfo}>
+                <Send size={20} color={Colors.primary} />
+                <View style={styles.notificationText}>
+                  <Text style={styles.notificationTitle}>Purchase Orders</Text>
+                  <Text style={styles.notificationDescription}>Auto-send POs to suppliers via chat</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleSwitch, { backgroundColor: autoSendSettings.autoSendPO ? Colors.primary : Colors.grey[300] }]}
+                onPress={() => handleAutoSendToggle('autoSendPO')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.toggleThumb, { transform: [{ translateX: autoSendSettings.autoSendPO ? 20 : 0 }], backgroundColor: Colors.background }]} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.notificationItem}>
+              <View style={styles.notificationInfo}>
+                <Send size={20} color={Colors.success} />
+                <View style={styles.notificationText}>
+                  <Text style={styles.notificationTitle}>Return Invoices</Text>
+                  <Text style={styles.notificationDescription}>Auto-send return invoices to the relevant supplier or customer</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleSwitch, { backgroundColor: autoSendSettings.autoSendReturnInvoice ? Colors.primary : Colors.grey[300] }]}
+                onPress={() => handleAutoSendToggle('autoSendReturnInvoice')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.toggleThumb, { transform: [{ translateX: autoSendSettings.autoSendReturnInvoice ? 20 : 0 }], backgroundColor: Colors.background }]} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.notificationItem}>
+              <View style={styles.notificationInfo}>
+                <Send size={20} color={Colors.warning} />
+                <View style={styles.notificationText}>
+                  <Text style={styles.notificationTitle}>Stock Discrepancy Reports</Text>
+                  <Text style={styles.notificationDescription}>Auto-send discrepancy reports to suppliers via chat</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleSwitch, { backgroundColor: autoSendSettings.autoSendDiscrepancy ? Colors.primary : Colors.grey[300] }]}
+                onPress={() => handleAutoSendToggle('autoSendDiscrepancy')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.toggleThumb, { transform: [{ translateX: autoSendSettings.autoSendDiscrepancy ? 20 : 0 }], backgroundColor: Colors.background }]} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        )}
+
+        {/* Payments Section (Owner or Master Access Staff) */}
+        {(!isStaff || hasPermission('master_access')) && (
         <View style={styles.section}>
           <View style={styles.mainSectionHeader}>
             <View style={styles.mainSectionHeaderContent}>
@@ -1582,7 +2029,7 @@ export default function SettingsScreen() {
             {/* Subscriptions */}
             <TouchableOpacity 
               style={styles.paymentOption}
-              onPress={() => router.push({
+              onPress={() => safeRouter.push({
                 pathname: '/subscriptions'
               } as any)}
               activeOpacity={0.7}
@@ -1598,6 +2045,7 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        )}
 
         {/* Legal Section */}
         <View style={styles.section}>
@@ -1612,12 +2060,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.legalOption}
               onPress={() => {
-                // Use web navigation if on web, otherwise normal navigation
-                if (Platform.OS === 'web' && webNav.isWeb) {
-                  webNav.navigateToScreen('/privacy-policy');
-                } else {
-                  router.push('/privacy-policy');
-                }
+                safeRouter.push('/privacy-policy');
               }}
               activeOpacity={0.7}
             >
@@ -1634,12 +2077,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.legalOption}
               onPress={() => {
-                // Use web navigation if on web, otherwise normal navigation
-                if (Platform.OS === 'web' && webNav.isWeb) {
-                  webNav.navigateToScreen('/terms-and-conditions');
-                } else {
-                  router.push('/terms-and-conditions');
-                }
+                safeRouter.push('/terms-and-conditions');
               }}
               activeOpacity={0.7}
             >
@@ -1670,7 +2108,8 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Danger Zone */}
+        {/* Danger Zone (Owner Only) */}
+        {!isStaff && (
         <View style={[styles.section, styles.dangerZoneSection]}>
           <View style={styles.dangerZoneHeader}>
             <AlertTriangle size={20} color={Colors.error} />
@@ -1691,7 +2130,9 @@ export default function SettingsScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        )}
       </ScrollView>
+      )}
 
       {/* Delete Confirmation Modal */}
       <Modal
@@ -2780,6 +3221,44 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
+  subStatusRow: {
+    marginBottom: 14,
+  },
+  subStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  subStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  subStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  subDatesContainer: {
+    gap: 8,
+  },
+  subDateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  subDateLabel: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  subDateValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1e293b',
+  },
   logoutButton: {
     backgroundColor: Colors.primary,
     borderRadius: 12,
@@ -2802,6 +3281,208 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  staffProfileCard: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  staffProfileTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: Colors.primary + '08',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  staffAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  staffAvatarText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  staffProfileHeaderInfo: {
+    flex: 1,
+  },
+  staffProfileName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  staffProfileRole: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginBottom: 6,
+  },
+  staffDeptBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.primary + '12',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  staffDeptBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  staffDetailsGrid: {
+    padding: 16,
+    gap: 12,
+  },
+  staffDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  staffDetailLabel: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  staffDetailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  staffPermissionsSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  staffPermissionsLabel: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginBottom: 8,
+  },
+  staffPermissionsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  staffPermissionChip: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  staffPermissionChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.primary,
+    textTransform: 'capitalize',
+  },
+  staffBusinessInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: Colors.grey[50],
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
+  },
+  staffBusinessName: {
+    fontSize: 13,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  attendanceContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  attendanceStatsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  attendanceStatCard: {
+    flex: 1,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.04)',
+  },
+  attendanceStatLabel: {
+    fontSize: 11,
+    color: Colors.textLight,
+    marginBottom: 4,
+  },
+  attendanceStatValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  attendanceStatSub: {
+    fontSize: 11,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  sessionsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  sessionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  sessionRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  sessionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  sessionInfo: {
+    flex: 1,
+  },
+  sessionDate: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: Colors.text,
+  },
+  sessionTime: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+  geoExitBadge: {
+    backgroundColor: '#fef2f2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  geoExitText: {
+    fontSize: 10,
+    color: '#DC2626',
+    fontWeight: '600',
+  },
+  sessionDuration: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginLeft: 8,
+  },
+  noAttendanceText: {
+    fontSize: 13,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingVertical: 20,
   },
 });
 

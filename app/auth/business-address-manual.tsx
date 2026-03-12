@@ -19,12 +19,12 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MapPin, ChevronDown, Search, X, Plus, User, Phone } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import { getGSTINStateCode } from '@/utils/dataStore';
 import GooglePlacesSearch from '@/components/GooglePlacesSearch';
 import { extractAddressComponents } from '@/services/googleMapsApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
-import { createAddress, updateAddress } from '@/services/backendApi';
+import { createAddress, updateAddress, createStaff } from '@/services/backendApi';
 import { BusinessAddress } from '@/utils/dataStore';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 
@@ -111,6 +111,9 @@ export default function BusinessAddressManualScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateAddressInfo, setDuplicateAddressInfo] = useState<any>(null);
+  const [showStaffOtpModal, setShowStaffOtpModal] = useState(false);
+  const [staffOtpCode, setStaffOtpCode] = useState('');
+  const [staffOtpName, setStaffOtpName] = useState('');
   const [contactPersonName, setContactPersonName] = useState(
     (prefilledContactName as string) || (name as string) || ''
   );
@@ -127,6 +130,7 @@ export default function BusinessAddressManualScreen() {
   const inputContainerRefs = useRef<{ [key: string]: View | null }>({});
   const inputPositionsRef = useRef<{ [key: string]: number }>({});
   const saveButtonRef = useRef<View | null>(null);
+  const pendingNavigateRef = useRef<any>(null);
   const keyboardHeightRef = useRef<number>(0);
   const prefilledInitializedRef = useRef(false);
   const contactInitializedRef = useRef(false);
@@ -136,12 +140,14 @@ export default function BusinessAddressManualScreen() {
   const colors = useThemeColors();
 
   const typeInfo = React.useMemo(() => {
-    // Dynamic header based on address type and edit mode
+    // Parse existing addresses from route params
+    let parsedAddresses: any[] = [];
+    try { parsedAddresses = JSON.parse(existingAddresses as string || '[]'); } catch {}
+    
     if (editMode === 'true') {
-      const allAddresses = dataStore.getAddresses();
       if (addressType === 'branch') {
-        const branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
-        const currentBranchIndex = branchAddresses.findIndex(addr => addr.id === editAddressId);
+        const branchAddresses = parsedAddresses.filter((addr: any) => addr.type === 'branch');
+        const currentBranchIndex = branchAddresses.findIndex((addr: any) => addr.id === editAddressId);
         const branchNumber = currentBranchIndex >= 0 ? currentBranchIndex + 1 : branchAddresses.length + 1;
         return {
           color: '#3f66ac',
@@ -149,8 +155,8 @@ export default function BusinessAddressManualScreen() {
           subtitle: 'Edit your branch address details'
         };
       } else if (addressType === 'warehouse') {
-        const warehouseAddresses = allAddresses.filter(addr => addr.type === 'warehouse');
-        const currentWarehouseIndex = warehouseAddresses.findIndex(addr => addr.id === editAddressId);
+        const warehouseAddresses = parsedAddresses.filter((addr: any) => addr.type === 'warehouse');
+        const currentWarehouseIndex = warehouseAddresses.findIndex((addr: any) => addr.id === editAddressId);
         const warehouseNumber = currentWarehouseIndex >= 0 ? currentWarehouseIndex + 1 : warehouseAddresses.length + 1;
         return {
           color: '#f59e0b',
@@ -339,8 +345,9 @@ export default function BusinessAddressManualScreen() {
     try {
       const existingAddressesParam = existingAddresses as string;
       if (!existingAddressesParam || existingAddressesParam === '[]') {
-        // Try loading from dataStore as fallback
-        const addressFromStore = dataStore.getAddressById(editAddressId as string);
+        // Try loading from route params as fallback
+        const allParsed = (() => { try { return JSON.parse(existingAddresses as string || '[]'); } catch { return []; } })();
+        const addressFromStore = allParsed.find((a: any) => a.id === editAddressId);
         if (addressFromStore) {
           // Load address data including additional lines
           setAddressName(addressFromStore.name || '');
@@ -770,7 +777,8 @@ export default function BusinessAddressManualScreen() {
 
     // Check for duplicate addresses (only for new addresses, not when editing)
     if (editMode !== 'true') {
-      const allAddresses = dataStore.getAddresses();
+      let allAddresses: any[] = [];
+      try { allAddresses = JSON.parse(existingAddresses as string || '[]'); } catch {}
       const trimmedContactName = contactPersonName.trim();
       const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
       const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
@@ -869,9 +877,23 @@ export default function BusinessAddressManualScreen() {
         stateCode: selectedState?.code || '',
       };
 
-      // Use latitude and longitude from state (captured from Google Maps selection)
-      const addressLatitude = latitude;
-      const addressLongitude = longitude;
+      // Use latitude and longitude from state; auto-geocode if missing
+      let addressLatitude = latitude;
+      let addressLongitude = longitude;
+
+      if (!addressLatitude || !addressLongitude) {
+        try {
+          const { geocodeAddress } = await import('@/services/googleMapsApi');
+          const fullAddr = [addressLine1.trim(), addressLine2.trim(), city.trim(), selectedState?.name, pincode].filter(Boolean).join(', ');
+          const results = await geocodeAddress(fullAddr);
+          if (results.length > 0 && results[0].geometry?.location) {
+            addressLatitude = results[0].geometry.location.lat;
+            addressLongitude = results[0].geometry.location.lng;
+          }
+        } catch (geocodeErr) {
+          console.warn('Auto-geocode failed:', geocodeErr);
+        }
+      }
 
       let backendAddress: any = null;
       
@@ -893,12 +915,8 @@ export default function BusinessAddressManualScreen() {
             pincode: pincode,
             stateName: selectedState?.name || '',
             stateCode: selectedState?.code || '',
-            manager: addressTypeValue === 'primary' 
-              ? (trimmedContactName || existingAddress.manager || fallbackName)
-              : undefined,
-            phone: addressTypeValue === 'primary'
-              ? ((sanitizedContactPhone || existingAddress.phone || fallbackPhone) || undefined)
-              : undefined,
+            manager: trimmedContactName || existingAddress.manager || (addressTypeValue === 'primary' ? fallbackName : undefined),
+            phone: sanitizedContactPhone || existingAddress.phone || (addressTypeValue === 'primary' ? fallbackPhone : undefined),
             isPrimary: addressTypeValue === 'primary',
             updatedAt: new Date().toISOString(),
           };
@@ -959,20 +977,14 @@ export default function BusinessAddressManualScreen() {
                 pincode: pincode,
                 stateName: selectedState?.name || '',
                 stateCode: getGSTINStateCode(selectedState?.name || ''),
-                // Update manager and phone info for primary addresses
-                manager: addr.isPrimary 
-                  ? (trimmedContactName || addr.manager || fallbackName)
-                  : addr.manager,
-                phone: addr.isPrimary
-                  ? ((sanitizedContactPhone || addr.phone || fallbackPhone) || undefined)
-                  : addr.phone,
+                manager: trimmedContactName || addr.manager || (addr.isPrimary ? fallbackName : undefined),
+                phone: sanitizedContactPhone || addr.phone || (addr.isPrimary ? fallbackPhone : undefined),
                 backendId: backendAddress?.id || addr.backendId,
               }
             : addr
         );
         console.log('✏️ Edited address in list:', allAddresses);
       } else {
-        // Create new address object
         const newAddress = {
           id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           name: addressName.trim(),
@@ -980,19 +992,14 @@ export default function BusinessAddressManualScreen() {
           doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
           addressLine1: addressLine1.trim(),
           addressLine2: addressLine2.trim(),
-          additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // Store all additional lines
+          additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [],
           city: city.trim(),
           pincode: pincode,
           stateName: selectedState?.name || '',
           stateCode: selectedState?.code || '',
           isPrimary: addressTypeValue === 'primary',
-          // Add manager and phone for primary addresses to show user info
-          manager: addressTypeValue === 'primary'
-            ? (trimmedContactName || fallbackName)
-            : undefined,
-          phone: addressTypeValue === 'primary'
-            ? ((sanitizedContactPhone || fallbackPhone) || undefined)
-            : undefined,
+          manager: trimmedContactName || (addressTypeValue === 'primary' ? fallbackName : undefined),
+          phone: sanitizedContactPhone || (addressTypeValue === 'primary' ? fallbackPhone : undefined),
           status: 'active' as const,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1006,31 +1013,48 @@ export default function BusinessAddressManualScreen() {
         allAddresses = [...existingAddressList, newAddress];
         console.log('📦 Final address list:', allAddresses);
         
-        // Save primary address to dataStore
-        if ((addressType || 'primary') === 'primary') {
-          dataStore.addAddress(newAddress);
-        }
+        // Address will be synced to Supabase backend via optimistic sync
       }
       
-      // Navigate immediately to address confirmation with all addresses
-      router.replace({
-        pathname: '/auth/address-confirmation',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          mobile,
-          allAddresses: JSON.stringify(allAddresses),
+      const navigateParams = {
+        type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+        allAddresses: JSON.stringify(allAddresses),
+      };
+
+      // Auto-create staff when a branch/warehouse manager is added during onboarding
+      const isBranchOrWarehouse = addressTypeValue === 'branch' || addressTypeValue === 'warehouse';
+      if (isBranchOrWarehouse && trimmedContactName && sanitizedContactPhone && sanitizedContactPhone.length === 10) {
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        try {
+          const staffResult = await createStaff({
+            name: trimmedContactName,
+            mobile: sanitizedContactPhone,
+            role: 'Manager',
+            department: addressTypeValue === 'branch' ? 'Branch' : 'Warehouse',
+            locationName: addressName.trim(),
+            locationType: addressTypeValue,
+            verificationCode,
+          });
+          if (staffResult.success) {
+            console.log('✅ Staff created during onboarding:', trimmedContactName);
+            // Show OTP modal - navigation will happen when user dismisses it
+            setStaffOtpName(trimmedContactName);
+            setStaffOtpCode(verificationCode);
+            setShowStaffOtpModal(true);
+            setIsLoading(false);
+            // Store navigate params for after modal dismiss
+            pendingNavigateRef.current = navigateParams;
+            return;
+          } else {
+            console.warn('⚠️ Staff creation failed, continuing:', staffResult.error);
+          }
+        } catch (staffErr) {
+          console.warn('⚠️ Staff creation error, continuing:', staffErr);
         }
-      });
-      
-      // Reset navigation flag immediately
+      }
+
+      router.replace({ pathname: '/auth/address-confirmation', params: navigateParams });
       setIsNavigating(false);
-      
       setIsLoading(false);
     } catch (error: any) {
       console.error('Error saving address:', error);
@@ -1038,6 +1062,15 @@ export default function BusinessAddressManualScreen() {
       setIsNavigating(false);
       setIsLoading(false);
     }
+  };
+
+  const handleDismissStaffOtpModal = () => {
+    setShowStaffOtpModal(false);
+    if (pendingNavigateRef.current) {
+      router.replace({ pathname: '/auth/address-confirmation', params: pendingNavigateRef.current });
+      pendingNavigateRef.current = null;
+    }
+    setIsNavigating(false);
   };
 
   const slideTransform = {
@@ -1049,7 +1082,6 @@ export default function BusinessAddressManualScreen() {
         }),
       },
     ],
-    // Removed opacity animation to prevent grey background flash
   };
 
   const webContainerStyles = getWebContainerStyles();
@@ -1066,7 +1098,7 @@ export default function BusinessAddressManualScreen() {
         >
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/mobile')}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color="#3f66ac" />
@@ -1356,12 +1388,15 @@ export default function BusinessAddressManualScreen() {
                 </View>
                 </View>
 
-                {(addressType === 'primary' || !addressType) && (
                   <View style={styles.contactFieldGroup}>
-                    <Text style={styles.contactSectionTitle}>Contact Person Details</Text>
+                    <Text style={styles.contactSectionTitle}>
+                      {addressType === 'branch' ? 'Branch Manager Details' : addressType === 'warehouse' ? 'Warehouse Manager Details' : 'Contact Person Details'}
+                    </Text>
 
                     <View style={styles.inputGroup}>
-                      <Text style={styles.label}>Contact Person Name</Text>
+                      <Text style={styles.label}>
+                        {addressType === 'branch' ? 'Branch Manager Name' : addressType === 'warehouse' ? 'Warehouse Manager Name' : 'Contact Person Name'}
+                      </Text>
                       <View 
                         ref={(ref) => {
                           inputContainerRefs.current['contactPersonName'] = ref;
@@ -1377,7 +1412,7 @@ export default function BusinessAddressManualScreen() {
                           style={[styles.input, styles.contactInput]}
                           value={contactPersonName}
                           onChangeText={setContactPersonName}
-                          placeholder="Person responsible at this location"
+                          placeholder={addressType === 'branch' ? 'Branch manager name' : addressType === 'warehouse' ? 'Warehouse manager name' : 'Person responsible at this location'}
                           placeholderTextColor="#999999"
                           autoCapitalize="words"
                           editable={true}
@@ -1422,7 +1457,6 @@ export default function BusinessAddressManualScreen() {
                       </Text>
                     </View>
                   </View>
-                )}
               </View>
 
               <TouchableOpacity
@@ -1693,9 +1727,7 @@ export default function BusinessAddressManualScreen() {
                             
                             const allAddresses = [...existingAddressList, newAddress];
                             
-                            if ((addressType || 'primary') === 'primary') {
-                              dataStore.addAddress(newAddress);
-                            }
+                            // Address synced to Supabase backend via optimistic sync
                             
                             // Navigate immediately (no delay)
                             router.replace({
@@ -1724,6 +1756,35 @@ export default function BusinessAddressManualScreen() {
                     return null;
                   })()}
                 </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Staff OTP Modal */}
+          <Modal
+            visible={showStaffOtpModal}
+            transparent
+            animationType="fade"
+            onRequestClose={handleDismissStaffOtpModal}
+          >
+            <View style={styles.otpModalOverlay}>
+              <View style={styles.otpModalContent}>
+                <View style={styles.otpModalIcon}>
+                  <Text style={{ fontSize: 40 }}>🔑</Text>
+                </View>
+                <Text style={styles.otpModalTitle}>Staff Verification Code</Text>
+                <Text style={styles.otpModalSubtitle}>
+                  Share this code with <Text style={{ fontWeight: '700' }}>{staffOtpName}</Text> for their first login.
+                </Text>
+                <View style={styles.otpCodeContainer}>
+                  <Text style={styles.otpCodeText} selectable>{staffOtpCode}</Text>
+                </View>
+                <Text style={styles.otpModalHint}>
+                  The staff member will enter this code after verifying their mobile number to link their account.
+                </Text>
+                <TouchableOpacity style={styles.otpModalButton} onPress={handleDismissStaffOtpModal} activeOpacity={0.8}>
+                  <Text style={styles.otpModalButtonText}>Done</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </Modal>
@@ -2502,5 +2563,73 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  otpModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  otpModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+  },
+  otpModalIcon: {
+    marginBottom: 12,
+  },
+  otpModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  otpModalSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  otpCodeContainer: {
+    backgroundColor: '#f0f9ff',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderWidth: 1.5,
+    borderColor: '#3F66AC',
+    borderStyle: 'dashed',
+    marginBottom: 16,
+  },
+  otpCodeText: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#3F66AC',
+    letterSpacing: 8,
+    textAlign: 'center',
+  },
+  otpModalHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  otpModalButton: {
+    backgroundColor: '#3F66AC',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    width: '100%',
+    alignItems: 'center',
+  },
+  otpModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

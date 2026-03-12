@@ -1,41 +1,222 @@
-import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { LogBox, Alert, Platform, View, StyleSheet } from 'react-native';
+import { Stack, usePathname, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as Linking from 'expo-linking';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import Toast from 'react-native-toast-message';
 import { StatusBarProvider } from '@/contexts/StatusBarContext';
 import { WebNavigationProvider } from '@/contexts/WebNavigationContext';
-import { dataStore } from '@/utils/dataStore';
+import { PermissionProvider, usePermissions } from '@/contexts/PermissionContext';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import { productStore } from '@/utils/productStore';
 import { prefetchBusinessData } from '@/hooks/useBusinessData';
 import { supabase, withTimeout } from '@/lib/supabase';
+import InvoiceReceivedPopup from '@/components/InvoiceReceivedPopup';
+import Sidebar from '@/components/Sidebar';
+
+LogBox.ignoreLogs([
+  'Codegen didn\'t run for',
+  'The action \'GO_BACK\' was not handled',
+]);
+
+// Suppress codegen warnings from console output
+const origWarn = console.warn;
+console.warn = (...args: any[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('Codegen didn\'t run for')) return;
+  origWarn(...args);
+};
+
+// Suppress expected auth errors (stale refresh tokens) from console
+const origError = console.error;
+console.error = (...args: any[]) => {
+  const msg = typeof args[0] === 'string' ? args[0]
+    : args[0]?.message ? args[0].message
+    : String(args[0] ?? '');
+  if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) return;
+  origError(...args);
+};
 
 declare global {
   var clearAllData: (() => Promise<void>) | undefined;
 }
 
 global.clearAllData = async () => {
-  await dataStore.clearAllDataForTesting();
   await subscriptionStore.clearSubscriptionData();
 };
 
+function RouteGuard() {
+  const pathname = usePathname();
+  const { canAccessRoute, loading, isStaff, permissions } = usePermissions();
+  const lastDenied = useRef('');
+
+  useEffect(() => {
+    if (loading || !isStaff) return;
+    if (permissions.length === 0) return;
+    if (pathname.startsWith('/auth') || pathname === '/' || pathname === '/index') return;
+    const alwaysAllowed = ['/dashboard', '/settings', '/chat', '/notifications'];
+    if (alwaysAllowed.some(r => pathname === r || pathname.startsWith(r + '/'))) return;
+    if (!canAccessRoute(pathname) && lastDenied.current !== pathname) {
+      lastDenied.current = pathname;
+      Alert.alert('Access Denied', 'You do not have permission to access this section.');
+      router.replace('/dashboard');
+    }
+  }, [pathname, loading, isStaff, permissions, canAccessRoute]);
+
+  return null;
+}
+
+const isWeb = Platform.OS === 'web';
+
+const AUTH_ROUTES = ['/auth/', '/index', '/admin/'];
+function shouldShowSidebar(pathname: string): boolean {
+  if (pathname === '/' || pathname === '/index') return false;
+  return !AUTH_ROUTES.some(r => pathname.startsWith(r));
+}
+
+function useWebGlobalStyles() {
+  useEffect(() => {
+    if (!isWeb || typeof document === 'undefined') return;
+    const id = 'erp-web-global-styles';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = `
+      /* Suppress browser default focus outlines on all inputs – custom focus rings are applied via React Native styles */
+      input, textarea, select, [contenteditable] {
+        outline: none !important;
+        outline-width: 0 !important;
+      }
+      input:focus, textarea:focus, select:focus, [contenteditable]:focus {
+        outline: none !important;
+        outline-width: 0 !important;
+      }
+      /* Smoother scrollbars for web */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+      /* Remove tap highlight on mobile web */
+      * { -webkit-tap-highlight-color: transparent; }
+    `;
+    document.head.appendChild(style);
+  }, []);
+}
+
+function usePreventBackspaceNavigation() {
+  useEffect(() => {
+    if (!isWeb || typeof document === 'undefined') return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      e.preventDefault();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+}
+
 export default function RootLayout() {
   useFrameworkReady();
+  useWebGlobalStyles();
+  usePreventBackspaceNavigation();
+  const pathname = usePathname();
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+
+  const handleSidebarCollapseChange = useCallback((collapsed: boolean, width: number) => {
+    setSidebarWidth(width);
+  }, []);
+
+  const showSidebar = isWeb && shouldShowSidebar(pathname);
+
+  const [invoiceLinkData, setInvoiceLinkData] = useState<{
+    invoiceId: string;
+    businessId: string;
+    type: string;
+    businessName?: string;
+    invoiceNumber?: string;
+    amount?: number;
+  } | null>(null);
+
+  const handleDeepLink = useCallback((url: string) => {
+    try {
+      const parsed = Linking.parse(url);
+      if (parsed.path === 'invoice-link' || parsed.hostname === 'invoice-link') {
+        const params = parsed.queryParams || {};
+        if (params.invoice_id && params.business_id) {
+          setInvoiceLinkData({
+            invoiceId: params.invoice_id as string,
+            businessId: params.business_id as string,
+            type: (params.type as string) || 'sale',
+            businessName: params.business_name as string | undefined,
+            invoiceNumber: params.invoice_number as string | undefined,
+            amount: params.amount ? Number(params.amount) : undefined,
+          });
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    // Handle initial URL if app was opened via deep link
+    Linking.getInitialURL().then(url => {
+      if (url) handleDeepLink(url);
+    }).catch(() => {});
+
+    // Listen for incoming deep links while app is running
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleDeepLink(event.url);
+    });
+
+    return () => subscription.remove();
+  }, [handleDeepLink]);
 
   useEffect(() => {
     const initializeData = async () => {
-      // 1. Load local cached data first (fast, from AsyncStorage)
-      await dataStore.loadData();
-
-      // 2. Check auth session before any backend calls (with timeout to prevent hanging)
       try {
-        const { data: { session } } = await withTimeout(
+        // Check if a session exists before attempting refresh to avoid
+        // AuthUnknownError when the auth endpoint returns non-JSON (e.g. HTML error pages)
+        const { data: { session: existingSession } } = await withTimeout(
           supabase.auth.getSession(),
-          10000,
+          5000,
           'Layout: getSession'
         );
-        if (session?.user) {
+        if (!existingSession?.user) return;
+
+        let session = existingSession;
+        try {
+          const { data: refreshed, error: refreshError } = await withTimeout(
+            supabase.auth.refreshSession(),
+            10000,
+            'Layout: refreshSession'
+          );
+          if (refreshError) {
+            const msg = refreshError.message || '';
+            if (msg.includes('Refresh Token') || msg.includes('Invalid Refresh Token')) {
+              await supabase.auth.signOut().catch(() => {});
+              return;
+            }
+          }
+          if (refreshed?.session) {
+            session = refreshed.session;
+          }
+        } catch {
+          // Refresh failed (e.g. non-JSON response or timeout) — continue with existing session
+        }
+        if (!session?.user) return;
+
+        const { data: userData } = await withTimeout(
+          Promise.resolve(
+            supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle()
+          ),
+          5000,
+          'Layout: check business'
+        ) as { data: { business_id: string } | null };
+
+        if (userData?.business_id) {
           await Promise.allSettled([
             withTimeout(productStore.loadProductsFromBackend(), 15000, 'Products prefetch'),
             withTimeout(prefetchBusinessData(), 15000, 'Business data prefetch'),
@@ -49,10 +230,8 @@ export default function RootLayout() {
     initializeData();
   }, []);
 
-  return (
-    <StatusBarProvider>
-      <WebNavigationProvider>
-        <Stack screenOptions={{ headerShown: false }}>
+  const stackElement = (
+        <Stack screenOptions={{ headerShown: false, animation: isWeb ? 'none' : undefined }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="auth/mobile" />
         <Stack.Screen name="auth/otp" />
@@ -65,7 +244,9 @@ export default function RootLayout() {
         <Stack.Screen name="auth/banking-details" />
         <Stack.Screen name="auth/bank-accounts" />
         <Stack.Screen name="auth/final-setup" />
-        <Stack.Screen name="dashboard" />
+        <Stack.Screen name="auth/discover-businesses" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="auth/staff-verify" />
+        <Stack.Screen name="dashboard" options={{ gestureEnabled: false }} />
         <Stack.Screen name="sales" />
         <Stack.Screen name="all-invoices" />
         <Stack.Screen name="returns" />
@@ -123,14 +304,81 @@ export default function RootLayout() {
         <Stack.Screen name="people/customers" />
         <Stack.Screen name="people/customer-details" />
         <Stack.Screen name="people/customer-chat" />
+        <Stack.Screen name="chat/index" />
+        <Stack.Screen name="chat/conversation" />
+        <Stack.Screen name="chat/new-conversation" />
         <Stack.Screen name="notifications" />
+        <Stack.Screen name="notifications/notify-staff" />
+        <Stack.Screen name="notifications/notify-owner" />
         <Stack.Screen name="reports" />
         <Stack.Screen name="reports/payment-details" />
         <Stack.Screen name="reports/daily-invoices" />
+        <Stack.Screen name="admin/email-verify" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="admin/dashboard" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="admin/search" />
         <Stack.Screen name="+not-found" />
       </Stack>
+  );
+
+  return (
+    <StatusBarProvider>
+      <PermissionProvider>
+      <RouteGuard />
+      <WebNavigationProvider>
+        {showSidebar ? (
+          <View style={webStyles.shell}>
+            <Sidebar
+              onNavigate={(route: string) => router.push(route as any)}
+              currentRoute={pathname}
+              onCollapseChange={handleSidebarCollapseChange}
+            />
+            <View style={[webStyles.content, { marginLeft: sidebarWidth }]}>
+              {stackElement}
+            </View>
+          </View>
+        ) : (
+          stackElement
+        )}
       <Toast />
+      <InvoiceReceivedPopup
+        visible={!!invoiceLinkData}
+        invoiceId={invoiceLinkData?.invoiceId || ''}
+        businessId={invoiceLinkData?.businessId || ''}
+        invoiceType={invoiceLinkData?.type || 'sale'}
+        businessName={invoiceLinkData?.businessName}
+        invoiceNumber={invoiceLinkData?.invoiceNumber}
+        amount={invoiceLinkData?.amount}
+        onDismiss={() => setInvoiceLinkData(null)}
+        onViewDetails={() => {
+          if (invoiceLinkData) {
+            router.push({
+              pathname: '/invoice-details',
+              params: { invoiceId: invoiceLinkData.invoiceId },
+            } as any);
+          }
+          setInvoiceLinkData(null);
+        }}
+        onAddToPurchases={() => {
+          if (invoiceLinkData) {
+            router.push('/purchasing/purchases' as any);
+          }
+          setInvoiceLinkData(null);
+        }}
+      />
       </WebNavigationProvider>
+      </PermissionProvider>
     </StatusBarProvider>
   );
 }
+
+const webStyles = StyleSheet.create({
+  shell: {
+    flex: 1,
+    flexDirection: 'row',
+    ...(isWeb ? { height: '100vh' as any } : {}),
+  },
+  content: {
+    flex: 1,
+    ...(isWeb ? { transition: 'margin-left 0.3s ease' as any, minWidth: 0 } : {}),
+  },
+});

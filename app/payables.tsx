@@ -1,21 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
-  Image,
   Platform,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowLeft, Search, Filter, Download, Share, Eye, ArrowUpRight, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee } from 'lucide-react-native';
+import { ArrowLeft, Search, Filter, Eye, ArrowUpRight, Plus, Building2, User, Calendar, Clock, TriangleAlert as AlertTriangle, IndianRupee, Download } from 'lucide-react-native';
 import { Payable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
-import { getPayables } from '@/services/backendApi';
+import { getPayables, invalidateApiCache } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
 const Colors = {
   background: '#FFFFFF',
@@ -74,6 +78,7 @@ export default function PayablesScreen() {
   const [filteredPayables, setFilteredPayables] = useState<Payable[]>([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     status: [] as string[],
     supplierType: [] as string[],
@@ -82,7 +87,12 @@ export default function PayablesScreen() {
     daysPastDue: 'none' as string,
     creditLimit: 'none' as string,
   });
-  
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
+
   // Use debounced navigation for supplier cards
   const debouncedNavigate = useDebounceNavigation(500);
 
@@ -95,7 +105,24 @@ export default function PayablesScreen() {
       } else {
         setPayables([]);
       }
+      setIsLoading(false);
     })();
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    (async () => {
+      try {
+        const { success, payables: data } = await getPayables();
+        if (success && data) {
+          setPayables(data.map(mapPayableFromBackend));
+        }
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    })();
+    setTimeout(() => setRefreshing(false), 600);
   }, []);
 
   const handleSearch = (query: string) => {
@@ -173,6 +200,9 @@ export default function PayablesScreen() {
       });
     }
 
+    // Apply date range filter
+    filtered = filterByDateRange(filtered, (p) => p.oldestBillDate, selectedTimeRange, customFromDate, customToDate);
+
     setFilteredPayables(filtered);
   };
 
@@ -217,11 +247,6 @@ export default function PayablesScreen() {
       month: 'short',
       year: 'numeric'
     });
-  };
-
-  const handlePayableAction = (action: string, payableId: string) => {
-    console.log(`${action} action for payable ${payableId}`);
-    // Implement action logic here
   };
 
   const handleMakePayment = () => {
@@ -269,20 +294,28 @@ export default function PayablesScreen() {
     return count;
   };
 
-  // Apply filters whenever activeFilters or payables change
+  // Apply filters whenever activeFilters, payables, or date range changes
   useEffect(() => {
     applyFilters(searchQuery);
-  }, [activeFilters, payables]);
+  }, [activeFilters, payables, selectedTimeRange, customFromDate, customToDate]);
+
+  const getInitials = (name: string): string => {
+    if (!name || name.trim().length === 0) return 'S';
+    const words = name.trim().split(' ').filter(w => w.length > 0);
+    if (words.length === 0) return 'S';
+    if (words.length === 1) return words[0][0].toUpperCase();
+    return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  };
 
   const handleSupplierDetails = (payable: Payable) => {
     if (isNavigating) return;
     setIsNavigating(true);
     
     debouncedNavigate({
-      pathname: '/payables/supplier-details',
+      pathname: '/purchasing/supplier-details',
       params: {
-        supplierId: payable.id,
-        supplierData: JSON.stringify(payable)
+        supplierId: payable.supplierId || payable.id,
+        defaultTab: 'transactions',
       }
     });
     
@@ -290,144 +323,84 @@ export default function PayablesScreen() {
   };
 
   const renderPayableCard = (payable: Payable) => {
+    const displayName = payable.supplierType === 'business' && payable.businessName
+      ? payable.businessName
+      : payable.supplierName;
+    const statusColor = getStatusColor(payable.status);
+    const daysText = payable.oldestBillDate
+      ? Math.max(0, Math.floor((Date.now() - new Date(payable.oldestBillDate).getTime()) / 86400000))
+      : 0;
+
     return (
       <TouchableOpacity
         key={payable.id}
         style={[
           styles.payableCard,
-          { borderLeftColor: getStatusColor(payable.status) }
+          { borderLeftColor: statusColor }
         ]}
         onPress={() => handleSupplierDetails(payable)}
         activeOpacity={0.7}
         disabled={isNavigating}
       >
-        {/* Top Section */}
+        {/* Row 1: Supplier info + Amount */}
         <View style={styles.payableHeader}>
-          {/* Left Side - Supplier Info */}
           <View style={styles.payableLeft}>
-            <Image 
-              source={{ uri: payable.supplierAvatar }}
-              style={styles.supplierAvatar}
-            />
+            <View style={[styles.supplierInitials, { backgroundColor: `${statusColor}12` }]}>
+              <Text style={[styles.supplierInitialsText, { color: statusColor }]}>{getInitials(displayName)}</Text>
+            </View>
             <View style={styles.supplierInfo}>
-              <Text style={styles.supplierName}>
-                {payable.supplierType === 'business' ? payable.businessName : payable.supplierName}
-              </Text>
-              {payable.supplierType === 'business' && (
-                <Text style={styles.contactPerson}>Contact: {payable.supplierName}</Text>
-              )}
-              <View style={styles.supplierMeta}>
-                {payable.supplierType === 'business' ? (
-                  <Building2 size={14} color={Colors.textLight} />
-                ) : (
-                  <User size={14} color={Colors.textLight} />
-                )}
-                <Text style={styles.supplierType}>
-                  {payable.supplierType === 'business' ? 'Business' : 'Individual'}
-                </Text>
-                {payable.gstin && (
-                  <Text style={styles.gstin}>• {payable.gstin}</Text>
-                )}
+              <Text style={styles.supplierName} numberOfLines={1}>{displayName}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: `${statusColor}12`, alignSelf: 'flex-start' }]}>
+                <Text style={[styles.statusText, { color: statusColor }]}>{getStatusText(payable.status)}</Text>
               </View>
             </View>
           </View>
 
-          {/* Right Side - Status and Amount */}
           <View style={styles.payableRight}>
-            <View style={[
-              styles.statusBadge,
-              { backgroundColor: `${getStatusColor(payable.status)}20` }
-            ]}>
-              <Text style={[
-                styles.statusText,
-                { color: getStatusColor(payable.status) }
-              ]}>
-                {getStatusText(payable.status)}
-              </Text>
-            </View>
-            <Text style={styles.payableAmount}>
-              {formatAmount(payable.totalPayable)}
-            </Text>
-            <Text style={styles.billCount}>
-              {payable.billCount} {payable.billCount === 1 ? 'bill' : 'bills'}
-            </Text>
+            <Text style={styles.payableAmount}>{formatAmount(payable.totalPayable)}</Text>
+            <Text style={styles.amountLabel}>outstanding</Text>
           </View>
         </View>
 
-        {/* Overdue Section */}
+        {/* Row 2: Key metrics */}
+        <View style={styles.metricsRow}>
+          <View style={styles.metricItem}>
+            <IndianRupee size={13} color={Colors.textLight} />
+            <Text style={styles.metricText}>
+              {payable.billCount} {payable.billCount === 1 ? 'invoice' : 'invoices'}
+            </Text>
+          </View>
+          {payable.oldestBillDate ? (
+            <View style={styles.metricItem}>
+              <Calendar size={13} color={Colors.textLight} />
+              <Text style={styles.metricText}>
+                {daysText > 0 ? `${daysText} days old` : 'Recent'}
+              </Text>
+            </View>
+          ) : null}
+          {payable.lastPaymentDate ? (
+            <View style={styles.metricItem}>
+              <Clock size={13} color={Colors.success} />
+              <Text style={[styles.metricText, { color: Colors.success }]}>Paid {formatDate(payable.lastPaymentDate)}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Row 3: Overdue warning */}
         {payable.overdueAmount > 0 && (
           <View style={styles.overdueSection}>
-            <AlertTriangle size={16} color={Colors.error} />
-            <Text style={styles.overdueLabel}>Overdue:</Text>
-            <Text style={styles.overdueAmount}>
-              {formatAmount(payable.overdueAmount)}
-            </Text>
-            <Text style={styles.daysPastDue}>
-              ({payable.daysPastDue} days past due)
-            </Text>
+            <AlertTriangle size={13} color={Colors.error} />
+            <Text style={styles.overdueLabel}>Overdue: {formatAmount(payable.overdueAmount)}</Text>
+            {payable.daysPastDue > 0 && (
+              <Text style={styles.daysPastDue}>({payable.daysPastDue} days)</Text>
+            )}
           </View>
         )}
 
-        {/* Details Section */}
-        <View style={styles.detailsSection}>
-          <View style={styles.detailRow}>
-            <Calendar size={14} color={Colors.textLight} />
-            <Text style={styles.detailText}>
-              Oldest: {formatDate(payable.oldestBillDate)}
-            </Text>
-          </View>
-          
-          {payable.paymentTerms && (
-            <View style={styles.detailRow}>
-              <Clock size={14} color={Colors.textLight} />
-              <Text style={styles.detailText}>
-                Terms: {payable.paymentTerms}
-              </Text>
-            </View>
-          )}
-
-          {payable.lastPaymentDate && (
-            <View style={styles.detailRow}>
-              <IndianRupee size={14} color={Colors.error} />
-              <Text style={styles.detailText}>
-                Last payment: {formatAmount(payable.lastPaymentAmount || 0)} on {formatDate(payable.lastPaymentDate)}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Bottom Section */}
+        {/* Row 4: Action footer */}
         <View style={styles.payableFooter}>
-          {/* Left Side - Contact */}
-          <Text style={styles.contactInfo}>
-            {payable.mobile}
-          </Text>
-
-          {/* Right Side - Action Icons */}
-          <View style={styles.actionIcons}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handlePayableAction('download', payable.id)}
-              activeOpacity={0.7}
-            >
-              <Download size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handlePayableAction('share', payable.id)}
-              activeOpacity={0.7}
-            >
-              <Share size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => handleSupplierDetails(payable)}
-              activeOpacity={0.7}
-              disabled={isNavigating}
-            >
-              <Eye size={18} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.viewDetailsText}>Tap to view supplier details</Text>
+          <ArrowUpRight size={14} color={Colors.primary} />
         </View>
       </TouchableOpacity>
     );
@@ -450,6 +423,14 @@ export default function PayablesScreen() {
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>Payables</Text>
+
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={() => setShowExportModal(true)}
+          activeOpacity={0.7}
+        >
+          <Download size={20} color={Colors.primary} />
+        </TouchableOpacity>
         
         <View style={styles.headerRight}>
           <Text style={styles.totalCount}>
@@ -458,6 +439,10 @@ export default function PayablesScreen() {
         </View>
       </View>
 
+      {isLoading ? (
+        <ListSkeleton itemCount={6} showSearch={true} showFilter={true} />
+      ) : (
+        <>
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
         <View style={styles.summaryCard}>
@@ -532,13 +517,25 @@ export default function PayablesScreen() {
       {/* Divider */}
       <View style={styles.divider} />
 
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
+
       {/* Payables List */}
-      <ScrollView 
+      <FlatList
+        data={filteredPayables}
+        renderItem={({item}) => renderPayableCard(item)}
+        keyExtractor={(item) => item.id}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {filteredPayables.length === 0 ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
           <View style={styles.emptyState}>
             <ArrowUpRight size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Payables Found</Text>
@@ -546,10 +543,8 @@ export default function PayablesScreen() {
               {searchQuery ? 'No payables match your search criteria' : 'No outstanding payables'}
             </Text>
           </View>
-        ) : (
-          filteredPayables.map(renderPayableCard)
-        )}
-      </ScrollView>
+        }
+      />
 
       {/* Make Payment FAB */}
       <TouchableOpacity
@@ -755,7 +750,32 @@ export default function PayablesScreen() {
           </View>
         </View>
       </Modal>
+        </>
+      )}
 
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'Payables',
+          fileName: 'payables',
+          columns: [
+            { key: 'supplierName', header: 'Supplier' },
+            { key: 'mobile', header: 'Mobile' },
+            { key: 'totalPayable', header: 'Total Payable (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'billCount', header: 'Bills', format: (v) => String(v || 0) },
+            { key: 'daysPastDue', header: 'Days Past Due', format: (v) => String(v || 0) },
+            { key: 'status', header: 'Status', format: (v) => v === 'current' ? 'Current' : v === 'overdue' ? 'Overdue' : 'Critical' },
+            { key: 'oldestBillDate', header: 'Oldest Bill Date' },
+          ],
+          data: filteredPayables,
+          summaryRows: [
+            { label: 'Total Payable', value: `₹${filteredPayables.reduce((s, p) => s + (p.totalPayable || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Overdue', value: `₹${filteredPayables.reduce((s, p) => s + (p.overdueAmount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -789,6 +809,15 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'flex-end',
+  },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   totalCount: {
     fontSize: 14,
@@ -878,150 +907,130 @@ const styles = StyleSheet.create({
   },
   payableCard: {
     backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: Colors.grey[200],
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
     elevation: 2,
   },
   payableHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    alignItems: 'flex-start',
   },
   payableLeft: {
     flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
-    marginRight: 16,
-  },
-  supplierAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     marginRight: 12,
+  },
+  supplierInitials: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  supplierInitialsText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   supplierInfo: {
     flex: 1,
   },
   supplierName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: Colors.text,
     marginBottom: 4,
   },
-  contactPerson: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 4,
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
-  supplierMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  supplierType: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  gstin: {
-    fontSize: 11,
-    color: Colors.primary,
-    fontFamily: 'monospace',
+  statusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   payableRight: {
     alignItems: 'flex-end',
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
   payableAmount: {
     fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-    marginBottom: 2,
+    fontWeight: '800',
+    color: Colors.error,
+    letterSpacing: -0.3,
   },
-  billCount: {
+  amountLabel: {
+    fontSize: 10,
+    color: Colors.textLight,
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
+  },
+  metricItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metricText: {
     fontSize: 12,
     color: Colors.textLight,
+    fontWeight: '500',
   },
   overdueSection: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fef2f2',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
-    marginBottom: 12,
-    gap: 6,
+    marginTop: 10,
+    gap: 5,
   },
   overdueLabel: {
     fontSize: 12,
     color: Colors.error,
     fontWeight: '600',
   },
-  overdueAmount: {
-    fontSize: 12,
-    color: Colors.error,
-    fontWeight: '700',
-  },
   daysPastDue: {
     fontSize: 11,
     color: Colors.error,
     fontStyle: 'italic',
   },
-  detailsSection: {
-    gap: 6,
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  detailText: {
-    fontSize: 12,
-    color: Colors.textLight,
-    flex: 1,
-  },
   payableFooter: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    paddingTop: 12,
+    paddingTop: 10,
+    marginTop: 10,
     borderTopWidth: 1,
     borderTopColor: Colors.grey[100],
+    gap: 4,
   },
-  contactInfo: {
-    fontSize: 14,
-    color: Colors.textLight,
-  },
-  actionIcons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.grey[50],
-    justifyContent: 'center',
-    alignItems: 'center',
+  viewDetailsText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '500',
   },
   makePaymentFAB: {
     position: 'absolute',

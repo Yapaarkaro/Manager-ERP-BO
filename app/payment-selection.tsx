@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowLeft, ArrowDownLeft, ArrowUpRight, IndianRupee } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { ArrowLeft, ArrowDownLeft, ArrowUpRight } from 'lucide-react-native';
+import { getReceivables, getPayables } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -26,18 +29,41 @@ const Colors = {
   }
 };
 
-export default function PaymentSelectionScreen() {
-  const handleReceivePayment = () => {
-    router.push('/receivables/receive-payment');
-  };
+const formatCurrency = (amount: number) => {
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(2)} L`;
+  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
 
-  const handleMakePayment = () => {
-    router.push('/payables/make-payment');
-  };
+export default function PaymentSelectionScreen() {
+  const [totalReceivable, setTotalReceivable] = useState(0);
+  const [totalPayable, setTotalPayable] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [recResult, payResult] = await Promise.all([
+        getReceivables(),
+        getPayables(),
+      ]);
+
+      if (recResult.success) {
+        setTotalReceivable(recResult.totalAmount ?? 0);
+      }
+
+      if (payResult.success) {
+        setTotalPayable(payResult.totalAmount ?? 0);
+      }
+    } catch {} finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <SafeAreaView style={styles.headerSafeArea}>
         <View style={styles.header}>
           <TouchableOpacity
@@ -47,7 +73,6 @@ export default function PaymentSelectionScreen() {
           >
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
-          
           <Text style={styles.headerTitle}>Payment Options</Text>
         </View>
       </SafeAreaView>
@@ -57,7 +82,6 @@ export default function PaymentSelectionScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Instructions */}
         <View style={styles.instructionsContainer}>
           <Text style={styles.instructionsTitle}>Choose Payment Type</Text>
           <Text style={styles.instructionsText}>
@@ -65,12 +89,10 @@ export default function PaymentSelectionScreen() {
           </Text>
         </View>
 
-        {/* Payment Options */}
         <View style={styles.optionsContainer}>
-          {/* Receive Payment Option */}
           <TouchableOpacity
             style={[styles.optionCard, styles.receivePaymentCard]}
-            onPress={handleReceivePayment}
+            onPress={() => safeRouter.push('/receivables/receive-payment')}
             activeOpacity={0.7}
           >
             <View style={styles.optionIconContainer}>
@@ -85,7 +107,6 @@ export default function PaymentSelectionScreen() {
                 <Text style={styles.featureText}>• Select customer</Text>
                 <Text style={styles.featureText}>• Choose amount</Text>
                 <Text style={styles.featureText}>• Record payment method</Text>
-                <Text style={styles.featureText}>• Generate receipt</Text>
               </View>
             </View>
             <View style={styles.optionArrow}>
@@ -93,10 +114,9 @@ export default function PaymentSelectionScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Make Payment Option */}
           <TouchableOpacity
             style={[styles.optionCard, styles.makePaymentCard]}
-            onPress={handleMakePayment}
+            onPress={() => safeRouter.push('/payables/make-payment')}
             activeOpacity={0.7}
           >
             <View style={styles.optionIconContainer}>
@@ -111,7 +131,6 @@ export default function PaymentSelectionScreen() {
                 <Text style={styles.featureText}>• Select supplier</Text>
                 <Text style={styles.featureText}>• Choose amount</Text>
                 <Text style={styles.featureText}>• Record payment method</Text>
-                <Text style={styles.featureText}>• Generate voucher</Text>
               </View>
             </View>
             <View style={styles.optionArrow}>
@@ -120,24 +139,31 @@ export default function PaymentSelectionScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Quick Stats */}
         <View style={styles.statsContainer}>
           <Text style={styles.statsTitle}>Quick Overview</Text>
           <View style={styles.statsGrid}>
             <View style={styles.statCard}>
               <ArrowDownLeft size={20} color={Colors.success} />
               <Text style={styles.statLabel}>Receivables</Text>
-              <Text style={[styles.statValue, { color: Colors.success }]}>
-                ₹2,45,000
-              </Text>
+              {isLoading ? (
+                <ActivityIndicator size="small" color={Colors.success} style={{ marginTop: 4 }} />
+              ) : (
+                <Text style={[styles.statValue, { color: Colors.success }]}>
+                  {totalReceivable > 0 ? formatCurrency(totalReceivable) : '₹0'}
+                </Text>
+              )}
             </View>
             
             <View style={styles.statCard}>
               <ArrowUpRight size={20} color={Colors.error} />
               <Text style={styles.statLabel}>Payables</Text>
-              <Text style={[styles.statValue, { color: Colors.error }]}>
-                ₹1,85,000
-              </Text>
+              {isLoading ? (
+                <ActivityIndicator size="small" color={Colors.error} style={{ marginTop: 4 }} />
+              ) : (
+                <Text style={[styles.statValue, { color: Colors.error }]}>
+                  {totalPayable > 0 ? formatCurrency(totalPayable) : '₹0'}
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -212,10 +238,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 2,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
@@ -237,10 +260,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
@@ -303,10 +323,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.grey[200],
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,

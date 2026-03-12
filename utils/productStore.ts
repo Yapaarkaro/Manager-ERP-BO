@@ -17,6 +17,7 @@ export interface Product {
   taxRate: number;
   taxInclusive?: boolean;
   supplier?: string;
+  supplierName?: string;
   location?: string;
   lastRestocked?: string;
   stockValue?: number;
@@ -25,6 +26,7 @@ export interface Product {
   tertiaryUnit?: string;
   conversionRatio?: string;
   tertiaryConversionRatio?: string;
+  useCompoundUnit?: boolean;
   urgencyLevel: 'normal' | 'low' | 'critical';
   batchNumber?: string;
   mrp?: string;
@@ -40,26 +42,35 @@ export interface Product {
 
 class ProductStore {
   private products: Product[] = [];
+  private productIndex = new Map<string, Product>();
   private listeners: (() => void)[] = [];
   private isLoading = false;
 
+  private rebuildIndex() {
+    this.productIndex.clear();
+    for (const p of this.products) this.productIndex.set(p.id, p);
+  }
+
   addProduct(product: Product) {
     this.products.push(product);
+    this.productIndex.set(product.id, product);
     this.notifyListeners();
   }
 
   getProducts(): Product[] {
-    return [...this.products];
+    return this.products;
   }
 
   getProductById(id: string): Product | undefined {
-    return this.products.find(p => p.id === id);
+    return this.productIndex.get(id);
   }
 
   updateProduct(id: string, updatedProduct: Product) {
     const idx = this.products.findIndex(p => p.id === id);
     if (idx !== -1) {
-      this.products[idx] = { ...updatedProduct, id, updatedAt: new Date().toISOString() };
+      const updated = { ...updatedProduct, id, updatedAt: new Date().toISOString() };
+      this.products[idx] = updated;
+      this.productIndex.set(id, updated);
       this.notifyListeners();
       return true;
     }
@@ -72,8 +83,8 @@ class ProductStore {
       p.name.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q) ||
       (p.supplier && p.supplier.toLowerCase().includes(q)) ||
-      p.hsnCode.includes(query) ||
-      p.barcode.includes(query)
+      p.hsnCode.toLowerCase().includes(q) ||
+      p.barcode.toLowerCase().includes(q)
     );
   }
 
@@ -81,6 +92,7 @@ class ProductStore {
     const idx = this.products.findIndex(p => p.id === id);
     if (idx !== -1) {
       this.products.splice(idx, 1);
+      this.productIndex.delete(id);
       this.notifyListeners();
       return true;
     }
@@ -89,11 +101,16 @@ class ProductStore {
 
   clearProducts() {
     this.products = [];
+    this.productIndex.clear();
     this.notifyListeners();
   }
 
   getProductCount(): number {
     return this.products.length;
+  }
+
+  hasProducts(): boolean {
+    return this.products.length > 0;
   }
 
   subscribe(listener: () => void) {
@@ -152,6 +169,7 @@ class ProductStore {
           taxRate: bp.tax_rate || 0,
           taxInclusive: bp.tax_inclusive || false,
           supplier: bp.preferred_supplier_id || undefined,
+          supplierName: bp.supplier_name || bp.preferred_supplier_name || undefined,
           location: bp.storage_location_name || '',
           lastRestocked: bp.last_restocked_at || bp.last_restocked || undefined,
           stockValue: bp.stock_value || undefined,
@@ -160,6 +178,7 @@ class ProductStore {
           tertiaryUnit: bp.tertiary_unit || undefined,
           conversionRatio: bp.conversion_ratio || undefined,
           tertiaryConversionRatio: bp.tertiary_conversion_ratio || undefined,
+          useCompoundUnit: bp.use_compound_unit ?? (!!bp.secondary_unit && bp.secondary_unit !== 'None'),
           urgencyLevel,
           batchNumber: bp.batch_number || undefined,
           mrp: bp.mrp_price?.toString() || undefined,
@@ -175,6 +194,7 @@ class ProductStore {
       });
 
       this.products = transformed;
+      this.rebuildIndex();
       this.notifyListeners();
       return { success: true };
     } catch (error: any) {
@@ -187,3 +207,115 @@ class ProductStore {
 }
 
 export const productStore = new ProductStore();
+
+// Lightweight in-memory bridge to pass product IDs between screens
+// instead of serializing full product objects through navigation params
+let _pendingProductIds: string[] = [];
+
+export const cartBridge = {
+  setPendingProducts(ids: string[]) {
+    _pendingProductIds = ids;
+  },
+  consumePendingProducts(): Product[] {
+    const ids = _pendingProductIds;
+    _pendingProductIds = [];
+    return ids
+      .map(id => productStore.getProductById(id))
+      .filter((p): p is Product => p !== undefined);
+  },
+  hasPending(): boolean {
+    return _pendingProductIds.length > 0;
+  },
+};
+
+// In-memory bridge for passing cart data between Cart → CustomerDetails → Payment
+// Avoids heavy JSON.stringify serialization through navigation params
+let _pendingCartData: { cartItems: any[]; totalAmount: number; roundOffAmount?: number } | null = null;
+
+export const cartDataBridge = {
+  setCartData(cartItems: any[], totalAmount: number, roundOffAmount?: number) {
+    _pendingCartData = { cartItems, totalAmount, roundOffAmount };
+  },
+  consumeCartData(): { cartItems: any[]; totalAmount: number; roundOffAmount?: number } | null {
+    const data = _pendingCartData;
+    _pendingCartData = null;
+    return data;
+  },
+  hasPending(): boolean {
+    return _pendingCartData !== null;
+  },
+};
+
+// In-memory bridge for passing payment data from Payment → Success screen
+let _pendingPaymentData: any = null;
+
+export const paymentDataBridge = {
+  setPaymentData(data: any) {
+    _pendingPaymentData = data;
+  },
+  consumePaymentData(): any {
+    const data = _pendingPaymentData;
+    _pendingPaymentData = null;
+    return data;
+  },
+  hasPending(): boolean {
+    return _pendingPaymentData !== null;
+  },
+};
+
+// Unified bridge for passing sale flow data across the entire flow
+// CustomerDetails → Payment → Success without serialization through navigation params
+export interface InvoiceExtras {
+  deliveryNote?: string;
+  paymentTermsMode?: string;
+  referenceNo?: string;
+  referenceDate?: string;
+  buyerOrderNumber?: string;
+  buyerOrderDate?: string;
+  dispatchDocNo?: string;
+  deliveryNoteDate?: string;
+  dispatchedVia?: string;
+  destination?: string;
+  termsOfDelivery?: string;
+  customFields?: Array<{ label: string; value: string }>;
+}
+
+let _saleFlowData: {
+  cartItems?: any[];
+  totalAmount?: number;
+  roundOffAmount?: number;
+  customerDetails?: any;
+  invoiceExtras?: InvoiceExtras;
+} = {};
+
+export const saleFlowBridge = {
+  setCartAndTotal(cartItems: any[], totalAmount: number, roundOffAmount?: number) {
+    _saleFlowData.cartItems = cartItems;
+    _saleFlowData.totalAmount = totalAmount;
+    _saleFlowData.roundOffAmount = roundOffAmount;
+  },
+  setCustomerDetails(customer: any) {
+    _saleFlowData.customerDetails = customer;
+  },
+  setInvoiceExtras(extras: InvoiceExtras) {
+    _saleFlowData.invoiceExtras = extras;
+  },
+  getCartItems(): any[] {
+    return _saleFlowData.cartItems || [];
+  },
+  getTotalAmount(): number {
+    return _saleFlowData.totalAmount || 0;
+  },
+  getRoundOffAmount(): number {
+    return _saleFlowData.roundOffAmount || 0;
+  },
+  getCustomerDetails(): any {
+    return _saleFlowData.customerDetails;
+  },
+  getInvoiceExtras(): InvoiceExtras | undefined {
+    return _saleFlowData.invoiceExtras;
+  },
+  clear() {
+    _saleFlowData = {};
+  },
+};

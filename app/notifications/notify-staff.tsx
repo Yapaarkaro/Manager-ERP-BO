@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,15 @@ import {
   Check,
   User,
   Bell,
+  Play,
+  Square,
+  Trash2,
 } from 'lucide-react-native';
+import { getStaff, createInAppNotification } from '@/services/backendApi';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { Audio } from 'expo-audio';
+import { supabase } from '@/lib/supabase';
 
 const Colors = {
   background: '#FFFFFF',
@@ -53,11 +61,10 @@ interface NotificationData {
   notificationType: string;
   customType: string;
   message: string;
+  priority: 'low' | 'medium' | 'high';
   isRecording: boolean;
   audioUrl?: string;
 }
-
-const mockStaff: Staff[] = [];
 
 const notificationTypes = [
   'Sale',
@@ -78,11 +85,19 @@ const notificationTypes = [
 ];
 
 export default function NotifyStaffScreen() {
+  const { staffBusinessId } = usePermissions();
+  const { data: businessData } = useBusinessData();
+  const effectiveBusinessId = staffBusinessId || businessData?.business?.id;
+
+  const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(true);
+
   const [formData, setFormData] = useState<NotificationData>({
     selectedStaff: [],
     notificationType: '',
     customType: '',
     message: '',
+    priority: 'medium',
     isRecording: false,
   });
 
@@ -91,6 +106,27 @@ export default function NotifyStaffScreen() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
+
+  // Voice recording state
+  const [audioRecording, setAudioRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoadingStaff(true);
+      const result = await getStaff();
+      if (result.success && result.staff) {
+        setStaffList(result.staff.map((s: any) => ({
+          id: s.id,
+          name: s.name || 'Unknown',
+          role: s.role || s.job_role || 'Staff',
+          avatar: s.avatar || undefined,
+        })));
+      }
+      setLoadingStaff(false);
+    })();
+  }, []);
 
   const updateFormData = (field: keyof NotificationData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -110,7 +146,7 @@ export default function NotifyStaffScreen() {
   };
 
   const handleSelectAllStaff = () => {
-    const allStaffIds = mockStaff.map(staff => staff.id);
+    const allStaffIds = staffList.map(staff => staff.id);
     updateFormData('selectedStaff', allStaffIds);
   };
 
@@ -119,7 +155,7 @@ export default function NotifyStaffScreen() {
   };
 
   // Filter staff based on search query
-  const filteredStaff = mockStaff.filter(staff =>
+  const filteredStaff = staffList.filter(staff =>
     staff.name.toLowerCase().includes(staffSearchQuery.toLowerCase()) ||
     staff.role.toLowerCase().includes(staffSearchQuery.toLowerCase())
   );
@@ -132,18 +168,57 @@ export default function NotifyStaffScreen() {
     setShowTypeModal(false);
   };
 
-  const handleRecordMessage = () => {
-    // Simulate recording functionality
-    updateFormData('isRecording', !formData.isRecording);
-    
+  const handleRecordMessage = useCallback(async () => {
     if (!formData.isRecording) {
-      Alert.alert('Recording Started', 'Recording your message...');
-      // In a real app, this would start audio recording
+      try {
+        const permission = await Audio.requestPermissionsAsync();
+        if (permission.status !== 'granted') {
+          Alert.alert('Permission Required', 'Please grant microphone permission.');
+          return;
+        }
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+        const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        setAudioRecording(rec);
+        setRecordingDuration(0);
+        updateFormData('isRecording', true);
+        recordingTimerRef.current = setInterval(() => setRecordingDuration(prev => prev + 1), 1000);
+      } catch {
+        Alert.alert('Error', 'Failed to start recording.');
+      }
     } else {
-      Alert.alert('Recording Stopped', 'Message recorded successfully!');
-      // In a real app, this would stop recording and save the audio
+      if (!audioRecording) return;
+      try {
+        await audioRecording.stopAndUnloadAsync();
+        const uri = audioRecording.getURI();
+        if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+        setAudioRecording(null);
+        updateFormData('isRecording', false);
+        setRecordingDuration(0);
+        if (uri) {
+          const ext = 'mp4';
+          const fileName = `notifications/voice_${Date.now()}.${ext}`;
+          const response = await fetch(uri);
+          const blob = await response.blob();
+          const arrayBuf = await new Response(blob).arrayBuffer();
+          const { error: uploadError } = await supabase.storage
+            .from('chat-media')
+            .upload(fileName, arrayBuf, { contentType: 'audio/mp4', upsert: false });
+          if (uploadError) { Alert.alert('Upload Failed', uploadError.message); return; }
+          const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(fileName);
+          updateFormData('audioUrl', urlData.publicUrl);
+          Alert.alert('Recorded', 'Voice message attached successfully.');
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to stop recording.');
+      }
     }
-  };
+  }, [formData.isRecording, audioRecording]);
 
   const isFormValid = () => {
     return (
@@ -162,31 +237,53 @@ export default function NotifyStaffScreen() {
     setShowPreviewModal(true);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
+    if (!formData.selectedStaff.length || !formData.message.trim() || !effectiveBusinessId) {
+      Alert.alert('Error', 'Please select staff and enter a message.');
+      return;
+    }
+
     setIsSending(true);
-    
-    // Simulate sending notification
-    setTimeout(() => {
-      setIsSending(false);
-      setShowPreviewModal(false);
-      Alert.alert(
-        'Notification Sent',
-        `Successfully sent notification to ${formData.selectedStaff.length} staff member(s)`,
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back()
-          }
-        ]
+
+    try {
+      const notifTitle = formData.notificationType === 'Others'
+        ? formData.customType || 'Notification'
+        : formData.notificationType;
+
+      const fullMessage = formData.audioUrl
+        ? `${formData.message}\n\n🎤 Voice message: ${formData.audioUrl}`
+        : formData.message;
+
+      const promises = formData.selectedStaff.map(staffMemberId =>
+        createInAppNotification({
+          businessId: effectiveBusinessId,
+          recipientId: staffMemberId,
+          recipientType: 'staff',
+          title: notifTitle,
+          message: fullMessage,
+          type: formData.priority === 'high' ? 'urgent' : 'info',
+          category: 'staff_notification',
+          priority: formData.priority,
+        })
       );
-    }, 2000);
+
+      await Promise.all(promises);
+      setShowPreviewModal(false);
+      Alert.alert('Success', 'Notification sent to selected staff member(s).', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to send notification.');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const getSelectedStaffNames = () => {
     if (formData.selectedStaff.length === 0) return 'Select staff members';
-    if (formData.selectedStaff.length === mockStaff.length) return 'All Staff';
+    if (formData.selectedStaff.length === staffList.length) return 'All Staff';
     if (formData.selectedStaff.length === 1) {
-      const staff = mockStaff.find(s => s.id === formData.selectedStaff[0]);
+      const staff = staffList.find(s => s.id === formData.selectedStaff[0]);
       return staff?.name || '';
     }
     return `${formData.selectedStaff.length} staff members selected`;
@@ -293,20 +390,63 @@ export default function NotifyStaffScreen() {
                 textAlignVertical="top"
               />
               
-              <TouchableOpacity
-                style={[
-                  styles.recordButton,
-                  formData.isRecording && styles.recordingButton
-                ]}
-                onPress={handleRecordMessage}
-                activeOpacity={0.7}
-              >
-                {formData.isRecording ? (
-                  <MicOff size={20} color={Colors.error} />
-                ) : (
-                  <Mic size={20} color={Colors.primary} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {formData.isRecording && (
+                  <Text style={{ fontSize: 13, color: Colors.error, fontWeight: '600' }}>
+                    {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                  </Text>
                 )}
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.recordButton, formData.isRecording && styles.recordingButton]}
+                  onPress={handleRecordMessage}
+                  activeOpacity={0.7}
+                >
+                  {formData.isRecording ? (
+                    <Square size={18} color={Colors.error} />
+                  ) : (
+                    <Mic size={20} color={Colors.primary} />
+                  )}
+                </TouchableOpacity>
+              </View>
+              {formData.audioUrl && !formData.isRecording && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: Colors.grey[50], padding: 8, borderRadius: 8, gap: 8 }}>
+                  <Play size={16} color={Colors.primary} />
+                  <Text style={{ flex: 1, fontSize: 13, color: Colors.text }}>Voice message attached</Text>
+                  <TouchableOpacity onPress={() => updateFormData('audioUrl', undefined)} activeOpacity={0.7}>
+                    <Trash2 size={16} color={Colors.error} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Priority */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Priority *</Text>
+            <View style={styles.priorityRow}>
+              {(['low', 'medium', 'high'] as const).map((level) => {
+                const selected = formData.priority === level;
+                const color = level === 'high' ? Colors.error : level === 'medium' ? Colors.warning : Colors.success;
+                return (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.priorityChip,
+                      selected && { backgroundColor: color + '18', borderColor: color },
+                    ]}
+                    onPress={() => updateFormData('priority', level)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.priorityDot, { backgroundColor: color }]} />
+                    <Text style={[
+                      styles.priorityChipText,
+                      selected && { color, fontWeight: '700' },
+                    ]}>
+                      {level.charAt(0).toUpperCase() + level.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
@@ -513,9 +653,9 @@ export default function NotifyStaffScreen() {
                 <View style={styles.previewSection}>
                   <Text style={styles.previewLabel}>Recipients:</Text>
                   <Text style={styles.previewValue}>
-                    {formData.selectedStaff.length === mockStaff.length 
+                    {formData.selectedStaff.length === staffList.length 
                       ? 'All Staff' 
-                      : mockStaff
+                      : staffList
                           .filter(staff => formData.selectedStaff.includes(staff.id))
                           .map(staff => staff.name)
                           .join(', ')
@@ -533,6 +673,16 @@ export default function NotifyStaffScreen() {
                   </Text>
                 </View>
                 
+                <View style={styles.previewSection}>
+                  <Text style={styles.previewLabel}>Priority:</Text>
+                  <Text style={[styles.previewValue, {
+                    color: formData.priority === 'high' ? Colors.error : formData.priority === 'medium' ? Colors.warning : Colors.success,
+                    fontWeight: '600',
+                  }]}>
+                    {formData.priority.charAt(0).toUpperCase() + formData.priority.slice(1)}
+                  </Text>
+                </View>
+
                 <View style={styles.previewSection}>
                   <Text style={styles.previewLabel}>Message:</Text>
                   <Text style={styles.previewValue}>{formData.message}</Text>
@@ -654,6 +804,32 @@ const styles = StyleSheet.create({
   input: {
     fontSize: 16,
     color: Colors.text,
+  },
+  priorityRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  priorityChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.grey[200],
+    backgroundColor: Colors.grey[50],
+    gap: 8,
+  },
+  priorityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  priorityChipText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: Colors.textLight,
   },
   messageContainer: {
     position: 'relative',

@@ -1,25 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   TextInput,
-  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { 
-  ArrowLeft, 
-  Search, 
-  Filter,
+import { router, useLocalSearchParams } from 'expo-router';
+import {
+  ArrowLeft,
+  Search,
   Building2,
   User,
-  Star,
-  Package,
-  Award
+  Phone,
+  MapPin,
+  ChevronRight,
 } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { getSuppliers } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -34,211 +36,197 @@ const Colors = {
     100: '#F3F4F6',
     200: '#E5E7EB',
     300: '#D1D5DB',
-  }
+  },
 };
 
-const suppliers: any[] = [];
-
 export default function SelectSupplierScreen() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filteredSuppliers, setFilteredSuppliers] = useState(suppliers);
+  const { autoPoItems: rawAutoPoItems } = useLocalSearchParams();
+  const autoPoItems = rawAutoPoItems ? JSON.parse(rawAutoPoItems as string) : null;
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredSuppliers(suppliers);
-    } else {
-      const filtered = suppliers.filter(supplier =>
-        supplier.name.toLowerCase().includes(query.toLowerCase()) ||
-        supplier.businessName?.toLowerCase().includes(query.toLowerCase()) ||
-        supplier.contactPerson.toLowerCase().includes(query.toLowerCase()) ||
-        supplier.categories.some(cat => cat.toLowerCase().includes(query.toLowerCase()))
-      );
-      setFilteredSuppliers(filtered);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const result = await getSuppliers();
+      if (result.success && result.suppliers) {
+        setSuppliers(result.suppliers);
+      }
+    } catch (e) {
+      console.error('Failed to load suppliers:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
+
+  useEffect(() => {
+    loadSuppliers();
+  }, [loadSuppliers]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadSuppliers();
   };
 
+  const filtered = suppliers.filter((s) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      (s.business_name || '').toLowerCase().includes(q) ||
+      (s.contact_person || '').toLowerCase().includes(q) ||
+      (s.mobile || '').includes(q) ||
+      (s.gstin || '').toLowerCase().includes(q)
+    );
+  });
+
   const handleSupplierSelect = (supplier: any) => {
-    router.push({
+    const mapped = {
+      id: supplier.id,
+      name: supplier.contact_person || supplier.business_name || 'Supplier',
+      businessName: supplier.business_name || '',
+      contactPerson: supplier.contact_person || '',
+      supplierType: supplier.supplier_type || 'business',
+      mobile: supplier.mobile || '',
+      email: supplier.email || '',
+      gstin: supplier.gstin || '',
+      address: supplier.address || '',
+      business_id: supplier.business_id || null,
+    };
+
+    if (autoPoItems) {
+      const supplierGroup = [{
+        supplierId: mapped.id,
+        supplierName: mapped.businessName || mapped.name,
+        supplierBusinessId: mapped.business_id,
+        products: autoPoItems,
+      }];
+      safeRouter.push({
+        pathname: '/inventory/auto-po-review' as any,
+        params: { supplierGroups: JSON.stringify(supplierGroup) },
+      });
+      return;
+    }
+
+    safeRouter.push({
       pathname: '/purchasing/create-po',
       params: {
-        supplierId: supplier.id,
-        supplierData: JSON.stringify(supplier)
-      }
+        supplierId: mapped.id,
+        supplierData: JSON.stringify(mapped),
+      },
     });
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return Colors.success;
-    if (score >= 80) return Colors.warning;
-    if (score >= 70) return '#f59e0b';
-    return Colors.error;
+  const getInitials = (supplier: any) => {
+    const name = supplier.business_name || supplier.contact_person || '?';
+    const words = name.trim().split(/\s+/);
+    if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+    return name.substring(0, 2).toUpperCase();
   };
 
-  const renderSupplierCard = (supplier: any) => {
-    const scoreColor = getScoreColor(supplier.supplierScore);
+  const renderSupplierCard = ({ item: supplier }: { item: any }) => {
+    const displayName = supplier.business_name || supplier.contact_person || 'Unnamed Supplier';
+    const isBusiness = supplier.supplier_type === 'business';
 
     return (
       <TouchableOpacity
-        key={supplier.id}
-        style={[
-          styles.supplierCard,
-          { borderLeftColor: scoreColor }
-        ]}
+        style={styles.supplierCard}
         onPress={() => handleSupplierSelect(supplier)}
         activeOpacity={0.7}
       >
-        <View style={styles.supplierHeader}>
-          <View style={styles.supplierLeft}>
-            <Image 
-              source={{ uri: supplier.avatar }}
-              style={styles.supplierAvatar}
-            />
-            <View style={styles.supplierInfo}>
-              <Text style={styles.supplierName}>
-                {supplier.supplierType === 'business' ? supplier.businessName : supplier.name}
-              </Text>
-              <Text style={styles.contactPerson}>
-                Contact: {supplier.contactPerson}
-              </Text>
-              <View style={styles.supplierMeta}>
-                {supplier.supplierType === 'business' ? (
-                  <Building2 size={14} color={Colors.textLight} />
-                ) : (
-                  <User size={14} color={Colors.textLight} />
-                )}
-                <Text style={styles.supplierType}>
-                  {supplier.supplierType === 'business' ? 'Business' : 'Individual'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.supplierRight}>
-            <View style={[
-              styles.scoreBadge,
-              { backgroundColor: `${scoreColor}20` }
-            ]}>
-              <Award size={14} color={scoreColor} />
-              <Text style={[
-                styles.scoreText,
-                { color: scoreColor }
-              ]}>
-                {supplier.supplierScore}
-              </Text>
-            </View>
-          </View>
+        <View style={styles.avatarCircle}>
+          <Text style={styles.avatarText}>{getInitials(supplier)}</Text>
         </View>
 
-        <View style={styles.supplierDetails}>
-          <View style={styles.detailRow}>
-            <Package size={14} color={Colors.textLight} />
-            <Text style={styles.detailText}>
-              {supplier.productCount} products
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Star size={14} color={Colors.warning} />
-            <Text style={styles.detailText}>
-              {supplier.qualityRating}/5 rating
-            </Text>
-          </View>
-        </View>
+        <View style={styles.cardContent}>
+          <Text style={styles.supplierName} numberOfLines={1}>{displayName}</Text>
 
-        <View style={styles.categoriesSection}>
-          <Text style={styles.categoriesLabel}>Categories:</Text>
-          <View style={styles.categoriesContainer}>
-            {supplier.categories.slice(0, 3).map((category: string, index: number) => (
-              <View key={index} style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>{category}</Text>
-              </View>
-            ))}
-            {supplier.categories.length > 3 && (
-              <View style={styles.categoryChip}>
-                <Text style={styles.categoryChipText}>
-                  +{supplier.categories.length - 3}
-                </Text>
-              </View>
+          {supplier.contact_person && supplier.business_name ? (
+            <View style={styles.metaRow}>
+              <User size={13} color={Colors.textLight} />
+              <Text style={styles.metaText}>{supplier.contact_person}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.metaRow}>
+            {isBusiness ? (
+              <Building2 size={13} color={Colors.textLight} />
+            ) : (
+              <User size={13} color={Colors.textLight} />
             )}
+            <Text style={styles.metaText}>{isBusiness ? 'Business' : 'Individual'}</Text>
+            {supplier.mobile ? (
+              <>
+                <Phone size={13} color={Colors.textLight} style={{ marginLeft: 10 }} />
+                <Text style={styles.metaText}>{supplier.mobile}</Text>
+              </>
+            ) : null}
           </View>
+
+          {supplier.address ? (
+            <View style={styles.metaRow}>
+              <MapPin size={13} color={Colors.textLight} />
+              <Text style={styles.metaText} numberOfLines={1}>{supplier.address}</Text>
+            </View>
+          ) : null}
         </View>
 
-        <View style={styles.termsSection}>
-          <Text style={styles.termsText}>
-            {supplier.paymentTerms} • {supplier.deliveryTime}
-          </Text>
-        </View>
+        <ChevronRight size={20} color={Colors.grey[300]} />
       </TouchableOpacity>
     );
   };
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          
-          <Text style={styles.headerTitle}>Select Supplier</Text>
-        </View>
-      </SafeAreaView>
-
-      {/* Instructions */}
-      <View style={styles.instructionsContainer}>
-        <Text style={styles.instructionsTitle}>Choose Supplier</Text>
-        <Text style={styles.instructionsText}>
-          Select a supplier to create a purchase order
-        </Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Select Supplier</Text>
       </View>
 
-      {/* Suppliers List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredSuppliers.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Building2 size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Suppliers Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No suppliers match your search criteria' : 'No suppliers available'}
-            </Text>
-          </View>
-        ) : (
-          filteredSuppliers.map(renderSupplierCard)
-        )}
-      </ScrollView>
-
-      {/* Bottom Search Bar */}
-      <View style={styles.floatingSearchContainer}>
-        <View style={styles.searchContainer}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search suppliers..."
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => console.log('Filter suppliers')}
-              activeOpacity={0.7}
-            >
-              <Filter size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-          </View>
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.textLight} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search suppliers..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
         </View>
       </View>
-    </View>
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading suppliers...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.id}
+          renderItem={renderSupplierCard}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Building2 size={48} color={Colors.textLight} />
+              <Text style={styles.emptyTitle}>
+                {searchQuery ? 'No suppliers match your search' : 'No suppliers added yet'}
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {searchQuery ? 'Try a different search term' : 'Add suppliers from the Suppliers section'}
+              </Text>
+            </View>
+          }
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
@@ -247,238 +235,121 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  headerSafeArea: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
   },
   backButton: {
     width: 40,
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: Colors.text,
   },
-  instructionsContainer: {
-    backgroundColor: '#f0f4ff',
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  instructionsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.primary,
-    marginBottom: 4,
-  },
-  instructionsText: {
-    fontSize: 14,
-    color: Colors.primary,
-    lineHeight: 20,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 100,
-  },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  supplierCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderLeftWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 3.84,
-    elevation: 2,
-  },
-  supplierHeader: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  supplierLeft: {
-    flexDirection: 'row',
-    flex: 1,
-    marginRight: 16,
-  },
-  supplierAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 12,
-  },
-  supplierInfo: {
-    flex: 1,
-  },
-  supplierName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  contactPerson: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 6,
-  },
-  supplierMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  supplierType: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  supplierRight: {
-    alignItems: 'flex-end',
-  },
-  scoreBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  scoreText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  supplierDetails: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  detailText: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  categoriesSection: {
-    marginBottom: 12,
-  },
-  categoriesLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 6,
-  },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  categoryChip: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  categoryChipText: {
-    fontSize: 10,
-    color: Colors.background,
-    fontWeight: '500',
-  },
-  termsSection: {
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  termsText: {
-    fontSize: 12,
-    color: Colors.textLight,
-    textAlign: 'center',
-  },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
   searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.text,
-    marginLeft: 12,
-    marginRight: 12,
-    
+    marginLeft: 10,
+    padding: 0,
   },
-  filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: Colors.textLight,
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  supplierCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+  },
+  avatarCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: `${Colors.primary}15`,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  cardContent: {
+    flex: 1,
+  },
+  supplierName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  metaText: {
+    fontSize: 13,
+    color: Colors.textLight,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 80,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: Colors.text,
+    marginTop: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 40,
   },
 });

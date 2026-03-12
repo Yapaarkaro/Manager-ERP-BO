@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   Search,
@@ -90,7 +91,7 @@ export default function POSearchScreen() {
   const handleVerifyStock = () => {
     if (!selectedPO) return;
     
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-in/invoice-input',
       params: {
         poData: JSON.stringify(selectedPO)
@@ -150,7 +151,7 @@ export default function POSearchScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-in');
+              safeRouter.replace('/inventory/stock-in');
             }
           }}
           activeOpacity={0.7}

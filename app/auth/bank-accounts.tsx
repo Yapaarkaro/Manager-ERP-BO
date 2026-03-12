@@ -15,8 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore } from '@/utils/dataStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { ListSkeleton } from '@/components/SkeletonLoader';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +57,7 @@ export default function BankAccountsScreen() {
   } = useLocalSearchParams();
 
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['primary']));
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
@@ -64,38 +65,14 @@ export default function BankAccountsScreen() {
   const colors = useThemeColors();
 
   useEffect(() => {
-    // Load bank accounts from dataStore first (for returning users), then fallback to params
-    const dataStoreBankAccounts = dataStore.getBankAccounts();
-    
-    if (dataStoreBankAccounts && dataStoreBankAccounts.length > 0) {
-      console.log('📥 Loaded bank accounts from dataStore:', dataStoreBankAccounts.length);
-      // Map dataStore BankAccount to local BankAccount interface
-      const mappedAccounts: BankAccount[] = dataStoreBankAccounts.map(acc => ({
-        id: acc.id,
-        bankId: acc.bankId,
-        bankName: acc.bankName,
-        bankShortName: acc.bankShortName,
-        accountHolderName: acc.accountHolderName,
-        accountNumber: acc.accountNumber,
-        ifscCode: acc.ifscCode,
-        accountType: acc.accountType,
-        initialBalance: acc.initialBalance,
-        upiId: acc.upiId,
-        isPrimary: acc.isPrimary,
-        createdAt: acc.createdAt,
-      }));
-      setBankAccounts(mappedAccounts);
-    } else {
-      // Fallback to params if dataStore is empty
-      try {
-        const accounts = JSON.parse(allBankAccounts as string);
-        setBankAccounts(accounts);
-        console.log('📥 Loaded bank accounts from params:', accounts.length);
-      } catch (error) {
-        console.log('📭 No bank accounts to load');
-        setBankAccounts([]);
-      }
+    // Load bank accounts from route params (source of truth passed between screens)
+    try {
+      const accounts = JSON.parse(allBankAccounts as string);
+      setBankAccounts(accounts);
+    } catch {
+      setBankAccounts([]);
     }
+    setIsLoadingAccounts(false);
 
     Animated.timing(slideAnimation, {
       toValue: 1,
@@ -189,70 +166,42 @@ export default function BankAccountsScreen() {
     setShowDeleteModal(true);
   };
 
-  const confirmDeleteAccount = () => {
+  const confirmDeleteAccount = async () => {
     if (accountToDelete) {
-      // Update local state
+      // Update local state immediately
       setBankAccounts(prev => prev.filter(acc => acc.id !== accountToDelete));
       
-      // Update dataStore
-      dataStore.deleteBankAccount(accountToDelete);
+      // Delete from Supabase backend (source of truth)
+      try {
+        const { deleteBankAccount } = await import('@/services/backendApi');
+        await deleteBankAccount(accountToDelete);
+      } catch {
+        // Non-blocking: local state already updated
+      }
       
       setAccountToDelete(null);
       setShowDeleteModal(false);
     }
   };
 
-  const handleMakePrimary = (accountId: string) => {
-    const currentPrimary = bankAccounts.find(acc => acc.isPrimary);
-    const newPrimary = bankAccounts.find(acc => acc.id === accountId);
-    
+  const handleMakePrimary = async (accountId: string) => {
+    // Update local state immediately
     setBankAccounts(prev => prev.map(acc => ({
       ...acc,
       isPrimary: acc.id === accountId
     })));
     
-    // Update in dataStore
-    dataStore.setPrimaryBankAccount(accountId);
-    
-    // Log the primary change via star icon
-    dataStore.logChange(
-      'bank_primary_change',
-      `⭐ Changed primary bank via star icon from ${currentPrimary?.bankName || 'none'} to ${newPrimary?.bankName}`,
-      currentPrimary ? {
-        id: currentPrimary.id,
-        bankName: currentPrimary.bankName,
-        accountNumber: currentPrimary.accountNumber,
-        isPrimary: true
-      } : null,
-      {
-        id: newPrimary?.id,
-        bankName: newPrimary?.bankName,
-        accountNumber: newPrimary?.accountNumber,
-        isPrimary: true
-      },
-      { 
-        action: 'star_icon_click',
-        screen: 'bank_accounts'
+    // Update in Supabase backend (source of truth)
+    try {
+      const { updateBankAccount } = await import('@/services/backendApi');
+      // Set all accounts as non-primary first, then set the new one
+      const otherAccounts = bankAccounts.filter(acc => acc.id !== accountId && acc.isPrimary);
+      for (const acc of otherAccounts) {
+        updateBankAccount({ accountId: acc.id, isPrimary: false }).catch(() => {});
       }
-    );
-    
-    // Log the complete new primary bank account details
-    if (newPrimary) {
-      console.log('');
-      console.log('='.repeat(60));
-      console.log('⭐ NEW PRIMARY BANK ACCOUNT - COMPLETE DETAILS');
-      console.log('='.repeat(60));
-      console.log('Bank Name:', newPrimary.bankName);
-      console.log('Bank Short Name:', newPrimary.bankShortName);
-      console.log('Account Holder Name:', newPrimary.accountHolderName);
-      console.log('Account Number:', newPrimary.accountNumber);
-      console.log('IFSC Code:', newPrimary.ifscCode);
-      console.log('Account Type:', newPrimary.accountType);
-      console.log('UPI ID:', newPrimary.upiId || 'N/A');
-      console.log('Initial Balance:', `₹${newPrimary.initialBalance.toLocaleString('en-IN')}`);
-      console.log('Is Primary:', newPrimary.isPrimary);
-      console.log('='.repeat(60));
-      console.log('');
+      await updateBankAccount({ accountId, isPrimary: true });
+    } catch {
+      // Non-blocking: local state already updated
     }
   };
 
@@ -306,9 +255,8 @@ export default function BankAccountsScreen() {
       console.error('Error getting session:', error);
     });
 
-    // Get latest data from dataStore to ensure we have all updates
-    const latestAddresses = dataStore.getAddresses();
-    const latestBankAccounts = dataStore.getBankAccounts();
+    // Use current local state (already in sync with backend via optimistic updates)
+    const latestBankAccounts = bankAccounts;
 
     // Navigate to final setup screen immediately (no delay)
     // Use replace to prevent going back to bank accounts list after continuing
@@ -322,7 +270,7 @@ export default function BankAccountsScreen() {
         businessName,
         businessType,
         customBusinessType,
-        allAddresses: JSON.stringify(latestAddresses),
+        allAddresses,
         allBankAccounts: JSON.stringify(latestBankAccounts),
         // Pass invoice configuration for returning users
         initialCashBalance,
@@ -528,6 +476,14 @@ export default function BankAccountsScreen() {
 
   const totalBalance = bankAccounts.reduce((sum, account) => sum + account.initialBalance, 0);
   const webContainerStyles = getWebContainerStyles();
+
+  if (isLoadingAccounts) {
+    return (
+      <ResponsiveContainer>
+        <ListSkeleton itemCount={4} showSearch={false} showFilter={false} />
+      </ResponsiveContainer>
+    );
+  }
 
   return (
     <ResponsiveContainer>

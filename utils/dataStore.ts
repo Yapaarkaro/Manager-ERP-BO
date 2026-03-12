@@ -58,6 +58,7 @@ export interface BusinessAddress {
   doorNumber: string;
   addressLine1: string;
   addressLine2: string;
+  addressLine3?: string;
   additionalLines?: string[];
   city: string;
   pincode: string;
@@ -70,6 +71,55 @@ export interface BusinessAddress {
   createdAt: string;
   updatedAt: string;
   backendId?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+/**
+ * Maps a backend location row (snake_case) to frontend BusinessAddress (camelCase).
+ * Handles both already-mapped camelCase objects and raw snake_case DB rows.
+ */
+export function mapLocationToAddress(loc: any): BusinessAddress {
+  const isCamelCase = 'addressLine1' in loc || 'isPrimary' in loc;
+
+  if (isCamelCase) {
+    return {
+      ...loc,
+      backendId: loc.backendId || loc.id,
+    };
+  }
+
+  return {
+    id: loc.id,
+    backendId: loc.id,
+    name: loc.name || '',
+    type: loc.type || 'primary',
+    doorNumber: loc.door_number || '',
+    addressLine1: loc.address_line_1 || '',
+    addressLine2: loc.address_line_2 || '',
+    addressLine3: loc.address_line_3 || '',
+    city: loc.city || '',
+    pincode: loc.pincode || '',
+    stateName: loc.state || '',
+    stateCode: loc.state_code && loc.state_code !== loc.state
+      ? loc.state_code
+      : getGSTINStateCode(loc.state || ''),
+    manager: loc.contact_name || '',
+    phone: loc.contact_phone || '',
+    isPrimary: loc.is_primary ?? false,
+    status: loc.is_deleted ? 'inactive' : 'active',
+    createdAt: loc.created_at || new Date().toISOString(),
+    updatedAt: loc.updated_at || new Date().toISOString(),
+    latitude: loc.latitude != null ? parseFloat(loc.latitude) : null,
+    longitude: loc.longitude != null ? parseFloat(loc.longitude) : null,
+  };
+}
+
+/**
+ * Maps an array of backend location rows to frontend BusinessAddress[].
+ */
+export function mapLocationsToAddresses(locations: any[]): BusinessAddress[] {
+  return (locations || []).filter((l: any) => !l.is_deleted).map(mapLocationToAddress);
 }
 
 export interface Customer {

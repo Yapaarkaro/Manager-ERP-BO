@@ -1,15 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
+  RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { ArrowLeft, Building, Plus, TrendingUp, TrendingDown } from 'lucide-react-native';
-import { dataStore, BankAccount } from '@/utils/dataStore';
+import { BankAccount } from '@/utils/dataStore';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { invalidateApiCache } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -28,17 +33,43 @@ const Colors = {
 };
 
 export default function BanksScreen() {
+  const { data: businessData, loading: businessLoading, refetch } = useBusinessData();
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    refetch().then(() => loadBankAccounts()).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [refetch]);
 
   useFocusEffect(
     React.useCallback(() => {
       loadBankAccounts();
-    }, [])
+    }, [businessData.bankAccounts])
   );
 
   const loadBankAccounts = () => {
-    const accounts = dataStore.getBankAccounts();
+    const rawAccounts = businessData.bankAccounts || [];
+    const accounts: BankAccount[] = rawAccounts.map((acc: any) => ({
+      id: acc.id,
+      accountHolderName: acc.account_holder_name ?? acc.accountHolderName ?? '',
+      bankName: acc.bank_name ?? acc.bankName ?? '',
+      bankId: acc.bank_id ?? acc.bankId ?? '',
+      bankShortName: acc.bank_short_name ?? acc.bankShortName ?? '',
+      accountNumber: acc.account_number ?? acc.accountNumber ?? '',
+      ifscCode: acc.ifsc_code ?? acc.ifscCode ?? '',
+      upiId: acc.upi_id ?? acc.upiId ?? '',
+      accountType: acc.account_type ?? acc.accountType ?? 'Savings',
+      isPrimary: acc.is_primary ?? acc.isPrimary ?? false,
+      initialBalance: acc.initial_balance ?? acc.initialBalance ?? 0,
+      balance: acc.balance ?? acc.initial_balance ?? acc.initialBalance ?? 0,
+      createdAt: acc.created_at ?? acc.createdAt ?? '',
+    }));
     setBankAccounts(accounts);
+    setIsLoading(businessLoading);
   };
 
   const formatAmount = (amount: number) => {
@@ -50,7 +81,7 @@ export default function BanksScreen() {
   };
 
   const handleBankAccountPress = (bankAccount: BankAccount) => {
-    router.push({
+    safeRouter.push({
       pathname: '/bank-details',
       params: {
         bankAccountId: bankAccount.id,
@@ -59,7 +90,7 @@ export default function BanksScreen() {
   };
 
   const handleAddBankAccount = () => {
-    router.push('/add-bank-account');
+    safeRouter.push('/add-bank-account');
   };
 
   const getTotalBalance = () => {
@@ -67,11 +98,11 @@ export default function BanksScreen() {
   };
 
   const getTotalIncome = () => {
-    return dataStore.getTotalIncome();
+    return 0;
   };
 
   const getTotalExpense = () => {
-    return dataStore.getTotalExpense();
+    return 0;
   };
 
   return (
@@ -96,7 +127,11 @@ export default function BanksScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        {isLoading ? (
+          <ListSkeleton itemCount={6} showSearch={false} showFilter={false} />
+        ) : (
+        <>
         {/* Summary Cards */}
         <View style={styles.summaryContainer}>
           <View style={styles.summaryCard}>
@@ -182,6 +217,8 @@ export default function BanksScreen() {
             </View>
           )}
         </View>
+        </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

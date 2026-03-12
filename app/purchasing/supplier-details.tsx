@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   Modal,
   Alert,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams, usePathname } from 'expo-router';
-import { ArrowLeft, MessageCircle, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share } from 'lucide-react-native';
-import { dataStore } from '@/utils/dataStore';
+import { router, useLocalSearchParams } from 'expo-router';
+import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share, Banknote, Truck } from 'lucide-react-native';
+import { getSuppliers, getPurchaseInvoices, getCachedPurchaseInvoiceItems, getSupplierMetrics, getProducts, invalidateApiCache, getOrCreateConversation, autoLinkSupplierToUser } from '@/services/backendApi';
+import { useBusinessData } from '@/hooks/useBusinessData';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
-import Sidebar from '@/components/Sidebar';
+import { DetailSkeleton } from '@/components/SkeletonLoader';
+import { safeRouter } from '@/utils/safeRouter';
 
 // Helper function to get initials from name
 const getInitials = (name: string): string => {
@@ -66,30 +68,113 @@ interface TransactionLog {
   description: string;
 }
 
-const mockSupplierProducts: SupplierProduct[] = [];
-
-const mockTransactionLogs: TransactionLog[] = [];
-
 export default function SupplierDetailsScreen() {
-  const { supplierId } = useLocalSearchParams();
-  const pathname = usePathname();
+  const { supplierId, defaultTab } = useLocalSearchParams();
+  const { data: bizData } = useBusinessData();
   const [supplier, setSupplier] = useState<any>(null);
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'products' | 'transactions'>('overview');
+  const [selectedTab, setSelectedTab] = useState<'overview' | 'products' | 'transactions'>(
+    (defaultTab === 'transactions' || defaultTab === 'products') ? defaultTab as any : 'overview'
+  );
   const [isLoading, setIsLoading] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [refreshing, setRefreshing] = useState(false);
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
+  const [supplierProducts, setSupplierProducts] = useState<SupplierProduct[]>([]);
+  const [metrics, setMetrics] = useState<any>(null);
 
   useEffect(() => {
     loadSupplierData();
   }, [supplierId]);
 
-  const loadSupplierData = () => {
+  const loadSupplierData = async () => {
     try {
       setIsLoading(true);
       
       if (supplierId) {
-        const supplierData = dataStore.getSupplierById(supplierId as string);
-        if (supplierData) {
-          setSupplier(supplierData);
+        const [suppResult, invResult, metricsResult, productsResult] = await Promise.all([
+          getSuppliers(),
+          getPurchaseInvoices(),
+          getSupplierMetrics(supplierId as string),
+          getProducts(),
+        ]);
+
+        let invoicesForSupplier: any[] = [];
+        if (invResult.success && invResult.invoices) {
+          invoicesForSupplier = invResult.invoices.filter((inv: any) => inv.supplier_id === supplierId);
+          setSupplierInvoices(invoicesForSupplier);
+        }
+
+        if (metricsResult.success && metricsResult.metrics) {
+          setMetrics(metricsResult.metrics);
+        }
+
+        let suppProds: SupplierProduct[] = [];
+        if (productsResult.success && productsResult.products) {
+          suppProds = productsResult.products
+            .filter((p: any) => p.preferred_supplier_id === supplierId)
+            .map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              category: p.category || 'Uncategorized',
+              price: parseFloat(p.per_unit_price) || parseFloat(p.sales_price) || 0,
+              minOrderQty: parseFloat(p.min_stock_level) || 1,
+              unit: p.primary_unit || 'pcs',
+              availability: (parseFloat(p.current_stock) || 0) > 0
+                ? (parseFloat(p.current_stock) || 0) <= (parseFloat(p.min_stock_level) || 0) ? 'limited' : 'in_stock'
+                : 'out_of_stock',
+              lastOrderDate: p.last_restocked_at || undefined,
+            }));
+        }
+        setSupplierProducts(suppProds);
+
+        const m = metricsResult.metrics;
+
+        if (suppResult.success && suppResult.suppliers) {
+          const found = suppResult.suppliers.find((s: any) => s.id === supplierId);
+          if (found) {
+            const totalValue = m?.total_value || invoicesForSupplier.reduce((s: number, inv: any) => s + (Number(inv.total_amount) || 0), 0);
+            const paidOrders = m?.paid_orders || invoicesForSupplier.filter((inv: any) => inv.payment_status === 'paid').length;
+            const pendingOrders = m?.pending_orders || invoicesForSupplier.filter((inv: any) => inv.payment_status !== 'paid').length;
+            const lastInvoice = invoicesForSupplier.length > 0 ? invoicesForSupplier.sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0] : null;
+
+            setSupplier({
+              id: found.id,
+              name: found.contact_person,
+              businessName: found.business_name,
+              supplierType: found.supplier_type || 'business',
+              contactPerson: found.contact_person,
+              mobile: found.mobile_number,
+              email: found.email || '',
+              address: `${found.address_line_1}${found.address_line_2 ? ', ' + found.address_line_2 : ''}${found.address_line_3 ? ', ' + found.address_line_3 : ''}, ${found.city}, ${found.pincode}, ${found.state}`,
+              gstin: found.gstin_pan || '',
+              avatar: '',
+              supplierScore: m?.health_score || 0,
+              onTimeDelivery: m?.on_time_delivery_rate || 0,
+              qualityRating: 0,
+              responseTime: 0,
+              avgDeliveryDays: m?.avg_delivery_days || 0,
+              avgPaymentDays: m?.avg_payment_duration_days || 0,
+              totalOrders: m?.total_orders || invoicesForSupplier.length,
+              completedOrders: paidOrders,
+              pendingOrders: pendingOrders,
+              overdueOrders: m?.overdue_orders || 0,
+              cancelledOrders: 0,
+              totalValue,
+              totalPaid: m?.total_paid || 0,
+              totalDue: m?.total_due || 0,
+              lastOrderDate: m?.last_order_date || lastInvoice?.invoice_date || lastInvoice?.created_at || null,
+              lastPaymentDate: m?.last_payment_date || null,
+              lastDeliveryDate: m?.last_delivery_date || null,
+              joinedDate: found.created_at,
+              status: found.status || 'active',
+              paymentTerms: '',
+              deliveryTime: '',
+              categories: [...new Set(suppProds.map(p => p.category).filter(c => c && c !== 'Uncategorized'))],
+              productCount: suppProds.length,
+              createdAt: found.created_at,
+              businessId: found.business_id || null,
+              linkedUserId: found.linked_user_id || null,
+            });
+          }
         }
       }
     } catch (error) {
@@ -98,6 +183,13 @@ export default function SupplierDetailsScreen() {
       setIsLoading(false);
     }
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadSupplierData().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [supplierId]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -152,16 +244,47 @@ export default function SupplierDetailsScreen() {
     }
   };
 
-  const handleChatPress = () => {
-    router.push({
-      pathname: '/purchasing/supplier-chat',
-      params: {
-        supplierId: supplier.id,
-        supplierName: supplier.supplierType === 'business' ? supplier.businessName : supplier.name,
-        supplierAvatar: supplier.avatar,
-        supplierPhoneNumber: supplier.mobile
-      }
+  const handleChatPress = async () => {
+    const businessId = bizData?.business?.id;
+    if (!businessId) return;
+
+    const supplierDisplayName = supplier.supplierType === 'business' ? supplier.businessName : supplier.name;
+
+    let linkedUserId = supplier.linkedUserId;
+    if (!linkedUserId) {
+      const linked = await autoLinkSupplierToUser(supplier.id);
+      if (linked) linkedUserId = linked;
+    }
+
+    if (!linkedUserId) {
+      Alert.alert(
+        'Not on Manager',
+        `${supplierDisplayName} is not on Manager yet. Invite them to start chatting.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const result = await getOrCreateConversation({
+      businessId,
+      otherPartyId: supplier.id,
+      otherPartyType: 'supplier',
+      otherPartyName: supplierDisplayName,
+      otherPartyUserId: linkedUserId,
     });
+
+    if (result.success && result.conversation) {
+      safeRouter.push({
+        pathname: '/chat/conversation',
+        params: {
+          conversationId: result.conversation.id,
+          name: supplierDisplayName,
+          type: result.crossBusiness ? 'customer' : 'supplier',
+          otherPartyId: supplier.id,
+          ...(result.crossBusiness ? { crossBusiness: 'true' } : {}),
+        }
+      });
+    }
   };
 
   // Show loading state
@@ -181,7 +304,7 @@ export default function SupplierDetailsScreen() {
           </View>
         </SafeAreaView>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading supplier details...</Text>
+          <DetailSkeleton />
         </View>
       </View>
     );
@@ -218,7 +341,7 @@ export default function SupplierDetailsScreen() {
   }
 
   const handleCreatePO = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/purchasing/create-po',
       params: {
         supplierId: supplier.id,
@@ -309,34 +432,9 @@ export default function SupplierDetailsScreen() {
     );
   };
 
-  const handleMenuNavigation = (route: any) => {
-    router.push(route);
-  };
-
-  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
-    setSidebarWidth(width);
-  };
-
   return (
-    <View style={styles.mainContainer}>
-      {/* Sidebar - Only on web */}
-      {Platform.OS === 'web' && (
-        <Sidebar
-          onNavigate={handleMenuNavigation}
-          currentRoute={pathname}
-          onCollapseChange={handleSidebarCollapseChange}
-        />
-      )}
-      
-      <View style={[
-        styles.contentWrapper,
-        Platform.OS === 'web' && {
-          marginLeft: sidebarWidth,
-          flex: 1,
-        }
-      ]}>
-        <ResponsiveContainer>
-          <View style={styles.container}>
+    <ResponsiveContainer>
+      <View style={styles.container}>
             {/* Header */}
             <SafeAreaView style={styles.headerSafeArea}>
               <View style={styles.header}>
@@ -355,7 +453,7 @@ export default function SupplierDetailsScreen() {
                   onPress={handleChatPress}
                   activeOpacity={0.7}
                 >
-                  <MessageCircle size={24} color={Colors.primary} />
+                  <MessageSquare size={22} color={Colors.primary} />
                 </TouchableOpacity>
               </View>
             </SafeAreaView>
@@ -400,6 +498,42 @@ export default function SupplierDetailsScreen() {
             </Text>
           </View>
           <Text style={styles.scoreLabel}>Supplier Score</Text>
+        </View>
+      </View>
+
+      {/* Quick Stats */}
+      <View style={{ paddingHorizontal: 16, paddingVertical: 12, backgroundColor: Colors.grey[50], borderTopWidth: 1, borderBottomWidth: 1, borderColor: Colors.grey[200] }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>Products</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.primary }}>{supplier.productCount}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>Orders</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.text }}>{supplier.totalOrders}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>On-Time</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: supplier.onTimeDelivery >= 80 ? Colors.success : supplier.onTimeDelivery >= 50 ? Colors.warning : Colors.error }}>
+              {supplier.onTimeDelivery}%
+            </Text>
+          </View>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>Total Value</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.primary }} numberOfLines={1}>{formatAmount(supplier.totalValue)}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>Last Order</Text>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.text }} numberOfLines={1}>
+              {supplier.lastOrderDate ? formatDate(supplier.lastOrderDate) : 'Never'}
+            </Text>
+          </View>
+          <View style={{ flex: 1, minWidth: '28%', backgroundColor: Colors.background, borderRadius: 8, padding: 10, alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, color: Colors.textLight, marginBottom: 2 }}>Categories</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>
+              {supplier.categories?.length || 0}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -459,37 +593,50 @@ export default function SupplierDetailsScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {selectedTab === 'overview' && (
           <View style={styles.overviewContainer}>
+            {/* Health Score */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Supplier Health</Text>
+              <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                <View style={[styles.scoreBadge, { backgroundColor: `${getScoreColor(supplier.supplierScore)}15`, paddingHorizontal: 20, paddingVertical: 12 }]}>
+                  <Award size={24} color={getScoreColor(supplier.supplierScore)} />
+                  <Text style={[styles.scoreValue, { fontSize: 28, color: getScoreColor(supplier.supplierScore) }]}>{supplier.supplierScore}</Text>
+                  <Text style={{ fontSize: 14, color: getScoreColor(supplier.supplierScore), fontWeight: '500' }}>/100</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 6 }}>
+                  {supplier.supplierScore >= 80 ? 'Excellent Supplier' : supplier.supplierScore >= 60 ? 'Good Supplier' : supplier.supplierScore >= 40 ? 'Average Supplier' : 'Needs Improvement'}
+                </Text>
+              </View>
+            </View>
+
             {/* Performance Metrics */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Performance Metrics</Text>
               <View style={styles.metricsGrid}>
                 <View style={styles.metricCard}>
-                  <Clock size={20} color={Colors.primary} />
+                  <Truck size={20} color={Colors.primary} />
                   <Text style={styles.metricLabel}>On-Time Delivery</Text>
-                  <Text style={[
-                    styles.metricValue,
-                    { color: supplier.onTimeDelivery >= 90 ? Colors.success : Colors.warning }
-                  ]}>
+                  <Text style={[styles.metricValue, { color: supplier.onTimeDelivery >= 80 ? Colors.success : supplier.onTimeDelivery >= 50 ? Colors.warning : Colors.error }]}>
                     {supplier.onTimeDelivery}%
                   </Text>
                 </View>
 
                 <View style={styles.metricCard}>
-                  <Star size={20} color={Colors.warning} />
-                  <Text style={styles.metricLabel}>Quality Rating</Text>
+                  <Clock size={20} color={Colors.warning} />
+                  <Text style={styles.metricLabel}>Avg Delivery</Text>
                   <Text style={styles.metricValue}>
-                    {supplier.qualityRating}/5
+                    {supplier.avgDeliveryDays || 0} days
                   </Text>
                 </View>
 
                 <View style={styles.metricCard}>
-                  <TrendingUp size={20} color={Colors.success} />
-                  <Text style={styles.metricLabel}>Response Time</Text>
+                  <Banknote size={20} color={Colors.success} />
+                  <Text style={styles.metricLabel}>Avg Payment</Text>
                   <Text style={styles.metricValue}>
-                    {supplier.responseTime}h
+                    {supplier.avgPaymentDays || 0} days
                   </Text>
                 </View>
 
@@ -545,17 +692,56 @@ export default function SupplierDetailsScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Business Terms</Text>
               <View style={styles.termsCard}>
+                {supplier.paymentTerms ? (
+                  <View style={styles.termRow}>
+                    <Text style={styles.termLabel}>Payment Terms:</Text>
+                    <Text style={styles.termValue}>{supplier.paymentTerms}</Text>
+                  </View>
+                ) : null}
+                {supplier.deliveryTime ? (
+                  <View style={styles.termRow}>
+                    <Text style={styles.termLabel}>Delivery Time:</Text>
+                    <Text style={styles.termValue}>{supplier.deliveryTime}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.termRow}>
-                  <Text style={styles.termLabel}>Payment Terms:</Text>
-                  <Text style={styles.termValue}>{supplier.paymentTerms}</Text>
+                  <Text style={styles.termLabel}>Added On:</Text>
+                  <Text style={styles.termValue}>{supplier.createdAt ? formatDate(supplier.createdAt) : 'N/A'}</Text>
                 </View>
                 <View style={styles.termRow}>
-                  <Text style={styles.termLabel}>Delivery Time:</Text>
-                  <Text style={styles.termValue}>{supplier.deliveryTime}</Text>
+                  <Text style={styles.termLabel}>Last Order:</Text>
+                  <Text style={styles.termValue}>{supplier.lastOrderDate ? formatDate(supplier.lastOrderDate) : 'Never'}</Text>
+                </View>
+                {supplier.lastPaymentDate && (
+                  <View style={styles.termRow}>
+                    <Text style={styles.termLabel}>Last Payment:</Text>
+                    <Text style={styles.termValue}>{formatDate(supplier.lastPaymentDate)}</Text>
+                  </View>
+                )}
+                {supplier.lastDeliveryDate && (
+                  <View style={styles.termRow}>
+                    <Text style={styles.termLabel}>Last Delivery:</Text>
+                    <Text style={styles.termValue}>{formatDate(supplier.lastDeliveryDate)}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* Financial Overview */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Financial Overview</Text>
+              <View style={styles.termsCard}>
+                <View style={styles.termRow}>
+                  <Text style={styles.termLabel}>Total Purchases</Text>
+                  <Text style={[styles.termValue, { color: Colors.primary }]}>{formatAmount(supplier.totalValue)}</Text>
                 </View>
                 <View style={styles.termRow}>
-                  <Text style={styles.termLabel}>Joined Date:</Text>
-                  <Text style={styles.termValue}>{formatDate(supplier.joinedDate)}</Text>
+                  <Text style={styles.termLabel}>Amount Paid</Text>
+                  <Text style={[styles.termValue, { color: Colors.success }]}>{formatAmount(supplier.totalPaid || 0)}</Text>
+                </View>
+                <View style={styles.termRow}>
+                  <Text style={styles.termLabel}>Outstanding Due</Text>
+                  <Text style={[styles.termValue, { color: (supplier.totalDue || 0) > 0 ? Colors.error : Colors.success }]}>{formatAmount(supplier.totalDue || 0)}</Text>
                 </View>
               </View>
             </View>
@@ -566,7 +752,7 @@ export default function SupplierDetailsScreen() {
               <View style={styles.orderSummaryGrid}>
                 <View style={styles.orderSummaryCard}>
                   <CheckCircle size={20} color={Colors.success} />
-                  <Text style={styles.orderSummaryLabel}>Completed</Text>
+                  <Text style={styles.orderSummaryLabel}>Paid</Text>
                   <Text style={[styles.orderSummaryValue, { color: Colors.success }]}>
                     {supplier.completedOrders}
                   </Text>
@@ -582,9 +768,9 @@ export default function SupplierDetailsScreen() {
 
                 <View style={styles.orderSummaryCard}>
                   <AlertTriangle size={20} color={Colors.error} />
-                  <Text style={styles.orderSummaryLabel}>Cancelled</Text>
+                  <Text style={styles.orderSummaryLabel}>Overdue</Text>
                   <Text style={[styles.orderSummaryValue, { color: Colors.error }]}>
-                    {supplier.cancelledOrders}
+                    {supplier.overdueOrders || 0}
                   </Text>
                 </View>
 
@@ -610,22 +796,125 @@ export default function SupplierDetailsScreen() {
             </View>
 
             <View style={styles.productsList}>
-              {mockSupplierProducts.map(renderProductCard)}
+              {supplierProducts.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <Package size={40} color={Colors.grey[300]} />
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: Colors.text, marginTop: 12 }}>No Products Yet</Text>
+                  <Text style={{ fontSize: 13, color: Colors.textLight, marginTop: 4, textAlign: 'center', paddingHorizontal: 24 }}>
+                    Products with this supplier as their preferred supplier will appear here
+                  </Text>
+                </View>
+              ) : (
+                supplierProducts.map(renderProductCard)
+              )}
             </View>
           </View>
         )}
 
         {selectedTab === 'transactions' && (
           <View style={styles.transactionsContainer}>
+            {/* Summary strip */}
+            {supplierInvoices.length > 0 && (() => {
+              const totalVal = supplierInvoices.reduce((s: number, inv: any) => s + (Number(inv.total_amount) || 0), 0);
+              const paidVal = supplierInvoices.reduce((s: number, inv: any) => s + (Number(inv.paid_amount) || 0), 0);
+              const dueVal = totalVal - paidVal;
+              return (
+                <View style={styles.txSummaryStrip}>
+                  <View style={styles.txSummaryItem}>
+                    <Text style={styles.txSummaryLabel}>Total</Text>
+                    <Text style={styles.txSummaryVal}>{formatAmount(totalVal)}</Text>
+                  </View>
+                  <View style={[styles.txSummaryDivider]} />
+                  <View style={styles.txSummaryItem}>
+                    <Text style={styles.txSummaryLabel}>Paid</Text>
+                    <Text style={[styles.txSummaryVal, { color: Colors.success }]}>{formatAmount(paidVal)}</Text>
+                  </View>
+                  <View style={[styles.txSummaryDivider]} />
+                  <View style={styles.txSummaryItem}>
+                    <Text style={styles.txSummaryLabel}>Due</Text>
+                    <Text style={[styles.txSummaryVal, { color: dueVal > 0 ? Colors.error : Colors.success }]}>{formatAmount(dueVal)}</Text>
+                  </View>
+                </View>
+              );
+            })()}
+
             <View style={styles.transactionsHeader}>
-              <Text style={styles.sectionTitle}>Transaction History</Text>
-              <Text style={styles.transactionsSubtitle}>
-                Purchase orders, invoices, and payments
-              </Text>
+              <Text style={styles.sectionTitle}>Purchase Invoices ({supplierInvoices.length})</Text>
             </View>
 
             <View style={styles.transactionsList}>
-              {mockTransactionLogs.map(renderTransactionLog)}
+              {supplierInvoices.length === 0 ? (
+                <View style={styles.txEmptyState}>
+                  <View style={styles.txEmptyIcon}>
+                    <FileText size={28} color={Colors.grey[300]} />
+                  </View>
+                  <Text style={styles.txEmptyTitle}>No Invoices Yet</Text>
+                  <Text style={styles.txEmptySubtitle}>Purchase invoices from this supplier will appear here</Text>
+                </View>
+              ) : (
+                supplierInvoices.map((inv: any) => {
+                  const invTotal = Number(inv.total_amount) || 0;
+                  const invPaid = Number(inv.paid_amount) || 0;
+                  const payStatus = inv.payment_status || 'pending';
+                  const invNum = inv.invoice_number || 'N/A';
+                  const invDate = inv.invoice_date || inv.created_at;
+                  let items = Array.isArray(inv.items) ? inv.items : [];
+                  if (items.length === 0) {
+                    const cached = getCachedPurchaseInvoiceItems(inv.id);
+                    if (cached) items = cached;
+                  }
+                  const itemCount = items.length;
+                  const itemNames = items.slice(0, 3).map((i: any) => i.product_name || i.productName || '').filter(Boolean);
+                  const moreCount = items.length > 3 ? items.length - 3 : 0;
+                  const balanceDue = invTotal - invPaid;
+                  const statusColor = payStatus === 'paid' ? Colors.success : payStatus === 'pending' ? Colors.warning : Colors.error;
+                  const statusBg = payStatus === 'paid' ? Colors.success + '12' : payStatus === 'pending' ? Colors.warning + '12' : Colors.error + '12';
+
+                  return (
+                    <TouchableOpacity
+                      key={inv.id}
+                      style={styles.txCard}
+                      onPress={() => safeRouter.push({ pathname: '/purchasing/invoice-details', params: { invoiceId: inv.id, invoiceData: JSON.stringify(inv) } })}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.txCardTop}>
+                        <View style={[styles.txStatusDot, { backgroundColor: statusColor }]} />
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={styles.txInvNum}>#{invNum}</Text>
+                            <Text style={styles.txAmount}>{formatAmount(invTotal)}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                            <Text style={styles.txDate}>{invDate ? formatDate(invDate) : '—'}</Text>
+                            <View style={[styles.txStatusChip, { backgroundColor: statusBg }]}>
+                              <Text style={[styles.txStatusChipText, { color: statusColor }]}>
+                                {payStatus === 'paid' ? 'Paid' : balanceDue > 0 ? `Due ${formatAmount(balanceDue)}` : 'Unpaid'}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                      </View>
+
+                      {itemNames.length > 0 && (
+                        <View style={styles.txItemRow}>
+                          <Package size={13} color={Colors.textLight} />
+                          <Text style={styles.txItemText} numberOfLines={1}>
+                            {itemNames.join(', ')}{moreCount > 0 ? ` +${moreCount} more` : ''}
+                          </Text>
+                          <Text style={styles.txItemCount}>{itemCount} item{itemCount !== 1 ? 's' : ''}</Text>
+                        </View>
+                      )}
+
+                      {itemNames.length === 0 && (
+                        <View style={styles.txItemRow}>
+                          <Package size={13} color={Colors.textLight} />
+                          <Text style={styles.txItemText}>{itemCount > 0 ? `${itemCount} item${itemCount !== 1 ? 's' : ''}` : 'Items not available'}</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
             </View>
           </View>
         )}
@@ -644,27 +933,10 @@ export default function SupplierDetailsScreen() {
             </View>
           </View>
         </ResponsiveContainer>
-      </View>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    backgroundColor: Colors.background,
-  },
-  contentWrapper: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    ...Platform.select({
-      web: {
-        transition: 'margin-left 0.3s ease',
-        minWidth: 0,
-      },
-    }),
-  },
   container: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -991,7 +1263,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   transactionsHeader: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   transactionsSubtitle: {
     fontSize: 14,
@@ -999,77 +1271,135 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   transactionsList: {
-    gap: 12,
+    gap: 10,
   },
-  transactionCard: {
+
+  txSummaryStrip: {
+    flexDirection: 'row',
     backgroundColor: Colors.background,
     borderRadius: 12,
     padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: Colors.grey[200],
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
     elevation: 1,
   },
-  transactionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  transactionLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  txSummaryItem: {
     flex: 1,
-    marginRight: 16,
+    alignItems: 'center' as const,
   },
-  transactionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  transactionInfo: {
-    flex: 1,
-  },
-  transactionNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 2,
-  },
-  transactionDescription: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  transactionDate: {
+  txSummaryLabel: {
     fontSize: 11,
     color: Colors.textLight,
+    marginBottom: 4,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
   },
-  transactionRight: {
-    alignItems: 'flex-end',
+  txSummaryVal: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: Colors.text,
   },
-  transactionAmount: {
-    fontSize: 16,
-    fontWeight: '700',
+  txSummaryDivider: {
+    width: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 8,
+  },
+
+  txEmptyState: {
+    alignItems: 'center' as const,
+    paddingVertical: 40,
+  },
+  txEmptyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    marginBottom: 12,
+  },
+  txEmptyTitle: {
+    fontSize: 15,
+    fontWeight: '600' as const,
     color: Colors.text,
     marginBottom: 4,
   },
-  transactionStatus: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+  txEmptySubtitle: {
+    fontSize: 13,
+    color: Colors.textLight,
+    textAlign: 'center' as const,
+    maxWidth: 220,
   },
-  transactionStatusText: {
-    fontSize: 10,
-    fontWeight: '600',
+
+  txCard: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  txCardTop: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 10,
+  },
+  txStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+  },
+  txInvNum: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  txAmount: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: Colors.text,
+  },
+  txDate: {
+    fontSize: 12,
+    color: Colors.textLight,
+  },
+  txStatusChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  txStatusChipText: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+  },
+  txItemRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[100],
+  },
+  txItemText: {
+    flex: 1,
+    fontSize: 12,
+    color: Colors.textLight,
+  },
+  txItemCount: {
+    fontSize: 11,
+    color: Colors.textLight,
+    fontWeight: '500' as const,
   },
   createPOSection: {
     position: 'absolute',

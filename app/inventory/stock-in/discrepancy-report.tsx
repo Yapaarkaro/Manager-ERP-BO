@@ -9,9 +9,11 @@ import {
   Alert,
   Dimensions,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -19,7 +21,13 @@ import {
   Send,
   FileText,
   Building2,
+  MessageSquare,
 } from 'lucide-react-native';
+import { autoLinkSupplierToUser } from '@/services/backendApi';
+import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -65,6 +73,7 @@ interface PurchaseOrder {
   supplierAddress: string;
   supplierPhone: string;
   supplierEmail: string;
+  supplierId?: string;
   orderDate: string;
   expectedDelivery: string;
   totalAmount: number;
@@ -94,9 +103,12 @@ interface DiscrepancyReport {
 
 export default function DiscrepancyReportScreen() {
   const { poData } = useLocalSearchParams();
+  const { data: bizData } = useBusinessData();
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [discrepancyReport, setDiscrepancyReport] = useState<DiscrepancyReport | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [supplierOnManager, setSupplierOnManager] = useState<boolean | null>(null);
+  const [supplierLinkedUserId, setSupplierLinkedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (poData) {
@@ -104,7 +116,6 @@ export default function DiscrepancyReportScreen() {
         const parsedPO = JSON.parse(poData as string);
         setPo(parsedPO);
         
-        // Create initial discrepancy report
         const productsWithDiscrepancies = parsedPO.products.filter((product: POProduct) => 
           product.receivedQuantity !== product.billedQuantity
         );
@@ -140,6 +151,45 @@ export default function DiscrepancyReportScreen() {
             status: 'draft',
           });
         }
+
+        if (parsedPO.supplierId) {
+          autoLinkSupplierToUser(parsedPO.supplierId).then(linked => {
+            if (linked) {
+              setSupplierOnManager(true);
+              setSupplierLinkedUserId(linked);
+            } else {
+              setSupplierOnManager(false);
+            }
+          }).catch(() => setSupplierOnManager(false));
+        } else {
+          const phone = (parsedPO.supplierPhone || '').replace(/[^0-9]/g, '');
+          if (phone) {
+            supabase.from('suppliers')
+              .select('id, linked_user_id, business_id')
+              .or(`mobile_number.ilike.%${phone.slice(-10)}`)
+              .limit(1)
+              .then(({ data }) => {
+                if (data && data[0]) {
+                  const s = data[0];
+                  parsedPO.supplierId = s.id;
+                  setPo({ ...parsedPO });
+                  if (s.linked_user_id || s.business_id) {
+                    setSupplierOnManager(true);
+                    setSupplierLinkedUserId(s.linked_user_id);
+                  } else {
+                    autoLinkSupplierToUser(s.id).then(linked => {
+                      setSupplierOnManager(!!linked);
+                      if (linked) setSupplierLinkedUserId(linked);
+                    }).catch(() => setSupplierOnManager(false));
+                  }
+                } else {
+                  setSupplierOnManager(false);
+                }
+              }).catch(() => setSupplierOnManager(false));
+          } else {
+            setSupplierOnManager(false);
+          }
+        }
       } catch (error) {
         console.error('Error parsing PO data:', error);
         Alert.alert('Error', 'Invalid PO data');
@@ -163,25 +213,55 @@ export default function DiscrepancyReportScreen() {
     });
   };
 
-  const handleSendReport = () => {
-    if (!discrepancyReport) return;
-
+  const handleSendReport = async () => {
+    if (!discrepancyReport || !po) return;
     setIsSubmitting(true);
-    
-    // Simulate API call
-    setTimeout(() => {
+
+    const businessId = bizData?.business?.id;
+
+    try {
+      if (supplierOnManager && businessId && po.supplierId) {
+        const savedSettings = await AsyncStorage.getItem('autoSendSettings');
+        const autoSend = savedSettings ? JSON.parse(savedSettings) : { autoSendDiscrepancy: false };
+
+        await autoSendDocumentToChat({
+          businessId,
+          contactId: po.supplierId,
+          contactType: 'supplier',
+          contactName: po.supplierName,
+          documentType: 'discrepancy_report',
+          documentNumber: discrepancyReport.poNumber,
+          totalAmount: discrepancyReport.totalDiscrepancyValue,
+        });
+
+        setIsSubmitting(false);
+        Alert.alert(
+          'Report Sent',
+          'Discrepancy report has been sent to the supplier via chat.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      } else {
+        setIsSubmitting(false);
+        handleSendViaWhatsApp();
+      }
+    } catch {
       setIsSubmitting(false);
-      Alert.alert(
-        'Report Sent',
-        'Discrepancy report has been sent to the supplier successfully.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.push('/purchasing/supplier-chat')
-          }
-        ]
-      );
-    }, 2000);
+      Alert.alert('Error', 'Failed to send report. Please try again.');
+    }
+  };
+
+  const handleSendViaWhatsApp = () => {
+    if (!discrepancyReport || !po) return;
+    const phone = po.supplierPhone;
+    if (!phone) {
+      Alert.alert('No Phone Number', 'Supplier phone number is not available.');
+      return;
+    }
+    const itemsList = discrepancyReport.products
+      .map(p => `• ${p.name}: Billed ${p.billedQuantity}, Received ${p.receivedQuantity} (${p.discrepancyType})`)
+      .join('\n');
+    const msg = `Stock Discrepancy Report\nPO: ${discrepancyReport.poNumber}\nDate: ${discrepancyReport.reportDate}\n\nItems:\n${itemsList}\n\nTotal Discrepancy Value: ₹${discrepancyReport.totalDiscrepancyValue.toLocaleString('en-IN')}\n\nSent from Manager`;
+    openWhatsApp(phone, msg);
   };
 
   const getDiscrepancyTypeColor = (type: string) => {
@@ -224,7 +304,7 @@ export default function DiscrepancyReportScreen() {
               try {
                 router.back();
               } catch (error) {
-                router.replace('/inventory/stock-in');
+                safeRouter.replace('/inventory/stock-in');
               }
             }}
             activeOpacity={0.7}
@@ -251,7 +331,7 @@ export default function DiscrepancyReportScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/inventory/stock-in');
+              safeRouter.replace('/inventory/stock-in');
             }
           }}
           activeOpacity={0.7}
@@ -398,22 +478,53 @@ export default function DiscrepancyReportScreen() {
           </View>
         </ScrollView>
 
-        {/* Send Button */}
+        {/* Send Buttons */}
         <View style={styles.bottomContainer}>
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              isSubmitting && styles.disabledButton
-            ]}
-            onPress={handleSendReport}
-            disabled={isSubmitting}
-            activeOpacity={0.8}
-          >
-            <Send size={20} color={Colors.background} />
-            <Text style={styles.sendButtonText}>
-              {isSubmitting ? 'Sending...' : 'Send Report to Supplier'}
-            </Text>
-          </TouchableOpacity>
+          {supplierOnManager === null ? (
+            <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 4 }}>Checking supplier status...</Text>
+            </View>
+          ) : supplierOnManager ? (
+            <>
+              <TouchableOpacity
+                style={[styles.sendButton, isSubmitting && styles.disabledButton]}
+                onPress={handleSendReport}
+                disabled={isSubmitting}
+                activeOpacity={0.8}
+              >
+                <MessageSquare size={20} color={Colors.background} />
+                <Text style={styles.sendButtonText}>
+                  {isSubmitting ? 'Sending...' : 'Send via Chat'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sendButton, { backgroundColor: '#25D366', marginTop: 8 }]}
+                onPress={handleSendViaWhatsApp}
+                activeOpacity={0.8}
+              >
+                <Send size={20} color={Colors.background} />
+                <Text style={styles.sendButtonText}>Send via WhatsApp</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View style={{ backgroundColor: Colors.grey[100], borderRadius: 8, padding: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' }}>
+                <AlertTriangle size={16} color={Colors.warning} />
+                <Text style={{ fontSize: 12, color: Colors.textLight, marginLeft: 8, flex: 1 }}>
+                  {po?.supplierName || 'This supplier'} is not on Manager. You can send this report via WhatsApp.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.sendButton, { backgroundColor: '#25D366' }]}
+                onPress={handleSendViaWhatsApp}
+                activeOpacity={0.8}
+              >
+                <Send size={20} color={Colors.background} />
+                <Text style={styles.sendButtonText}>Send via WhatsApp</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </SafeAreaView>
   );

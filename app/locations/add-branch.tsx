@@ -20,7 +20,6 @@ import WebAddressSearch from '@/components/WebAddressSearch';
 import PlatformMapView from '@/components/PlatformMapView';
 import * as Location from 'expo-location';
 import { reverseGeocode, extractAddressComponents } from '@/services/googleMapsApi';
-import { dataStore } from '../../utils/dataStore';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -74,13 +73,12 @@ export default function AddBranchScreen() {
       // For edit mode, don't show counter
       return '';
     }
-    // Use backend data if available, otherwise fallback to dataStore
+    // Use backend data if available
     let branchAddresses: any[] = [];
     if (businessData?.addresses) {
       branchAddresses = businessData.addresses.filter((addr: any) => addr.type === 'branch');
     } else {
-    const allAddresses = dataStore.getAddresses();
-      branchAddresses = allAddresses.filter(addr => addr.type === 'branch');
+      branchAddresses = [];
     }
     return ` - ${branchAddresses.length + 1}`; // +1 for the new branch being added
   };

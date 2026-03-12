@@ -37,14 +37,16 @@ import {
   Eye,
 } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
-import { dataStore, getGSTINStateCode } from '@/utils/dataStore';
+import { getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
 import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import TrialNotification from '@/components/TrialNotification';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
+import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { completeOnboarding, deleteSignupProgress, saveSignupProgress, updateBusinessCashBalance } from '@/services/backendApi';
-import { supabase, withTimeout } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
+
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 
@@ -73,9 +75,17 @@ export default function BusinessSummaryScreen() {
   const [editableBusinessType, setEditableBusinessType] = useState(
     businessType !== 'Others' ? businessType as string : customBusinessType as string
   );
-  // Initialize empty, will be populated from backend data via useBusinessData hook
-  const [editableAddresses, setEditableAddresses] = useState<any[]>([]);
-  const [editableBankAccounts, setEditableBankAccounts] = useState(JSON.parse(allBankAccounts as string || '[]'));
+  // Initialize from route params for instant display; backend data will update via useBusinessData
+  const [editableAddresses, setEditableAddresses] = useState<any[]>(() => {
+    try {
+      return JSON.parse(allAddresses as string || '[]');
+    } catch { return []; }
+  });
+  const [editableBankAccounts, setEditableBankAccounts] = useState(() => {
+    try {
+      return JSON.parse(allBankAccounts as string || '[]');
+    } catch { return []; }
+  });
   const [editableCashBalance, setEditableCashBalance] = useState(initialCashBalance as string || '0');
   const [editableInvoicePrefix, setEditableInvoicePrefix] = useState(invoicePrefix as string);
   const [editableInvoicePattern, setEditableInvoicePattern] = useState(invoicePattern as string);
@@ -96,6 +106,7 @@ export default function BusinessSummaryScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showTrialNotification, setShowTrialNotification] = useState(false);
+  const [trialPopupLoading, setTrialPopupLoading] = useState(false);
   const [showDeleteAddressModal, setShowDeleteAddressModal] = useState(false);
   const [showDeleteBankModal, setShowDeleteBankModal] = useState(false);
   const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
@@ -124,237 +135,75 @@ export default function BusinessSummaryScreen() {
     }
   }, []);
 
-  // ✅ Use unified business data hook for instant, cached data
-  const { data: businessData, refetch } = useBusinessData();
+  // Supabase backend is the sole source of truth via useBusinessData hook
+  const { data: businessData, loading: isBusinessDataLoading, refetch } = useBusinessData();
 
-  // ✅ Update addresses and bank accounts from cached business data (instant, no delay)
-  // Use refs to track last data and prevent unnecessary updates that cause scroll
-  const lastAddressesRef = useRef<string>('');
-  const lastBankAccountsRef = useRef<string>('');
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollPositionRef = useRef<number>(0);
   
-  // Save scroll position before updates
   const handleScroll = (event: any) => {
     scrollPositionRef.current = event.nativeEvent.contentOffset.y;
   };
   
+  // When backend data arrives, update local editable state (backend is source of truth)
+  const lastSyncKeyRef = useRef<string>('');
   useEffect(() => {
-    // Only update if data exists and actually changed (prevent unnecessary re-renders that cause scroll)
-    if (businessData?.addresses) {
-      // Convert backend format to local format
-      // ✅ Use backend data as single source of truth - don't mix with DataStore to avoid duplicates
-      // First, remove any addresses from DataStore that don't exist in backend (cleanup duplicates)
-      const backendAddressIds = new Set(businessData.addresses.map((addr: any) => addr.id));
-      const dataStoreAddresses = dataStore.getAddresses();
-      dataStoreAddresses.forEach((dsAddr) => {
-        // If DataStore address has a backendId that's not in backend, remove it
-        if (dsAddr.backendId && !backendAddressIds.has(dsAddr.backendId)) {
-          // This address was deleted from backend, remove from DataStore
-          dataStore.deleteAddress(dsAddr.id);
-        }
-      });
-      
-      const formattedAddresses = businessData.addresses.map((addr: any) => {
-        // ✅ Use backend ID as the address ID to ensure consistency
-        // Find existing address in DataStore by backendId for editing purposes only
-        const existingAddress = dataStore.getAddresses().find(a => a.backendId === addr.id);
-        
-        const formattedAddress = {
-          id: addr.id, // ✅ Use backend ID directly to avoid duplicates
-          name: addr.name,
-          type: addr.type,
-          doorNumber: addr.door_number || '',
-          addressLine1: addr.address_line1 || '',
-          addressLine2: addr.address_line2 || '',
-          additionalLines: addr.additional_lines && Array.isArray(addr.additional_lines) ? addr.additional_lines : [], // ✅ Include additionalLines
-          city: addr.city || '',
-          pincode: addr.pincode || '',
-          stateName: addr.state || '',
-          stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-          isPrimary: addr.is_primary || false,
-          manager: addr.manager_name || '',
-          phone: addr.manager_mobile_number || '',
-          status: 'active' as const,
-          createdAt: addr.created_at || new Date().toISOString(),
-          updatedAt: addr.updated_at || new Date().toISOString(),
-          backendId: addr.id, // ✅ Include backendId
-        };
-        
-        // ✅ Sync to DataStore for editing purposes only
-        // Use backendId to find existing address, but use backend ID as the address ID
-        if (!existingAddress) {
-          // Add to DataStore - use backend ID as the address ID
-          dataStore.addAddress(formattedAddress);
-        } else {
-          // Update existing address in DataStore to match backend
-          // If existingAddress.id doesn't match backend ID, we need to handle it
-          if (existingAddress.id !== addr.id) {
-            // Delete old address and add new one with correct ID
-            dataStore.deleteAddress(existingAddress.id);
-            dataStore.addAddress(formattedAddress);
-          } else {
-            // Same ID, just update
-            dataStore.updateAddress(existingAddress.id, formattedAddress);
-          }
-        }
-        
-        return formattedAddress;
-      });
-      
-      // ✅ Deduplicate addresses by ID (in case of any duplicates)
+    if (!businessData) return;
+    
+    // Format backend addresses into local display format
+    if (businessData.addresses?.length > 0) {
+      const formattedAddresses = mapLocationsToAddresses(businessData.addresses);
       const uniqueAddresses = formattedAddresses.filter((addr, index, self) => 
         index === self.findIndex(a => a.id === addr.id)
       );
-      
-      // Only update if addresses actually changed (prevent unnecessary re-renders that cause scroll)
-      // ✅ Include more fields in comparison to detect all changes (addressLine1, city, additionalLines, etc.)
-      const addressesKey = JSON.stringify(uniqueAddresses.map((a: any) => ({ 
-        id: a.id, 
-        name: a.name, 
-        type: a.type,
-        addressLine1: a.addressLine1,
-        addressLine2: a.addressLine2,
-        additionalLines: a.additionalLines,
-        city: a.city,
-        pincode: a.pincode,
-        updatedAt: a.updatedAt,
-      })));
-      if (lastAddressesRef.current !== addressesKey) {
-        // Save current scroll position before update
-        const savedScrollPosition = scrollPositionRef.current;
-        
-        setEditableAddresses(uniqueAddresses);
-        lastAddressesRef.current = addressesKey;
-        
-        // Restore scroll position after state update (on next frame to prevent scroll jump)
-        if (Platform.OS === 'web' && scrollViewRef.current) {
-          requestAnimationFrame(() => {
-            scrollViewRef.current?.scrollTo({ y: savedScrollPosition, animated: false });
-          });
-        }
-      }
+      setEditableAddresses(uniqueAddresses);
     }
-    if (businessData?.bankAccounts) {
-      // Convert backend format to local format
-      // ✅ Use backend data as single source of truth - don't mix with DataStore to avoid duplicates
-      // First, remove any bank accounts from DataStore that don't exist in backend (cleanup duplicates)
-      const backendAccountIds = new Set(businessData.bankAccounts.map((acc: any) => acc.id));
-      const dataStoreAccounts = dataStore.getBankAccounts();
-      dataStoreAccounts.forEach((dsAcc) => {
-        // If DataStore account has a backendId that's not in backend, remove it
-        if (dsAcc.backendId && !backendAccountIds.has(dsAcc.backendId)) {
-          // This account was deleted from backend, remove from DataStore
-          dataStore.deleteBankAccount(dsAcc.id);
-        }
-      });
+
+    // Format backend bank accounts into local display format
+    if (businessData.bankAccounts?.length > 0) {
+      const formattedAccounts = businessData.bankAccounts.map((acc: any) => ({
+        id: acc.id,
+        bankId: acc.bank_id || '',
+        bankName: acc.bank_name || '',
+        bankShortName: acc.bank_short_name || '',
+        accountHolderName: acc.account_holder_name || '',
+        accountNumber: acc.account_number || '',
+        ifscCode: acc.ifsc_code || '',
+        upiId: acc.upi_id || '',
+        accountType: (acc.account_type || 'Savings') as 'Savings' | 'Current',
+        initialBalance: parseFloat(String(acc.initial_balance || 0)),
+        balance: parseFloat(String(acc.initial_balance || 0)),
+        isPrimary: acc.is_primary || false,
+        createdAt: acc.created_at || new Date().toISOString(),
+        backendId: acc.id,
+      }));
       
-      const formattedAccounts = businessData.bankAccounts.map((acc: any) => {
-        // ✅ Use backend ID as the account ID to ensure consistency
-        // Find existing account in DataStore by backendId for editing purposes only
-        const existingAccount = dataStore.getBankAccounts().find(a => a.backendId === acc.id);
-        
-        const formattedAccount = {
-          id: acc.id, // ✅ Use backend ID directly to avoid duplicates
-          bankId: acc.bank_id || '',
-          bankName: acc.bank_name || '',
-          bankShortName: acc.bank_short_name || '',
-          accountHolderName: acc.account_holder_name || '',
-          accountNumber: acc.account_number || '',
-          ifscCode: acc.ifsc_code || '',
-          upiId: acc.upi_id || '',
-          accountType: (acc.account_type || 'Savings') as 'Savings' | 'Current',
-          initialBalance: parseFloat(String(acc.initial_balance || 0)),
-          balance: parseFloat(String(acc.initial_balance || 0)),
-          isPrimary: acc.is_primary || false,
-          createdAt: acc.created_at || new Date().toISOString(),
-          backendId: acc.id, // ✅ Include backendId
-        };
-        
-        // ✅ Sync to DataStore for editing purposes only
-        // Use backendId to find existing account, but use backend ID as the account ID
-        if (!existingAccount) {
-          // Add to DataStore - use backend ID as the account ID
-          dataStore.addBankAccount(formattedAccount as any);
-        } else {
-          // Update existing account in DataStore to match backend
-          // If existingAccount.id doesn't match backend ID, we need to handle it
-          if (existingAccount.id !== acc.id) {
-            // Delete old account and add new one with correct ID
-            dataStore.deleteBankAccount(existingAccount.id);
-            dataStore.addBankAccount(formattedAccount as any);
-          } else {
-            // Same ID, just update
-            dataStore.updateBankAccount(existingAccount.id, formattedAccount as any);
-          }
-        }
-        
-        return formattedAccount;
-      });
-      
-      // ✅ Deduplicate accounts by ID (in case of any duplicates)
-      const uniqueAccounts = formattedAccounts.filter((acc, index, self) => 
+      const uniqueAccounts = formattedAccounts.filter((acc: any, index: number, self: any[]) => 
         index === self.findIndex(a => a.id === acc.id)
       );
-      
-      // Only update if bank accounts actually changed (prevent unnecessary re-renders that cause scroll)
-      // ✅ Include more fields in comparison to detect all changes
-      const accountsKey = JSON.stringify(uniqueAccounts.map(a => ({ 
-        id: a.id, 
-        accountNumber: a.accountNumber,
-        accountHolderName: a.accountHolderName,
-        bankName: a.bankName,
-        ifscCode: a.ifscCode,
-        initialBalance: a.initialBalance,
-      })));
-      if (lastBankAccountsRef.current !== accountsKey) {
-        // Save current scroll position before update
-        const savedScrollPosition = scrollPositionRef.current;
-        
-        setEditableBankAccounts(uniqueAccounts);
-        lastBankAccountsRef.current = accountsKey;
-        
-        // Restore scroll position after state update (on next frame)
-        if (Platform.OS === 'web' && scrollViewRef.current) {
-          requestAnimationFrame(() => {
-            scrollViewRef.current?.scrollTo({ y: savedScrollPosition, animated: false });
-          });
-        }
-      }
+      setEditableBankAccounts(uniqueAccounts);
     }
     
-    // ✅ Update cash balance from backend data
-    // Only update if backend has a meaningful value (non-zero) OR if we don't have a value from params
-    // This prevents backend from overwriting the user's input before onboarding completion
-    if (businessData?.business) {
+    // Update cash balance from backend
+    if (businessData.business) {
       const backendCashBalance = businessData.business.current_cash_balance || businessData.business.initial_cash_balance || 0;
       const currentCashBalance = parseFloat(editableCashBalance) || 0;
-      
-      // Only update from backend if:
-      // 1. Backend has a non-zero value AND current value is zero/empty (backend is source of truth after onboarding)
-      // 2. OR if backend value is significantly different (user may have updated it elsewhere)
       if (backendCashBalance > 0 && (currentCashBalance === 0 || Math.abs(backendCashBalance - currentCashBalance) > 0.01)) {
-        const cashBalanceString = backendCashBalance.toString();
-        setEditableCashBalance(cashBalanceString);
+        setEditableCashBalance(backendCashBalance.toString());
       }
     }
   }, [businessData]);
 
-  // ✅ Refetch when screen comes into focus to get latest data (especially after edits)
+  // Refetch from Supabase when screen comes into focus (after edit screens)
+  const hasFetchedOnce = useRef(false);
   useFocusEffect(
     React.useCallback(() => {
-      // Refetch to get latest data from backend (especially after address/bank account edits)
-      console.log('✅ Business summary focused - refetching data');
-      // Since edit screens now await backend sync, wait 500ms, and prefetch data,
-      // we can refetch immediately (data should be ready)
-      // But add a small delay to ensure navigation has completed
-      setTimeout(() => {
-        refetch().then(() => {
-          console.log('✅ Business summary data refetched');
-        }).catch((error) => {
-          console.error('❌ Error refetching business summary data:', error);
-        });
-      }, 200); // 200ms delay - ensures navigation has completed and screen is ready
+      if (!hasFetchedOnce.current) {
+        hasFetchedOnce.current = true;
+        refetch().catch(() => {});
+      } else {
+        refetch().catch(() => {});
+      }
     }, [refetch])
   );
 
@@ -426,13 +275,18 @@ export default function BusinessSummaryScreen() {
     setShowDeleteAddressModal(true);
   };
 
-  const confirmDeleteAddress = () => {
+  const confirmDeleteAddress = async () => {
     if (addressToDelete) {
-      // Update local state
+      // Update local state immediately for responsive UI
       setEditableAddresses((prev: typeof editableAddresses) => prev.filter((addr: typeof editableAddresses[0]) => addr.id !== addressToDelete));
       
-      // Update dataStore
-      dataStore.deleteAddress(addressToDelete);
+      // Delete from Supabase backend (the source of truth)
+      try {
+        const { deleteAddress } = await import('@/services/backendApi');
+        await deleteAddress(addressToDelete);
+      } catch {
+        // Non-blocking: local state already updated for responsiveness
+      }
       
       setAddressToDelete(null);
       setShowDeleteAddressModal(false);
@@ -444,13 +298,18 @@ export default function BusinessSummaryScreen() {
     setShowDeleteBankModal(true);
   };
 
-  const confirmDeleteBankAccount = () => {
+  const confirmDeleteBankAccount = async () => {
     if (bankAccountToDelete) {
-      // Update local state
+      // Update local state immediately for responsive UI
       setEditableBankAccounts((prev: typeof editableBankAccounts) => prev.filter((acc: typeof editableBankAccounts[0]) => acc.id !== bankAccountToDelete));
       
-      // Update dataStore
-      dataStore.deleteBankAccount(bankAccountToDelete);
+      // Delete from Supabase backend (the source of truth)
+      try {
+        const { deleteBankAccount } = await import('@/services/backendApi');
+        await deleteBankAccount(bankAccountToDelete);
+      } catch {
+        // Non-blocking: local state already updated for responsiveness
+      }
       
       setBankAccountToDelete(null);
       setShowDeleteBankModal(false);
@@ -463,50 +322,39 @@ export default function BusinessSummaryScreen() {
   };
 
   const handleCompleteSetup = async () => {
-    // Prevent double navigation
-    if (isNavigating || isLoading) {
-      console.log('⚠️ Navigation already in progress, ignoring duplicate click');
+    if (isNavigating || isLoading) return;
+
+    let rawMobile = (mobile as string);
+    if (!rawMobile) {
+      const { data: { session } } = await supabase.auth.getSession();
+      rawMobile = session?.user?.phone || session?.user?.user_metadata?.phone || '';
+    }
+    const mobileNumber = rawMobile ? String(rawMobile).replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10) : '';
+
+    if (!mobileNumber) {
+      Alert.alert('Error', 'Mobile number is required to complete setup. Please try again.');
       return;
     }
 
     setIsLoading(true);
     setIsNavigating(true);
 
-    try {
-      // Complete onboarding in backend
-      const { data: { session } } = await withTimeout(
-        supabase.auth.getSession(),
-        10000,
-        'Business summary: getSession'
-      );
-      const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
-      
-      if (!mobileNumber) {
-        console.warn('⚠️ Mobile number not available for completing onboarding');
-        Alert.alert('Error', 'Mobile number is required to complete setup. Please try again.');
-        setIsLoading(false);
-        setIsNavigating(false);
-        return;
-      }
-      
-      const invoicePatternValue = editableInvoicePattern || `${editableInvoicePrefix}-YYYY-####`;
-      
-      // ✅ Optimistically save signup progress (non-blocking)
-      (async () => {
-        try {
-          const { optimisticSaveSignupProgress } = await import('@/utils/optimisticSync');
-          optimisticSaveSignupProgress({
-            mobile: mobileNumber,
-            mobileVerified: true,
-            currentStep: 'businessSummary',
-          });
-        } catch (error) {
-          console.error('Error saving signup progress:', error);
-        }
-      })();
+    // Show the trial popup immediately in skeleton/loading state
+    setTrialPopupLoading(true);
+    setShowTrialNotification(true);
 
-      // Complete onboarding - AWAIT to ensure it completes before navigation
-      const onboardingResult = await completeOnboarding({
+    const invoicePatternValue = editableInvoicePattern || `${editableInvoicePrefix}-YYYY-####`;
+
+    // Non-blocking: save signup progress optimistically
+    import('@/utils/optimisticSync')
+      .then(m => m.optimisticSaveSignupProgress({ mobile: mobileNumber, mobileVerified: true, currentStep: 'businessSummary' }))
+      .catch(() => {});
+
+    // Start trial concurrently (don't wait for onboarding)
+    subscriptionStore.startTrial().catch(() => {});
+
+    try {
+      const doComplete = () => completeOnboarding({
         initialCashBalance: totalCashBalance,
         invoicePrefix: editableInvoicePrefix,
         invoicePattern: JSON.stringify({ pattern: invoicePatternValue }),
@@ -515,105 +363,45 @@ export default function BusinessSummaryScreen() {
         registeredMobile: mobileNumber,
       });
 
+      let onboardingResult = await doComplete();
       if (!onboardingResult.success) {
-        console.error('Onboarding failed:', onboardingResult.error);
-        Alert.alert('Error', onboardingResult.error || 'Failed to complete onboarding. Please try again.');
+        const isRetriable = onboardingResult.error?.includes('timed out') || onboardingResult.error?.includes('connection') || onboardingResult.error?.includes('Network');
+        if (isRetriable) {
+          onboardingResult = await doComplete();
+        }
+      }
+
+      if (!onboardingResult.success) {
+        setShowTrialNotification(false);
+        setTrialPopupLoading(false);
         setIsLoading(false);
         setIsNavigating(false);
+        Alert.alert('Error', onboardingResult.error || 'Failed to complete onboarding. Please try again.');
         return;
       }
 
       console.log('✅ Onboarding completed successfully. Business ID:', onboardingResult.businessId);
 
-      // ✅ Clear cache to ensure fresh data is loaded after onboarding completion
       clearBusinessDataCache();
-      
-      // ✅ Refetch immediately after clearing cache to get fresh data including cash balance
-      // Small delay to ensure backend has finished processing
-      setTimeout(() => {
-        refetch().then(() => {
-          console.log('✅ Business data refetched after onboarding completion');
-        }).catch((error) => {
-          console.error('❌ Error refetching after onboarding:', error);
-        });
-      }, 1000); // 1 second delay to ensure backend has processed the cash balance
-      
-      // ✅ Note: complete-onboarding Edge Function now updates signup_progress with business_id
-      // and marks it as 'signupComplete', so we don't need to update it here
-      console.log('✅ Onboarding complete - signup_progress will be updated by complete-onboarding Edge Function');
 
-      const businessData = {
-        personalInfo: {
-          name: editableName,
-          businessName: editableBusinessName,
-          businessType: editableBusinessType,
-        },
-        verification: {
-          type,
-          value,
-          gstinData: gstinData ? JSON.parse(gstinData as string) : null,
-        },
-        addresses: editableAddresses,
-        bankAccounts: editableBankAccounts,
-        initialCashBalance: totalCashBalance,
-        totalBalance: grandTotal,
-        invoiceConfig: {
-          prefix: editableInvoicePrefix,
-          pattern: editableInvoicePattern,
-          startingNumber: editableStartingNumber,
-          fiscalYear: editableFiscalYear,
-        },
-        setupCompletedAt: new Date().toISOString(),
-      };
+      // Non-critical background tasks
+      import('@/hooks/useBusinessData').then(m => m.prefetchBusinessData()).catch(() => {});
+      deleteSignupProgress(mobileNumber).catch(() => {});
 
-      console.log('Complete business setup data:', businessData);
-
-      dataStore.setSignupComplete(true);
-
-      // Create user account for login
-      const userAccount = dataStore.createUserAccount();
-      console.log('✅ User account created for login:', userAccount.mobile);
-
-      // Start the 30-day free trial
-      await subscriptionStore.startTrial();
-
-      // ✅ Prefetch business data in background (warm up cache for instant dashboard load)
-      (async () => {
-        try {
-          const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-          await prefetchBusinessData();
-          console.log('✅ Business data prefetched - dashboard will load instantly');
-        } catch (error) {
-          console.error('⚠️ Prefetch error (non-blocking):', error);
-        }
-      })();
-      
-      // ✅ Delete signup progress after successful completion
-      try {
-        const deleteResult = await deleteSignupProgress();
-        if (deleteResult.success) {
-          console.log('✅ Signup progress deleted after successful completion');
-        } else {
-          console.warn('⚠️ Failed to delete signup progress (non-blocking):', deleteResult.error);
-        }
-      } catch (error) {
-        console.error('⚠️ Error deleting signup progress (non-blocking):', error);
-      }
-      
+      // Transition popup from skeleton to real content
+      setTrialPopupLoading(false);
       setIsLoading(false);
       setIsNavigating(false);
-      
-      // ✅ Show trial notification BEFORE navigation
-      // This ensures the popup appears after the business summary screen
-      setShowTrialNotification(true);
     } catch (error: any) {
       console.error('Error completing setup:', error);
+      setShowTrialNotification(false);
+      setTrialPopupLoading(false);
+      setIsLoading(false);
+      setIsNavigating(false);
       Alert.alert(
         'Setup Failed',
         error.message || 'Failed to complete setup. Please check your connection and try again.'
       );
-      setIsLoading(false);
-      setIsNavigating(false);
     }
   };
 
@@ -721,6 +509,16 @@ export default function BusinessSummaryScreen() {
   );
 
   const webContainerStyles = getWebContainerStyles();
+
+  // Only show skeleton if we have NO data at all (no params, no DataStore, no cache)
+  const hasLocalData = editableAddresses.length > 0 || editableBankAccounts.length > 0 || editableName;
+  if (isBusinessDataLoading && !hasLocalData) {
+    return (
+      <ResponsiveContainer>
+        <DetailSkeleton />
+      </ResponsiveContainer>
+    );
+  }
 
   return (
     <ResponsiveContainer>
@@ -1428,25 +1226,16 @@ export default function BusinessSummaryScreen() {
       {/* Trial Notification Modal */}
       <TrialNotification
         visible={showTrialNotification}
+        loading={trialPopupLoading}
         onClose={() => {
           setShowTrialNotification(false);
-          // ✅ Prefetch business data before navigation (if not already cached)
-          (async () => {
-            try {
-              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-              await prefetchBusinessData();
-            } catch (error) {
-              console.error('⚠️ Prefetch error (non-blocking):', error);
-            }
-          })();
-          // Navigate to dashboard after closing the popup
-          router.replace('/dashboard');
+          router.replace('/auth/discover-businesses' as any);
         }}
         onUpgrade={() => {
           setShowTrialNotification(false);
           router.push('/subscription');
         }}
-        trialEndDate={subscriptionStore.getSubscription().trialEndDate!}
+        trialEndDate={subscriptionStore.getSubscription().trialEndDate || ''}
       />
 
       {/* Delete Address Confirmation Modal */}

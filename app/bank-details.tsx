@@ -1,35 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   SafeAreaView,
   TextInput,
-  Animated,
   Modal,
   Alert,
+  Platform,
+  ActivityIndicator,
+  ScrollView,
+  RefreshControl,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Building, TrendingUp, TrendingDown, Calendar, FileText, CreditCard, Smartphone, Banknote, Receipt, Plus, ExternalLink, Search, X, Check } from 'lucide-react-native';
-import { dataStore, BankAccount } from '@/utils/dataStore';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { ArrowLeft, Building2, Plus, Search, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileText, Check, Receipt } from 'lucide-react-native';
+import { BankAccount } from '@/utils/dataStore';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { getBankTransactions, addBankTransaction, invalidateApiCache, clearBankTransaction, deleteBankTransaction } from '@/services/backendApi';
+import { onTransactionChange } from '@/utils/transactionEvents';
+import DateInputWithPicker from '@/components/DateInputWithPicker';
+import { safeRouter } from '@/utils/safeRouter';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
-const Colors = {
-  background: '#FFFFFF',
+const C = {
+  bg: '#FFFFFF',
   text: '#1F2937',
-  textLight: '#6B7280',
+  textMuted: '#6B7280',
+  textLight: '#9CA3AF',
   primary: '#3f66ac',
+  primaryBg: '#EFF3FB',
   success: '#059669',
+  successBg: '#ECFDF5',
   error: '#DC2626',
+  errorBg: '#FEF2F2',
   warning: '#D97706',
-  grey: {
-    50: '#F9FAFB',
-    100: '#F3F4F6',
-    200: '#E5E7EB',
-    300: '#D1D5DB',
-  }
+  warningBg: '#FFFBEB',
+  border: '#E5E7EB',
+  surface: '#F9FAFB',
+  surfaceAlt: '#F3F4F6',
+  divider: '#F3F4F6',
 };
+
+type PaymentSource = 'UPI' | 'Card' | 'Cheque' | 'Cash' | 'Bank Transfer' | 'NEFT' | 'RTGS' | 'IMPS' | 'Other';
 
 interface BankTransaction {
   id: string;
@@ -41,29 +56,70 @@ interface BankTransaction {
   reference: string;
   category: string;
   transactionNumber: string;
-  source: 'UPI' | 'Card' | 'Cheque' | 'Cash' | 'Bank Transfer' | 'NEFT' | 'RTGS' | 'IMPS' | 'Other';
+  source: PaymentSource;
   relatedInvoiceId?: string;
   relatedCustomerId?: string;
   relatedSupplierId?: string;
   createdAt: string;
-  // Cheque specific fields
+  counterpartyName?: string;
   chequeNumber?: string;
   chequeDate?: string;
   isCleared?: boolean;
   clearanceDate?: string;
+  bounceReason?: string;
+  notes?: string;
+}
+
+const PAYMENT_MODES: { label: string; value: PaymentSource }[] = [
+  { label: 'UPI', value: 'UPI' }, { label: 'Card', value: 'Card' },
+  { label: 'Bank Transfer', value: 'Bank Transfer' }, { label: 'Cheque', value: 'Cheque' },
+  { label: 'Cash', value: 'Cash' }, { label: 'NEFT', value: 'NEFT' },
+  { label: 'RTGS', value: 'RTGS' }, { label: 'IMPS', value: 'IMPS' }, { label: 'Other', value: 'Other' },
+];
+const CATEGORIES = ['Sales', 'Purchase', 'Salary', 'Rent', 'Utilities', 'Loan', 'Interest', 'Transfer', 'General', 'Other'];
+
+const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(n);
+const fmtDec = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(n);
+
+function fmtDateLabel(ds: string) {
+  const d = new Date(ds);
+  const today = new Date();
+  const yest = new Date(); yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function mapTx(t: any): BankTransaction {
+  return {
+    id: t.id, bankAccountId: t.bank_account_id, type: t.type,
+    amount: parseFloat(t.amount) || 0, description: t.description || '',
+    date: t.date || t.transaction_date || t.created_at,
+    reference: t.reference || t.reference_number || '', category: t.category || '',
+    transactionNumber: t.transaction_number || '',
+    source: t.source || t.payment_mode || 'Other',
+    relatedInvoiceId: t.related_invoice_id || t.reference_id,
+    relatedCustomerId: t.related_customer_id, relatedSupplierId: t.related_supplier_id,
+    createdAt: t.created_at || '', counterpartyName: t.counterparty_name || '',
+    chequeNumber: t.cheque_number || '', chequeDate: t.cheque_date || null,
+    isCleared: t.is_cleared ?? true, clearanceDate: t.clearance_date || null,
+    bounceReason: t.bounce_reason || null, notes: t.notes || '',
+  };
 }
 
 export default function BankDetailsScreen() {
   const { bankAccountId } = useLocalSearchParams();
+  const { data: businessData } = useBusinessData();
   const [bankAccount, setBankAccount] = useState<BankAccount | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [transactions, setTransactions] = useState<BankTransaction[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
-  const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [filteredTransactions, setFilteredTransactions] = useState<BankTransaction[]>([]);
-  const [currentSearchText, setCurrentSearchText] = useState('');
-  const [cursorVisible, setCursorVisible] = useState(true);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   const [showUnclearedCheques, setShowUnclearedCheques] = useState(false);
   const [showChequeConfirmation, setShowChequeConfirmation] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<BankTransaction | null>(null);
@@ -71,1696 +127,667 @@ export default function BankDetailsScreen() {
   const [clearanceDate, setClearanceDate] = useState('');
   const [bounceReason, setBounceReason] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
-  
-  const searchTerms = ['amount', 'date', 'customer', 'supplier', 'invoice number'];
 
+  const [showAddTx, setShowAddTx] = useState(false);
+  const [txType, setTxType] = useState<'credit' | 'debit'>('credit');
+  const [txAmount, setTxAmount] = useState('');
+  const [txDescription, setTxDescription] = useState('');
+  const [txCategory, setTxCategory] = useState('General');
+  const [txPaymentMode, setTxPaymentMode] = useState<PaymentSource>('Other');
+  const [txReference, setTxReference] = useState('');
+  const [txCounterparty, setTxCounterparty] = useState('');
+  const [txDate, setTxDate] = useState(new Date().toISOString().split('T')[0]);
+  const [txSaving, setTxSaving] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showModePicker, setShowModePicker] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => { loadBankAccount(); }, [bankAccountId]);
+  useFocusEffect(useCallback(() => { if (bankAccount) loadTransactions(); }, [bankAccount, bankAccountId]));
+
+  const txMountedRef = useRef(true);
   useEffect(() => {
-    loadBankAccount();
-    startTypewriterAnimation();
+    txMountedRef.current = true;
+    const unsub = onTransactionChange(() => {
+      if (txMountedRef.current && bankAccountId) { loadBankAccount(); loadSilent(); }
+    });
+    return () => { txMountedRef.current = false; unsub(); };
   }, [bankAccountId]);
 
-  useEffect(() => {
-    if (bankAccount) {
-      loadTransactions();
-    }
-  }, [bankAccount, bankAccountId]);
-
-  const startTypewriterAnimation = () => {
-    let termIndex = 0;
-    let charIndex = 0;
-    let isDeleting = false;
-    
-    const typewriterEffect = () => {
-      const currentTerm = searchTerms[termIndex];
-      
-      if (!isDeleting) {
-        // Typing effect
-        setCurrentSearchText(currentTerm.substring(0, charIndex + 1));
-        charIndex++;
-        
-        if (charIndex === currentTerm.length) {
-          // Adaptive pause based on word length - shorter words get more time
-          const baseTime = 1200; // Base reading time
-          const lengthBonus = Math.max(0, (8 - currentTerm.length) * 200); // Extra time for short words
-          const readingTime = baseTime + lengthBonus;
-          
-          setTimeout(() => {
-            isDeleting = true;
-            typewriterEffect();
-          }, readingTime);
-          return;
-        }
-      } else {
-        // Deleting effect
-        setCurrentSearchText(currentTerm.substring(0, charIndex - 1));
-        charIndex--;
-        
-        if (charIndex === 0) {
-          isDeleting = false;
-          termIndex = (termIndex + 1) % searchTerms.length;
-          setTimeout(typewriterEffect, 400);
-          return;
-        }
-      }
-      
-      // Adaptive typing speed - shorter words type slower for visibility
-      let typingSpeed, deletingSpeed;
-      
-      if (currentTerm.length <= 4) {
-        // Short words: slower typing for better visibility
-        typingSpeed = 150;
-        deletingSpeed = 100;
-      } else if (currentTerm.length <= 8) {
-        // Medium words: normal speed
-        typingSpeed = 120;
-        deletingSpeed = 80;
-      } else {
-        // Long words: faster typing since they're easier to recognize
-        typingSpeed = 100;
-        deletingSpeed = 70;
-      }
-      
-      const speed = isDeleting ? deletingSpeed : typingSpeed;
-      setTimeout(typewriterEffect, speed);
-    };
-    
-    // Start the animation
-    typewriterEffect();
-    
-    // Cursor blinking
-    const cursorInterval = setInterval(() => {
-      setCursorVisible(prev => !prev);
-    }, 600);
-    
-    return () => clearInterval(cursorInterval);
+  const loadSilent = async () => {
+    if (!bankAccountId) return;
+    try {
+      const r = await getBankTransactions(bankAccountId as string);
+      if (txMountedRef.current && r.success) setTransactions((r.transactions || []).map(mapTx));
+    } catch { /* silent */ }
   };
 
   const loadBankAccount = () => {
     if (bankAccountId) {
-      const account = dataStore.getBankAccountById(bankAccountId as string);
-      setBankAccount(account || null);
+      const found = (businessData.bankAccounts || []).find((a: any) => a.id === bankAccountId);
+      if (found) {
+        setBankAccount({
+          id: found.id,
+          accountHolderName: found.account_holder_name ?? found.accountHolderName ?? '',
+          bankName: found.bank_name ?? found.bankName ?? '',
+          bankId: found.bank_id ?? found.bankId ?? '',
+          bankShortName: found.bank_short_name ?? found.bankShortName ?? '',
+          accountNumber: found.account_number ?? found.accountNumber ?? '',
+          ifscCode: found.ifsc_code ?? found.ifscCode ?? '',
+          upiId: found.upi_id ?? found.upiId ?? '',
+          accountType: found.account_type ?? found.accountType ?? 'Savings',
+          isPrimary: found.is_primary ?? found.isPrimary ?? false,
+          initialBalance: found.initial_balance ?? found.initialBalance ?? 0,
+          balance: found.current_balance ?? found.balance ?? found.initial_balance ?? found.initialBalance ?? 0,
+          createdAt: found.created_at ?? found.createdAt ?? '',
+        });
+      } else {
+        setBankAccount(null);
+      }
+    }
+    setIsLoading(false);
+  };
+
+  const loadTransactions = async () => {
+    if (!bankAccountId) return;
+    try {
+      const r = await getBankTransactions(bankAccountId as string);
+      const mapped = (r.transactions || []).map(mapTx);
+      setTransactions(mapped);
+      const ob = bankAccount?.initialBalance || bankAccount?.balance || 0;
+      const tc = mapped.filter((t: BankTransaction) => t.type === 'credit' && (t.source !== 'Cheque' || t.isCleared)).reduce((s: number, t: BankTransaction) => s + t.amount, 0);
+      const td = mapped.filter((t: BankTransaction) => t.type === 'debit' && (t.source !== 'Cheque' || t.isCleared)).reduce((s: number, t: BankTransaction) => s + t.amount, 0);
+      setCurrentBalance(ob + tc - td);
+    } catch {
+      setTransactions([]);
+      setCurrentBalance(bankAccount?.balance || 0);
     }
   };
 
-  const loadTransactions = () => {
-    if (bankAccountId) {
-      const accountTransactions = dataStore.getBankTransactions(bankAccountId as string);
-      setTransactions(accountTransactions);
-      setFilteredTransactions(accountTransactions);
-      
-      // Calculate current balance properly (excluding uncleared cheques)
-      const openingBalance = bankAccount?.balance || 0;
-      const totalCredit = accountTransactions
-        .filter(t => t.type === 'credit' && (t.source !== 'Cheque' || t.isCleared))
-        .reduce((sum, t) => sum + t.amount, 0);
-      const totalDebit = accountTransactions
-        .filter(t => t.type === 'debit' && (t.source !== 'Cheque' || t.isCleared))
-        .reduce((sum, t) => sum + t.amount, 0);
-      
-      setCurrentBalance(openingBalance + totalCredit - totalDebit);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    Promise.all([loadBankAccount(), loadTransactions()]).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [bankAccountId, bankAccount]);
+
+  const filtered = useMemo(() => {
+    let result = transactions;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(t =>
+        t.description.toLowerCase().includes(q) || t.amount.toString().includes(q) ||
+        t.reference.toLowerCase().includes(q) || t.category.toLowerCase().includes(q) ||
+        (t.source || '').toLowerCase().includes(q) || (t.counterpartyName || '').toLowerCase().includes(q)
+      );
+    }
+    result = filterByDateRange(result, (t) => t.date, selectedTimeRange, customFromDate, customToDate);
+    return result;
+  }, [transactions, searchQuery, selectedTimeRange, customFromDate, customToDate]);
+
+  const grouped = useMemo(() => {
+    const sorted = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const sections: { title: string; data: BankTransaction[] }[] = [];
+    for (const t of sorted) {
+      const key = new Date(t.date).toDateString();
+      const last = sections[sections.length - 1];
+      if (last && last.title === key) last.data.push(t);
+      else sections.push({ title: key, data: [t] });
+    }
+    return sections;
+  }, [filtered]);
+
+  const totalCredit = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+  const totalDebit = transactions.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+  const unclearedCheques = transactions.filter(t => t.source === 'Cheque' && !t.isCleared);
+
+  const maskAccNum = (n: string) => n.length > 4 ? '•••• ' + n.slice(-4) : n;
+
+  const handleTxPress = (t: BankTransaction) => {
+    const cat = (t.category || '').toLowerCase();
+    if (cat === 'return' && t.relatedInvoiceId) {
+      safeRouter.push({ pathname: '/return-details', params: { returnId: t.relatedInvoiceId } });
+    } else if (cat === 'purchase_invoice' && t.relatedInvoiceId) {
+      safeRouter.push({ pathname: '/purchasing/invoice-details', params: { invoiceId: t.relatedInvoiceId } });
+    } else if (t.relatedInvoiceId && !t.relatedCustomerId && !t.relatedSupplierId) {
+      safeRouter.push({ pathname: '/invoice-details', params: { invoiceId: t.relatedInvoiceId } });
+    } else {
+      safeRouter.push({ pathname: '/transaction-details', params: { transactionId: t.id, bankAccountId: bankAccountId as string, transactionType: 'bank', transactionData: JSON.stringify(t) } });
     }
   };
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setFilteredTransactions(transactions);
-      return;
-    }
-
-    const filtered = transactions.filter(transaction => {
-      const searchLower = query.toLowerCase();
-      
-      // Search by invoice number
-      if (transaction.relatedInvoiceId?.toLowerCase().includes(searchLower)) {
-        return true;
-      }
-      
-      // Search by customer name (if available)
-      if (transaction.relatedCustomerId) {
-        const customer = dataStore.getCustomerById(transaction.relatedCustomerId);
-        if (customer?.name.toLowerCase().includes(searchLower) || 
-            customer?.businessName?.toLowerCase().includes(searchLower)) {
-          return true;
-        }
-      }
-      
-      // Search by supplier name (if available)
-      if (transaction.relatedSupplierId) {
-        const supplier = dataStore.getSupplierById(transaction.relatedSupplierId);
-        if (supplier?.name.toLowerCase().includes(searchLower) || 
-            supplier?.businessName?.toLowerCase().includes(searchLower)) {
-          return true;
-        }
-      }
-      
-      // Search by date
-      if (transaction.date.toLowerCase().includes(searchLower)) {
-        return true;
-      }
-      
-      // Search by amount
-      if (transaction.amount.toString().includes(searchLower)) {
-        return true;
-      }
-      
-      // Search by description
-      if (transaction.description.toLowerCase().includes(searchLower)) {
-        return true;
-      }
-      
-      // Search by transaction number
-      if (transaction.transactionNumber.toLowerCase().includes(searchLower)) {
-        return true;
-      }
-      
-      return false;
-    });
-    
-    setFilteredTransactions(filtered);
+  const handleQuickClearCheque = (t: BankTransaction) => {
+    setSelectedTransaction(t); setChequeAction('clear');
+    setClearanceDate(new Date().toISOString().split('T')[0]); setShowChequeConfirmation(true);
   };
-
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
+  const handleQuickBounceCheque = (t: BankTransaction) => {
+    setSelectedTransaction(t); setChequeAction('bounce');
+    setBounceReason(''); setNotifyCustomer(false); setShowChequeConfirmation(true);
   };
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
-
-  const getSourceIcon = (source: string) => {
-    switch (source) {
-      case 'UPI':
-        return <Smartphone size={16} color={Colors.primary} />;
-      case 'Card':
-        return <CreditCard size={16} color={Colors.primary} />;
-      case 'Cheque':
-        return <Receipt size={16} color={Colors.primary} />;
-      case 'Cash':
-        return <Banknote size={16} color={Colors.primary} />;
-      case 'Bank Transfer':
-      case 'NEFT':
-      case 'RTGS':
-      case 'IMPS':
-        return <Building size={16} color={Colors.primary} />;
-      default:
-        return <FileText size={16} color={Colors.primary} />;
-    }
-  };
-
-  const getSourceColor = (source: string) => {
-    switch (source) {
-      case 'UPI':
-        return Colors.primary;
-      case 'Card':
-        return Colors.success;
-      case 'Cheque':
-        return Colors.warning;
-      case 'Cash':
-        return Colors.error;
-      default:
-        return Colors.textLight;
-    }
-  };
-
-  const handleTransactionPress = (transaction: BankTransaction) => {
-    // Navigate to transaction details screen
-    router.push({
-      pathname: '/transaction-details',
-      params: {
-        transactionId: transaction.id,
-        bankAccountId: bankAccountId as string,
-      }
-    });
-  };
-
-  const getTotalCredit = () => {
-    return transactions
-      .filter(t => t.type === 'credit')
-      .reduce((sum, t) => sum + t.amount, 0);
-  };
-
-  const getTotalDebit = () => {
-    return transactions
-      .filter(t => t.type === 'debit')
-      .reduce((sum, t) => sum + t.amount, 0);
-  };
-
-  const getUnclearedChequeAmount = () => {
-    return transactions
-      .filter(t => t.source === 'Cheque' && !t.isCleared)
-      .reduce((sum, t) => {
-        if (t.type === 'credit') {
-          return sum + t.amount;
-        } else {
-          return sum - t.amount;
-        }
-      }, 0);
-  };
-
-  const getUnclearedCheques = () => {
-    return transactions.filter(t => t.source === 'Cheque' && !t.isCleared);
-  };
-
-  const handleViewUnclearedCheques = () => {
-    setShowUnclearedCheques(true);
-  };
-
-  const handleQuickClearCheque = (transaction: BankTransaction) => {
-    setSelectedTransaction(transaction);
-    setChequeAction('clear');
-    setClearanceDate(new Date().toISOString().split('T')[0]); // Default to today
-    setShowChequeConfirmation(true);
-  };
-
-  const handleQuickBounceCheque = (transaction: BankTransaction) => {
-    setSelectedTransaction(transaction);
-    setChequeAction('bounce');
-    setBounceReason(''); // Reset reason
-    setNotifyCustomer(false); // Reset notification option
-    setShowChequeConfirmation(true);
-  };
-
-  const handleConfirmChequeAction = () => {
+  const handleConfirmChequeAction = async () => {
     if (!selectedTransaction || !chequeAction) return;
-
     if (chequeAction === 'clear') {
-      if (!clearanceDate) {
-        Alert.alert('Error', 'Please select a clearance date.');
-        return;
-      }
-      
-      const success = dataStore.clearCheque(selectedTransaction.id, clearanceDate);
-      if (success) {
-        loadTransactions();
-        Alert.alert('Success', 'Cheque cleared successfully!');
-        handleCloseChequeConfirmation();
-      } else {
-        Alert.alert('Error', 'Failed to clear cheque. Please try again.');
-      }
-    } else if (chequeAction === 'bounce') {
-      if (!bounceReason.trim()) {
-        Alert.alert('Error', 'Please provide a reason for bouncing the cheque.');
-        return;
-      }
-      
-      const success = dataStore.bounceCheque(selectedTransaction.id);
-      if (success) {
-        loadTransactions();
-        
-        // Show notification option if enabled
-        if (notifyCustomer) {
-          const customerName = selectedTransaction.relatedCustomerId 
-            ? dataStore.getCustomerById(selectedTransaction.relatedCustomerId)?.name || 'Customer'
-            : 'Customer';
-          
-          Alert.alert(
-            'Notification Sent',
-            `${customerName} has been notified about the bounced cheque.\n\nReason: ${bounceReason}`,
-            [{ text: 'OK' }]
-          );
-        } else {
-          Alert.alert('Success', 'Cheque bounced successfully!');
-        }
-        
-        handleCloseChequeConfirmation();
-      } else {
-        Alert.alert('Error', 'Failed to bounce cheque. Please try again.');
-      }
+      if (!clearanceDate) { Alert.alert('Error', 'Please select a clearance date.'); return; }
+      try {
+        const r = await clearBankTransaction(selectedTransaction.id, clearanceDate);
+        if (r.success) { loadTransactions(); Alert.alert('Success', 'Cheque cleared successfully!'); }
+        else Alert.alert('Error', 'Failed to clear cheque.');
+      } catch { Alert.alert('Error', 'Failed to clear cheque.'); }
+    } else {
+      if (!bounceReason.trim()) { Alert.alert('Error', 'Please provide a reason.'); return; }
+      try {
+        const r = await deleteBankTransaction(selectedTransaction.id);
+        if (r.success) { loadTransactions(); Alert.alert('Success', 'Cheque bounced.'); }
+        else Alert.alert('Error', 'Failed to bounce cheque.');
+      } catch { Alert.alert('Error', 'Failed to bounce cheque.'); }
     }
+    closeChequeModal();
+  };
+  const closeChequeModal = () => {
+    setShowChequeConfirmation(false); setSelectedTransaction(null);
+    setChequeAction(null); setClearanceDate(''); setBounceReason(''); setNotifyCustomer(false);
   };
 
-  const handleCloseChequeConfirmation = () => {
-    setShowChequeConfirmation(false);
-    setSelectedTransaction(null);
-    setChequeAction(null);
-    setClearanceDate('');
-    setBounceReason('');
-    setNotifyCustomer(false);
+  const resetTxForm = () => {
+    setTxType('credit'); setTxAmount(''); setTxDescription(''); setTxCategory('General');
+    setTxPaymentMode('Other'); setTxReference(''); setTxCounterparty('');
+    setTxDate(new Date().toISOString().split('T')[0]); setTxSaving(false);
+  };
+  const handleSave = async () => {
+    const amt = parseFloat(txAmount);
+    if (!amt || amt <= 0) { Alert.alert('Error', 'Enter a valid amount'); return; }
+    if (!txDescription.trim()) { Alert.alert('Error', 'Enter a description'); return; }
+    setTxSaving(true);
+    const res = await addBankTransaction({
+      bankAccountId: bankAccountId as string, type: txType, amount: amt,
+      description: txDescription.trim(), category: txCategory, paymentMode: txPaymentMode,
+      referenceNumber: txReference.trim(), counterpartyName: txCounterparty.trim(),
+      transactionDate: new Date(txDate).toISOString(),
+    });
+    setTxSaving(false);
+    if (res.success) {
+      Alert.alert('Success', 'Transaction added');
+      setShowAddTx(false); resetTxForm(); loadTransactions();
+    } else Alert.alert('Error', res.error || 'Failed to add transaction');
   };
 
-  if (!bankAccount) {
+  const renderTxItem = (t: BankTransaction) => {
+    const isCredit = t.type === 'credit';
+    const isUncleared = t.source === 'Cheque' && !t.isCleared;
     return (
-      <View style={styles.container}>
-        <SafeAreaView style={styles.headerSafeArea}>
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-              activeOpacity={0.7}
-            >
-              <ArrowLeft size={24} color={Colors.text} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Bank Account</Text>
-            <TouchableOpacity
-              style={styles.searchButton}
-              onPress={() => setShowSearch(!showSearch)}
-              activeOpacity={0.7}
-            >
-              <Search size={24} color={Colors.primary} />
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Bank account not found</Text>
+      <TouchableOpacity
+        key={t.id}
+        style={[s.txRow, isUncleared && s.txRowUncleared]}
+        onPress={() => handleTxPress(t)}
+        activeOpacity={0.6}
+      >
+        <View style={[s.txIcon, { backgroundColor: isCredit ? C.successBg : C.errorBg }]}>
+          {isCredit ? <ArrowDownLeft size={16} color={C.success} /> : <ArrowUpRight size={16} color={C.error} />}
         </View>
-      </View>
+        <View style={s.txInfo}>
+          <Text style={s.txDesc} numberOfLines={1}>{t.description}</Text>
+          <View style={s.txMeta}>
+            <Text style={s.txTime}>{new Date(t.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</Text>
+            {t.source !== 'Other' && <View style={s.txSourcePill}><Text style={s.txSourceText}>{t.source}</Text></View>}
+            {isUncleared && <View style={s.txUnclearedPill}><Text style={s.txUnclearedText}>Pending</Text></View>}
+          </View>
+          {t.counterpartyName ? <Text style={s.txCounterparty} numberOfLines={1}>{t.counterpartyName}</Text> : null}
+        </View>
+        <Text style={[s.txAmount, { color: isCredit ? C.success : C.error }]}>
+          {isCredit ? '+' : '-'}{fmt(t.amount)}
+        </Text>
+      </TouchableOpacity>
     );
-  }
+  };
+
+  const renderSection = (section: { title: string; data: BankTransaction[] }) => (
+    <View key={section.title}>
+      <Text style={s.sectionDate}>{fmtDateLabel(section.data[0].date)}</Text>
+      {section.data.map(t => renderTxItem(t))}
+    </View>
+  );
+
+  if (isLoading) return (
+    <View style={s.container}>
+      <SafeAreaView style={s.headerArea}><View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}><ArrowLeft size={22} color={C.text} /></TouchableOpacity>
+        <Text style={s.headerTitle}>Account Statement</Text><View style={s.headerBtn} />
+      </View></SafeAreaView>
+      <View style={s.loadingWrap}><ActivityIndicator size="small" color={C.primary} /><Text style={s.loadingText}>Loading...</Text></View>
+    </View>
+  );
+
+  if (!bankAccount) return (
+    <View style={s.container}>
+      <SafeAreaView style={s.headerArea}><View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}><ArrowLeft size={22} color={C.text} /></TouchableOpacity>
+        <Text style={s.headerTitle}>Account Statement</Text><View style={s.headerBtn} />
+      </View></SafeAreaView>
+      <View style={s.loadingWrap}><Building2 size={40} color={C.border} /><Text style={s.emptyTitle}>Bank account not found</Text></View>
+    </View>
+  );
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <SafeAreaView style={styles.headerSafeArea}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{bankAccount.bankName}</Text>
-          <TouchableOpacity
-            style={styles.searchButton}
-            onPress={() => setShowSearch(!showSearch)}
-            activeOpacity={0.7}
-          >
-            <Search size={24} color={Colors.primary} />
-          </TouchableOpacity>
+    <View style={s.container}>
+      <SafeAreaView style={s.headerArea}>
+        <View style={s.header}>
+          <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}><ArrowLeft size={22} color={C.text} /></TouchableOpacity>
+          <Text style={s.headerTitle}>Account Statement</Text>
+          <TouchableOpacity onPress={() => setShowExportModal(true)} style={s.headerBtn}><FileText size={20} color={C.primary} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowSearch(!showSearch)} style={s.headerBtn}><Search size={20} color={C.primary} /></TouchableOpacity>
         </View>
       </SafeAreaView>
 
-      {/* Search Bar */}
       {showSearch && (
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputContainer}>
-            <Search size={20} color={Colors.textLight} style={styles.searchIcon} />
-            {searchQuery.length === 0 ? (
-              <View style={styles.searchHintContainer}>
-                <Text style={styles.searchHintText}>Search using: </Text>
-                <Text style={styles.animatedText}>{currentSearchText}</Text>
-                <View
-                  style={[
-                    styles.cursor,
-                    {
-                      opacity: cursorVisible ? 1 : 0,
-                    },
-                  ]}
-                />
-              </View>
-            ) : (
-              <TextInput
-                style={styles.searchInput}
-                placeholder=""
-                value={searchQuery}
-                onChangeText={handleSearch}
-                placeholderTextColor={Colors.textLight}
-              />
-            )}
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                style={styles.clearSearchButton}
-                onPress={() => {
-                  setSearchQuery('');
-                  setFilteredTransactions(transactions);
-                }}
-              >
-                <Text style={styles.clearSearchText}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+        <View style={s.searchBar}>
+          <Search size={16} color={C.textMuted} />
+          <TextInput style={s.searchInput} value={searchQuery} onChangeText={setSearchQuery}
+            placeholder="Search transactions..." placeholderTextColor={C.textLight} autoCapitalize="none" autoCorrect={false} autoFocus />
+          {searchQuery.length > 0 && <TouchableOpacity onPress={() => setSearchQuery('')}><X size={16} color={C.textMuted} /></TouchableOpacity>}
         </View>
       )}
 
-      {/* Account Details at Top */}
-      <View style={styles.compactAccountSection}>
-        <View style={styles.compactAccountCard}>
-          <View style={styles.compactAccountIcon}>
-            <Building size={16} color={Colors.primary} />
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
+
+      {/* Account Card */}
+      <View style={s.acctCard}>
+        <View style={s.acctTop}>
+          <View style={s.acctIconWrap}><Building2 size={18} color="#fff" /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.acctName}>{bankAccount.bankName}</Text>
+            <Text style={s.acctNum}>A/C: {maskAccNum(bankAccount.accountNumber)} {bankAccount.accountType ? `• ${bankAccount.accountType}` : ''}</Text>
           </View>
-          <Text style={styles.compactAccountText}>
-            {bankAccount.accountHolderName} • {bankAccount.accountNumber}
-          </Text>
         </View>
-      </View>
-
-      {/* Balance Overview at Top */}
-      <View style={styles.topBalanceSection}>
-        <View style={styles.topBalanceContainer}>
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLabel}>Opening Balance:</Text>
-            <Text style={styles.balanceValue}>
-              {formatAmount(bankAccount.balance || 0)}
-            </Text>
-          </View>
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLabel}>Total Credit:</Text>
-            <Text style={[styles.balanceValue, { color: Colors.success }]}>
-              {formatAmount(getTotalCredit())}
-            </Text>
-          </View>
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLabel}>Total Debit:</Text>
-            <Text style={styles.balanceValue}>
-              {formatAmount(getTotalDebit())}
-            </Text>
-          </View>
-          <View style={[styles.balanceRow, styles.finalBalanceRow]}>
-            <Text style={styles.finalBalanceLabel}>Current Balance:</Text>
-            <Text style={styles.finalBalanceValue}>
-              {formatAmount(currentBalance)}
-            </Text>
-          </View>
-          {getUnclearedChequeAmount() !== 0 && (
-            <View style={styles.balanceRow}>
-              <Text style={styles.balanceLabel}>Uncleared Cheques:</Text>
-              <Text style={[styles.balanceValue, { color: Colors.warning }]}>
-                {getUnclearedChequeAmount() > 0 ? '+' : ''}{formatAmount(getUnclearedChequeAmount())}
-              </Text>
-            </View>
-          )}
+        <View style={s.acctBalWrap}>
+          <Text style={s.acctBalLabel}>Current Balance</Text>
+          <Text style={s.acctBalVal}>{fmtDec(currentBalance)}</Text>
         </View>
-      </View>
-
-      {/* Credit and Debit Overview Cards Below Balance */}
-      <View style={styles.overviewCardsSection}>
-        <View style={styles.overviewCards}>
-          <View style={styles.overviewCard}>
-            <Text style={styles.overviewLabel}>Credit</Text>
-            <Text style={[styles.overviewAmount, { color: Colors.success }]}>
-              {formatAmount(getTotalCredit())}
-            </Text>
+        <View style={s.acctStats}>
+          <View style={s.acctStat}>
+            <Text style={s.acctStatLabel}>Opening</Text>
+            <Text style={s.acctStatVal}>{fmt(bankAccount.initialBalance || bankAccount.balance || 0)}</Text>
           </View>
-
-          <View style={styles.overviewCard}>
-            <Text style={styles.overviewLabel}>Debit</Text>
-            <Text style={[styles.overviewAmount, { color: Colors.error }]}>
-              {formatAmount(getTotalDebit())}
-            </Text>
+          <View style={s.acctStatSep} />
+          <View style={s.acctStat}>
+            <Text style={s.acctStatLabel}>Credit</Text>
+            <Text style={[s.acctStatVal, { color: '#34D399' }]}>+{fmt(totalCredit)}</Text>
+          </View>
+          <View style={s.acctStatSep} />
+          <View style={s.acctStat}>
+            <Text style={s.acctStatLabel}>Debit</Text>
+            <Text style={[s.acctStatVal, { color: '#FCA5A5' }]}>-{fmt(totalDebit)}</Text>
           </View>
         </View>
       </View>
 
-      {/* Transactions Section */}
-      <View style={styles.transactionsSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Transaction History</Text>
-          <Text style={styles.transactionCount}>
-            {filteredTransactions.length} transactions
-          </Text>
-        </View>
-
-        {filteredTransactions.length === 0 ? (
-          <View style={styles.emptyState}>
-            <FileText size={48} color={Colors.grey[300]} />
-            <Text style={styles.emptyStateTitle}>
-              {searchQuery ? 'No matching transactions' : 'No Transactions'}
-            </Text>
-            <Text style={styles.emptyStateSubtitle}>
-              {searchQuery 
-                ? 'Try adjusting your search criteria'
-                : 'Transactions will appear here when you make or receive payments'
-              }
-            </Text>
-          </View>
-        ) : (
-          <ScrollView 
-            style={styles.transactionsScrollView} 
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.transactionsContent}
-          >
-            {filteredTransactions.map((transaction) => (
-              <View key={transaction.id} style={styles.transactionCardContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.transactionCard,
-                    transaction.source === 'Cheque' && !transaction.isCleared && styles.unclearedChequeCard
-                  ]}
-                  onPress={() => handleTransactionPress(transaction)}
-                  activeOpacity={0.7}
-                >
-                  {/* Main Transaction Row */}
-                  <View style={styles.transactionMainRow}>
-                    {/* Left Side - Transaction Info */}
-                    <View style={styles.transactionLeft}>
-                      <View style={styles.transactionHeader}>
-                        <Text style={styles.transactionDescription}>
-                          {transaction.description}
-                        </Text>
-                        {/* Uncleared Cheque Badge */}
-                        {transaction.source === 'Cheque' && !transaction.isCleared && (
-                          <View style={styles.unclearedBadge}>
-                            <Receipt size={12} color={Colors.background} />
-                            <Text style={styles.unclearedBadgeText}>Uncleared</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.transactionMeta}>
-                        <Text style={styles.transactionDate}>
-                          {formatDate(transaction.date)}
-                        </Text>
-                        <Text style={styles.transactionId}>
-                          {transaction.transactionNumber}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Right Side - Amount & Source */}
-                    <View style={styles.transactionRight}>
-                      {/* Amount */}
-                      <Text style={[
-                        styles.transactionAmount,
-                        { color: transaction.type === 'credit' ? Colors.success : Colors.error }
-                      ]}>
-                        {transaction.type === 'credit' ? '+' : '-'}{formatAmount(transaction.amount)}
-                      </Text>
-                      
-                      {/* Source */}
-                      <Text style={[styles.sourceText, { color: getSourceColor(transaction.source) }]}>
-                        {transaction.source}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Click Indicator */}
-                  <View style={styles.clickIndicator}>
-                    <Text style={styles.clickText}>Tap for details</Text>
-                    <ExternalLink size={14} color={Colors.primary} />
-                  </View>
-                </TouchableOpacity>
-
-                {/* Quick Actions for Uncleared Cheques */}
-                {transaction.source === 'Cheque' && !transaction.isCleared && (
-                  <View style={styles.quickActionsContainer}>
-                    <TouchableOpacity
-                      style={styles.clearChequeQuickButton}
-                      onPress={() => handleQuickClearCheque(transaction)}
-                      activeOpacity={0.7}
-                    >
-                      <Check size={14} color={Colors.background} />
-                      <Text style={styles.clearChequeQuickButtonText}>Clear Cheque</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity
-                      style={styles.bounceChequeQuickButton}
-                      onPress={() => handleQuickBounceCheque(transaction)}
-                      activeOpacity={0.7}
-                    >
-                      <X size={14} color={Colors.background} />
-                      <Text style={styles.bounceChequeQuickButtonText}>Bounce</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-        )}
-      </View>
-
-
-
-      {/* Uncleared Cheques Button - Above Add Transaction */}
-      {getUnclearedCheques().length > 0 && (
-        <View style={styles.unclearedChequesButtonContainer}>
-          <TouchableOpacity
-            style={styles.unclearedChequesButton}
-            onPress={handleViewUnclearedCheques}
-            activeOpacity={0.7}
-          >
-            <Receipt size={20} color={Colors.background} />
-            <Text style={styles.unclearedChequesButtonText}>
-              View Uncleared Cheques ({getUnclearedCheques().length})
-            </Text>
-          </TouchableOpacity>
-        </View>
+      {unclearedCheques.length > 0 && (
+        <TouchableOpacity style={s.unclearedBanner} onPress={() => setShowUnclearedCheques(true)}>
+          <Receipt size={16} color={C.warning} />
+          <Text style={s.unclearedBannerText}>{unclearedCheques.length} uncleared cheque{unclearedCheques.length > 1 ? 's' : ''}</Text>
+          <ChevronDown size={16} color={C.warning} />
+        </TouchableOpacity>
       )}
 
-      {/* Add Transaction Button - Fixed at Bottom */}
-      <View style={styles.bottomButtonContainer}>
-        <TouchableOpacity
-          style={styles.bottomButton}
-          onPress={() => setShowAddTransaction(true)}
-          activeOpacity={0.7}
-        >
-          <Plus size={20} color={Colors.background} />
-          <Text style={styles.bottomButtonText}>Add Transaction</Text>
+      {/* Transaction List */}
+      {grouped.length === 0 ? (
+        <View style={s.emptyWrap}>
+          <FileText size={40} color={C.border} />
+          <Text style={s.emptyTitle}>{searchQuery ? 'No matching transactions' : 'No Transactions Yet'}</Text>
+          <Text style={s.emptySub}>{searchQuery ? 'Try different search terms' : 'Tap the button below to add a transaction'}</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={grouped}
+          keyExtractor={(item) => item.title}
+          renderItem={({ item }) => renderSection(item)}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        />
+      )}
+
+      {/* Bottom Add Button */}
+      <View style={s.bottomBar}>
+        <TouchableOpacity style={s.addBtn} onPress={() => { resetTxForm(); setShowAddTx(true); }} activeOpacity={0.8}>
+          <Plus size={20} color="#fff" />
+          <Text style={s.addBtnText}>Add Transaction</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Uncleared Cheques Modal */}
-      <Modal
-        visible={showUnclearedCheques}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowUnclearedCheques(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Uncleared Cheques</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowUnclearedCheques(false)}
-              >
-                <X size={24} color={Colors.textLight} />
+      {/* ===== Add Transaction Modal ===== */}
+      <Modal visible={showAddTx} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowAddTx(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+          <View style={s.modalHead}>
+            <TouchableOpacity onPress={() => setShowAddTx(false)}><X size={24} color={C.text} /></TouchableOpacity>
+            <Text style={s.modalTitle}>Add Transaction</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+            <View style={s.typeToggle}>
+              <TouchableOpacity style={[s.typeBtn, txType === 'credit' && s.typeBtnCredit]} onPress={() => setTxType('credit')}>
+                <Text style={[s.typeBtnText, txType === 'credit' && { color: '#fff' }]}>Credit (In)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.typeBtn, txType === 'debit' && s.typeBtnDebit]} onPress={() => setTxType('debit')}>
+                <Text style={[s.typeBtnText, txType === 'debit' && { color: '#fff' }]}>Debit (Out)</Text>
               </TouchableOpacity>
             </View>
-            
-            <View style={styles.modalBody}>
-              <Text style={styles.modalSubtitle}>
-                You have {getUnclearedCheques().length} uncleared cheque(s) that need attention
-              </Text>
-              
-              <ScrollView style={styles.chequesList} showsVerticalScrollIndicator={false}>
-                {getUnclearedCheques().map((cheque) => (
-                  <View key={cheque.id} style={styles.chequeItemContainer}>
-                    <View style={styles.chequeItem}>
-                      <View style={styles.chequeItemHeader}>
-                        <View style={styles.chequeItemLeft}>
-                          <Receipt size={20} color={Colors.warning} />
-                          <Text style={styles.chequeItemTitle}>
-                            {cheque.description}
-                          </Text>
-                        </View>
-                        <Text style={[
-                          styles.chequeItemAmount,
-                          { color: cheque.type === 'credit' ? Colors.success : Colors.error }
-                        ]}>
-                          {cheque.type === 'credit' ? '+' : '-'}{formatAmount(cheque.amount)}
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.chequeItemDetails}>
-                        {cheque.chequeNumber && (
-                          <Text style={styles.chequeItemDetail}>
-                            Cheque #: {cheque.chequeNumber}
-                          </Text>
-                        )}
-                        {cheque.chequeDate && (
-                          <Text style={styles.chequeItemDetail}>
-                            Date: {formatDate(cheque.chequeDate)}
-                          </Text>
-                        )}
-                        <Text style={styles.chequeItemDetail}>
-                          Reference: {cheque.reference}
-                        </Text>
-                      </View>
-                      
-                      <View style={styles.chequeItemAction}>
-                        <Text style={styles.chequeItemActionText}>Quick Actions Available</Text>
-                      </View>
-                    </View>
 
-                    {/* Quick Action Buttons for Uncleared Cheques */}
-                    <View style={styles.chequeItemQuickActions}>
-                      <TouchableOpacity
-                        style={styles.chequeItemClearButton}
-                        onPress={() => {
-                          setShowUnclearedCheques(false);
-                          handleQuickClearCheque(cheque);
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Check size={14} color={Colors.background} />
-                        <Text style={styles.chequeItemClearButtonText}>Clear Cheque</Text>
-                      </TouchableOpacity>
-                      
-                      <TouchableOpacity
-                        style={styles.chequeItemBounceButton}
-                        onPress={() => {
-                          setShowUnclearedCheques(false);
-                          handleQuickBounceCheque(cheque);
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <X size={14} color={Colors.background} />
-                        <Text style={styles.chequeItemBounceButtonText}>Bounce Cheque</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
+            <Text style={s.fieldLabel}>Amount *</Text>
+            <View style={s.amountRow}>
+              <Text style={s.rupee}>₹</Text>
+              <TextInput style={s.amountInput} value={txAmount} onChangeText={setTxAmount}
+                placeholder="0.00" placeholderTextColor={C.textLight} keyboardType="decimal-pad" />
             </View>
-          </View>
-        </View>
+
+            <Text style={s.fieldLabel}>Description *</Text>
+            <TextInput style={s.textField} value={txDescription} onChangeText={setTxDescription}
+              placeholder="e.g., Payment from ABC Ltd" placeholderTextColor={C.textLight} />
+
+            <Text style={s.fieldLabel}>Counterparty Name</Text>
+            <TextInput style={s.textField} value={txCounterparty} onChangeText={setTxCounterparty}
+              placeholder="e.g., Customer / Supplier name" placeholderTextColor={C.textLight} />
+
+            <Text style={s.fieldLabel}>Category</Text>
+            <TouchableOpacity style={s.pickerBtn} onPress={() => setShowCategoryPicker(!showCategoryPicker)}>
+              <Text style={s.pickerVal}>{txCategory}</Text>
+              <ChevronDown size={16} color={C.textMuted} />
+            </TouchableOpacity>
+            {showCategoryPicker && (
+              <View style={s.pickerList}>
+                {CATEGORIES.map(cat => (
+                  <TouchableOpacity key={cat} style={[s.pickerItem, txCategory === cat && s.pickerItemActive]}
+                    onPress={() => { setTxCategory(cat); setShowCategoryPicker(false); }}>
+                    <Text style={[s.pickerItemText, txCategory === cat && { color: C.primary, fontWeight: '600' }]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <Text style={s.fieldLabel}>Payment Mode</Text>
+            <TouchableOpacity style={s.pickerBtn} onPress={() => setShowModePicker(!showModePicker)}>
+              <Text style={s.pickerVal}>{txPaymentMode}</Text>
+              <ChevronDown size={16} color={C.textMuted} />
+            </TouchableOpacity>
+            {showModePicker && (
+              <View style={s.pickerList}>
+                {PAYMENT_MODES.map(m => (
+                  <TouchableOpacity key={m.value} style={[s.pickerItem, txPaymentMode === m.value && s.pickerItemActive]}
+                    onPress={() => { setTxPaymentMode(m.value); setShowModePicker(false); }}>
+                    <Text style={[s.pickerItemText, txPaymentMode === m.value && { color: C.primary, fontWeight: '600' }]}>{m.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <Text style={s.fieldLabel}>Reference Number</Text>
+            <TextInput style={s.textField} value={txReference} onChangeText={setTxReference}
+              placeholder="e.g., UTR / Cheque No." placeholderTextColor={C.textLight} />
+
+            <DateInputWithPicker
+              label="Transaction Date"
+              value={txDate}
+              onChangeDate={setTxDate}
+              maximumDate={new Date()}
+            />
+
+            <TouchableOpacity style={[s.saveBtn, txSaving && { opacity: 0.6 }]} onPress={handleSave} disabled={txSaving} activeOpacity={0.8}>
+              <Text style={s.saveBtnText}>{txSaving ? 'Saving...' : 'Save Transaction'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
-      {/* Enhanced Cheque Confirmation Modal */}
-      <Modal
-        visible={showChequeConfirmation}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={handleCloseChequeConfirmation}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmationModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {chequeAction === 'clear' ? 'Clear Cheque' : 'Bounce Cheque'}
-              </Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={handleCloseChequeConfirmation}
-              >
-                <X size={24} color={Colors.textLight} />
-              </TouchableOpacity>
+      {/* ===== Uncleared Cheques Modal ===== */}
+      <Modal visible={showUnclearedCheques} transparent animationType="slide" onRequestClose={() => setShowUnclearedCheques(false)}>
+        <View style={s.overlay}>
+          <View style={s.sheetModal}>
+            <View style={s.sheetHead}>
+              <Text style={s.sheetTitle}>Uncleared Cheques ({unclearedCheques.length})</Text>
+              <TouchableOpacity onPress={() => setShowUnclearedCheques(false)}><X size={24} color={C.textMuted} /></TouchableOpacity>
             </View>
-            
-            <View style={styles.modalBody}>
-              {/* Cheque Details Section */}
-              <View style={styles.chequeDetailsSection}>
-                <Text style={styles.chequeDetailsSectionTitle}>Cheque Details</Text>
-                <View style={styles.chequeDetailsCard}>
-                  <View style={styles.chequeDetailRow}>
-                    <Text style={styles.chequeDetailLabel}>Cheque Number:</Text>
-                    <Text style={styles.chequeDetailValue}>{selectedTransaction?.chequeNumber}</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {unclearedCheques.map(ch => (
+                <View key={ch.id} style={s.chequeCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ fontWeight: '600', color: C.text, flex: 1 }}>{ch.description}</Text>
+                    <Text style={{ fontWeight: '700', color: ch.type === 'credit' ? C.success : C.error }}>{ch.type === 'credit' ? '+' : '-'}{fmt(ch.amount)}</Text>
                   </View>
-                  <View style={styles.chequeDetailRow}>
-                    <Text style={styles.chequeDetailLabel}>Amount:</Text>
-                    <Text style={styles.chequeDetailValue}>
-                      {selectedTransaction && formatAmount(selectedTransaction.amount)}
-                    </Text>
-                  </View>
-                  <View style={styles.chequeDetailRow}>
-                    <Text style={styles.chequeDetailLabel}>Description:</Text>
-                    <Text style={styles.chequeDetailValue}>{selectedTransaction?.description}</Text>
-                  </View>
-                  {selectedTransaction?.chequeDate && (
-                    <View style={styles.chequeDetailRow}>
-                      <Text style={styles.chequeDetailLabel}>Cheque Date:</Text>
-                      <Text style={styles.chequeDetailValue}>
-                        {formatDate(selectedTransaction.chequeDate)}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Clear Cheque Section */}
-              {chequeAction === 'clear' && (
-                <View style={styles.actionSection}>
-                  <Text style={styles.actionSectionTitle}>Clearance Details</Text>
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Clearance Date *</Text>
-                    <TextInput
-                      style={styles.dateInput}
-                      value={clearanceDate}
-                      onChangeText={setClearanceDate}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={Colors.textLight}
-                    />
-                    <Text style={styles.inputNote}>
-                      Date when the cheque was cleared by the bank
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Bounce Cheque Section */}
-              {chequeAction === 'bounce' && (
-                <View style={styles.actionSection}>
-                  <Text style={styles.actionSectionTitle}>Bounce Details</Text>
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Reason for Bounce *</Text>
-                    <TextInput
-                      style={styles.reasonTextArea}
-                      value={bounceReason}
-                      onChangeText={setBounceReason}
-                      placeholder="Enter reason for cheque bounce (e.g., Insufficient funds, Account closed, etc.)"
-                      placeholderTextColor={Colors.textLight}
-                      multiline={true}
-                      numberOfLines={3}
-                      textAlignVertical="top"
-                    />
-                  </View>
-
-                  {/* Customer Notification Option */}
-                  <View style={styles.notificationSection}>
-                    <TouchableOpacity
-                      style={styles.notificationToggle}
-                      onPress={() => setNotifyCustomer(!notifyCustomer)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[styles.checkbox, notifyCustomer && styles.checkboxChecked]}>
-                        {notifyCustomer && <Check size={16} color={Colors.background} />}
-                      </View>
-                      <View style={styles.notificationTextContainer}>
-                        <Text style={styles.notificationLabel}>Notify Customer/Supplier</Text>
-                        <Text style={styles.notificationDescription}>
-                          Send notification about the bounced cheque with reason
-                        </Text>
-                      </View>
+                  {ch.chequeNumber && <Text style={s.chequeDetail}>Cheque #: {ch.chequeNumber}</Text>}
+                  {ch.chequeDate && <Text style={s.chequeDetail}>Date: {fmtDateLabel(ch.chequeDate)}</Text>}
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                    <TouchableOpacity style={[s.inlineClearBtn, { flex: 1, justifyContent: 'center' }]}
+                      onPress={() => { setShowUnclearedCheques(false); handleQuickClearCheque(ch); }}>
+                      <Check size={14} color="#fff" /><Text style={s.inlineBtnText}> Clear</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.inlineBounceBtn, { flex: 1, justifyContent: 'center' }]}
+                      onPress={() => { setShowUnclearedCheques(false); handleQuickBounceCheque(ch); }}>
+                      <X size={14} color="#fff" /><Text style={s.inlineBtnText}> Bounce</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
-              )}
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
-              {/* Action Buttons */}
-              <View style={styles.confirmationModalButtons}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={handleCloseChequeConfirmation}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+      {/* ===== Cheque Confirmation Modal ===== */}
+      <Modal visible={showChequeConfirmation} transparent animationType="fade" onRequestClose={closeChequeModal}>
+        <View style={s.overlay}>
+          <View style={s.sheetModal}>
+            <View style={s.sheetHead}>
+              <Text style={s.sheetTitle}>{chequeAction === 'clear' ? 'Clear Cheque' : 'Bounce Cheque'}</Text>
+              <TouchableOpacity onPress={closeChequeModal}><X size={24} color={C.textMuted} /></TouchableOpacity>
+            </View>
+            <View style={{ padding: 20 }}>
+              {selectedTransaction && (
+                <View style={s.chequeCard}>
+                  <Text style={{ fontWeight: '600', color: C.text, marginBottom: 4 }}>{selectedTransaction.description}</Text>
+                  <Text style={s.chequeDetail}>Amount: {fmtDec(selectedTransaction.amount)}</Text>
+                  {selectedTransaction.chequeNumber && <Text style={s.chequeDetail}>Cheque #: {selectedTransaction.chequeNumber}</Text>}
+                </View>
+              )}
+              {chequeAction === 'clear' && (
+                <View style={{ marginTop: 16 }}>
+                  <DateInputWithPicker
+                    label="Clearance Date *"
+                    value={clearanceDate}
+                    onChangeDate={setClearanceDate}
+                    maximumDate={new Date()}
+                  />
+                </View>
+              )}
+              {chequeAction === 'bounce' && (
+                <View style={{ marginTop: 16 }}>
+                  <Text style={s.fieldLabel}>Reason for Bounce *</Text>
+                  <TextInput style={[s.textField, { minHeight: 70, textAlignVertical: 'top' }]} value={bounceReason} onChangeText={setBounceReason}
+                    placeholder="e.g., Insufficient funds" placeholderTextColor={C.textLight} multiline />
+                  <TouchableOpacity style={s.notifyRow} onPress={() => setNotifyCustomer(!notifyCustomer)}>
+                    <View style={[s.checkbox, notifyCustomer && s.checkboxChecked]}>{notifyCustomer && <Check size={14} color="#fff" />}</View>
+                    <Text style={{ color: C.text, fontSize: 14 }}>Notify Customer/Supplier</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                <TouchableOpacity style={[s.cancelBtn, { flex: 1 }]} onPress={closeChequeModal}>
+                  <Text style={{ color: C.text, fontWeight: '500', textAlign: 'center' }}>Cancel</Text>
                 </TouchableOpacity>
-                
                 <TouchableOpacity
-                  style={[
-                    styles.confirmActionButton,
-                    chequeAction === 'clear' ? styles.clearActionButton : styles.bounceActionButton,
-                    (chequeAction === 'clear' && !clearanceDate) || 
-                    (chequeAction === 'bounce' && !bounceReason.trim()) ? styles.disabledButton : {}
-                  ]}
+                  style={[s.saveBtn, { flex: 2, backgroundColor: chequeAction === 'clear' ? C.success : C.error, marginTop: 0 }]}
                   onPress={handleConfirmChequeAction}
-                  disabled={
-                    (chequeAction === 'clear' && !clearanceDate) || 
-                    (chequeAction === 'bounce' && !bounceReason.trim())
-                  }
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.confirmActionButtonText}>
-                    {chequeAction === 'clear' ? 'Clear Cheque' : 'Bounce Cheque'}
-                  </Text>
+                  disabled={(chequeAction === 'clear' && !clearanceDate) || (chequeAction === 'bounce' && !bounceReason.trim())}>
+                  <Text style={s.saveBtnText}>{chequeAction === 'clear' ? 'Clear Cheque' : 'Bounce Cheque'}</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
         </View>
       </Modal>
+
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: `Bank Statement - ${bankAccount?.bankName || ''}`,
+          fileName: 'bank_statement',
+          columns: [
+            { key: 'date', header: 'Date' },
+            { key: 'description', header: 'Description' },
+            { key: 'type', header: 'Type', format: (v) => v === 'credit' ? 'Credit' : 'Debit' },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'source', header: 'Source' },
+            { key: 'reference', header: 'Reference' },
+            { key: 'counterpartyName', header: 'Counterparty' },
+            { key: 'category', header: 'Category' },
+          ],
+          data: filtered,
+          summaryRows: [
+            { label: 'Total Credits', value: `₹${filtered.filter(t => t.type === 'credit').reduce((s, t) => s + (t.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Debits', value: `₹${filtered.filter(t => t.type === 'debit').reduce((s, t) => s + (t.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  
-  // Fixed Header
-  headerSafeArea: {
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-    flex: 1,
-    textAlign: 'center',
-  },
-  searchButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
 
+  headerArea: { backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10 },
+  headerBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: C.text },
 
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 8, marginBottom: 4,
+    backgroundColor: C.surface, borderRadius: 10, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: Platform.OS === 'ios' ? 10 : 4, gap: 8,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: C.text, paddingVertical: Platform.OS === 'ios' ? 0 : 6, ...Platform.select({ web: { outlineStyle: 'none' as any } }) },
 
-  // Transactions Section
-  transactionsSection: {
-    flex: 1,
-    marginHorizontal: 16,
-    marginTop: 16,
+  acctCard: {
+    margin: 16, marginBottom: 8, backgroundColor: C.primary, borderRadius: 16, padding: 18,
+    ...Platform.select({ ios: { shadowColor: C.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 }, android: { elevation: 6 } }),
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+  acctTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  acctIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  acctName: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  acctNum: { fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  acctBalWrap: { alignItems: 'center', marginBottom: 14 },
+  acctBalLabel: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginBottom: 2 },
+  acctBalVal: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
+  acctStats: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 10, paddingVertical: 10 },
+  acctStat: { flex: 1, alignItems: 'center' },
+  acctStatSep: { width: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
+  acctStatLabel: { fontSize: 10, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 3 },
+  acctStatVal: { fontSize: 13, fontWeight: '700', color: '#fff' },
+
+  unclearedBanner: {
+    flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 4,
+    backgroundColor: C.warningBg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 8,
+    borderWidth: 1, borderColor: '#FDE68A',
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  transactionCount: {
-    fontSize: 12,
-    color: Colors.textLight,
+  unclearedBannerText: { flex: 1, fontSize: 13, color: C.warning, fontWeight: '500' },
+
+  sectionDate: {
+    fontSize: 12, fontWeight: '700', color: C.textMuted, textTransform: 'uppercase',
+    letterSpacing: 0.4, marginTop: 18, marginBottom: 8, paddingHorizontal: 4,
   },
 
-  // Overview Cards
-  overviewCards: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
+  txRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.divider,
   },
-  overviewCard: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    alignItems: 'center',
+  txRowUncleared: { backgroundColor: '#FFFEF5', borderRadius: 8, paddingHorizontal: 4, marginHorizontal: -4 },
+  txIcon: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  txInfo: { flex: 1, marginRight: 12 },
+  txDesc: { fontSize: 14, fontWeight: '500', color: C.text, marginBottom: 3 },
+  txMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  txTime: { fontSize: 12, color: C.textLight },
+  txSourcePill: { backgroundColor: C.primaryBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+  txSourceText: { fontSize: 10, fontWeight: '600', color: C.primary, textTransform: 'uppercase' },
+  txUnclearedPill: { backgroundColor: C.warningBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: '#FDE68A' },
+  txUnclearedText: { fontSize: 10, fontWeight: '600', color: C.warning },
+  txCounterparty: { fontSize: 12, color: C.textLight, marginTop: 2 },
+  txAmount: { fontSize: 15, fontWeight: '700', textAlign: 'right', minWidth: 80 },
+
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
+  loadingText: { fontSize: 13, color: C.textMuted },
+  emptyWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: C.text, marginTop: 14, marginBottom: 6 },
+  emptySub: { fontSize: 13, color: C.textMuted, textAlign: 'center', lineHeight: 20 },
+
+  bottomBar: {
+    paddingHorizontal: 16, paddingVertical: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 14,
+    backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border,
   },
-  overviewLabel: {
-    fontSize: 11,
-    color: Colors.textLight,
-    marginBottom: 4,
-    textAlign: 'center',
+  addBtn: {
+    backgroundColor: C.primary, borderRadius: 12, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
   },
-  overviewAmount: {
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
+  addBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheetModal: { backgroundColor: C.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: C.border },
+  sheetTitle: { fontSize: 18, fontWeight: '700', color: C.text },
+
+  modalHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
+  modalTitle: { fontSize: 17, fontWeight: '700', color: C.text },
+
+  typeToggle: { flexDirection: 'row', backgroundColor: C.surfaceAlt, borderRadius: 10, padding: 3, marginBottom: 20 },
+  typeBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  typeBtnCredit: { backgroundColor: C.success },
+  typeBtnDebit: { backgroundColor: C.error },
+  typeBtnText: { fontSize: 13, fontWeight: '600', color: C.textMuted },
+
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: C.text, marginBottom: 6, marginTop: 14 },
+  amountRow: {
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: C.border,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 12 : 4,
   },
-  emptyStateTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateSubtitle: {
-    fontSize: 14,
-    color: Colors.textLight,
-    textAlign: 'center',
-    lineHeight: 20,
+  rupee: { fontSize: 18, fontWeight: '700', color: C.text, marginRight: 8 },
+  amountInput: { flex: 1, fontSize: 20, fontWeight: '700', color: C.text, ...Platform.select({ web: { outlineStyle: 'none' as any } }) },
+  textField: {
+    borderWidth: 1, borderColor: C.border, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 12 : 10,
+    fontSize: 14, color: C.text, backgroundColor: C.bg,
+    ...Platform.select({ web: { outlineStyle: 'none' as any } }),
   },
 
-  // Scrollable Transactions
-  transactionsScrollView: {
-    flex: 1,
+  pickerBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
   },
-  transactionsContent: {
-    paddingBottom: 16,
-  },
+  pickerVal: { fontSize: 14, color: C.text },
+  pickerList: { borderWidth: 1, borderColor: C.border, borderRadius: 10, marginTop: 4, backgroundColor: C.bg, overflow: 'hidden' },
+  pickerItem: { paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
+  pickerItemActive: { backgroundColor: C.primaryBg },
+  pickerItemText: { fontSize: 14, color: C.text },
 
-  // Transaction Cards - Simplified Design
-  transactionCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  
-  // Main Transaction Row
-  transactionMainRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  
-  // Left Side - Transaction Info
-  transactionLeft: {
-    flex: 1,
-    marginRight: 12,
-  },
-  transactionDescription: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 6,
-    lineHeight: 18,
-  },
-  transactionMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 4,
-  },
-  transactionDate: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  transactionId: {
-    fontSize: 11,
-    color: Colors.primary,
-    fontWeight: '500',
-    backgroundColor: Colors.primary + '15',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  transactionType: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
+  saveBtn: { backgroundColor: C.primary, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 24 },
+  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  cancelBtn: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', backgroundColor: C.surfaceAlt },
 
-  // Right Side - Amount & Source
-  transactionRight: {
-    alignItems: 'flex-end',
-  },
-  transactionAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  sourceText: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
+  chequeCard: { backgroundColor: C.surface, borderRadius: 10, padding: 14, borderWidth: 1, borderColor: C.border, marginBottom: 12 },
+  chequeDetail: { fontSize: 13, color: C.textMuted, marginBottom: 2 },
+  inlineClearBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.success, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, gap: 4 },
+  inlineBounceBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.error, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, gap: 4 },
+  inlineBtnText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 
-  // Click Indicator
-  clickIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  clickText: {
-    fontSize: 11,
-    color: Colors.textLight,
-    fontStyle: 'italic',
-  },
-
-  // Balance Row Styles (Used in Top Balance)
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  balanceLabel: {
-    fontSize: 13,
-    color: Colors.textLight,
-  },
-  balanceValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  finalBalanceRow: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-    paddingTop: 8,
-    marginTop: 8,
-    marginBottom: 0,
-  },
-  finalBalanceLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  finalBalanceValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-
-  // Compact Account Information at Top
-  compactAccountSection: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  compactAccountCard: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  compactAccountIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: Colors.primary + '20',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  compactAccountText: {
-    fontSize: 14,
-    color: Colors.text,
-    fontWeight: '500',
-  },
-
-  // Top Balance Section
-  topBalanceSection: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-  },
-  topBalanceContainer: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-
-  // Overview Cards Section
-  overviewCardsSection: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-  },
-
-  // Bottom Button Container - App UI Consistent
-  unclearedChequesButtonContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.background,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  unclearedChequesButton: {
-    backgroundColor: Colors.warning,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: Colors.warning,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  unclearedChequesButtonText: {
-    color: Colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: '90%',
-    maxWidth: 400,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  closeButton: {
-    padding: 4,
-  },
-  modalBody: {
-    padding: 20,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-
-  // Cheques List Styles
-  chequesList: {
-    maxHeight: 400,
-  },
-  chequeItem: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  chequeItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  chequeItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 8,
-  },
-  chequeItemTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    flex: 1,
-  },
-  chequeItemAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  chequeItemDetails: {
-    marginBottom: 12,
-  },
-  chequeItemDetail: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 4,
-  },
-  chequeItemAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-  },
-  chequeItemActionText: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '500',
-  },
-
-  // Enhanced Uncleared Cheques Modal Styles
-  chequeItemContainer: {
-    marginBottom: 16,
-  },
-  chequeItemQuickActions: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    backgroundColor: Colors.grey[100],
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-  },
-  chequeItemClearButton: {
-    flex: 1,
-    backgroundColor: Colors.success,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  chequeItemClearButtonText: {
-    color: Colors.background,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  chequeItemBounceButton: {
-    flex: 1,
-    backgroundColor: Colors.error,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  chequeItemBounceButtonText: {
-    color: Colors.background,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-
-
-  // Enhanced Transaction Card Styles
-  transactionCardContainer: {
-    marginBottom: 12,
-  },
-  unclearedChequeCard: {
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.warning,
-    backgroundColor: Colors.grey[50],
-  },
-  transactionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  unclearedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.warning,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  unclearedBadgeText: {
-    color: Colors.background,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  quickActionsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    backgroundColor: Colors.grey[100],
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-  },
-  clearChequeQuickButton: {
-    flex: 1,
-    backgroundColor: Colors.success,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  clearChequeQuickButtonText: {
-    color: Colors.background,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bounceChequeQuickButton: {
-    flex: 1,
-    backgroundColor: Colors.error,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  bounceChequeQuickButtonText: {
-    color: Colors.background,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  // Enhanced Confirmation Modal Styles
-  confirmationModalContent: {
-    backgroundColor: Colors.background,
-    borderRadius: 16,
-    width: '95%',
-    maxWidth: 450,
-    maxHeight: '85%',
-  },
-  chequeDetailsSection: {
-    marginBottom: 20,
-  },
-  chequeDetailsSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  chequeDetailsCard: {
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  chequeDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  chequeDetailLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    flex: 1,
-  },
-  chequeDetailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.text,
-    flex: 1.5,
-    textAlign: 'right',
-  },
-  actionSection: {
-    marginBottom: 20,
-  },
-  actionSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  dateInput: {
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: Colors.text,
-    backgroundColor: Colors.background,
-  },
-  reasonTextArea: {
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: Colors.text,
-    backgroundColor: Colors.background,
-    minHeight: 80,
-  },
-  inputNote: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  notificationSection: {
-    marginTop: 16,
-  },
-  notificationToggle: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: 12,
-    backgroundColor: Colors.grey[50],
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    borderColor: Colors.grey[300],
-    borderRadius: 4,
-    marginRight: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  notificationTextContainer: {
-    flex: 1,
-  },
-  notificationLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.text,
-    marginBottom: 4,
-  },
-  notificationDescription: {
-    fontSize: 12,
-    color: Colors.textLight,
-    lineHeight: 16,
-  },
-  confirmationModalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-  },
-  cancelButton: {
-    flex: 1,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.grey[200],
-    borderWidth: 1,
-    borderColor: Colors.grey[300],
-  },
-  cancelButtonText: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  confirmActionButton: {
-    flex: 2,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearActionButton: {
-    backgroundColor: Colors.success,
-  },
-  bounceActionButton: {
-    backgroundColor: Colors.error,
-  },
-  confirmActionButtonText: {
-    color: Colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  disabledButton: {
-    backgroundColor: Colors.grey[300],
-  },
-
-  bottomButtonContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingBottom: 32,
-    backgroundColor: Colors.background,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[100],
-  },
-  bottomButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: Colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  bottomButtonText: {
-    color: Colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  errorText: {
-    fontSize: 16,
-    color: Colors.textLight,
-  },
-
-  // Search Bar Styles
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.grey[50],
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.grey[100],
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: Colors.text,
-    paddingVertical: 0,
-  },
-  clearSearchButton: {
-    padding: 4,
-  },
-  clearSearchText: {
-    fontSize: 16,
-  },
-  searchHintContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    paddingHorizontal: 12,
-  },
-  searchHintText: {
-    fontSize: 12,
-    color: Colors.textLight,
-  },
-  animatedText: {
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginLeft: 2,
-  },
-  cursor: {
-    width: 2,
-    height: 14,
-    backgroundColor: Colors.primary,
-    marginLeft: 2,
-  },
+  notifyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, padding: 12, backgroundColor: C.surface, borderRadius: 8 },
+  checkbox: { width: 20, height: 20, borderWidth: 2, borderColor: C.border, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked: { backgroundColor: C.primary, borderColor: C.primary },
 });

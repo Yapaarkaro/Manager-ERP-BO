@@ -7,9 +7,17 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, FileText, User, Building2, Calendar, Hash, Package, MessageSquare, CreditCard, Banknote, Smartphone, TriangleAlert as AlertTriangle, Check } from 'lucide-react-native';
+import { createReturn, createInAppNotification, autoLinkSupplierToUser } from '@/services/backendApi';
+import { usePermissions } from '@/contexts/PermissionContext';
+import { safeRouter } from '@/utils/safeRouter';
+import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Colors = {
   background: '#FFFFFF',
@@ -35,6 +43,8 @@ export default function ReturnConfirmationScreen() {
   const reasons = JSON.parse(itemReasons as string);
   
   const [isProcessing, setIsProcessing] = useState(false);
+  const { isStaff, staffId, staffName, staffBusinessId } = usePermissions();
+  const { data: bizData } = useBusinessData();
 
   const formatAmount = (amount: string) => {
     return new Intl.NumberFormat('en-IN', {
@@ -98,33 +108,138 @@ export default function ReturnConfirmationScreen() {
     return reasons.find((reason: any) => reason.itemId === itemId)?.reason || '';
   };
 
+  const isSupplierReturn = invoice.returnType === 'supplier';
+
   const handleConfirmReturn = async () => {
     setIsProcessing(true);
 
-    // Generate return number
-    const returnNumber = `RET-${new Date().getFullYear()}-${String(Date.now()).slice(-3)}`;
+    const returnPrefix = isSupplierReturn ? 'SRET' : 'RET';
+    const returnNumber = `${returnPrefix}-${new Date().getFullYear()}-${String(Date.now()).slice(-3)}`;
+    const refundAmt = parseFloat(returnAmount as string);
 
-    const returnData = {
-      returnNumber,
-      originalInvoice: invoice,
-      returnedItems: items,
-      itemReasons: reasons,
-      refundMethod,
-      returnAmount: parseFloat(returnAmount as string),
-      processedAt: new Date().toISOString(),
-      processedBy: invoice.staffName, // Current user
-    };
+    try {
+      const returnPayload: any = {
+        returnNumber,
+        originalInvoiceId: invoice.id,
+        originalInvoiceNumber: invoice.invoiceNumber,
+        items: items.map((item: any) => ({
+          productId: item.productId || item.id,
+          productName: item.name,
+          quantity: item.returnQuantity,
+          unitPrice: item.rate,
+          totalPrice: item.rate * item.returnQuantity,
+          taxRate: item.taxRate || 0,
+          taxAmount: (item.rate * item.returnQuantity) * ((item.taxRate || 0) / 100),
+          reason: reasons.find((r: any) => r.itemId === item.id)?.reason || '',
+        })),
+        totalAmount: refundAmt,
+        refundAmount: refundAmt,
+        refundStatus: 'refunded',
+        refundMethod: (refundMethod as string) || 'cash',
+        reason: reasons.map((r: any) => r.reason).filter(Boolean).join('; '),
+        bankAccountId: invoice.bankAccountId,
+        staffId: staffId || undefined,
+        staffName: staffName || undefined,
+        returnType: isSupplierReturn ? 'supplier' : 'customer',
+      };
 
-    // Simulate processing
-    setTimeout(() => {
-      router.push({
-        pathname: '/new-return/success',
-        params: {
-          returnData: JSON.stringify(returnData)
-        }
-      });
-      setIsProcessing(false);
-    }, 2000);
+      if (isSupplierReturn) {
+        returnPayload.customerId = null;
+        returnPayload.customerName = invoice.supplierName || invoice.customerName;
+        returnPayload.customerType = 'business';
+        returnPayload.supplierId = invoice.supplierId || '';
+        returnPayload.supplierName = invoice.supplierName || invoice.customerName;
+      } else {
+        returnPayload.customerId = invoice.customerId;
+        returnPayload.customerName = invoice.customerName;
+        returnPayload.customerType = invoice.customerType;
+      }
+
+      const result = await createReturn(returnPayload);
+
+      if (result.success && isStaff && staffId && staffBusinessId) {
+        const notifTitle = isSupplierReturn
+          ? `Supplier Return by ${staffName || 'Staff'}`
+          : `New Return by ${staffName || 'Staff'}`;
+        createInAppNotification({
+          businessId: staffBusinessId,
+          recipientId: 'owner',
+          recipientType: 'owner',
+          title: notifTitle,
+          message: `Return ${returnNumber} - ${formatCurrencyINR(refundAmt)}`,
+          type: 'info',
+          category: 'return',
+          sourceStaffId: staffId,
+          sourceStaffName: staffName || undefined,
+          relatedEntityType: 'return',
+          relatedEntityId: result.returnData?.id,
+        }).catch(() => {});
+      }
+
+      const businessId = staffBusinessId || bizData?.business?.id;
+      if (result.success && businessId) {
+        try {
+          const savedSettings = await AsyncStorage.getItem('autoSendSettings');
+          const autoSend = savedSettings ? JSON.parse(savedSettings) : { autoSendReturnInvoice: true };
+
+          if (autoSend.autoSendReturnInvoice) {
+            if (isSupplierReturn && invoice.supplierId) {
+              const linked = await autoLinkSupplierToUser(invoice.supplierId);
+              if (linked) {
+                await autoSendDocumentToChat({
+                  businessId,
+                  contactId: invoice.supplierId,
+                  contactType: 'supplier',
+                  contactName: invoice.supplierName || invoice.customerName,
+                  documentType: 'return_invoice',
+                  documentNumber: returnNumber,
+                  totalAmount: refundAmt,
+                  entityId: result.returnData?.id,
+                });
+              }
+            } else if (!isSupplierReturn && invoice.customerId && invoice.customerType === 'business') {
+              const { data: custRow } = await supabase
+                .from('customers')
+                .select('linked_user_id, business_id')
+                .eq('id', invoice.customerId)
+                .maybeSingle();
+              if (custRow?.linked_user_id || custRow?.business_id) {
+                await autoSendDocumentToChat({
+                  businessId,
+                  contactId: invoice.customerId,
+                  contactType: 'customer',
+                  contactName: invoice.customerName,
+                  documentType: 'return_invoice',
+                  documentNumber: returnNumber,
+                  totalAmount: refundAmt,
+                  entityId: result.returnData?.id,
+                });
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const returnData = {
+        returnNumber,
+        originalInvoice: invoice,
+        returnedItems: items,
+        itemReasons: reasons,
+        refundMethod,
+        returnAmount: refundAmt,
+        processedAt: new Date().toISOString(),
+        processedBy: invoice.staffName,
+        returnType: isSupplierReturn ? 'supplier' : 'customer',
+        supplierName: isSupplierReturn ? (invoice.supplierName || invoice.customerName) : undefined,
+        supplierMobile: isSupplierReturn ? invoice.supplierMobile : undefined,
+        customerMobile: !isSupplierReturn ? invoice.customerMobile : undefined,
+      };
+
+      safeRouter.replace({ pathname: '/new-return/success', params: { returnData: JSON.stringify(returnData) } } as any);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to process return');
+    }
+    setIsProcessing(false);
   };
 
   const RefundIcon = getRefundMethodIcon();
@@ -167,7 +282,7 @@ export default function ReturnConfirmationScreen() {
 
         {/* Original Invoice Info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Original Invoice</Text>
+          <Text style={styles.sectionTitle}>{isSupplierReturn ? 'Purchase Invoice' : 'Original Invoice'}</Text>
           <View style={styles.invoiceCard}>
             <View style={styles.invoiceHeader}>
               <FileText size={20} color={Colors.primary} />
@@ -178,12 +293,16 @@ export default function ReturnConfirmationScreen() {
             </View>
             
             <View style={styles.customerInfo}>
-              {invoice.customerType === 'business' ? (
+              {isSupplierReturn ? (
+                <Building2 size={16} color={Colors.warning} />
+              ) : invoice.customerType === 'business' ? (
                 <Building2 size={16} color={Colors.textLight} />
               ) : (
                 <User size={16} color={Colors.textLight} />
               )}
-              <Text style={styles.customerName}>{invoice.customerName}</Text>
+              <Text style={styles.customerName}>
+                {isSupplierReturn ? (invoice.supplierName || invoice.customerName) : invoice.customerName}
+              </Text>
             </View>
           </View>
         </View>

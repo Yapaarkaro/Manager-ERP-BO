@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,17 @@ import {
   Modal,
   TextInput,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
-import { getGSTINStateCode } from '../../utils/dataStore';
-import { getAddresses } from '@/services/backendApi';
+import { mapLocationsToAddresses } from '../../utils/dataStore';
+import { getAddresses, invalidateApiCache } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { safeRouter } from '@/utils/safeRouter';
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -76,7 +78,8 @@ interface WarehouseData {
   nearLowStockItems?: number;
 }
 
-const mockWarehouses: WarehouseData[] = [];
+const warehousesData: WarehouseData[] = [];
+const staffOnLeave: { name: string; type: string; duration: string }[] = [];
 
 export default function WarehousesScreen() {
   const { handleBack } = useWebBackNavigation();
@@ -88,53 +91,49 @@ export default function WarehousesScreen() {
   const [showOverviewModal, setShowOverviewModal] = useState(false);
   const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseData | null>(null);
   const [salesPeriod, setSalesPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [refreshing, setRefreshing] = useState(false);
 
-  const mapAddressToWarehouse = (addr: any): WarehouseData => ({
-    id: addr.id,
-    name: addr.name,
-    type: 'warehouse' as const,
-    doorNumber: addr.door_number || '',
-    addressLine1: addr.address_line1 || '',
-    addressLine2: addr.address_line2 || '',
-    city: addr.city || '',
-    pincode: addr.pincode || '',
-    stateName: addr.state || '',
-    stateCode: addr.state ? getGSTINStateCode(addr.state) : '',
-    isPrimary: addr.is_primary || false,
-    createdAt: addr.created_at || new Date().toISOString(),
-    manager: addr.manager_name || '',
-    phone: addr.manager_mobile_number || '',
-    status: 'active' as const,
-    usesManager: !!addr.manager_name,
-    staffCount: 0,
-    staffAttendance: 0,
-    dailySales: 0,
-    weeklySales: 0,
-    monthlySales: 0,
-    dailyGrowth: 0,
-    weeklyGrowth: 0,
-    monthlyGrowth: 0,
-    cashInHand: 0,
-    stockValue: 0,
-    receivables: 0,
-    payables: 0,
-    stockInToday: 0,
-    stockOutToday: 0,
-    lowStockItems: 0,
-    nearLowStockItems: 0,
-  });
+  const loadWarehouses = useCallback(async () => {
+    const { success, addresses } = await getAddresses();
+    if (success && addresses) {
+      const warehouseAddresses = addresses.filter((addr: any) => addr.type === 'warehouse');
+      const mapped = mapLocationsToAddresses(warehouseAddresses);
+      const warehouseData: WarehouseData[] = mapped.map((addr) => ({
+        ...addr,
+        type: 'warehouse' as const,
+        usesManager: !!addr.manager,
+        staffCount: 0,
+        staffAttendance: 0,
+        dailySales: 0,
+        weeklySales: 0,
+        monthlySales: 0,
+        dailyGrowth: 0,
+        weeklyGrowth: 0,
+        monthlyGrowth: 0,
+        cashInHand: 0,
+        stockValue: 0,
+        receivables: 0,
+        payables: 0,
+        stockInToday: 0,
+        stockOutToday: 0,
+        lowStockItems: 0,
+        nearLowStockItems: 0,
+      }));
+      setWarehouses(warehouseData);
+      setFilteredWarehouses(warehouseData);
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      const { success, addresses } = await getAddresses();
-      if (success && addresses) {
-        const warehouseAddresses = addresses.filter((addr: any) => addr.type === 'warehouse');
-        const warehouseData = warehouseAddresses.map(mapAddressToWarehouse);
-        setWarehouses(warehouseData);
-        setFilteredWarehouses(warehouseData);
-      }
-    })();
-  }, []);
+    loadWarehouses();
+  }, [loadWarehouses]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadWarehouses().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [loadWarehouses]);
 
   useEffect(() => {
     // Filter warehouses based on search query
@@ -173,11 +172,11 @@ export default function WarehousesScreen() {
   };
 
   const handleAddWarehouse = () => {
-    router.push('/locations/add-warehouse');
+    safeRouter.push('/locations/add-warehouse');
   };
 
   const handleEditWarehouse = (warehouse: WarehouseData) => {
-    router.push({
+    safeRouter.push({
       pathname: '/locations/warehouse-details',
       params: {
         warehouseId: warehouse.id,
@@ -212,14 +211,12 @@ export default function WarehousesScreen() {
     return status === 'active' ? Colors.success : Colors.error;
   };
 
-  const getStockTrend = (currentStock: number) => {
-    const trend = Math.random() > 0.5 ? 'up' : 'down';
-    const percentage = (Math.random() * 20).toFixed(1);
-    return { trend, percentage };
+  const getStockTrend = () => {
+    return { trend: 'neutral', value: '0%' };
   };
 
   const renderWarehouseCard = (warehouse: WarehouseData) => {
-    const stockTrend = getStockTrend(warehouse.currentStock || 0);
+    const stockTrend = getStockTrend();
 
     return (
       <TouchableOpacity
@@ -287,21 +284,18 @@ export default function WarehousesScreen() {
         <View style={styles.statsSection}>
           <View style={styles.statItem}>
             <Package size={16} color={Colors.primary} />
-            <View style={styles.statContent}>
+              <View style={styles.statContent}>
               <Text style={styles.statLabel}>Current Stock</Text>
               <View style={styles.statValueContainer}>
                 <Text style={styles.statValue}>{warehouse.currentStock || 0} items</Text>
                 <View style={styles.trendContainer}>
-                  {stockTrend.trend === 'up' ? (
-                    <TrendingUp size={12} color={Colors.success} />
-                  ) : (
-                    <TrendingDown size={12} color={Colors.error} />
-                  )}
+                  {stockTrend.trend === 'up' && <TrendingUp size={12} color={Colors.success} />}
+                  {stockTrend.trend === 'down' && <TrendingDown size={12} color={Colors.error} />}
                   <Text style={[
                     styles.trendText,
-                    { color: stockTrend.trend === 'up' ? Colors.success : Colors.error }
+                    { color: stockTrend.trend === 'neutral' ? Colors.textLight : stockTrend.trend === 'up' ? Colors.success : Colors.error }
                   ]}>
-                    {stockTrend.percentage}%
+                    {stockTrend.value}
                   </Text>
                 </View>
               </View>
@@ -414,6 +408,7 @@ export default function WarehousesScreen() {
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, webContainerStyles.webScrollContent]}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {filteredWarehouses.length === 0 ? (
           <View style={styles.emptyState}>
@@ -647,16 +642,17 @@ export default function WarehousesScreen() {
                       {/* Staff on Leave */}
                       <View style={styles.overviewSection}>
                         <Text style={styles.overviewSectionTitle}>Staff on Leave</Text>
-                        <View style={styles.leaveItem}>
-                          <Text style={styles.leaveName}>Vikram Patel</Text>
-                          <Text style={styles.leaveType}>Annual Leave</Text>
-                          <Text style={styles.leaveDuration}>3 days</Text>
-                        </View>
-                        <View style={styles.leaveItem}>
-                          <Text style={styles.leaveName}>Meera Joshi</Text>
-                          <Text style={styles.leaveType}>Sick Leave</Text>
-                          <Text style={styles.leaveDuration}>1 day</Text>
-                        </View>
+                        {staffOnLeave.length === 0 ? (
+                          <Text style={styles.emptySectionText}>No data available</Text>
+                        ) : (
+                          staffOnLeave.map((item) => (
+                            <View key={item.name} style={styles.leaveItem}>
+                              <Text style={styles.leaveName}>{item.name}</Text>
+                              <Text style={styles.leaveType}>{item.type}</Text>
+                              <Text style={styles.leaveDuration}>{item.duration}</Text>
+                            </View>
+                          ))
+                        )}
                       </View>
 
                       {/* Address Section */}
@@ -804,6 +800,12 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     textAlign: 'center',
     paddingHorizontal: 32,
+  },
+  emptySectionText: {
+    fontSize: 14,
+    color: Colors.textLight,
+    fontStyle: 'italic',
+    paddingVertical: 8,
   },
   warehouseCard: {
     backgroundColor: Colors.background,

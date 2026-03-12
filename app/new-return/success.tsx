@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  BackHandler,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
-import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, RotateCcw, Eye } from 'lucide-react-native';
+import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, RotateCcw, Eye, Send } from 'lucide-react-native';
+import { safeRouter } from '@/utils/safeRouter';
+import { openWhatsApp } from '@/utils/invoiceShareUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -29,6 +33,24 @@ const Colors = {
 export default function ReturnSuccessScreen() {
   const { returnData } = useLocalSearchParams();
   const returnInfo = JSON.parse(returnData as string);
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      router.replace('/dashboard' as any);
+      return true;
+    });
+    return () => backHandler.remove();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e: any) => {
+      if (e.data?.action?.type === 'REPLACE') return;
+      e.preventDefault();
+      router.replace('/dashboard' as any);
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -64,7 +86,16 @@ export default function ReturnSuccessScreen() {
   };
 
   const handleShareReturn = () => {
-    console.log('Share return invoice:', returnInfo.returnNumber);
+    const phone = returnInfo.supplierMobile || returnInfo.customerMobile || returnInfo.originalInvoice?.customerMobile;
+    if (phone) {
+      const itemsList = returnInfo.returnedItems.map((item: any) =>
+        `• ${item.name} x${item.returnQuantity}`
+      ).join('\n');
+      const msg = `Return Invoice: ${returnInfo.returnNumber}\nOriginal Invoice: ${returnInfo.originalInvoice.invoiceNumber}\nRefund: ${formatAmount(returnInfo.returnAmount)}\n\nItems:\n${itemsList}\n\nSent from Manager`;
+      openWhatsApp(phone, msg);
+    } else {
+      Alert.alert('Share', 'No phone number available for WhatsApp sharing.');
+    }
   };
 
   const handlePrintReturn = () => {
@@ -72,11 +103,11 @@ export default function ReturnSuccessScreen() {
   };
 
   const handleNewReturn = () => {
-    router.push('/new-return');
+    safeRouter.push('/new-return');
   };
 
   const handleGoToDashboard = () => {
-    router.push('/dashboard');
+    router.replace('/dashboard' as any);
   };
 
   const handleViewReturnDetails = () => {
@@ -97,7 +128,7 @@ export default function ReturnSuccessScreen() {
       customerDetails: returnInfo.originalInvoice.customerDetails,
     };
 
-    router.push({
+    safeRouter.push({
       pathname: '/return-details',
       params: {
         returnId: returnInvoiceData.id,
@@ -199,11 +230,19 @@ export default function ReturnSuccessScreen() {
 
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={handlePrintReturn}
+              onPress={() => {
+                const phone = returnInfo.supplierMobile || returnInfo.customerMobile || returnInfo.originalInvoice?.customerMobile;
+                if (phone) {
+                  const msg = `Return Invoice: ${returnInfo.returnNumber}\nRefund: ${formatAmount(returnInfo.returnAmount)}\n\nSent from Manager`;
+                  openWhatsApp(phone, msg);
+                } else {
+                  Alert.alert('WhatsApp', 'No phone number available.');
+                }
+              }}
               activeOpacity={0.7}
             >
-              <Printer size={20} color={Colors.error} />
-              <Text style={styles.actionButtonText}>Print</Text>
+              <Send size={20} color="#25D366" />
+              <Text style={[styles.actionButtonText, { color: '#25D366' }]}>WhatsApp</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

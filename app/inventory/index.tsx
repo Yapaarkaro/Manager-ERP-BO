@@ -1,21 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   TextInput,
   Image,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import { productStore, Product } from '@/utils/productStore';
-import { dataStore } from '@/utils/dataStore';
+import { getSuppliers, invalidateApiCache } from '@/services/backendApi';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
   Search, 
@@ -24,10 +27,8 @@ import {
   Plus,
   TriangleAlert as AlertTriangle,
   Eye,
-  Scan,
   TrendingUp,
   TrendingDown,
-  IndianRupee
 } from 'lucide-react-native';
 
 const Colors = {
@@ -46,28 +47,117 @@ const Colors = {
   }
 };
 
+const formatPrice = (price: number) => formatCurrencyINR(price, 4);
 
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+};
+
+const getUrgencyColor = (urgency: string) => {
+  switch (urgency) {
+    case 'critical': return Colors.error;
+    case 'low': return Colors.warning;
+    case 'normal': return Colors.success;
+    default: return Colors.textLight;
+  }
+};
+
+const getStockTrend = (current: number, min: number, max: number) => {
+  const percentage = (current / max) * 100;
+  if (percentage > 70) return { trend: 'up', color: Colors.success };
+  if (percentage > 30) return { trend: 'stable', color: Colors.warning };
+  return { trend: 'down', color: Colors.error };
+};
+
+// Cache suppliers across navigations so we don't refetch every time
+let _suppliersMapCache: Record<string, string> = {};
+let _lastProductRefresh = 0;
+const REFRESH_INTERVAL_MS = 60_000; // Only refresh from backend once per minute
 
 export default function InventoryScreen() {
   const { handleBack } = useWebBackNavigation();
-  const { navigateToScreen, isWeb } = useWebNavigation();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>(() => productStore.getProducts());
+  const [isLoading, setIsLoading] = useState(() => productStore.getProducts().length === 0);
+  const [suppliersMap, setSuppliersMap] = useState<Record<string, string>>(_suppliersMapCache);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Load products from backend and refresh when screen comes into focus
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    _lastProductRefresh = 0;
+    _suppliersMapCache = {};
+    (async () => {
+      try {
+        await productStore.loadProductsFromBackend();
+        refreshProducts();
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          const map: Record<string, string> = {};
+          result.suppliers.forEach((s: any) => {
+            map[s.id] = s.business_name || s.contact_person || s.id;
+          });
+          _suppliersMapCache = map;
+          setSuppliersMap(map);
+        }
+      } catch (e) {
+        console.error('Refresh failed:', e);
+      }
+    })();
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
-      const loadProducts = async () => {
-        // Load products from backend first
-        await productStore.loadProductsFromBackend();
-        // Then refresh the UI
-      refreshProducts();
-      };
-      loadProducts();
+      // Always show cached products immediately
+      const cachedProducts = productStore.getProducts();
+      if (cachedProducts.length > 0) {
+        setFilteredProducts(cachedProducts);
+        setIsLoading(false);
+      }
+
+      // Only refresh from backend if stale
+      const now = Date.now();
+      if (now - _lastProductRefresh > REFRESH_INTERVAL_MS) {
+        _lastProductRefresh = now;
+        productStore.loadProductsFromBackend().then(() => {
+          refreshProducts();
+          setIsLoading(false);
+        }).catch(() => setIsLoading(false));
+      } else {
+        setIsLoading(false);
+      }
     }, [])
   );
 
-  // Subscribe to product store changes
+  useEffect(() => {
+    if (Object.keys(_suppliersMapCache).length > 0) {
+      setSuppliersMap(_suppliersMapCache);
+      return;
+    }
+    const loadSuppliers = async () => {
+      try {
+        const result = await getSuppliers();
+        if (result.success && result.suppliers) {
+          const map: Record<string, string> = {};
+          result.suppliers.forEach((s: any) => {
+            map[s.id] = s.business_name || s.contact_person || s.id;
+          });
+          _suppliersMapCache = map;
+          setSuppliersMap(map);
+        }
+      } catch (error) {
+        console.error('Error loading suppliers:', error);
+      }
+    };
+    loadSuppliers();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = productStore.subscribe(() => {
       refreshProducts();
@@ -75,142 +165,77 @@ export default function InventoryScreen() {
     return unsubscribe;
   }, []);
 
-  const handleSearch = (query: string) => {
+  const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
     if (query.trim() === '') {
       setFilteredProducts(productStore.getProducts());
     } else {
       setFilteredProducts(productStore.searchProducts(query));
     }
-  };
+  }, []);
 
-  const handleProductPress = (product: Product) => {
-    if (isWeb) {
-      // On web, use navigateToScreen to keep sidebar visible
-      const route = `/inventory/product-details?productId=${product.id}&productData=${encodeURIComponent(JSON.stringify(product))}`;
-      navigateToScreen(route);
-    } else {
-      // On mobile, use normal navigation
-    router.push({
+  const handleProductPress = useCallback((product: Product) => {
+    safeRouter.push({
       pathname: '/inventory/product-details',
-      params: {
-        productId: product.id,
-        productData: JSON.stringify(product)
-      }
+      params: { productId: product.id }
     });
-    }
-  };
+  }, []);
 
-  const handleAddProduct = () => {
-    // Check trial status synchronously (fast, no async operations)
+  const handleAddProduct = useCallback(() => {
     const { canPerformAction } = require('@/utils/trialUtils');
-    const canPerform = canPerformAction('add product');
-    
-    if (!canPerform) {
-      return; // Trial check will show alert, just return
-    }
-    
-    // Navigate immediately without any blocking operations
-    if (isWeb) {
-      navigateToScreen('/inventory/manual-product');
-    } else {
-    router.push('/inventory/manual-product');
-    }
-  };
+    if (!canPerformAction('add product')) return;
+    safeRouter.push('/inventory/manual-product');
+  }, []);
 
-  // Function to refresh products (called when returning from add product)
   const refreshProducts = () => {
-    const products = productStore.getProducts();
-    setFilteredProducts(products);
-    console.log('=== PRODUCTS REFRESHED ===');
-    console.log('Total products:', products.length);
-    if (products.length > 0) {
-      products.forEach((product: Product, index: number) => {
-        console.log(`Product ${index + 1}:`, product.name, '-', product.category);
-      });
-    }
-    console.log('==========================');
+    setFilteredProducts(productStore.getProducts());
   };
 
-  const handleLowStockPress = () => {
-    router.push('/inventory/low-stock');
-  };
+  const handleLowStockPress = useCallback(() => {
+    safeRouter.push('/inventory/low-stock');
+  }, []);
 
-  const handleStockDiscrepanciesPress = () => {
-    router.push('/inventory/stock-discrepancies');
-  };
+  const handleStockDiscrepanciesPress = useCallback(() => {
+    safeRouter.push('/inventory/stock-discrepancies');
+  }, []);
 
-  const getUrgencyColor = (urgency: string) => {
-    switch (urgency) {
-      case 'critical': return Colors.error;
-      case 'low': return Colors.warning;
-      case 'normal': return Colors.success;
-      default: return Colors.textLight;
-    }
-  };
+  const getSupplierName = useCallback((product: Product): string | null => {
+    if (product.supplierName) return product.supplierName;
+    if (!product.supplier) return null;
+    return suppliersMap[product.supplier] || null;
+  }, [suppliersMap]);
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(price);
-  };
+  const { totalStockValue, lowStockItems, criticalItems, categoryCount } = useMemo(() => {
+    const allProducts = productStore.getProducts();
+    return {
+      totalStockValue: filteredProducts.reduce((sum, p) => sum + (p.stockValue || 0), 0),
+      lowStockItems: allProducts.filter(p => p.currentStock <= p.minStockLevel).length,
+      criticalItems: allProducts.filter(p => p.urgencyLevel === 'critical').length,
+      categoryCount: new Set(filteredProducts.map(p => p.category)).size,
+    };
+  }, [filteredProducts]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
-
-  const getStockTrend = (current: number, min: number, max: number) => {
-    const percentage = (current / max) * 100;
-    if (percentage > 70) return { trend: 'up', color: Colors.success };
-    if (percentage > 30) return { trend: 'stable', color: Colors.warning };
-    return { trend: 'down', color: Colors.error };
-  };
-
-  const getSupplierName = (supplierId: string | undefined) => {
-    if (!supplierId) return 'No supplier';
-    
-    // Get supplier name from dataStore
-    const supplier = dataStore.getSupplierById(supplierId);
-    if (supplier) {
-      // Show business name if available, otherwise show contact person name
-      return supplier.businessName || supplier.name;
-    }
-    return supplierId; // Fallback to displaying the ID if supplier not found
-  };
-
-  const totalStockValue = filteredProducts.reduce((sum, product) => sum + (product.stockValue || 0), 0);
-  const lowStockItems = productStore.getProducts().filter(product => 
-    product.currentStock <= product.minStockLevel
-  ).length;
-  const criticalItems = productStore.getProducts().filter(product => 
-    product.urgencyLevel === 'critical'
-  ).length;
-
-  const renderProductCard = (product: Product) => {
+  const renderProductCard = useCallback(({ item: product }: { item: Product }) => {
     const stockTrend = getStockTrend(product.currentStock, product.minStockLevel, product.maxStockLevel || 1);
     const urgencyColor = getUrgencyColor(product.urgencyLevel);
 
     return (
       <TouchableOpacity
-        key={product.id}
         style={styles.productCard}
         onPress={() => handleProductPress(product)}
         activeOpacity={0.7}
       >
-        {/* Product Header */}
         <View style={styles.productHeader}>
-          <Image 
-            source={{ uri: product.image }}
-            style={styles.productImage}
-          />
+          {product.image ? (
+            <Image 
+              source={{ uri: product.image }}
+              style={styles.productImage}
+            />
+          ) : (
+            <View style={[styles.productImage, styles.productImagePlaceholder]}>
+              <Package size={24} color={Colors.textLight} />
+            </View>
+          )}
           
           <View style={styles.productInfo}>
             <Text style={styles.productName} numberOfLines={2}>
@@ -219,9 +244,13 @@ export default function InventoryScreen() {
             <Text style={styles.productCategory}>
               {product.category}
             </Text>
-            <Text style={styles.productSupplier}>
-              {getSupplierName(product.supplier)}
-            </Text>
+            {getSupplierName(product) ? (
+              <Text style={styles.productSupplier}>
+                {getSupplierName(product)}
+              </Text>
+            ) : (
+              <Text style={styles.productNoSupplier}>No supplier</Text>
+            )}
           </View>
 
           <View style={styles.productRight}>
@@ -238,7 +267,6 @@ export default function InventoryScreen() {
           </View>
         </View>
 
-        {/* Stock Information */}
         <View style={styles.stockSection}>
           <View style={styles.stockHeader}>
             <View style={styles.stockInfo}>
@@ -261,7 +289,6 @@ export default function InventoryScreen() {
             </View>
           </View>
 
-          {/* Stock Progress */}
           <View style={styles.stockProgressContainer}>
             <View style={styles.stockProgressBar}>
               <View style={[
@@ -277,7 +304,6 @@ export default function InventoryScreen() {
             </Text>
           </View>
 
-          {/* Additional Info */}
           <View style={styles.additionalInfo}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Location:</Text>
@@ -286,7 +312,7 @@ export default function InventoryScreen() {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Last Restocked:</Text>
               <Text style={styles.infoValue}>
-                {product.lastRestocked ? formatDate(product.lastRestocked) : 'Not specified'}
+                {product.lastRestocked ? formatDate(product.lastRestocked) : 'Never'}
               </Text>
             </View>
             <View style={styles.infoRow}>
@@ -296,7 +322,6 @@ export default function InventoryScreen() {
           </View>
         </View>
 
-        {/* Stock Status Badge */}
         {product.urgencyLevel !== 'normal' && (
           <View style={styles.statusBadgeContainer}>
             <View style={[
@@ -312,15 +337,89 @@ export default function InventoryScreen() {
         )}
       </TouchableOpacity>
     );
-  };
+  }, [handleProductPress, getSupplierName]);
+
+  const keyExtractor = useCallback((item: Product) => item.id, []);
+
+  const ListHeader = useMemo(() => (
+    <>
+      <View style={styles.summaryContainer}>
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.success} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Stock Value</Text>
+            <Text style={[styles.summaryValue, { color: Colors.success }]}>
+              {formatPrice(totalStockValue)}
+            </Text>
+            <Text style={styles.summaryCount}>value</Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total Products</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
+              {filteredProducts.length}
+            </Text>
+            <Text style={styles.summaryCount}>products</Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.warning} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Categories</Text>
+            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
+              {categoryCount}
+            </Text>
+            <Text style={styles.summaryCount}>categories</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.inlineSearchContainer}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => {}}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.divider} />
+    </>
+  ), [totalStockValue, filteredProducts.length, categoryCount, searchQuery, handleSearch]);
+
+  const ListEmpty = useMemo(() => (
+    <View style={styles.emptyState}>
+      <Package size={64} color={Colors.textLight} />
+      <Text style={styles.emptyStateTitle}>No Products Found</Text>
+      <Text style={styles.emptyStateText}>
+        {searchQuery ? 'No products match your search criteria' : 'Add your first product to get started'}
+      </Text>
+    </View>
+  ), [searchQuery]);
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-            onPress={handleBack}
+          onPress={handleBack}
           activeOpacity={0.7}
         >
           <ArrowLeft size={24} color={Colors.text} />
@@ -339,96 +438,29 @@ export default function InventoryScreen() {
         </View>
       </View>
 
-      {/* Summary Cards */}
-      <View style={styles.summaryContainer}>
-        <View style={styles.summaryCard}>
-          <Package size={20} color={Colors.success} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Total Stock Value</Text>
-            <Text style={[styles.summaryValue, { color: Colors.success }]}>
-              {formatPrice(totalStockValue)}
-            </Text>
-            <Text style={styles.summaryCount}>
-              value
-            </Text>
-          </View>
+      {isLoading ? (
+        <View style={styles.scrollView}>
+          <ListSkeleton itemCount={6} showSearch={true} showFilter={true} />
         </View>
+      ) : (
+        <FlatList
+          data={filteredProducts}
+          renderItem={renderProductCard}
+          keyExtractor={keyExtractor}
+          ListHeaderComponent={ListHeader}
+          ListEmptyComponent={ListEmpty}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== 'web'}
+          style={styles.scrollView}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        />
+      )}
 
-        <View style={styles.summaryCard}>
-          <Package size={20} color={Colors.primary} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Total Products</Text>
-            <Text style={[styles.summaryValue, { color: Colors.primary }]}>
-              {filteredProducts.length}
-            </Text>
-            <Text style={styles.summaryCount}>
-              products
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.summaryCard}>
-          <Package size={20} color={Colors.warning} />
-          <View style={styles.summaryInfo}>
-            <Text style={styles.summaryLabel}>Categories</Text>
-            <Text style={[styles.summaryValue, { color: Colors.warning }]}>
-              {new Set(filteredProducts.map(p => p.category)).size}
-            </Text>
-            <Text style={styles.summaryCount}>
-              categories
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Divider */}
-      <View style={styles.divider} />
-
-      {/* Search Bar - Inline between summary and content */}
-      <View style={styles.inlineSearchContainer}>
-        <View style={styles.searchBar}>
-          <Search size={20} color={Colors.primary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search products..."
-            placeholderTextColor={Colors.textLight}
-            value={searchQuery}
-            onChangeText={handleSearch}
-          />
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => console.log('Filter products')}
-            activeOpacity={0.7}
-          >
-            <Filter size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Divider */}
-      <View style={styles.divider} />
-
-      {/* Products List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredProducts.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Package size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Products Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No products match your search criteria' : 'Add your first product to get started'}
-            </Text>
-          </View>
-        ) : (
-          filteredProducts.map(renderProductCard)
-        )}
-      </ScrollView>
-
-      {/* Low Stock Alert Button */}
-      {lowStockItems > 0 && (
+      {!isLoading && lowStockItems > 0 && (
         <View style={styles.alertButtonContainer}>
           <TouchableOpacity
             style={styles.alertButton}
@@ -443,7 +475,6 @@ export default function InventoryScreen() {
         </View>
       )}
 
-      {/* Add Product FAB */}
       <TouchableOpacity
         style={styles.addProductFAB}
         onPress={handleAddProduct}
@@ -452,7 +483,6 @@ export default function InventoryScreen() {
         <Plus size={20} color="#FFFFFF" />
         <Text style={styles.fabText}>Add Product</Text>
       </TouchableOpacity>
-
     </SafeAreaView>
   );
 }
@@ -497,83 +527,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  addButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  stockValueContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: Colors.grey[50],
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  totalStockContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-    gap: 12,
-  },
-  totalStockInfo: {
-    alignItems: 'center',
-  },
-  totalStockLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  totalStockValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.success,
-    textAlign: 'center',
-  },
-  bottomStatsRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  bottomStatCard: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  bottomStatLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  bottomStatValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.text,
-    textAlign: 'center',
-  },
   summaryCard: {
     flex: 1,
     flexDirection: 'column',
@@ -582,10 +535,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
@@ -628,11 +578,10 @@ const styles = StyleSheet.create({
   inlineSearchContainer: {
     paddingHorizontal: 16,
     paddingVertical: 16,
-    // No background - completely transparent
   },
   addProductFAB: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 50 : 40, // Above safe area to prevent gesture conflicts
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -641,19 +590,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 25,
     shadowColor: Colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
     elevation: 5,
-    zIndex: 1000, // Ensure button is above other elements
-    ...Platform.select({
-      web: {
-        cursor: 'pointer',
-      },
-    }),
+    zIndex: 1000,
+    ...Platform.select({ web: { cursor: 'pointer' as any } }),
   },
   fabText: {
     color: '#FFFFFF',
@@ -665,7 +607,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
     paddingBottom: 140,
   },
   emptyState: {
@@ -691,14 +632,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
+    marginHorizontal: 16,
     borderWidth: 1,
     borderColor: Colors.grey[200],
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 3.84,
     elevation: 2,
@@ -712,6 +651,11 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 8,
     marginRight: 12,
+  },
+  productImagePlaceholder: {
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   productInfo: {
     flex: 1,
@@ -732,6 +676,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.primary,
     fontWeight: '500',
+  },
+  productNoSupplier: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontStyle: 'italic',
   },
   productRight: {
     alignItems: 'flex-end',
@@ -849,10 +798,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 8,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 8,
@@ -861,26 +807,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  floatingSearchContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 16,
-    right: 16,
-    backgroundColor: Colors.background,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  searchContainer: {
-    paddingHorizontal: 4,
-    paddingVertical: 4,
   },
   searchBar: {
     flexDirection: 'row',
@@ -900,13 +826,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
   },
 });

@@ -15,7 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, FileText } from 'lucide-react-native';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
 import { router } from 'expo-router';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
@@ -34,17 +33,10 @@ const Colors = {
 
 export default function TermsAndConditionsScreen() {
   const { handleBack } = useWebBackNavigation();
-  const { isWeb, navigateToScreen } = useWebNavigation();
   const webContainerStyles = getWebContainerStyles();
   
   const handleBackPress = () => {
-    if (Platform.OS === 'web' && isWeb) {
-      // On web, navigate back to settings in the dashboard area
-      navigateToScreen('/settings');
-    } else {
-      // On mobile, use normal back navigation
-      router.back();
-    }
+    router.back();
   };
 
   return (

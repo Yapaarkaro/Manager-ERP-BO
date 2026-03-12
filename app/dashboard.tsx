@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { router, useFocusEffect } from 'expo-router';
 import {
   View,
@@ -8,11 +8,18 @@ import {
   Image,
   Pressable,
   Platform,
+  BackHandler,
+  RefreshControl,
+  Alert,
+  ActivityIndicator,
+  Animated as RNAnimated,
+  Share,
+  TouchableOpacity,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
-import { dataStore } from '@/utils/dataStore';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { 
@@ -34,16 +41,38 @@ import {
   ChevronDown,
   ChevronUp,
   PackageMinus,
-  PackagePlus
+  PackagePlus,
+  Trash2,
+  MapPin,
+  Camera,
+  Power,
+  MessageSquare,
+  Copy,
+  Share2,
+  KeyRound,
+  X,
 } from 'lucide-react-native';
 import HamburgerMenu from '@/components/HamburgerMenu';
-import Sidebar from '@/components/Sidebar';
 import FAB from '@/components/FAB';
-import WebScreenRenderer from '@/components/WebScreenRenderer';
+import { DashboardSkeleton } from '@/components/SkeletonLoader';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
-import { getLowStockProducts } from '@/services/backendApi';
+import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders } from '@/services/backendApi';
+import { usePermissions } from '@/contexts/PermissionContext';
+import * as ImagePicker from 'expo-image-picker';
+import {
+  requestLocationPermissions,
+  getCurrentPosition,
+  getStaffAssignedCoordinates,
+  isWithinGeofence,
+  calculateDistance,
+  startBackgroundLocationMonitoring,
+  stopBackgroundLocationMonitoring,
+  setActiveSession,
+  getStaffAttendanceConfig,
+} from '@/utils/geofenceService';
+import { supabase } from '@/lib/supabase';
+import { onTransactionChange } from '@/utils/transactionEvents';
 
 const Colors = {
   background: '#FFFFFF',
@@ -113,61 +142,669 @@ export default function DashboardScreen() {
   const [isLastWeekExpanded, setIsLastWeekExpanded] = useState(false);
   const [showHamburgerMenu, setShowHamburgerMenu] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(280); // Track sidebar width for content adjustment
-  const [lowStockCount, setLowStockCount] = useState(23); // Default value, will be updated from backend
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const [nearLowStockCount, setNearLowStockCount] = useState(0);
+  const [writeOffSummary, setWriteOffSummary] = useState({ count: 0, totalValue: 0 });
+  const [totalSales, setTotalSales] = useState(0);
+  const [totalReturns, setTotalReturns] = useState(0);
+  const [totalReceivables, setTotalReceivables] = useState(0);
+  const [totalPayables, setTotalPayables] = useState(0);
+  const [todaySales, setTodaySales] = useState(0);
+  const [todayOrders, setTodayOrders] = useState(0);
+  const [weekSales, setWeekSales] = useState(0);
+  const [weekOrders, setWeekOrders] = useState(0);
+  const [stockDiscrepancies, setStockDiscrepancies] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   
-  // ✅ Use unified business data hook directly (instant from cache, no redundant state)
   const { data: businessData, loading: dataLoading, refetch } = useBusinessData();
+  const { hasPermission, isOwner, isStaff, refreshPermissions, staffId, staffLocationId, staffBusinessId } = usePermissions();
 
-  // Fetch low stock count from backend
-  useEffect(() => {
-    const loadLowStockCount = async () => {
-      try {
-        const result = await getLowStockProducts();
-        if (result.success && result.products) {
-          setLowStockCount(result.products.length);
-        }
-      } catch (error) {
-        console.error('Error loading low stock count:', error);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [onlineStaff, setOnlineStaff] = useState<any[]>([]);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [staffLoginAlerts, setStaffLoginAlerts] = useState<any[]>([]);
+  const staffOverlayAnim = useRef(new RNAnimated.Value(-200)).current;
+  const dismissedAlertIdsRef = useRef<Set<string>>(new Set());
+  const [incompleteStaffList, setIncompleteStaffList] = useState<any[]>([]);
+  const [showIncompleteStaffBanner, setShowIncompleteStaffBanner] = useState(false);
+  const incompleteStaffDismissedRef = useRef(false);
+
+  const [staffOnline, setStaffOnline] = useState(false);
+  const [staffToggleLoading, setStaffToggleLoading] = useState(false);
+  const [staffDistance, setStaffDistance] = useState<number | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [checkInTime, setCheckInTime] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const targetCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  const loadAllKPIData = useCallback(async () => {
+    try {
+      const { supabase: sb } = await import('@/lib/supabase');
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session?.access_token) return;
+
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const weekAgo = new Date(today);
+      weekAgo.setDate(today.getDate() - 7);
+      const weekAgoStr = weekAgo.toISOString().split('T')[0];
+
+      const [productsRes, writeOffRes, invoiceRes, returnsRes, receivablesRes, payablesRes, poRes] = await Promise.allSettled([
+        getProducts(),
+        getWriteOffs('month'),
+        getInvoices(),
+        getReturns(),
+        getReceivables(),
+        getPayables(),
+        getPurchaseOrders(),
+      ]);
+
+      if (productsRes.status === 'fulfilled' && productsRes.value.success && productsRes.value.products) {
+        const products = productsRes.value.products;
+        let low = 0;
+        let nearLow = 0;
+        products.forEach((p: any) => {
+          const current = p.current_stock ?? p.stock ?? 0;
+          const min = p.min_stock_level ?? p.minimum_stock ?? 0;
+          if (min > 0) {
+            if (current <= min) low++;
+            else if (current <= min * 1.2) nearLow++;
+          }
+        });
+        setLowStockCount(low);
+        setNearLowStockCount(nearLow);
       }
-    };
 
-    loadLowStockCount();
+      if (writeOffRes.status === 'fulfilled' && writeOffRes.value.success && writeOffRes.value.summary) {
+        setWriteOffSummary({ count: writeOffRes.value.summary.count || 0, totalValue: writeOffRes.value.summary.totalValue || 0 });
+      }
+
+      if (invoiceRes.status === 'fulfilled' && invoiceRes.value.success && invoiceRes.value.invoices) {
+        const invoices = invoiceRes.value.invoices;
+        const monthTotal = invoices.reduce((sum: number, inv: any) => sum + (Number(inv.total_amount) || Number(inv.total) || 0), 0);
+        setTotalSales(monthTotal);
+
+        let tSales = 0, tOrders = 0, wSales = 0, wOrders = 0;
+        invoices.forEach((inv: any) => {
+          const amt = Number(inv.total_amount) || Number(inv.total) || 0;
+          const invDate = (inv.created_at || inv.invoice_date || '').split('T')[0];
+          if (invDate === todayStr) { tSales += amt; tOrders++; }
+          if (invDate >= weekAgoStr) { wSales += amt; wOrders++; }
+        });
+        setTodaySales(tSales);
+        setTodayOrders(tOrders);
+        setWeekSales(wSales);
+        setWeekOrders(wOrders);
+      }
+
+      if (returnsRes.status === 'fulfilled' && returnsRes.value.success && returnsRes.value.returns) {
+        const total = returnsRes.value.returns.reduce((sum: number, r: any) => sum + (Number(r.refund_amount) || Number(r.total_amount) || Number(r.total) || 0), 0);
+        setTotalReturns(total);
+      }
+
+      if (receivablesRes.status === 'fulfilled' && receivablesRes.value.success) {
+        const total = Number(receivablesRes.value.totalAmount) || (receivablesRes.value.receivables || []).reduce((sum: number, r: any) => sum + (Number(r.totalReceivable) || 0), 0);
+        setTotalReceivables(total);
+      }
+
+      if (payablesRes.status === 'fulfilled' && payablesRes.value.success) {
+        const total = Number(payablesRes.value.totalAmount) || (payablesRes.value.payables || []).reduce((sum: number, p: any) => sum + (Number(p.totalPayable) || 0), 0);
+        setTotalPayables(total);
+      }
+
+      if (poRes.status === 'fulfilled' && poRes.value.success && poRes.value.orders) {
+        const discrepancies = poRes.value.orders
+          .filter((po: any) => {
+            const ordered = po.total_quantity || po.ordered_quantity || 0;
+            const received = po.received_quantity || 0;
+            return po.status === 'received' && ordered !== received;
+          })
+          .slice(0, 5)
+          .map((po: any) => ({
+            id: po.id,
+            poNumber: po.po_number || po.order_number || 'N/A',
+            supplier: po.supplier_name || 'Unknown',
+            ordered: po.total_quantity || po.ordered_quantity || 0,
+            received: po.received_quantity || 0,
+          }));
+        setStockDiscrepancies(discrepancies);
+      }
+    } catch (err) {
+      console.error('KPI data load error:', err);
+    }
   }, []);
-  
+
+  useEffect(() => {
+    loadAllKPIData();
+  }, [loadAllKPIData]);
+
+  // Auto-refresh KPIs when any transaction changes (sale, return, payment, etc.)
+  useEffect(() => {
+    const unsubscribe = onTransactionChange((source) => {
+      invalidateApiCache();
+      loadAllKPIData();
+      refetch();
+    });
+    return unsubscribe;
+  }, [loadAllKPIData, refetch]);
+
+  // Supabase realtime: listen for invoice/return inserts for cross-device updates
+  useEffect(() => {
+    const businessId = businessData?.business?.id;
+    if (!businessId) return;
+
+    const channel = supabase
+      .channel(`dashboard-kpi-${businessId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'invoices', filter: `business_id=eq.${businessId}` },
+        () => {
+          invalidateApiCache();
+          loadAllKPIData();
+          refetch();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'return_invoices', filter: `business_id=eq.${businessId}` },
+        () => {
+          invalidateApiCache();
+          loadAllKPIData();
+          refetch();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'invoices', filter: `business_id=eq.${businessId}` },
+        () => {
+          invalidateApiCache();
+          loadAllKPIData();
+          refetch();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [businessData?.business?.id, loadAllKPIData, refetch]);
+
   const { setStatusBarStyle } = useStatusBar();
   const debouncedNavigate = useDebounceNavigation(500);
   const pathname = usePathname();
-  const { currentScreen, navigateToScreen, isWeb } = useWebNavigation();
-
-  // Handle sidebar collapse state changes
-  const handleSidebarCollapseChange = (isCollapsed: boolean, width: number) => {
-    setSidebarWidth(width);
-  };
-
   // Set status bar to dark for white header
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // ✅ Only refetch when screen comes into focus if cache is stale (not on every focus)
+  // Prevent back navigation from dashboard (user should not go back to signup/login)
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => true; // Return true to prevent default back behavior
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [])
+  );
+
   useFocusEffect(
     React.useCallback(() => {
-      // Check if cache is stale (older than 30 seconds) before refetching
       const { __getGlobalCache } = require('@/hooks/useBusinessData');
       const cache = __getGlobalCache();
       const now = Date.now();
-      const CACHE_DURATION = 30000; // 30 seconds - longer for dashboard
+      const CACHE_DURATION = 30000;
       
-      // Only refetch if cache is stale or missing
       if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
-        console.log('🔄 Dashboard: Cache stale, refetching business data');
         refetch();
-      } else {
-        console.log('✅ Dashboard: Using cached data (no refetch needed)');
+        loadAllKPIData();
       }
-    }, [refetch])
+
+      refreshPermissions();
+    }, [refetch, refreshPermissions, loadAllKPIData])
   );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    Promise.all([
+      refetch(),
+      refreshPermissions(),
+      loadAllKPIData(),
+    ]).catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [refetch, refreshPermissions, loadAllKPIData]);
+
+  // Staff attendance: load active session on mount/focus
+  useEffect(() => {
+    if (!isStaff || !staffId) return;
+    let cancelled = false;
+    (async () => {
+      const result = await getActiveStaffSession(staffId);
+      if (cancelled) return;
+      if (result.success && result.session) {
+        setStaffOnline(true);
+        setActiveSessionId(result.session.id);
+        setCheckInTime(result.session.check_in);
+        if (staffLocationId) {
+          const coords = await getStaffAssignedCoordinates(staffLocationId);
+          if (coords) {
+            targetCoordsRef.current = coords;
+            setActiveSession(staffId, result.session.id);
+            const config = await getStaffAttendanceConfig(staffId);
+            if (config.attendanceMode === 'geofence') {
+              startBackgroundLocationMonitoring(staffId, result.session.id, coords.lat, coords.lng, config.geofenceRadius);
+            }
+          }
+        }
+      } else {
+        setStaffOnline(false);
+        setActiveSessionId(null);
+        setCheckInTime(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isStaff, staffId, staffLocationId]);
+
+  // Elapsed time counter
+  useEffect(() => {
+    if (staffOnline && checkInTime) {
+      const update = () => {
+        const diff = Math.floor((Date.now() - new Date(checkInTime).getTime()) / 1000);
+        setElapsedSeconds(diff > 0 ? diff : 0);
+      };
+      update();
+      elapsedTimerRef.current = setInterval(update, 1000);
+    } else {
+      setElapsedSeconds(0);
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+    }
+    return () => { if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current); };
+  }, [staffOnline, checkInTime]);
+
+  // Periodically update staff distance from assigned location
+  useEffect(() => {
+    if (!isStaff || !staffLocationId) return;
+    let cancelled = false;
+    const checkDistance = async () => {
+      try {
+        const coords = await getStaffAssignedCoordinates(staffLocationId);
+        if (!coords || cancelled) return;
+        targetCoordsRef.current = coords;
+        const pos = await getCurrentPosition();
+        if (!pos || cancelled) return;
+        setStaffDistance(Math.round(calculateDistance(pos.lat, pos.lng, coords.lat, coords.lng)));
+      } catch {}
+    };
+    checkDistance();
+    const interval = setInterval(checkDistance, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isStaff, staffLocationId]);
+
+  const formatElapsed = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleGoOnline = async () => {
+    if (!staffId || !staffBusinessId) return;
+    setStaffToggleLoading(true);
+
+    try {
+      const perms = await requestLocationPermissions();
+      if (!perms.foreground) {
+        Alert.alert('Location Required', 'Please grant location access to mark attendance.');
+        setStaffToggleLoading(false);
+        return;
+      }
+
+      const pos = await getCurrentPosition();
+      if (!pos) {
+        Alert.alert('Location Error', 'Could not determine your current location. Please try again.');
+        setStaffToggleLoading(false);
+        return;
+      }
+
+      const coords = targetCoordsRef.current || (staffLocationId ? await getStaffAssignedCoordinates(staffLocationId) : null);
+      if (!coords) {
+        Alert.alert('No Location Assigned', 'Your work location does not have coordinates. Please contact your manager.');
+        setStaffToggleLoading(false);
+        return;
+      }
+      targetCoordsRef.current = coords;
+
+      const dist = calculateDistance(pos.lat, pos.lng, coords.lat, coords.lng);
+      setStaffDistance(Math.round(dist));
+
+      if (!isWithinGeofence(pos.lat, pos.lng, coords.lat, coords.lng)) {
+        Alert.alert('Too Far Away', `You are ${Math.round(dist)}m from your work location. You must be within 100m to go online.`);
+        setStaffToggleLoading(false);
+        return;
+      }
+
+      let selfieUrl: string | undefined;
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 0.6,
+          cameraType: ImagePicker.CameraType.front,
+        });
+
+        if (result.canceled) {
+          setStaffToggleLoading(false);
+          return;
+        }
+
+        const asset = result.assets[0];
+        if (asset?.uri) {
+          const filename = `${staffId}_${Date.now()}.jpg`;
+          const response = await fetch(asset.uri);
+          const blob = await response.blob();
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('staff-selfies')
+            .upload(filename, blob, { contentType: 'image/jpeg', upsert: false });
+
+          if (!uploadError && uploadData?.path) {
+            const { data: urlData } = supabase.storage.from('staff-selfies').getPublicUrl(uploadData.path);
+            selfieUrl = urlData?.publicUrl;
+          }
+        }
+      } catch (camErr) {
+        console.warn('Selfie capture failed, continuing without:', camErr);
+      }
+
+      const sessionResult = await createStaffSession({
+        staffId,
+        businessId: staffBusinessId,
+        selfieUrl,
+        latitude: pos.lat,
+        longitude: pos.lng,
+      });
+
+      if (sessionResult.success && sessionResult.session) {
+        setStaffOnline(true);
+        setActiveSessionId(sessionResult.session.id);
+        setCheckInTime(sessionResult.session.check_in);
+
+        if (perms.background) {
+          const config = await getStaffAttendanceConfig(staffId);
+          if (config.attendanceMode === 'geofence') {
+            startBackgroundLocationMonitoring(staffId, sessionResult.session.id, coords.lat, coords.lng, config.geofenceRadius);
+          }
+        }
+      } else {
+        Alert.alert('Error', sessionResult.error || 'Failed to check in.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Something went wrong.');
+    } finally {
+      setStaffToggleLoading(false);
+    }
+  };
+
+  const handleGoOffline = async () => {
+    if (!staffId || !activeSessionId) return;
+    setStaffToggleLoading(true);
+
+    try {
+      const pos = await getCurrentPosition();
+      await endStaffSession({
+        sessionId: activeSessionId,
+        staffId,
+        reason: 'manual',
+        latitude: pos?.lat,
+        longitude: pos?.lng,
+      });
+
+      await stopBackgroundLocationMonitoring();
+      setStaffOnline(false);
+      setActiveSessionId(null);
+      setCheckInTime(null);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to check out.');
+    } finally {
+      setStaffToggleLoading(false);
+    }
+  };
+
+  // Load notifications with realtime subscription
+  useEffect(() => {
+    if (!businessData?.business?.id) return;
+    const businessId = staffBusinessId || businessData.business.id;
+    const recipientFilter = isStaff && staffId
+      ? { recipientId: staffId, recipientType: 'staff' as const }
+      : {};
+
+    const fetchNotifs = () =>
+      getInAppNotifications({ businessId, ...recipientFilter, limit: 20 }).then(r => {
+        if (r.success && r.notifications) {
+          const filtered = r.notifications.filter((n: any) => n.type !== 'chat_message');
+          setNotifications(filtered);
+        }
+      });
+
+    fetchNotifs();
+
+    const channel = supabase.channel('dashboard-notifs')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'in_app_notifications',
+        filter: `business_id=eq.${businessId}`,
+      }, () => {
+        fetchNotifs();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [businessData?.business?.id, isStaff, staffId, staffBusinessId]);
+
+  // Staff login attempt overlay - filter from notifications, verify staff still needs login
+  useEffect(() => {
+    if (!isOwner || !businessData?.business?.id) return;
+
+    const candidateAlerts = notifications.filter(
+      (n: any) =>
+        n.category === 'staff_login_attempt' &&
+        (n.status === 'unread' || !n.is_read) &&
+        !dismissedAlertIdsRef.current.has(n.id)
+    );
+
+    if (candidateAlerts.length === 0) {
+      setStaffLoginAlerts([]);
+      staffOverlayAnim.setValue(-200);
+      return;
+    }
+
+    const staffIds = candidateAlerts
+      .map((n: any) => n.related_entity_id)
+      .filter(Boolean);
+
+    if (staffIds.length === 0) {
+      setStaffLoginAlerts(candidateAlerts);
+      RNAnimated.spring(staffOverlayAnim, { toValue: 0, useNativeDriver: true, tension: 60, friction: 10 }).start();
+      return;
+    }
+
+    (async () => {
+      try {
+        const { data: rows } = await supabase
+          .from('staff')
+          .select('id, verification_code')
+          .in('id', staffIds);
+
+        const alreadyVerifiedIds = new Set(
+          (rows || []).filter((r: any) => r.verification_code === null).map((r: any) => r.id)
+        );
+
+        candidateAlerts.forEach((a: any) => {
+          if (alreadyVerifiedIds.has(a.related_entity_id)) {
+            dismissedAlertIdsRef.current.add(a.id);
+            markNotificationRead(a.id).catch(() => {});
+          }
+        });
+
+        const validAlerts = candidateAlerts.filter(
+          (a: any) => !alreadyVerifiedIds.has(a.related_entity_id)
+        );
+
+        setStaffLoginAlerts(validAlerts);
+        if (validAlerts.length > 0) {
+          RNAnimated.spring(staffOverlayAnim, { toValue: 0, useNativeDriver: true, tension: 60, friction: 10 }).start();
+        } else {
+          staffOverlayAnim.setValue(-200);
+        }
+      } catch {
+        setStaffLoginAlerts(candidateAlerts);
+        RNAnimated.spring(staffOverlayAnim, { toValue: 0, useNativeDriver: true, tension: 60, friction: 10 }).start();
+      }
+    })();
+  }, [notifications, isOwner, businessData?.business?.id]);
+
+  // Poll staff table to auto-dismiss overlay when verification_code is cleared
+  useEffect(() => {
+    if (staffLoginAlerts.length === 0) return;
+
+    const staffIds = staffLoginAlerts
+      .map((n: any) => n.related_entity_id)
+      .filter(Boolean);
+    if (staffIds.length === 0) return;
+
+    let cancelled = false;
+
+    const pollStaffCodes = async () => {
+      try {
+        const { data: rows } = await supabase
+          .from('staff')
+          .select('id, name, verification_code')
+          .in('id', staffIds);
+
+        if (cancelled || !rows) return;
+
+        const verifiedIds = rows
+          .filter((r: any) => r.verification_code === null)
+          .map((r: any) => r.id);
+
+        if (verifiedIds.length > 0) {
+          const alertsToDismiss = staffLoginAlerts.filter(
+            (a: any) => verifiedIds.includes(a.related_entity_id)
+          );
+
+          alertsToDismiss.forEach((a: any) => {
+            dismissedAlertIdsRef.current.add(a.id);
+            markNotificationRead(a.id).catch(() => {});
+          });
+
+          setStaffLoginAlerts(prev =>
+            prev.filter(a => !verifiedIds.includes(a.related_entity_id))
+          );
+        }
+      } catch {}
+    };
+
+    pollStaffCodes();
+    const interval = setInterval(pollStaffCodes, 5000);
+
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [staffLoginAlerts.length]);
+
+  const dismissStaffAlert = async (alert: any) => {
+    dismissedAlertIdsRef.current.add(alert.id);
+    setStaffLoginAlerts(prev => prev.filter(a => a.id !== alert.id));
+    try { await markNotificationRead(alert.id); } catch {}
+  };
+
+  // Load online staff with realtime updates
+  useEffect(() => {
+    if (!hasPermission('staff_management')) return;
+    const loadOnline = () => {
+      invalidateApiCache('staff');
+      getStaffList().then(r => {
+        if (r.success && r.staff) {
+          setOnlineStaff(r.staff.filter((s: any) => s.is_online === true && !s.is_deleted));
+        }
+      });
+    };
+    loadOnline();
+
+    const businessId = staffBusinessId || businessData?.business?.id;
+    if (!businessId) return;
+
+    const channel = supabase.channel('staff-online-status')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'staff',
+        filter: `business_id=eq.${businessId}`,
+      }, () => {
+        loadOnline();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [businessData?.business?.id, staffBusinessId]);
+
+  // Check for incomplete staff profiles after signup
+  useEffect(() => {
+    if (!isOwner || incompleteStaffDismissedRef.current) return;
+    const checkIncomplete = async () => {
+      try {
+        const result = await getStaffList();
+        if (!result.success || !result.staff) return;
+        const userPhone = businessData?.user?.phone || '';
+        const ownerPhoneLast10 = userPhone.replace(/\D/g, '').slice(-10);
+        const staffOnly = result.staff.filter((s: any) => {
+          if (s.is_deleted) return false;
+          const sRole = (s.role || '').toLowerCase();
+          if (sRole.includes('owner')) return false;
+          const sMobile = (s.mobile || '').replace(/\D/g, '').slice(-10);
+          if (ownerPhoneLast10 && sMobile === ownerPhoneLast10) return false;
+          return true;
+        });
+        const incomplete = staffOnly.filter((s: any) => {
+          const missingAddress = !s.address;
+          const missingSalary = !s.basic_salary && s.basic_salary !== 0;
+          const missingEmergency = !s.emergency_contact_name;
+          return missingAddress || missingSalary || missingEmergency;
+        });
+        setIncompleteStaffList(incomplete);
+        setShowIncompleteStaffBanner(incomplete.length > 0);
+      } catch {}
+    };
+    checkIncomplete();
+  }, [isOwner, businessData?.user?.phone]);
+
+  const loadUnreadChats = useCallback(() => {
+    const bid = staffBusinessId || businessData?.business?.id;
+    if (!bid) return;
+    getTotalUnreadChatCount(bid, !!isStaff).then(setUnreadChatCount);
+  }, [staffBusinessId, businessData?.business?.id, isStaff]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUnreadChats();
+    }, [loadUnreadChats])
+  );
+
+  useEffect(() => {
+    const businessId = staffBusinessId || businessData?.business?.id;
+    if (!businessId) return;
+
+    const channel = supabase.channel('dashboard-chat-unread')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'conversations',
+        filter: `business_id=eq.${businessId}`,
+      }, () => {
+        loadUnreadChats();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [businessData?.business?.id, staffBusinessId, loadUnreadChats]);
 
   // ✅ Save device snapshot in background (non-blocking, only once per session)
   const deviceSnapshotSavedRef = React.useRef(false);
@@ -184,34 +821,57 @@ export default function DashboardScreen() {
         
         const { collectDeviceSnapshot } = await import('@/utils/deviceInfo');
         const { saveDeviceSnapshot } = await import('@/services/backendApi');
-        const deviceSnapshot = await collectDeviceSnapshot();
-        if (deviceSnapshot.deviceId) {
-          // Save in background, don't await (non-blocking)
+        const ds = await collectDeviceSnapshot();
+        if (ds.deviceId) {
           saveDeviceSnapshot({
-            deviceId: deviceSnapshot.deviceId,
-            deviceName: deviceSnapshot.deviceName,
-            deviceBrand: deviceSnapshot.deviceBrand,
-            deviceModel: deviceSnapshot.deviceModel,
-            deviceType: deviceSnapshot.deviceType,
-            deviceYearClass: deviceSnapshot.deviceYearClass,
-            osName: deviceSnapshot.osName,
-            osVersion: deviceSnapshot.osVersion,
-            platformApiLevel: deviceSnapshot.platformApiLevel,
-            networkServiceProvider: deviceSnapshot.networkServiceProvider,
-            internetServiceProvider: deviceSnapshot.internetServiceProvider,
-            wifiName: deviceSnapshot.wifiName,
-            bluetoothName: deviceSnapshot.bluetoothName,
-            manufacturer: deviceSnapshot.manufacturer,
-            totalMemory: deviceSnapshot.totalMemory,
-            isDevice: deviceSnapshot.isDevice,
-            isEmulator: deviceSnapshot.isEmulator,
-            isTablet: deviceSnapshot.isTablet,
-            appVersion: deviceSnapshot.appVersion,
-            appBuildNumber: deviceSnapshot.appBuildNumber,
-          }).catch(() => {}); // Silent fail
+            deviceId: ds.deviceId,
+            deviceName: ds.deviceName,
+            deviceBrand: ds.deviceBrand,
+            deviceModel: ds.deviceModel,
+            deviceType: ds.deviceType,
+            deviceYearClass: ds.deviceYearClass,
+            osName: ds.osName,
+            osVersion: ds.osVersion,
+            platformApiLevel: ds.platformApiLevel,
+            networkServiceProvider: ds.networkServiceProvider,
+            internetServiceProvider: ds.internetServiceProvider,
+            networkType: ds.networkType,
+            wifiName: ds.wifiName,
+            bluetoothName: ds.bluetoothName,
+            ipAddress: ds.ipAddress,
+            manufacturer: ds.manufacturer,
+            totalMemory: ds.totalMemory,
+            isDevice: ds.isDevice,
+            isEmulator: ds.isEmulator,
+            isTablet: ds.isTablet,
+            screenWidth: ds.screenWidth,
+            screenHeight: ds.screenHeight,
+            screenScale: ds.screenScale,
+            pixelDensity: ds.pixelDensity,
+            totalStorage: ds.totalStorage,
+            freeStorage: ds.freeStorage,
+            batteryLevel: ds.batteryLevel,
+            batteryState: ds.batteryState,
+            carrierName: ds.carrierName,
+            mobileCountryCode: ds.mobileCountryCode,
+            mobileNetworkCode: ds.mobileNetworkCode,
+            appVersion: ds.appVersion,
+            appBuildNumber: ds.appBuildNumber,
+            expoSdkVersion: ds.expoSdkVersion,
+            locale: ds.locale,
+            timezone: ds.timezone,
+          }).then((result) => {
+            if (result?.success) {
+              console.log('✅ Device snapshot saved');
+            } else {
+              console.warn('⚠️ Device snapshot save failed:', result?.error);
+            }
+          }).catch((err) => {
+            console.warn('⚠️ Device snapshot error:', err);
+          });
         }
       } catch (error) {
-        // Silent fail
+        console.warn('⚠️ Device snapshot collection error:', error);
       }
     })();
   }, []);
@@ -289,21 +949,18 @@ export default function DashboardScreen() {
 
   const handleMenuNavigation = (route: any) => {
     if (isNavigating) return;
-    setIsNavigating(true);
-    
-    // On web, use split-view navigation; on mobile, use normal navigation
-    if (isWeb) {
-      navigateToScreen(route);
-    } else {
-      debouncedNavigate(route);
+
+    if (route === '/dashboard') {
+      setShowHamburgerMenu(false);
+      return;
     }
-    
+
+    setIsNavigating(true);
+    debouncedNavigate(route);
     setTimeout(() => setIsNavigating(false), 1000);
   };
 
-  const handleFABAction = (action: string) => {
-    console.log('FAB action:', action);
-  };
+  const handleFABAction = (_action: string) => {};
 
   // Render greeting section - use hook data directly for instant display
   const renderGreeting = () => {
@@ -323,241 +980,361 @@ export default function DashboardScreen() {
     );
   };
 
-  // Render KPI cards section
+  const renderStaffAttendanceToggle = () => {
+    const withinRange = staffDistance !== null && staffDistance <= 100;
+
+    return (
+      <View style={[styles.section, { borderLeftWidth: 4, borderLeftColor: staffOnline ? '#059669' : '#6B7280' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: staffOnline ? '#059669' : '#DC2626' }} />
+            <Text style={{ fontSize: 17, fontWeight: '700', color: Colors.text }}>
+              {staffOnline ? 'You\'re Online' : 'You\'re Offline'}
+            </Text>
+          </View>
+          {staffOnline && (
+            <View style={{ backgroundColor: '#dcfce7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669', fontVariant: ['tabular-nums'] }}>
+                {formatElapsed(elapsedSeconds)}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {!staffOnline && staffDistance !== null && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, paddingHorizontal: 4 }}>
+            <MapPin size={14} color={withinRange ? '#059669' : '#DC2626'} />
+            <Text style={{ fontSize: 13, color: withinRange ? '#059669' : '#DC2626', fontWeight: '500' }}>
+              {withinRange ? `Within range (${staffDistance}m)` : `${staffDistance}m away — must be within 100m`}
+            </Text>
+          </View>
+        )}
+
+        {staffOnline && checkInTime && (
+          <Text style={{ fontSize: 13, color: Colors.textLight, marginBottom: 12, paddingHorizontal: 4 }}>
+            Checked in at {new Date(checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        )}
+
+        <Pressable
+          onPress={staffOnline ? handleGoOffline : handleGoOnline}
+          disabled={staffToggleLoading || (!staffOnline && !withinRange)}
+          style={({ pressed }) => [
+            {
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+              paddingVertical: 14, borderRadius: 12,
+              backgroundColor: staffToggleLoading
+                ? '#9CA3AF'
+                : staffOnline
+                  ? '#DC2626'
+                  : withinRange
+                    ? '#059669'
+                    : '#D1D5DB',
+              opacity: pressed ? 0.85 : 1,
+            },
+          ]}
+        >
+          {staffToggleLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              {staffOnline ? <Power size={18} color="#fff" /> : <Camera size={18} color="#fff" />}
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>
+                {staffOnline ? 'Go Offline' : 'Go Online'}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+    );
+  };
+
+  const fmtCurrency = (val: number) => {
+    const formatted = new Intl.NumberFormat('en-IN').format(val);
+    return `₹${formatted}`;
+  };
+
   const renderKPICards = () => (
     <View style={styles.kpiContainer}>
-      <Pressable onPress={isNavigating ? undefined : handleSalesPress} disabled={isNavigating}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
-          <View style={styles.kpiHeader}>
-            <Text style={styles.kpiTitle}>Total Sales</Text>
-            <ShoppingCart size={20} color={Colors.success} />
+      {hasPermission('sales') && (
+        <Pressable onPress={isNavigating ? undefined : handleSalesPress} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Total Sales</Text>
+              <ShoppingCart size={20} color={Colors.success} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.success }]}>{fmtCurrency(totalSales)}</Text>
+            <View style={styles.kpiFooter}>
+              <Text style={styles.kpiPeriod}>View all sales</Text>
+            </View>
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.success }]}>₹1,25,000</Text>
-          <View style={styles.kpiFooter}>
-            <TrendingUp size={16} color={Colors.success} />
-            <Text style={[styles.kpiChange, { color: Colors.success }]}>12.5%</Text>
-            <Text style={styles.kpiPeriod}>vs same day last month</Text>
-          </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      )}
 
-      <Pressable onPress={isNavigating ? undefined : handleReturnsPress} disabled={isNavigating}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
-          <View style={styles.kpiHeader}>
-            <Text style={styles.kpiTitle}>Returns</Text>
-            <RotateCcw size={20} color={Colors.error} />
+      {hasPermission('inventory') && (
+        <Pressable onPress={isNavigating ? undefined : handleReturnsPress} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Returns</Text>
+              <RotateCcw size={20} color={Colors.error} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.error }]}>{fmtCurrency(totalReturns)}</Text>
+            <View style={styles.kpiFooter}>
+              <Text style={styles.kpiPeriod}>View all returns</Text>
+            </View>
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.error }]}>₹8,500</Text>
-          <View style={styles.kpiFooter}>
-            <TrendingDown size={16} color={Colors.success} />
-            <Text style={[styles.kpiChange, { color: Colors.success }]}>3.2%</Text>
-            <Text style={styles.kpiPeriod}>decline vs last month</Text>
-          </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      )}
 
-      <Pressable onPress={isNavigating ? undefined : handleLowStockPress} disabled={isNavigating}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.warning }]}>
-          <View style={styles.kpiHeader}>
-            <Text style={styles.kpiTitle}>Low Stock Items</Text>
-            <AlertTriangle size={20} color={Colors.error} />
+      {hasPermission('inventory') && (
+        <Pressable onPress={isNavigating ? undefined : handleLowStockPress} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.warning }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Low Stock Items</Text>
+              <AlertTriangle size={20} color={Colors.error} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.error }]}>{lowStockCount}</Text>
+            <View style={styles.kpiFooter}>
+              {nearLowStockCount > 0 ? (
+                <Text style={styles.kpiPeriod}>
+                  <Text style={{ color: Colors.error, fontWeight: '600' }}>{lowStockCount} low</Text>
+                  {' · '}
+                  <Text style={{ color: '#D97706', fontWeight: '600' }}>{nearLowStockCount} near low</Text>
+                </Text>
+              ) : (
+                <Text style={styles.kpiPeriod}>View low stock</Text>
+              )}
+            </View>
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.error }]}>{lowStockCount}</Text>
-          <View style={styles.kpiFooter}>
-            <AlertTriangle size={16} color={Colors.warning} />
-            <Text style={[styles.kpiChange, { color: Colors.warning }]}>15.8%</Text>
-            <Text style={styles.kpiPeriod}>of stock needs attention</Text>
-          </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      )}
 
-      <Pressable onPress={isNavigating ? undefined : handleReceivablesPress} disabled={isNavigating}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
-          <View style={styles.kpiHeader}>
-            <Text style={styles.kpiTitle}>Receivables</Text>
-            <ArrowDownLeft size={20} color={Colors.success} />
+      {hasPermission('payment_processing') && (
+        <Pressable onPress={isNavigating ? undefined : handleReceivablesPress} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.success }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Receivables</Text>
+              <ArrowDownLeft size={20} color={Colors.success} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.success }]}>{fmtCurrency(totalReceivables)}</Text>
+            <View style={styles.kpiFooter}>
+              <Text style={styles.kpiPeriod}>View receivables</Text>
+            </View>
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.success }]}>₹45,000</Text>
-          <View style={styles.kpiFooter}>
-            <TrendingUp size={16} color={Colors.success} />
-            <Text style={[styles.kpiChange, { color: Colors.success }]}>8.7%</Text>
-            <Text style={styles.kpiPeriod}>from 8 unpaid invoices</Text>
-          </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      )}
 
-      <Pressable onPress={isNavigating ? undefined : handlePayablesPress} disabled={isNavigating}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
-          <View style={styles.kpiHeader}>
-            <Text style={styles.kpiTitle}>Payables</Text>
-            <ArrowUpRight size={20} color={Colors.error} />
+      {hasPermission('payment_processing') && (
+        <Pressable onPress={isNavigating ? undefined : handlePayablesPress} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.error }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Payables</Text>
+              <ArrowUpRight size={20} color={Colors.error} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.error }]}>{fmtCurrency(totalPayables)}</Text>
+            <View style={styles.kpiFooter}>
+              <Text style={styles.kpiPeriod}>View payables</Text>
+            </View>
           </View>
-          <Text style={[styles.kpiAmount, { color: Colors.error }]}>₹32,000</Text>
-          <View style={styles.kpiFooter}>
-            <TrendingDown size={16} color={Colors.error} />
-            <Text style={[styles.kpiChange, { color: Colors.error }]}>5.4%</Text>
-            <Text style={styles.kpiPeriod}>due to 12 suppliers</Text>
+        </Pressable>
+      )}
+
+      {hasPermission('inventory') && (
+        <Pressable onPress={isNavigating ? undefined : () => debouncedNavigate('/inventory/stock-out')} disabled={isNavigating}>
+          <View style={[styles.kpiCard, { borderLeftColor: Colors.orange }]}>
+            <View style={styles.kpiHeader}>
+              <Text style={styles.kpiTitle}>Write-Offs</Text>
+              <Trash2 size={20} color={Colors.orange} />
+            </View>
+            <Text style={[styles.kpiAmount, { color: Colors.orange }]}>
+              {writeOffSummary.count > 0 ? fmtCurrency(writeOffSummary.totalValue) : '₹0'}
+            </Text>
+            <View style={styles.kpiFooter}>
+              <Text style={styles.kpiPeriod}>{writeOffSummary.count} this month</Text>
+            </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+      )}
     </View>
   );
 
-  // Render stock discrepancies section
   const renderStockDiscrepancies = () => (
     <View style={styles.section}>
       <Pressable onPress={isNavigating ? undefined : handleStockDiscrepancyPress} disabled={isNavigating}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Stock Discrepancies</Text>
-          <AlertTriangle size={20} color={Colors.text} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {stockDiscrepancies.length > 0 && (
+              <View style={{ backgroundColor: Colors.error, borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{stockDiscrepancies.length}</Text>
+              </View>
+            )}
+            <AlertTriangle size={20} color={Colors.text} />
+          </View>
         </View>
       </Pressable>
       <View style={styles.discrepancyList}>
-        {([
-          { 
-            product: 'iPhone 14 Pro',
-            expected: 100,
-            actual: 95,
-            type: 'shortage' as const,
-            supplier: {
-              name: 'Apple India Pvt Ltd',
-              id: 'SUP001'
-            },
-            staff: {
-              name: 'Rajesh Kumar',
-              avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-            }
-          },
-          { 
-            product: 'Samsung Galaxy S23',
-            expected: 50,
-            actual: 52,
-            type: 'excess' as const,
-            supplier: {
-              name: 'Samsung Electronics',
-              id: 'SUP002'
-            },
-            staff: {
-              name: 'Priya Sharma',
-              avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-            }
-          }
-        ] as const).map((item, index) => (
-          <Pressable key={index} onPress={isNavigating ? undefined : handleStockDiscrepancyPress} disabled={isNavigating}>
-            <View style={[
-              styles.discrepancyItem,
-              item.type === 'shortage' ? styles.shortageItem : styles.excessItem
-            ]}>
-              <View style={styles.discrepancyHeader}>
-                <Text style={styles.discrepancyProduct}>{item.product}</Text>
-                {item.type === 'shortage' ? (
-                  <PackageMinus size={20} color={Colors.error} />
-                ) : (
-                  <PackagePlus size={20} color={Colors.orange} />
-                )}
-              </View>
-              <View style={styles.discrepancyDetails}>
-                <View style={styles.discrepancyInfo}>
-                  <Text style={styles.discrepancyText}>
-                    Expected: {item.expected} • Actual: {item.actual}
-                  </Text>
-                  <Text style={styles.supplierName}>{item.supplier.name}</Text>
-                </View>
-                <View style={styles.staffInfo}>
-                  <Image 
-                    source={{ uri: item.staff.avatar }}
-                    style={styles.staffAvatar}
-                  />
-                  <Text style={[
-                    styles.discrepancyDiff,
-                    item.type === 'shortage' ? styles.shortageText : styles.excessText
-                  ]}>
-                    {item.type === 'shortage' ? '-' : '+'}
-                    {Math.abs(item.actual - item.expected)} units
-                  </Text>
+        {stockDiscrepancies.length === 0 ? (
+          <Text style={{ color: Colors.textLight, fontSize: 14, textAlign: 'center', padding: 16 }}>
+            No stock discrepancies found
+          </Text>
+        ) : (
+          stockDiscrepancies.map((d) => (
+            <Pressable key={d.id} onPress={handleStockDiscrepancyPress}>
+              <View style={[styles.notificationItem, { borderLeftWidth: 3, borderLeftColor: Colors.error }]}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text }}>{d.poNumber}</Text>
+                    <Text style={{ fontSize: 12, color: Colors.textLight }}>{d.supplier}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 16 }}>
+                    <Text style={{ fontSize: 13, color: Colors.textLight }}>
+                      Ordered: <Text style={{ fontWeight: '600', color: Colors.text }}>{d.ordered}</Text>
+                    </Text>
+                    <Text style={{ fontSize: 13, color: Colors.textLight }}>
+                      Received: <Text style={{ fontWeight: '600', color: d.received < d.ordered ? Colors.error : Colors.success }}>{d.received}</Text>
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          </Pressable>
-        ))}
+            </Pressable>
+          ))
+        )}
       </View>
     </View>
   );
 
-  // Render notifications section
-  const renderNotifications = () => (
-    <View style={styles.section}>
-      <Pressable onPress={isNavigating ? undefined : handleNotificationsPress} disabled={isNavigating}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Notification Center</Text>
-          <Bell size={20} color={Colors.text} />
-        </View>
-      </Pressable>
-      <View style={styles.notificationList}>
-        {([
-          { 
-            type: 'urgent' as const, 
-            message: 'New order received from customer #1234. Order value: ₹5,500', 
-            time: '2h ago',
-            staff: {
-              name: 'Rajesh Kumar',
-              avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-            }
-          },
-          { 
-            type: 'warning' as const, 
-            message: 'Low stock alert: iPhone 14 Pro has only 3 units left', 
-            time: '4h ago',
-            staff: {
-              name: 'System',
-              avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-            }
-          },
-          { 
-            type: 'info' as const, 
-            message: 'Payment of ₹12,000 received from customer #5678', 
-            time: '6h ago',
-            staff: {
-              name: 'Priya Sharma',
-              avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1'
-            }
-          },
-        ] as const).map((notification, index) => (
-          <Pressable key={index} onPress={isNavigating ? undefined : handleNotificationsPress} disabled={isNavigating}>
-            <View style={styles.notificationItem}>
-              <View style={[
-                styles.notificationIcon,
-                notification.type === 'urgent' ? styles.urgentIcon :
-                notification.type === 'warning' ? styles.warningIcon :
-                styles.infoIcon
-              ]}>
-                {notification.type === 'urgent' ? (
-                  <AlertTriangle size={16} color={Colors.success} />
-                ) : notification.type === 'warning' ? (
-                  <AlertCircle size={16} color={Colors.warning} />
-                ) : (
-                  <Bell size={16} color={Colors.primary} />
-                )}
-              </View>
-              <View style={styles.notificationContent}>
-                <Text style={styles.notificationText}>{notification.message}</Text>
-                <View style={styles.notificationFooter}>
-                  <View style={styles.staffInfo}>
-                    <Image 
-                      source={{ uri: notification.staff.avatar }}
-                      style={styles.staffAvatar}
-                    />
-                    <Text style={styles.staffName}>{notification.staff.name}</Text>
-                  </View>
-                  <Text style={styles.notificationTime}>{notification.time}</Text>
+  const getRelativeTime = (dateStr: string) => {
+    const now = Date.now();
+    const diff = now - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'alert': case 'urgent': return Colors.error;
+      case 'warning': return Colors.warning;
+      case 'success': return Colors.success;
+      default: return Colors.primary;
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return Colors.error;
+      case 'medium': return '#D97706';
+      case 'low': return Colors.success;
+      default: return Colors.textLight;
+    }
+  };
+
+  const getNotifStatusBg = (status: string) => {
+    switch (status) {
+      case 'unread': return '#FEF3F2';
+      case 'read': return '#EFF6FF';
+      case 'acknowledged': return '#FFFBEB';
+      case 'resolved': return '#ECFDF5';
+      default: return Colors.grey[50];
+    }
+  };
+
+  const getNotifStatusBorder = (status: string) => {
+    switch (status) {
+      case 'unread': return Colors.error;
+      case 'read': return '#3B82F6';
+      case 'acknowledged': return '#D97706';
+      case 'resolved': return Colors.success;
+      default: return Colors.grey[200];
+    }
+  };
+
+  const renderNotifications = () => {
+    const unreadCount = notifications.filter(n => n.status === 'unread' || (!n.status && !n.is_read)).length;
+
+    return (
+      <View style={styles.section}>
+        <Pressable onPress={isNavigating ? undefined : handleNotificationsPress} disabled={isNavigating}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Notification Center</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {unreadCount > 0 && (
+                <View style={{ backgroundColor: Colors.error, borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{unreadCount}</Text>
                 </View>
-              </View>
+              )}
+              <Bell size={20} color={Colors.text} />
             </View>
-          </Pressable>
-        ))}
+          </View>
+        </Pressable>
+        <View style={styles.notificationList}>
+          {notifications.length === 0 ? (
+            <Text style={{ color: Colors.textLight, fontSize: 14, textAlign: 'center', padding: 16 }}>
+              No new notifications
+            </Text>
+          ) : (
+            <>
+              {notifications.slice(0, 3).map((notif) => {
+                const priority = notif.priority || 'medium';
+                const status = notif.status || (notif.is_read ? 'read' : 'unread');
+                const pColor = getPriorityColor(priority);
+                const bgColor = getNotifStatusBg(status);
+                const borderColor = getNotifStatusBorder(status);
+
+                return (
+                  <Pressable
+                    key={notif.id}
+                    onPress={handleNotificationsPress}
+                  >
+                    <View style={[
+                      styles.notificationItem,
+                      { backgroundColor: bgColor, borderLeftWidth: 3, borderLeftColor: borderColor },
+                    ]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, flex: 1 }}>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: pColor, marginTop: 6 }} />
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, flex: 1 }} numberOfLines={1}>
+                              {notif.title}
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ backgroundColor: pColor + '18', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                <Text style={{ fontSize: 9, fontWeight: '700', color: pColor }}>
+                                  {priority.toUpperCase()}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 13, color: Colors.textLight, lineHeight: 18 }} numberOfLines={2}>
+                            {notif.message}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 4 }}>
+                            {getRelativeTime(notif.created_at)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
+              {notifications.length > 3 && (
+                <Pressable onPress={handleNotificationsPress}>
+                  <Text style={{ color: Colors.primary, fontSize: 13, fontWeight: '600', textAlign: 'center', paddingVertical: 10 }}>
+                    View all {notifications.length} notifications →
+                  </Text>
+                </Pressable>
+              )}
+            </>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   // Render staff performance section
   const renderStaffPerformance = () => (
@@ -567,72 +1344,59 @@ export default function DashboardScreen() {
         <Users size={20} color={Colors.text} />
       </View>
       <View style={styles.staffList}>
-        {[
-          {
-            id: 'STAFF001',
-            name: 'Rajesh Kumar',
-            image: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-            attendance: '95%',
-            sales: '₹45,000',
-            invoices: 28,
-            score: 92
-          },
-          {
-            id: 'STAFF002',
-            name: 'Priya Sharma',
-            image: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-            attendance: '88%',
-            sales: '₹38,000',
-            invoices: 22,
-            score: 85
-          },
-          {
-            id: 'STAFF003',
-            name: 'Amit Singh',
-            image: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1',
-            attendance: '92%',
-            sales: '₹52,000',
-            invoices: 31,
-            score: 89
-          },
-        ].map((staff) => (
-          <Pressable key={staff.id} onPress={isNavigating ? undefined : () => handleStaffPress(staff.id)} disabled={isNavigating}>
-            <View style={styles.staffCard}>
-              <View style={styles.staffHeader}>
-                <Image source={{ uri: staff.image }} style={styles.staffImage} />
-                <View>
-                  <Text style={styles.staffNameText}>{staff.name}</Text>
-                  <Text style={styles.staffAttendance}>
-                    Attendance: {staff.attendance}
-                  </Text>
+        {onlineStaff.length === 0 ? (
+          <Text style={{ color: Colors.textLight, fontSize: 14, textAlign: 'center', padding: 16 }}>
+            No staff currently online
+          </Text>
+        ) : (
+          onlineStaff.map((staff) => (
+            <Pressable key={staff.id} onPress={() => handleStaffPress(staff.id)}>
+              <View style={styles.staffCard}>
+                <View style={styles.staffHeader}>
+                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary + '20', justifyContent: 'center', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.primary }}>
+                      {(staff.full_name || staff.name || '?').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.staffNameText}>{staff.full_name || staff.name || 'Staff'}</Text>
+                    <Text style={styles.staffAttendance}>{staff.role || 'Staff'}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success }} />
+                    <Text style={{ fontSize: 12, color: Colors.success, fontWeight: '600' }}>Online</Text>
+                  </View>
                 </View>
               </View>
-              <View style={styles.staffStats}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Sales</Text>
-                  <Text style={styles.statValue}>{staff.sales}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Invoices</Text>
-                  <Text style={styles.statValue}>{staff.invoices}</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Score</Text>
-                  <Text style={[styles.statValue, styles.scoreValue]}>{staff.score}/100</Text>
-                </View>
-              </View>
-            </View>
-          </Pressable>
-        ))}
+            </Pressable>
+          ))
+        )}
+        <Pressable
+          onPress={() => debouncedNavigate('/people/staff')}
+          style={{ marginTop: 12, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: Colors.primary, alignItems: 'center' }}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.primary }}>View All Staff</Text>
+        </Pressable>
       </View>
     </View>
   );
 
   // Render business overview section
+  const fmtCompact = (val: number) => {
+    if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
+    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+    if (val >= 1000) return `₹${(val / 1000).toFixed(1)}K`;
+    return `₹${val}`;
+  };
+
+  const cashBalance = businessData?.business?.current_cash_balance ?? 0;
+  const bankBalance = businessData?.business?.current_primary_bank_balance ?? 0;
+  const totalFunds = businessData?.business?.current_total_funds ?? (cashBalance + bankBalance);
+
   const renderBusinessOverview = () => (
     <View style={[styles.section, styles.lastSection]}>
       <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>Business Overview</Text>
+        <Text style={styles.sectionTitle}>Business Overview</Text>
         <Clock size={20} color={Colors.text} />
       </View>
 
@@ -642,15 +1406,11 @@ export default function DashboardScreen() {
             <View style={styles.periodHeader}>
               <Text style={styles.periodTitle}>Today</Text>
               <View style={styles.periodStats}>
-                <Text style={styles.periodAmount}>₹88,000</Text>
+                <Text style={styles.periodAmount}>{fmtCurrency(todaySales)}</Text>
                 <View style={styles.orderBadge}>
-                  <Text style={styles.orderCount}>12 orders</Text>
+                  <Text style={styles.orderCount}>{todayOrders} {todayOrders === 1 ? 'order' : 'orders'}</Text>
                 </View>
               </View>
-            </View>
-            <View style={styles.trendContainer}>
-              <TrendingUp size={16} color={Colors.success} />
-              <Text style={[styles.trendValue, styles.positive]}>12.5%</Text>
             </View>
           </View>
 
@@ -659,29 +1419,15 @@ export default function DashboardScreen() {
           <View style={styles.paymentMethods}>
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Cash</Text>
-              <Text style={styles.paymentAmount}>
-                {businessData?.business?.current_cash_balance !== undefined && !isNaN(businessData.business.current_cash_balance)
-                  ? `₹${Math.round(businessData.business.current_cash_balance / 1000)}K`
-                  : '₹0'}
-              </Text>
+              <Text style={styles.paymentAmount}>{fmtCompact(cashBalance)}</Text>
             </View>
-
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Bank</Text>
-              <Text style={styles.paymentAmount}>
-                {businessData?.business?.current_primary_bank_balance !== undefined && !isNaN(businessData.business.current_primary_bank_balance)
-                  ? `₹${Math.round(businessData.business.current_primary_bank_balance / 1000)}K`
-                  : '₹0'}
-              </Text>
+              <Text style={styles.paymentAmount}>{fmtCompact(bankBalance)}</Text>
             </View>
-
             <View style={styles.paymentMethod}>
               <Text style={styles.paymentTitle}>Total</Text>
-              <Text style={styles.paymentAmount}>
-                {businessData?.business?.current_total_funds !== undefined && !isNaN(businessData.business.current_total_funds)
-                  ? `₹${Math.round(businessData.business.current_total_funds / 1000)}K`
-                  : '₹0'}
-              </Text>
+              <Text style={[styles.paymentAmount, { fontWeight: '700' }]}>{fmtCompact(totalFunds)}</Text>
             </View>
           </View>
 
@@ -693,9 +1439,9 @@ export default function DashboardScreen() {
                 <View style={styles.periodHeader}>
                   <Text style={styles.periodTitle}>Last Week</Text>
                   <View style={styles.periodStats}>
-                    <Text style={styles.periodAmount}>₹1,95,000</Text>
+                    <Text style={styles.periodAmount}>{fmtCurrency(weekSales)}</Text>
                     <View style={styles.orderBadge}>
-                      <Text style={styles.orderCount}>65 orders</Text>
+                      <Text style={styles.orderCount}>{weekOrders} {weekOrders === 1 ? 'order' : 'orders'}</Text>
                     </View>
                   </View>
                 </View>
@@ -705,34 +1451,25 @@ export default function DashboardScreen() {
                   <ChevronDown size={20} color={Colors.text} />
                 )}
               </View>
-              <View style={styles.trendContainer}>
-                <TrendingUp size={16} color={Colors.success} />
-                <Text style={[styles.trendValue, styles.positive]}>8.7%</Text>
-              </View>
             </View>
           </Pressable>
 
           {isLastWeekExpanded && (
             <>
               <View style={styles.divider} />
-              <View style={styles.dayWiseSection}>
-                <Text style={styles.dayWiseTitle}>Day-wise Sales</Text>
-                {[
-                  { day: 'Monday', amount: '₹28,000', orders: 12 },
-                  { day: 'Tuesday', amount: '₹32,500', orders: 14 },
-                  { day: 'Wednesday', amount: '₹25,800', orders: 11 },
-                  { day: 'Thursday', amount: '₹35,200', orders: 16 },
-                  { day: 'Friday', amount: '₹42,000', orders: 18 },
-                  { day: 'Saturday', amount: '₹31,500', orders: 13 },
-                ].map((dayData, index) => (
-                  <View key={index} style={styles.dayWiseItem}>
-                    <Text style={styles.dayName}>{dayData.day}</Text>
-                    <View style={styles.dayStats}>
-                      <Text style={styles.dayAmount}>{dayData.amount}</Text>
-                      <Text style={styles.dayOrders}>{dayData.orders} orders</Text>
-                    </View>
-                  </View>
-                ))}
+              <View style={styles.paymentMethods}>
+                <View style={styles.paymentMethod}>
+                  <Text style={styles.paymentTitle}>Cash</Text>
+                  <Text style={styles.paymentAmount}>{fmtCompact(cashBalance)}</Text>
+                </View>
+                <View style={styles.paymentMethod}>
+                  <Text style={styles.paymentTitle}>Bank</Text>
+                  <Text style={styles.paymentAmount}>{fmtCompact(bankBalance)}</Text>
+                </View>
+                <View style={styles.paymentMethod}>
+                  <Text style={styles.paymentTitle}>Total</Text>
+                  <Text style={[styles.paymentAmount, { fontWeight: '700' }]}>{fmtCompact(totalFunds)}</Text>
+                </View>
               </View>
             </>
           )}
@@ -741,14 +1478,14 @@ export default function DashboardScreen() {
     </View>
   );
 
-  // Dashboard sections data
   const dashboardSections = [
     { id: 'greeting', render: renderGreeting },
+    ...(isStaff ? [{ id: 'attendance-toggle', render: renderStaffAttendanceToggle }] : []),
     { id: 'kpi', render: renderKPICards },
-    { id: 'discrepancies', render: renderStockDiscrepancies },
+    ...(hasPermission('inventory') ? [{ id: 'discrepancies', render: renderStockDiscrepancies }] : []),
     { id: 'notifications', render: renderNotifications },
-    { id: 'staff', render: renderStaffPerformance },
-    { id: 'overview', render: renderBusinessOverview },
+    ...(hasPermission('staff_management') ? [{ id: 'staff', render: renderStaffPerformance }] : []),
+    ...(hasPermission('reports') ? [{ id: 'overview', render: renderBusinessOverview }] : []),
   ];
 
   const renderSection = ({ item }: { item: { id: string; render: () => React.ReactElement } }) => {
@@ -758,27 +1495,6 @@ export default function DashboardScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <View style={styles.mainContainer}>
-      {/* Sidebar - Only on web */}
-      {Platform.OS === 'web' && (
-        <Sidebar 
-          onNavigate={handleMenuNavigation} 
-          currentRoute={pathname}
-          onCollapseChange={handleSidebarCollapseChange}
-        />
-      )}
-      
-      <View style={[
-        styles.contentWrapper, 
-        Platform.OS === 'web' && { 
-          marginLeft: sidebarWidth,
-          flex: 1,
-        }
-      ]}>
-        {/* Web Screen Renderer - Replaces dashboard content when a screen is selected */}
-        {Platform.OS === 'web' && currentScreen ? (
-          <WebScreenRenderer sidebarWidth={sidebarWidth} />
-        ) : (
           <ResponsiveContainer>
             <SafeAreaView style={styles.safeArea}>
               {/* Header */}
@@ -793,31 +1509,60 @@ export default function DashboardScreen() {
                 )}
                 
                 <Text style={styles.headerTitle}>Dashboard</Text>
+                <View style={{ flex: 1 }} />
+                <Pressable onPress={() => debouncedNavigate('/notifications')} style={styles.chatIconWrapper}>
+                  <Bell size={22} color={Colors.text} />
+                  {notifications.filter(n => n.status === 'unread' || (!n.status && !n.is_read)).length > 0 && (
+                    <View style={styles.chatBadge}>
+                      <Text style={styles.chatBadgeText}>
+                        {(() => {
+                          const c = notifications.filter(n => n.status === 'unread' || (!n.status && !n.is_read)).length;
+                          return c > 99 ? '99+' : c;
+                        })()}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+                <Pressable onPress={() => debouncedNavigate('/chat')} style={styles.chatIconWrapper}>
+                  <MessageSquare size={22} color={Colors.text} />
+                  {unreadChatCount > 0 && (
+                    <View style={styles.chatBadge}>
+                      <Text style={styles.chatBadgeText}>
+                        {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
               </View>
 
-              <FlatList
-                data={dashboardSections}
-                renderItem={renderSection}
-                keyExtractor={(item) => item.id}
-                style={styles.flatList}
-                contentContainerStyle={[
-                  styles.flatListContent,
-                  Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
-                ]}
-                showsVerticalScrollIndicator={false}
-                showsHorizontalScrollIndicator={false}
-                bounces={true}
-                alwaysBounceVertical={false}
-                scrollEventThrottle={16}
-                keyboardShouldPersistTaps="handled"
-                removeClippedSubviews={false}
-                initialNumToRender={6}
-                maxToRenderPerBatch={6}
-                windowSize={10}
-                scrollIndicatorInsets={{ right: -1000, bottom: -1000 }}
-                persistentScrollbar={false}
-                indicatorStyle="white"
-              />
+              {dataLoading ? (
+                <DashboardSkeleton />
+              ) : (
+                <FlatList
+                  data={dashboardSections}
+                  renderItem={renderSection}
+                  keyExtractor={(item) => item.id}
+                  style={styles.flatList}
+                  contentContainerStyle={[
+                    styles.flatListContent,
+                    Platform.OS === 'web' ? webContainerStyles.webScrollContent : { paddingHorizontal: 0 }
+                  ]}
+                  showsVerticalScrollIndicator={false}
+                  showsHorizontalScrollIndicator={false}
+                  bounces={true}
+                  alwaysBounceVertical={false}
+                  scrollEventThrottle={16}
+                  keyboardShouldPersistTaps="handled"
+                  removeClippedSubviews={false}
+                  initialNumToRender={6}
+                  maxToRenderPerBatch={6}
+                  windowSize={10}
+                  scrollIndicatorInsets={{ right: -1000, bottom: -1000 }}
+                  persistentScrollbar={false}
+                  indicatorStyle="white"
+                  refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+                />
+              )}
 
               {/* Hamburger Menu - Only on mobile */}
               {Platform.OS !== 'web' && (
@@ -828,34 +1573,216 @@ export default function DashboardScreen() {
                 />
               )}
 
-              {/* FAB */}
-              <FAB onAction={handleFABAction} />
+              <FAB
+                onAction={handleFABAction}
+                hiddenActions={[
+                  ...(!hasPermission('sales') ? ['new-sale'] : []),
+                  ...(!hasPermission('inventory') ? ['return', 'stock'] : []),
+                  ...(!hasPermission('payment_processing') ? ['payments', 'expense'] : []),
+                  ...(!hasPermission('staff_management') ? ['notify-staff'] : []),
+                ]}
+              />
+
+              {/* Incomplete Staff Details Banner */}
+              {showIncompleteStaffBanner && incompleteStaffList.length > 0 && staffLoginAlerts.length === 0 && (
+                <View style={{
+                  position: 'absolute' as const, top: Platform.OS === 'ios' ? 50 : 10,
+                  left: 12, right: 12, zIndex: 9998,
+                }}>
+                  <View style={{
+                    backgroundColor: '#FFF7ED', borderRadius: 16, padding: 16,
+                    borderWidth: 1.5, borderColor: '#FB923C',
+                    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.12, shadowRadius: 12, elevation: 6,
+                  }}>
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const }}>
+                      <View style={{
+                        width: 36, height: 36, borderRadius: 10, backgroundColor: '#EA580C',
+                        alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10,
+                      }}>
+                        <Users size={18} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700' as const, color: '#1F2937' }}>
+                          {incompleteStaffList.length === 1
+                            ? `${incompleteStaffList[0].name}'s profile is incomplete`
+                            : `${incompleteStaffList.length} staff profiles are incomplete`}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#9A3412', marginTop: 2 }}>
+                          {incompleteStaffList.length === 1
+                            ? 'Complete address, salary or emergency contact'
+                            : 'Tap to complete their details'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          incompleteStaffDismissedRef.current = true;
+                          setShowIncompleteStaffBanner(false);
+                        }}
+                        hitSlop={12}
+                        style={{ padding: 4 }}
+                      >
+                        <X size={18} color="#9CA3AF" />
+                      </Pressable>
+                    </View>
+                    <TouchableOpacity
+                      style={{
+                        marginTop: 12, backgroundColor: '#EA580C', borderRadius: 10,
+                        paddingVertical: 10, alignItems: 'center' as const,
+                      }}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        if (incompleteStaffList.length === 1) {
+                          router.push({ pathname: '/people/add-staff', params: { staffId: incompleteStaffList[0].id } });
+                        } else {
+                          router.push('/people/staff');
+                        }
+                        incompleteStaffDismissedRef.current = true;
+                        setShowIncompleteStaffBanner(false);
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: '700' as const, color: '#fff' }}>
+                        {incompleteStaffList.length === 1 ? 'Complete Profile' : 'Go to Staff Section'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Staff Login Attempt Overlay */}
+              {staffLoginAlerts.length > 0 && (
+                <RNAnimated.View style={{
+                  position: 'absolute' as const, top: Platform.OS === 'ios' ? 50 : 10,
+                  left: 12, right: 12, zIndex: 9999,
+                  transform: [{ translateY: staffOverlayAnim }],
+                }}>
+                  {staffLoginAlerts.map((alert) => {
+                    const code = (alert.message || '').match(/:\s*(\d{6})/)?.[1] || '';
+                    const staffName = alert.source_staff_name || alert.title?.replace(' is trying to log in', '') || 'Staff';
+                    return (
+                      <View key={alert.id} style={{
+                        backgroundColor: '#FFFBEB', borderRadius: 16, padding: 16,
+                        marginBottom: 8, borderWidth: 1.5, borderColor: '#F59E0B',
+                        shadowColor: '#000', shadowOffset: { width: 0, height: 6 },
+                        shadowOpacity: 0.15, shadowRadius: 16, elevation: 8,
+                      }}>
+                        <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 10 }}>
+                          <View style={{
+                            width: 36, height: 36, borderRadius: 10, backgroundColor: '#D97706',
+                            alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10,
+                          }}>
+                            <KeyRound size={18} color="#fff" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 15, fontWeight: '700' as const, color: '#1F2937' }}>
+                              {staffName} is trying to log in
+                            </Text>
+                            <Text style={{ fontSize: 12, color: '#92400E', marginTop: 1 }}>First-time login verification</Text>
+                          </View>
+                          <Pressable
+                            onPress={() => dismissStaffAlert(alert)}
+                            hitSlop={12}
+                            style={{ padding: 4 }}
+                          >
+                            <X size={18} color="#9CA3AF" />
+                          </Pressable>
+                        </View>
+
+                        {code ? (
+                          <>
+                            <View style={{ flexDirection: 'row' as const, justifyContent: 'center' as const, marginBottom: 12 }}>
+                              {code.split('').map((digit: string, idx: number) => (
+                                <View key={idx} style={{
+                                  width: 40, height: 48, borderRadius: 10, backgroundColor: '#FEF3C7',
+                                  borderWidth: 2, borderColor: '#F59E0B',
+                                  alignItems: 'center' as const, justifyContent: 'center' as const, marginHorizontal: 3,
+                                }}>
+                                  <Text style={{ fontSize: 22, fontWeight: '800' as const, color: '#92400E' }}>{digit}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            <View style={{ flexDirection: 'row' as const }}>
+                              <TouchableOpacity
+                                style={{
+                                  flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const,
+                                  justifyContent: 'center' as const, backgroundColor: '#3f66ac',
+                                  borderRadius: 10, paddingVertical: 11, marginRight: 8,
+                                }}
+                                activeOpacity={0.7}
+                                onPress={async () => {
+                                  try { await Clipboard.setStringAsync(code); Alert.alert('Copied', 'Code copied to clipboard'); } catch {}
+                                }}
+                              >
+                                <Copy size={16} color="#fff" />
+                                <Text style={{ fontSize: 14, fontWeight: '700' as const, color: '#fff', marginLeft: 6 }}>Copy Code</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={{
+                                  width: 44, height: 44, borderRadius: 10, backgroundColor: '#fff',
+                                  borderWidth: 1, borderColor: '#E5E7EB',
+                                  alignItems: 'center' as const, justifyContent: 'center' as const,
+                                }}
+                                activeOpacity={0.7}
+                                onPress={async () => {
+                                  const msg = `Hi ${staffName}, your Manager ERP first-login code is: ${code}`;
+                                  try { await Share.share({ message: msg }); } catch {}
+                                }}
+                              >
+                                <Share2 size={16} color="#3f66ac" />
+                              </TouchableOpacity>
+                            </View>
+                          </>
+                        ) : (
+                          <View>
+                            <Text style={{ fontSize: 13, color: '#6B7280', textAlign: 'center' as const, marginBottom: 10 }}>
+                              No verification code found for this staff member.
+                            </Text>
+                            <TouchableOpacity
+                              style={{
+                                flexDirection: 'row' as const, alignItems: 'center' as const,
+                                justifyContent: 'center' as const, backgroundColor: '#3f66ac',
+                                borderRadius: 10, paddingVertical: 11,
+                              }}
+                              activeOpacity={0.7}
+                              onPress={async () => {
+                                try {
+                                  const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+                                  const entityId = alert.related_entity_id;
+                                  if (!entityId) {
+                                    Alert.alert('Error', 'Cannot identify staff member');
+                                    return;
+                                  }
+                                  const { error } = await supabase
+                                    .from('staff')
+                                    .update({ verification_code: newCode })
+                                    .eq('id', entityId);
+                                  if (error) {
+                                    Alert.alert('Error', 'Failed to generate code');
+                                  } else {
+                                    Alert.alert('Code Generated', `Code ${newCode} generated. Share it with ${staffName} to complete login.`);
+                                    dismissStaffAlert(alert);
+                                  }
+                                } catch {
+                                  Alert.alert('Error', 'Something went wrong');
+                                }
+                              }}
+                            >
+                              <KeyRound size={16} color="#fff" />
+                              <Text style={{ fontSize: 14, fontWeight: '700' as const, color: '#fff', marginLeft: 6 }}>Generate Login Code</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </RNAnimated.View>
+              )}
             </SafeAreaView>
           </ResponsiveContainer>
-        )}
-      </View>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  mainContainer: {
-    flex: 1,
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-  },
-  contentWrapper: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    ...Platform.select({
-      web: {
-        // marginLeft and width will be set dynamically via inline style based on sidebarWidth state
-        transition: 'margin-left 0.3s ease, width 0.3s ease',
-        minWidth: 0, // Allow content to shrink when sidebar expands
-        position: 'relative', // Allow absolute positioning of screen renderer
-        overflow: 'hidden', // Ensure clean boundaries
-      },
-    }),
-  },
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -880,6 +1807,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    overflow: 'visible' as const,
+    zIndex: 10,
   },
   greetingSection: {
     paddingHorizontal: Platform.select({
@@ -907,6 +1836,34 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...getFontStyles().header,
     color: Colors.text,
+  },
+  chatIconWrapper: {
+    padding: 8,
+    position: 'relative' as const,
+    overflow: 'visible' as const,
+  },
+  chatBadge: {
+    position: 'absolute' as const,
+    top: -2,
+    right: -2,
+    backgroundColor: '#DC2626',
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    zIndex: 10,
+    elevation: 5,
+  },
+  chatBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700' as const,
+    textAlign: 'center' as const,
+    lineHeight: 12,
   },
   greeting: {
     fontSize: 24,

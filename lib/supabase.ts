@@ -17,12 +17,43 @@ const supabaseStorage = Platform.OS === 'web'
   ? (typeof window !== 'undefined' && window.localStorage ? window.localStorage : undefined)
   : AsyncStorage;
 
+/**
+ * Custom fetch wrapper that catches HTML responses from auth endpoints
+ * and converts them into proper JSON error responses, preventing
+ * AuthUnknownError from JSON parse failures.
+ */
+const resilientFetch: typeof fetch = async (input, init) => {
+  const response = await fetch(input, init);
+  const url = typeof input === 'string' ? input : input instanceof Request ? input.url : '';
+  const isAuthEndpoint = url.includes('/auth/v1/');
+
+  if (isAuthEndpoint && !response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await response.text();
+      const trimmed = text.trim();
+      if (trimmed.startsWith('<')) {
+        console.warn(`⚠️ Auth endpoint returned HTML (status ${response.status}), converting to JSON error`);
+        return new Response(
+          JSON.stringify({ error: 'server_error', error_description: `Auth server returned non-JSON response (HTTP ${response.status})` }),
+          { status: response.status, statusText: response.statusText, headers: { 'content-type': 'application/json' } },
+        );
+      }
+    }
+  }
+
+  return response;
+};
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: supabaseStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: resilientFetch,
   },
 });
 

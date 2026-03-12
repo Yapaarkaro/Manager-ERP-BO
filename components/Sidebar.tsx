@@ -10,7 +10,8 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useWebNavigation } from '@/contexts/WebNavigationContext';
+import { router } from 'expo-router';
+import { usePermissions } from '@/contexts/PermissionContext';
 import { 
   X, 
   LayoutDashboard, 
@@ -33,6 +34,7 @@ import {
   IndianRupee,
   ChevronLeft,
   Wallet,
+  MessageSquare,
 } from 'lucide-react-native';
 
 interface SidebarProps {
@@ -46,10 +48,12 @@ interface MenuSection {
   title: string;
   icon: any;
   route?: string;
+  permission?: string;
   subsections?: {
     id: string;
     title: string;
     route: string;
+    permission?: string;
   }[];
 }
 
@@ -65,17 +69,20 @@ const menuSections: MenuSection[] = [
     title: 'Transactions',
     icon: IndianRupee,
     route: '/all-invoices',
+    permission: 'sales',
   },
   {
     id: 'inventory',
     title: 'Inventory',
     icon: Package,
     route: '/inventory',
+    permission: 'inventory',
   },
   {
     id: 'purchasing',
     title: 'Purchasing',
     icon: ShoppingCart,
+    permission: 'inventory',
     subsections: [
       { id: 'purchases', title: 'Purchases', route: '/purchasing/purchases' },
       { id: 'suppliers', title: 'Suppliers', route: '/purchasing/suppliers' },
@@ -86,8 +93,8 @@ const menuSections: MenuSection[] = [
     title: 'People',
     icon: Users,
     subsections: [
-      { id: 'customers', title: 'Customers', route: '/people/customers' },
-      { id: 'staff', title: 'Staff', route: '/people/staff' },
+      { id: 'customers', title: 'Customers', route: '/people/customers', permission: 'customer_management' },
+      { id: 'staff', title: 'Staff', route: '/people/staff', permission: 'staff_management' },
     ],
   },
   {
@@ -95,17 +102,20 @@ const menuSections: MenuSection[] = [
     title: 'Bank Accounts',
     icon: CreditCard,
     route: '/bank-accounts',
+    permission: 'payment_processing',
   },
   {
     id: 'cash-accounts',
     title: 'Cash Accounts',
     icon: Wallet,
     route: '/cash-accounts',
+    permission: 'payment_processing',
   },
   {
     id: 'locations',
     title: 'Locations',
     icon: MapPin,
+    permission: 'inventory',
     subsections: [
       { id: 'branches', title: 'Branches', route: '/locations/branches' },
       { id: 'warehouses', title: 'Warehouses', route: '/locations/warehouses' },
@@ -116,12 +126,20 @@ const menuSections: MenuSection[] = [
     title: 'Reports',
     icon: BarChart3,
     route: '/reports',
+    permission: 'reports',
   },
   {
     id: 'marketing',
     title: 'Marketing',
     icon: Megaphone,
     route: '/marketing',
+    permission: 'master_access',
+  },
+  {
+    id: 'chat',
+    title: 'Chat',
+    icon: MessageSquare,
+    route: '/chat',
   },
   {
     id: 'settings',
@@ -131,11 +149,9 @@ const menuSections: MenuSection[] = [
   },
 ];
 
-export default function Sidebar({ onNavigate, currentRoute, onCollapseChange }: SidebarProps) {
-  // Get web navigation context (returns safe defaults if provider not available)
-  const webNav = useWebNavigation();
+function Sidebar({ onNavigate, currentRoute, onCollapseChange }: SidebarProps) {
+  const { hasPermission } = usePermissions();
 
-  // Keep all sections with subsections expanded by default
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(menuSections.filter(s => s.subsections && s.subsections.length > 0).map(s => s.id))
   );
@@ -184,14 +200,8 @@ export default function Sidebar({ onNavigate, currentRoute, onCollapseChange }: 
   }, []);
 
   const handleNavigation = (route: string) => {
-    // On web, use split-view navigation; otherwise use normal navigation
-    if (Platform.OS === 'web' && webNav) {
-      // If clicking Dashboard, close any open screen
-      if (route === '/dashboard') {
-        webNav.closeScreen();
-      } else {
-        webNav.navigateToScreen(route);
-      }
+    if (Platform.OS === 'web') {
+      router.push(route as any);
     } else {
       onNavigate(route);
     }
@@ -301,7 +311,18 @@ export default function Sidebar({ onNavigate, currentRoute, onCollapseChange }: 
           style={styles.menuContent}
           showsVerticalScrollIndicator={false}
         >
-          {menuSections.map(renderMenuItem)}
+          {menuSections
+            .filter(s => !s.permission || hasPermission(s.permission))
+            .map(section => {
+              if (section.subsections) {
+                const filteredSubs = section.subsections.filter(
+                  sub => !sub.permission || hasPermission(sub.permission)
+                );
+                if (filteredSubs.length === 0) return null;
+                return renderMenuItem({ ...section, subsections: filteredSubs });
+              }
+              return renderMenuItem(section);
+            })}
         </ScrollView>
       </SafeAreaView>
 
@@ -369,6 +390,8 @@ export default function Sidebar({ onNavigate, currentRoute, onCollapseChange }: 
     </Animated.View>
   );
 }
+
+export default React.memo(Sidebar);
 
 const styles = StyleSheet.create({
   sidebar: {

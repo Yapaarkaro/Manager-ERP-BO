@@ -30,29 +30,20 @@ export const getPlatformShadow = (
   opacity: number = 0.1
 ) => {
   if (Platform.OS === 'web') {
-    // Web: Use boxShadow CSS property
     const blur = elevation * 2;
     const spread = elevation * 0.5;
     return {
       boxShadow: `0 ${elevation}px ${blur}px ${spread}px ${color}${Math.round(opacity * 255).toString(16).padStart(2, '0')}`,
     };
-  } else if (Platform.OS === 'ios') {
-    // iOS: Use shadow properties
-    return {
-      shadowColor: color,
-      shadowOffset: {
-        width: 0,
-        height: elevation,
-      },
-      shadowOpacity: opacity,
-      shadowRadius: elevation * 2,
-    };
-  } else {
-    // Android: Use elevation
-    return {
-      elevation,
-    };
   }
+
+  return {
+    shadowColor: color,
+    shadowOffset: { width: 0, height: elevation },
+    shadowOpacity: opacity,
+    shadowRadius: elevation * 2,
+    elevation,
+  };
 };
 
 /**

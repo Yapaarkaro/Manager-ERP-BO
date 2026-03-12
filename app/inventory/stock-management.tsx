@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -15,6 +17,8 @@ import {
   ShoppingCart,
   ArrowRight,
 } from 'lucide-react-native';
+import { invalidateApiCache } from '@/services/backendApi';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -33,22 +37,30 @@ const Colors = {
 };
 
 export default function StockManagementScreen() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
+
   const handleStockIn = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('stock in')) return;
-    router.push('/inventory/stock-in');
+    safeRouter.push('/inventory/stock-in');
   };
 
   const handleStockOut = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('stock out')) return;
-    router.push('/inventory/stock-out');
+    safeRouter.push('/inventory/stock-out');
   };
 
   const handleNewSale = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('create new sale')) return;
-    router.push('/new-sale');
+    safeRouter.push('/new-sale');
   };
 
   return (
@@ -62,7 +74,7 @@ export default function StockManagementScreen() {
             try {
               router.back();
             } catch (error) {
-              router.replace('/dashboard');
+              safeRouter.replace('/dashboard');
             }
           }}
           activeOpacity={0.7}
@@ -73,7 +85,7 @@ export default function StockManagementScreen() {
         <Text style={styles.headerTitle}>Stock Management</Text>
       </View>
 
-        <View style={styles.content}>
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
           <Text style={styles.description}>
             Choose the type of stock operation or sales process you want to perform
           </Text>
@@ -100,7 +112,7 @@ export default function StockManagementScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Stock Out Option */}
+          {/* Write-Off Option */}
           <TouchableOpacity
             style={styles.optionCard}
             onPress={handleStockOut}
@@ -110,7 +122,7 @@ export default function StockManagementScreen() {
               <ArrowUpRight size={32} color={Colors.error} />
             </View>
             <View style={styles.optionContent}>
-              <Text style={styles.optionTitle}>Stock Out</Text>
+              <Text style={styles.optionTitle}>Write-Off</Text>
               <Text style={styles.optionDescription}>
                 Record inventory adjustments, damages, transfers, and other non-sales removals.
               </Text>
@@ -134,7 +146,7 @@ export default function StockManagementScreen() {
               <Text style={styles.newSaleButtonText}>Create New Sale</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </SafeAreaView>
   );
 }
@@ -168,6 +180,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
     paddingHorizontal: 16,
     paddingVertical: 20,
   },

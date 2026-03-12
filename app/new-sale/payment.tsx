@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,20 @@ import {
   TextInput,
   Modal,
   Image,
+  Platform,
+  KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { showError } from '@/utils/notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { dataStore, BankAccount } from '@/utils/dataStore';
+import { BankAccount } from '@/utils/dataStore';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { paymentDataBridge, saleFlowBridge, productStore, InvoiceExtras } from '@/utils/productStore';
 import { generateInvoiceUPIURL, formatUPIAmountDisplay } from '@/utils/upiQRGenerator';
+import { autoFormatDateInput, validateDateDDMMYYYY } from '@/utils/formatters';
+import { peekNextInvoiceNumber } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -22,9 +30,14 @@ import {
   Building2,
   X,
   Check,
-  FileText
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Trash2
 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
+import { safeRouter } from '@/utils/safeRouter';
 
 const Colors = {
   background: '#FFFFFF',
@@ -47,8 +60,19 @@ type OthersMethod = 'bank_transfer' | 'cheque';
 type PaymentType = 'full_payment' | 'part_payment' | 'add_to_receivables';
 
 export default function PaymentScreen() {
-  const { cartItems, totalAmount, customerDetails } = useLocalSearchParams();
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null);
+  const { data: businessData } = useBusinessData();
+  
+  // Read sale flow data from in-memory bridge (fast, no JSON parsing)
+  const [flowData] = useState(() => ({
+    cartItems: saleFlowBridge.getCartItems(),
+    totalAmount: saleFlowBridge.getTotalAmount(),
+    customer: saleFlowBridge.getCustomerDetails(),
+  }));
+  const cartItemsArray = flowData.cartItems;
+  const totalAmount = flowData.totalAmount.toString();
+  const customer = flowData.customer || { name: '', mobile: '' };
+  
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>('cash');
   const [selectedOthersMethod, setSelectedOthersMethod] = useState<OthersMethod | null>(null);
   
   // Cash payment states
@@ -78,6 +102,7 @@ export default function PaymentScreen() {
   const [showBankAccounts, setShowBankAccounts] = useState(false);
   const [showReceivablesConfirmation, setShowReceivablesConfirmation] = useState(false);
   const [showPartPaymentConfirmation, setShowPartPaymentConfirmation] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   
 
   
@@ -88,22 +113,74 @@ export default function PaymentScreen() {
   // UPI payment data
   const [upiPaymentURL, setUpiPaymentURL] = useState<string>('');
 
-  const amount = parseFloat(totalAmount as string);
-  const customer = JSON.parse(customerDetails as string);
+  // Invoice number preview
+  const [nextInvoiceNumber, setNextInvoiceNumber] = useState<string>('');
 
-  // Load real bank accounts from data store
-  React.useEffect(() => {
-    const allBankAccounts = dataStore.getBankAccounts();
-    setBankAccounts(allBankAccounts);
-    
-    const primary = dataStore.getPrimaryBankAccount();
-    setPrimaryBankAccount(primary || null);
-    
-    // Auto-select primary bank account by default
-    if (primary && !selectedBankAccount) {
-      setSelectedBankAccount(primary.id);
-    }
+  // Advanced invoice fields
+  const [extraFieldsEnabled, setExtraFieldsEnabled] = useState(false);
+  const [selectedFieldKeys, setSelectedFieldKeys] = useState<string[]>([]);
+  const [showExtraFields, setShowExtraFields] = useState(false);
+  const [invoiceExtras, setInvoiceExtras] = useState<InvoiceExtras>(() => {
+    return saleFlowBridge.getInvoiceExtras?.() || {
+      deliveryNote: '', paymentTermsMode: '', referenceNo: '', referenceDate: '',
+      buyerOrderNumber: '', buyerOrderDate: '', dispatchDocNo: '', deliveryNoteDate: '',
+      dispatchedVia: '', destination: '', termsOfDelivery: '', customFields: [],
+    };
+  });
 
+  const INVOICE_FIELD_OPTIONS = [
+    { key: 'delivery_note', label: 'Delivery Note', field: 'deliveryNote' },
+    { key: 'payment_terms', label: 'Mode/Terms of Payment', field: 'paymentTermsMode' },
+    { key: 'reference_no', label: 'Reference No.', field: 'referenceNo' },
+    { key: 'reference_date', label: 'Reference Date', field: 'referenceDate', isDate: true },
+    { key: 'buyers_order_no', label: "Buyer's Order No.", field: 'buyerOrderNumber' },
+    { key: 'buyers_order_date', label: "Buyer's Order Date", field: 'buyerOrderDate', isDate: true },
+    { key: 'dispatch_doc_no', label: 'Dispatch Doc No.', field: 'dispatchDocNo' },
+    { key: 'delivery_note_date', label: 'Delivery Note Date', field: 'deliveryNoteDate', isDate: true },
+    { key: 'dispatched_through', label: 'Dispatched Through', field: 'dispatchedVia' },
+    { key: 'destination', label: 'Destination', field: 'destination' },
+    { key: 'terms_of_delivery', label: 'Terms of Delivery', field: 'termsOfDelivery' },
+  ];
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await peekNextInvoiceNumber();
+        if (!cancelled && res.success && res.invoiceNumber) {
+          setNextInvoiceNumber(res.invoiceNumber);
+        }
+      } catch {}
+      try {
+        const enabledVal = await AsyncStorage.getItem('@invoice_extra_fields_enabled');
+        if (!cancelled && enabledVal === 'true') setExtraFieldsEnabled(true);
+        const fieldsVal = await AsyncStorage.getItem('@invoice_selected_fields');
+        if (!cancelled && fieldsVal) {
+          try { setSelectedFieldKeys(JSON.parse(fieldsVal)); } catch {}
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const amount = parseFloat(totalAmount);
+
+  const normalizeBankAccounts = React.useCallback((raw: any[]): BankAccount[] => {
+    return raw.map((acc: any) => ({
+      id: acc.id,
+      accountHolderName: acc.account_holder_name ?? acc.accountHolderName ?? '',
+      bankName: acc.bank_name ?? acc.bankName ?? '',
+      bankId: acc.bank_id ?? acc.bankId ?? '',
+      bankShortName: acc.bank_short_name ?? acc.bankShortName ?? '',
+      accountNumber: acc.account_number ?? acc.accountNumber ?? '',
+      ifscCode: acc.ifsc_code ?? acc.ifscCode ?? '',
+      upiId: acc.upi_id ?? acc.upiId ?? '',
+      accountType: acc.account_type ?? acc.accountType ?? 'Savings',
+      isPrimary: acc.is_primary ?? acc.isPrimary ?? false,
+      initialBalance: acc.initial_balance ?? acc.initialBalance ?? 0,
+      balance: acc.balance ?? acc.initial_balance ?? acc.initialBalance ?? 0,
+      createdAt: acc.created_at ?? acc.createdAt ?? '',
+    }));
   }, []);
 
   // Auto-generate QR code only for single bank account when UPI modal opens
@@ -130,21 +207,18 @@ export default function PaymentScreen() {
     };
   }, []);
 
-  // Reload bank accounts when screen comes into focus (e.g., after adding a new bank account)
   useFocusEffect(
     React.useCallback(() => {
-      const allBankAccounts = dataStore.getBankAccounts();
+      const allBankAccounts = normalizeBankAccounts(businessData.bankAccounts || []);
       setBankAccounts(allBankAccounts);
       
-      const primary = dataStore.getPrimaryBankAccount();
-      setPrimaryBankAccount(primary || null);
+      const primary = allBankAccounts.find(acc => acc.isPrimary) || null;
+      setPrimaryBankAccount(primary);
       
-      // Auto-select primary bank account by default if none is selected
       if (primary && !selectedBankAccount) {
         setSelectedBankAccount(primary.id);
       }
-
-    }, [])
+    }, [businessData.bankAccounts])
   );
 
   const formatAmount = (amount: number) => {
@@ -194,46 +268,51 @@ export default function PaymentScreen() {
     }
   };
 
-  const showPaymentConfirmation = () => {
-    // Navigate to success screen with payment confirmation data
-    router.push({
-      pathname: '/new-sale/success',
-      params: {
-        paymentData: JSON.stringify({
-          method: 'mixed',
-          amount: amount,
-          total: amount, // Add total field for compatibility
-          customer: customer,
-          cartItems: JSON.parse(cartItems as string),
-          paymentType: paymentType,
-          cashAmount: parseFloat(cashReceived),
-          receivablesAmount: Math.abs(calculateBalance()),
-        })
+  const saveInvoiceExtrasIfNeeded = () => {
+    if (extraFieldsEnabled && selectedFieldKeys.length > 0) {
+      const hasAnyValue = INVOICE_FIELD_OPTIONS.some(f =>
+        selectedFieldKeys.includes(f.key) && ((invoiceExtras as any)[f.field] || '').trim()
+      );
+      if (hasAnyValue) {
+        saleFlowBridge.setInvoiceExtras(invoiceExtras);
       }
+    }
+  };
+
+  const showPaymentConfirmation = () => {
+    saveInvoiceExtrasIfNeeded();
+    paymentDataBridge.setPaymentData({
+      method: 'cash',
+      amount: amount,
+      total: amount,
+      customer: customer,
+      cartItems: cartItemsArray,
+      paymentType: paymentType,
+      cashAmount: parseFloat(cashReceived) || 0,
+      receivablesAmount: Math.abs(calculateBalance()),
+      roundOffAmount: saleFlowBridge.getRoundOffAmount(),
     });
+    safeRouter.replace({ pathname: '/new-sale/success', params: {} } as any);
   };
 
   const handlePartPaymentConfirmation = () => {
-    // Navigate to success screen with part payment confirmation data
-    router.push({
-      pathname: '/new-sale/success',
-      params: {
-        paymentData: JSON.stringify({
-          method: 'mixed',
-          amount: amount,
-          total: amount, // Add total field for compatibility
-          customer: customer,
-          cartItems: JSON.parse(cartItems as string),
-          paymentType: 'part_payment',
-          cashAmount: parseFloat(cashReceived),
-          remainingAmount: Math.abs(calculateBalance()),
-          remainingMethod: selectedPaymentMethod,
-          remainingDetails: selectedPaymentMethod === 'upi' ? { method: 'UPI' } :
-                           selectedPaymentMethod === 'card' ? { method: 'Card' } :
-                           { method: 'Others' }
-        })
-      }
+    saveInvoiceExtrasIfNeeded();
+    paymentDataBridge.setPaymentData({
+      method: 'cash',
+      amount: amount,
+      total: amount,
+      customer: customer,
+      cartItems: cartItemsArray,
+      paymentType: 'part_payment',
+      cashAmount: parseFloat(cashReceived) || 0,
+      remainingAmount: Math.abs(calculateBalance()),
+      remainingMethod: selectedPaymentMethod,
+      roundOffAmount: saleFlowBridge.getRoundOffAmount(),
+      remainingDetails: selectedPaymentMethod === 'upi' ? { method: 'UPI' } :
+                       selectedPaymentMethod === 'card' ? { method: 'Card' } :
+                       { method: 'Others' }
     });
+    safeRouter.replace({ pathname: '/new-sale/success', params: {} } as any);
   };
 
   const generateUPIQRCode = () => {
@@ -283,10 +362,38 @@ export default function PaymentScreen() {
     }
   };
 
+  const [stockWarningShown, setStockWarningShown] = useState(false);
+
   const handleCompletePayment = () => {
+    if (isNavigating) return;
     if (!selectedPaymentMethod) {
       showError('Please select a payment method', 'Payment Method Required');
       return;
+    }
+
+    if (!stockWarningShown) {
+      const lowStockItems: string[] = [];
+      for (const cartItem of cartItemsArray) {
+        const product = productStore.getProductById?.(cartItem.id || cartItem.productId);
+        if (product) {
+          const currentStock = product.current_stock ?? product.currentStock ?? 0;
+          const cartQty = cartItem.quantity || 1;
+          if (cartQty > currentStock) {
+            lowStockItems.push(`${product.name || cartItem.name}: need ${cartQty}, have ${currentStock}`);
+          }
+        }
+      }
+      if (lowStockItems.length > 0) {
+        Alert.alert(
+          'Negative Stock Warning',
+          `The following items will go into negative stock:\n\n${lowStockItems.join('\n')}\n\nDo you want to continue?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Continue Anyway', style: 'destructive', onPress: () => { setStockWarningShown(true); handleCompletePayment(); } },
+          ]
+        );
+        return;
+      }
     }
 
     // Check if full invoice amount is received
@@ -322,6 +429,10 @@ export default function PaymentScreen() {
             showError('Please fill all cheque details', 'Cheque Details Required');
             return;
           }
+          if (validateDateDDMMYYYY(chequeDate)) {
+            showError(validateDateDDMMYYYY(chequeDate)!, 'Invalid Cheque Date');
+            return;
+          }
         }
       }
     }
@@ -330,9 +441,10 @@ export default function PaymentScreen() {
       method: selectedPaymentMethod,
       amount: amount,
       customer: customer,
-      cartItems: JSON.parse(cartItems as string),
+      cartItems: cartItemsArray,
       paymentType: paymentType,
-      total: amount, // Add total field for compatibility
+      total: amount,
+      roundOffAmount: saleFlowBridge.getRoundOffAmount(),
     };
 
     switch (selectedPaymentMethod) {
@@ -345,6 +457,10 @@ export default function PaymentScreen() {
         paymentData.balance = calculateBalance();
         break;
 
+      case 'upi':
+        paymentData.bankAccount = selectedBankAccount || primaryBankAccount?.id || undefined;
+        break;
+
       case 'card':
         if (!cardNumber) {
           showError('Please enter the payment reference number', 'Payment Reference Required');
@@ -354,6 +470,7 @@ export default function PaymentScreen() {
           referenceNumber: cardNumber,
           method: 'PoS Machine',
         };
+        paymentData.bankAccount = selectedBankAccount || primaryBankAccount?.id || undefined;
         break;
 
       case 'others':
@@ -382,6 +499,10 @@ export default function PaymentScreen() {
           }
           if (!chequeDate) {
             showError('Please enter cheque date', 'Cheque Date Required');
+            return;
+          }
+          if (validateDateDDMMYYYY(chequeDate)) {
+            showError(validateDateDDMMYYYY(chequeDate)!, 'Invalid Cheque Date');
             return;
           }
           if (!chequeBankName) {
@@ -417,44 +538,6 @@ export default function PaymentScreen() {
     }
 
     // Log payment completion
-    console.log('=== PAYMENT COMPLETED ===');
-    console.log('Payment Method:', selectedPaymentMethod);
-    console.log('Customer:', customer.name);
-    console.log('Customer Type:', customer.customerType);
-    console.log('Total Amount:', formatAmount(amount));
-    console.log('Items Count:', JSON.parse(cartItems as string).length);
-    console.log('Cash Received:', selectedPaymentMethod === 'cash' ? formatAmount(parseFloat(cashReceived)) : 'N/A');
-    console.log('Balance:', selectedPaymentMethod === 'cash' ? formatAmount(calculateBalance()) : 'N/A');
-    console.log('Payment Reference:', selectedPaymentMethod === 'card' ? cardNumber : 'N/A');
-    console.log('Others Method:', selectedPaymentMethod === 'others' ? selectedOthersMethod : 'N/A');
-    console.log('Bank Account:', selectedPaymentMethod === 'others' ? selectedBankAccount : 'N/A');
-    console.log('Cheque Number:', selectedPaymentMethod === 'others' && selectedOthersMethod === 'cheque' ? chequeNumber : 'N/A');
-    console.log('Cheque Date:', selectedPaymentMethod === 'others' && selectedOthersMethod === 'cheque' ? chequeDate : 'N/A');
-    console.log('Cheque Bank:', selectedPaymentMethod === 'others' && selectedOthersMethod === 'cheque' ? chequeBankName : 'N/A');
-    console.log('Auto Clear Cheque:', selectedPaymentMethod === 'others' && selectedOthersMethod === 'cheque' ? autoClearCheque : 'N/A');
-    console.log('Bank Transfer Reference:', selectedPaymentMethod === 'others' && selectedOthersMethod === 'bank_transfer' ? bankTransferReference : 'N/A');
-    
-    // Log part payment details
-    if (showPartPaymentOptions) {
-      console.log('Part Payment - Cash Amount:', formatAmount(parseFloat(cashReceived)));
-      console.log('Part Payment - Remaining Amount:', formatAmount(Math.abs(calculateBalance())));
-      console.log('Part Payment - Remaining Method:', selectedPaymentMethod);
-    }
-    
-    JSON.parse(cartItems as string).forEach((item: any, index: number) => {
-      console.log(`Item ${index + 1}:`);
-      console.log('  Product Name:', item.name);
-      console.log('  Quantity:', item.quantity);
-      console.log('  Unit Price:', formatAmount(item.price));
-      console.log('  Total:', formatAmount(item.price * item.quantity));
-      console.log('  Tax Rate:', item.taxRate + '%');
-      console.log('  HSN Code:', item.hsnCode);
-      console.log('  Batch Number:', item.batchNumber);
-      console.log('  Primary Unit:', item.primaryUnit);
-    });
-    console.log('Completed at:', new Date().toISOString());
-    console.log('========================');
-
     // Discard UPI QR code when payment is completed
     setUpiPaymentURL('');
     setShowUpiQR(false);
@@ -469,13 +552,14 @@ export default function PaymentScreen() {
     if (showPartPaymentOptions) {
       setShowPartPaymentConfirmation(true);
     } else {
-      // Navigate to success screen for full payments
+      setIsNavigating(true);
+      saveInvoiceExtrasIfNeeded();
+      paymentDataBridge.setPaymentData(paymentData);
       router.push({
         pathname: '/new-sale/success',
-        params: {
-          paymentData: JSON.stringify(paymentData),
-        }
+        params: {}
       });
+      setTimeout(() => setIsNavigating(false), 1500);
     }
   };
 
@@ -578,16 +662,74 @@ export default function PaymentScreen() {
         </View>
       </SafeAreaView>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Customer Info */}
-        <View style={styles.customerInfo}>
-          <Text style={styles.customerName}>{customer.name}</Text>
-          <Text style={styles.customerMobile}>{customer.mobile}</Text>
-        </View>
+        {/* Invoice Number Strip */}
+        {nextInvoiceNumber ? (
+          <View style={styles.invoiceStrip}>
+            <FileText size={14} color={Colors.primary} />
+            <Text style={styles.invoiceStripLabel}>Invoice:</Text>
+            <Text style={styles.invoiceStripNumber}>{nextInvoiceNumber}</Text>
+            <View style={{ flex: 1 }} />
+            <Text style={styles.customerNameSmall}>{customer.name}</Text>
+          </View>
+        ) : (
+          <View style={styles.customerInfo}>
+            <Text style={styles.customerName}>{customer.name}</Text>
+            <Text style={styles.customerMobile}>{customer.mobile}</Text>
+          </View>
+        )}
+
+        {/* Advanced Invoice Details */}
+        {extraFieldsEnabled && selectedFieldKeys.length > 0 && (
+          <View style={{ backgroundColor: '#FFF7ED', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1.5, borderColor: '#F59E0B' }}>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+              onPress={() => setShowExtraFields(!showExtraFields)}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: '#F59E0B', justifyContent: 'center', alignItems: 'center' }}>
+                  <FileText size={16} color="#fff" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#92400E' }}>Additional Invoice Details</Text>
+                  <Text style={{ fontSize: 11, color: '#B45309', marginTop: 1 }}>Tap to {showExtraFields ? 'collapse' : 'fill optional fields'}</Text>
+                </View>
+              </View>
+              {showExtraFields ? <ChevronUp size={20} color="#B45309" /> : <ChevronDown size={20} color="#B45309" />}
+            </TouchableOpacity>
+
+            {showExtraFields && (
+              <View style={{ marginTop: 12 }}>
+                {INVOICE_FIELD_OPTIONS.filter(f => selectedFieldKeys.includes(f.key)).map((opt) => (
+                  <View key={opt.key} style={{ marginBottom: 10 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '500', color: Colors.textLight, marginBottom: 4 }}>{opt.label}</Text>
+                    <TextInput
+                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.text, backgroundColor: Colors.grey[50] }}
+                      value={(invoiceExtras as any)[opt.field] || ''}
+                      onChangeText={(t) => {
+                        const val = opt.isDate ? autoFormatDateInput(t, '/') : t;
+                        setInvoiceExtras(prev => ({ ...prev, [opt.field]: val }));
+                      }}
+                      placeholder={opt.isDate ? 'DD/MM/YYYY' : `Enter ${opt.label.toLowerCase()}`}
+                      placeholderTextColor={Colors.textLight}
+                      keyboardType={opt.isDate ? 'numeric' : 'default'}
+                      maxLength={opt.isDate ? 10 : undefined}
+                    />
+                    {opt.isDate && (invoiceExtras as any)[opt.field]?.length === 10 && validateDateDDMMYYYY((invoiceExtras as any)[opt.field]) && (
+                      <Text style={{ fontSize: 11, color: Colors.error, marginTop: 2 }}>{validateDateDDMMYYYY((invoiceExtras as any)[opt.field])}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Payment Methods */}
         <View style={styles.paymentMethodsContainer}>
@@ -876,11 +1018,15 @@ export default function PaymentScreen() {
                     <TextInput
                       style={styles.input}
                       value={chequeDate}
-                      onChangeText={setChequeDate}
+                      onChangeText={(t) => setChequeDate(autoFormatDateInput(t, '/'))}
                       placeholder="DD/MM/YYYY"
                       placeholderTextColor={Colors.textLight}
+                      keyboardType="numeric"
                       maxLength={10}
                     />
+                    {chequeDate.length === 10 && validateDateDDMMYYYY(chequeDate) && (
+                      <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 2 }}>{validateDateDDMMYYYY(chequeDate)}</Text>
+                    )}
                   </View>
                 </View>
 
@@ -944,17 +1090,17 @@ export default function PaymentScreen() {
             <TouchableOpacity
               style={[
                 styles.completePaymentButton,
-                !selectedPaymentMethod && styles.disabledButton
+                (!selectedPaymentMethod || isNavigating) && styles.disabledButton
               ]}
               onPress={handleCompletePayment}
-              disabled={!selectedPaymentMethod}
+              disabled={!selectedPaymentMethod || isNavigating}
               activeOpacity={0.8}
             >
               <Text style={[
                 styles.completePaymentButtonText,
-                !selectedPaymentMethod && styles.disabledButtonText
+                (!selectedPaymentMethod || isNavigating) && styles.disabledButtonText
               ]}>
-                Complete Payment
+                {isNavigating ? 'Processing...' : 'Complete Payment'}
               </Text>
             </TouchableOpacity>
             
@@ -975,21 +1121,22 @@ export default function PaymentScreen() {
           <TouchableOpacity
             style={[
               styles.completeButton,
-              !selectedPaymentMethod && styles.disabledButton
+              (!selectedPaymentMethod || isNavigating) && styles.disabledButton
             ]}
             onPress={handleCompletePayment}
-            disabled={!selectedPaymentMethod}
+            disabled={!selectedPaymentMethod || isNavigating}
             activeOpacity={0.8}
           >
             <Text style={[
               styles.completeButtonText,
-              !selectedPaymentMethod && styles.disabledButtonText
+              (!selectedPaymentMethod || isNavigating) && styles.disabledButtonText
             ]}>
-              Complete Payment
+              {isNavigating ? 'Processing...' : 'Complete Payment'}
             </Text>
           </TouchableOpacity>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* UPI QR Code Modal */}
       <Modal
@@ -1038,7 +1185,7 @@ export default function PaymentScreen() {
                     style={styles.addBankAccountButton}
                     onPress={() => {
                       setShowUpiQR(false);
-                      router.push('/add-bank-account');
+                      safeRouter.push('/add-bank-account');
                     }}
                     activeOpacity={0.7}
                   >
@@ -1200,8 +1347,7 @@ export default function PaymentScreen() {
                     style={styles.addBankAccountButton}
                     onPress={() => {
                       setShowBankAccounts(false);
-                      // Navigate to add bank account screen
-                      router.push('/add-bank-account');
+                      safeRouter.push('/add-bank-account');
                     }}
                     activeOpacity={0.7}
                   >
@@ -1457,6 +1603,33 @@ const styles = StyleSheet.create({
   customerMobile: {
     fontSize: 14,
     color: Colors.textLight,
+  },
+  invoiceStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 20,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  invoiceStripLabel: {
+    fontSize: 12,
+    color: Colors.textLight,
+    fontWeight: '500',
+  },
+  invoiceStripNumber: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  customerNameSmall: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.text,
   },
   paymentMethodsContainer: {
     marginBottom: 24,

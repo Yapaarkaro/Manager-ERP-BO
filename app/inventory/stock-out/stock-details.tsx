@@ -7,16 +7,23 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Modal,
+  Alert,
+  Platform,
 } from 'react-native';
 import { showError, showInfo } from '@/utils/notifications';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { safeRouter } from '@/utils/safeRouter';
 import {
   ArrowLeft,
   Plus,
   Camera,
   FileText,
   Trash2,
+  Images,
+  X,
 } from 'lucide-react-native';
 
 const Colors = {
@@ -63,6 +70,8 @@ export default function StockDetailsScreen() {
   
   const [stockOutItems, setStockOutItems] = useState<StockOutItem[]>([]);
   const [notes, setNotes] = useState('');
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
+  const [activeImageProductId, setActiveImageProductId] = useState<string | null>(null);
 
   // Parse selected products
   const products: Product[] = selectedProducts ? JSON.parse(selectedProducts) : [];
@@ -108,17 +117,53 @@ export default function StockDetailsScreen() {
   };
 
   const handleAddProductProofImage = (productId: string) => {
-    showInfo('Camera or gallery would open here. For demo, we\'ll simulate adding an image.', 'Add Proof Image');
-    // Simulate adding image after a short delay
-    setTimeout(() => {
-      setStockOutItems(prev => 
-        prev.map(item => 
-          item.product.id === productId 
-            ? { ...item, proofImage: 'https://images.pexels.com/photos/788946/pexels-photo-788946.jpeg?auto=compress&cs=tinysrgb&w=150&h=150&dpr=1' }
+    setActiveImageProductId(productId);
+    setShowImagePickerModal(true);
+  };
+
+  const pickProofFromGallery = async () => {
+    setShowImagePickerModal(false);
+    const productId = activeImageProductId;
+    if (!productId) return;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to your photo library.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      setStockOutItems(prev =>
+        prev.map(item =>
+          item.product.id === productId
+            ? { ...item, proofImage: result.assets[0].uri }
             : item
         )
       );
-    }, 1000);
+    }
+  };
+
+  const takeProofPhoto = async () => {
+    setShowImagePickerModal(false);
+    const productId = activeImageProductId;
+    if (!productId) return;
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow camera access.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (!result.canceled && result.assets.length > 0) {
+      setStockOutItems(prev =>
+        prev.map(item =>
+          item.product.id === productId
+            ? { ...item, proofImage: result.assets[0].uri }
+            : item
+        )
+      );
+    }
   };
 
   const handleRemoveProductProofImage = (productId: string) => {
@@ -132,7 +177,7 @@ export default function StockDetailsScreen() {
   };
 
   const handleAddMoreItems = () => {
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-out/select-products',
       params: { reason }
     });
@@ -185,7 +230,7 @@ export default function StockDetailsScreen() {
       generalNotes: notes,
     };
 
-    router.push({
+    safeRouter.push({
       pathname: '/inventory/stock-out/confirmation',
       params: {
         stockOutData: JSON.stringify(stockOutData)
@@ -304,17 +349,20 @@ export default function StockDetailsScreen() {
           <ArrowLeft size={24} color={Colors.text} />
         </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Stock Out Details</Text>
+        <Text style={styles.headerTitle}>Write-Off Details</Text>
       </View>
 
       <ScrollView 
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={true}
+        bounces={true}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
       >
         {/* Reason Display */}
         <View style={styles.reasonContainer}>
-          <Text style={styles.reasonLabel}>Stock Out Reason:</Text>
+          <Text style={styles.reasonLabel}>Write-Off Reason:</Text>
           <Text style={styles.reasonText}>{reason}</Text>
         </View>
 
@@ -326,7 +374,7 @@ export default function StockDetailsScreen() {
           <Text style={styles.generalNotesLabel}>General Notes (Optional):</Text>
           <TextInput
             style={styles.generalNotesInput}
-            placeholder="Add general notes for this stock out..."
+            placeholder="Add general notes for this write-off..."
             placeholderTextColor={Colors.textLight}
             value={notes}
             onChangeText={setNotes}
@@ -356,6 +404,52 @@ export default function StockDetailsScreen() {
           <Text style={styles.continueButtonText}>Continue</Text>
         </TouchableOpacity>
       </View>
+      {/* Image Picker Modal */}
+      <Modal
+        visible={showImagePickerModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImagePickerModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Proof Image</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowImagePickerModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={24} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ padding: 20, gap: 12 }}>
+              <TouchableOpacity
+                style={styles.imagePickerOption}
+                onPress={takeProofPhoto}
+                activeOpacity={0.7}
+              >
+                <Camera size={24} color={Colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.imagePickerOptionTitle}>Take Photo</Text>
+                  <Text style={styles.imagePickerOptionSub}>Use camera to capture proof</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.imagePickerOption}
+                onPress={pickProofFromGallery}
+                activeOpacity={0.7}
+              >
+                <Images size={24} color={Colors.success} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.imagePickerOptionTitle}>Choose from Gallery</Text>
+                  <Text style={styles.imagePickerOptionSub}>Select an existing photo</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -392,7 +486,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingVertical: 20,
+    paddingTop: 20,
+    paddingBottom: 200,
   },
   reasonContainer: {
     paddingHorizontal: 16,
@@ -683,4 +778,64 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.background,
   },
-}); 
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalContainer: {
+    backgroundColor: Colors.background,
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.grey[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    backgroundColor: Colors.grey[50],
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  imagePickerOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  imagePickerOptionSub: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginTop: 2,
+  },
+});

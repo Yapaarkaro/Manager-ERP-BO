@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { safeRouter } from '@/utils/safeRouter';
 import { getCampaigns } from '@/services/backendApi';
 import { 
   ArrowLeft, 
@@ -154,7 +155,7 @@ export default function MarketingScreen() {
   };
 
   const handleCampaignPress = (campaign: MarketingCampaign) => {
-    router.push({
+    safeRouter.push({
       pathname: '/marketing/campaign-details',
       params: {
         campaignId: campaign.id,
@@ -164,7 +165,7 @@ export default function MarketingScreen() {
   };
 
   const handleAddCampaign = () => {
-    router.push('/marketing/add-campaign');
+    safeRouter.push('/marketing/add-campaign');
   };
 
   const getStatusColor = (status: string) => {

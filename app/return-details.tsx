@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,18 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle } from 'lucide-react-native';
+import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink } from 'lucide-react-native';
+import { useBusinessData } from '@/hooks/useBusinessData';
+import { formatQty } from '@/utils/formatters';
+import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
+import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
+import { safeRouter } from '@/utils/safeRouter';
+import { supabase } from '@/lib/supabase';
+import { getReturnById } from '@/services/backendApi';
 
 const Colors = {
   background: '#FFFFFF',
@@ -41,16 +49,122 @@ interface ReturnItem {
 
 export default function ReturnDetailsScreen() {
   const { returnId, returnData } = useLocalSearchParams();
-  let returnInvoice: any = {};
-  try { returnInvoice = returnData ? JSON.parse(returnData as string) : {}; } catch { returnInvoice = {}; }
+  const { data: businessData } = useBusinessData();
+  let parsedReturn: any = {};
+  try { parsedReturn = returnData ? JSON.parse(returnData as string) : {}; } catch { parsedReturn = {}; }
+
+  const [returnInvoice, setReturnInvoice] = useState<any>(parsedReturn);
+  const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
+  const [isLoadingItems, setIsLoadingItems] = useState(true);
+
   const customer = returnInvoice?.customerDetails;
   const isBusinessCustomer = returnInvoice?.customerType === 'business';
 
-  const returnItems: ReturnItem[] = [];
+  const mapItems = (rawItems: any[]): ReturnItem[] =>
+    rawItems.map((item: any, idx: number) => {
+      const qty = Number(item.quantity) || 0;
+      const unitPrice = Number(item.rate || item.unit_price || item.unitPrice) || 0;
+      const totalPrice = Number(item.total_price || item.totalPrice || item.amount) || (unitPrice * qty);
+      const taxAmt = Number(item.taxAmount || item.tax_amount) || 0;
+      let taxRate = Number(item.taxRate || item.tax_rate) || 0;
+      if (taxRate === 0 && taxAmt > 0 && totalPrice > taxAmt) {
+        taxRate = Math.round((taxAmt / (totalPrice - taxAmt)) * 100);
+      }
+      const preTaxAmount = totalPrice - taxAmt > 0 ? totalPrice - taxAmt : unitPrice * qty;
 
-  const subtotal = returnItems.reduce((sum, item) => sum + item.amount, 0);
+      return {
+        id: item.id || `return-item-${idx}`,
+        name: item.name || item.product_name || item.productName || '',
+        quantity: qty,
+        rate: unitPrice,
+        amount: preTaxAmount,
+        taxRate,
+        taxAmount: taxAmt,
+        total: totalPrice > 0 ? totalPrice : preTaxAmount + taxAmt,
+        reason: item.reason || '',
+      };
+    });
+
+  useEffect(() => {
+    const loadReturnData = async () => {
+      setIsLoadingItems(true);
+      const resolvedId = Array.isArray(returnId) ? returnId[0] : returnId;
+
+      const paramItems = parsedReturn?.items || parsedReturn?.returnItems || [];
+      if (paramItems.length > 0) {
+        setReturnItems(mapItems(paramItems));
+        setIsLoadingItems(false);
+        return;
+      }
+
+      if (!resolvedId) {
+        setIsLoadingItems(false);
+        return;
+      }
+
+      try {
+        let foundItems: any[] = [];
+
+        try {
+          const efResult = await getReturnById(resolvedId);
+          if (efResult.success && efResult.returnData) {
+            const r = efResult.returnData;
+            setReturnInvoice((prev: any) => ({
+              ...prev,
+              id: r.id || prev.id,
+              returnNumber: r.return_number || prev.returnNumber || '',
+              originalInvoiceId: r.original_invoice_id || prev.originalInvoiceId || '',
+              originalInvoiceNumber: r.original_invoice_number || prev.originalInvoiceNumber || '',
+              customerName: r.customer_name || prev.customerName || '',
+              customerType: r.customer_type || prev.customerType || 'individual',
+              customerId: r.customer_id || prev.customerId || '',
+              staffName: r.staff_name || prev.staffName || '',
+              date: r.return_date || r.created_at || prev.date || '',
+              amount: parseFloat(r.total_amount) || prev.amount || 0,
+              refundStatus: r.refund_status || prev.refundStatus || 'pending',
+              refundMethod: r.refund_method || prev.refundMethod || '',
+              reason: r.reason || prev.reason || '',
+              returnType: r.return_type || prev.returnType || 'customer',
+              supplierName: r.supplier_name || prev.supplierName || '',
+            }));
+            foundItems = efResult.items || [];
+          }
+        } catch (e) {
+          console.warn('Edge function for return failed:', e);
+        }
+
+        // Fallback: Query return_items table directly if edge function failed
+        if (foundItems.length === 0) {
+          try {
+            const { data: returnItemRows } = await supabase
+              .from('return_items')
+              .select('*')
+              .eq('return_id', resolvedId)
+              .eq('is_deleted', false);
+            if (returnItemRows && returnItemRows.length > 0) {
+              foundItems = returnItemRows;
+            }
+          } catch (e) {
+            console.warn('Direct return_items query failed:', e);
+          }
+        }
+
+        if (foundItems.length > 0) {
+          setReturnItems(mapItems(foundItems));
+        }
+      } catch (error) {
+        console.warn('Error loading return data:', error);
+      } finally {
+        setIsLoadingItems(false);
+      }
+    };
+
+    loadReturnData();
+  }, [returnId]);
+
+  const subtotal = returnItems.reduce((sum, item) => sum + item.amount, 0) || Number(returnInvoice.amount) || 0;
   const totalTax = returnItems.reduce((sum, item) => sum + item.taxAmount, 0);
-  const grandTotal = subtotal + totalTax;
+  const grandTotal = subtotal + totalTax || Number(returnInvoice.totalAmount) || subtotal;
 
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -95,41 +209,89 @@ export default function ReturnDetailsScreen() {
     }
   };
 
-  const handleDownload = () => {
-    Alert.alert('Download', 'Return invoice download functionality will be implemented');
+  const buildReturnPDFData = (): InvoicePDFData => {
+    const bizAddr = businessData?.addresses?.[0];
+    return {
+      type: 'return',
+      invoiceNumber: returnInvoice.returnNumber || returnInvoice.return_number || returnInvoice.id || '',
+      invoiceDate: returnInvoice.date || returnInvoice.return_date || new Date().toISOString(),
+      business: {
+        name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
+        address: bizAddr ? [bizAddr.address_line1, bizAddr.city, bizAddr.state, bizAddr.pincode].filter(Boolean).join(', ') : '',
+        gstin: businessData?.business?.tax_id || '',
+        phone: businessData?.business?.phone,
+      },
+      customer: customer ? {
+        name: customer.name || returnInvoice.customerName || '',
+        address: customer.address,
+        gstin: customer.gstin,
+        phone: customer.mobile,
+        isBusinessCustomer,
+      } : undefined,
+      items: returnItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        rate: item.rate,
+        taxRate: item.taxRate,
+        taxAmount: item.taxAmount,
+        total: item.total,
+        reason: item.reason,
+      })),
+      subtotal,
+      taxAmount: totalTax,
+      totalAmount: grandTotal,
+      paymentStatus: returnInvoice.refundStatus || 'pending',
+      notes: returnInvoice.notes,
+      staffName: returnInvoice.staffName || returnInvoice.staff_name,
+      invoiceId: returnInvoice.id,
+      businessId: businessData?.business?.id,
+    };
+  };
+
+  const handleDownload = async () => {
+    try {
+      const pdfData = buildReturnPDFData();
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, pdfData.invoiceNumber);
+    } catch (error: any) {
+      Alert.alert('Download Failed', error.message || 'Could not generate PDF');
+    }
   };
 
   const handleShare = () => {
-    Alert.alert('Share', 'Return invoice sharing functionality will be implemented');
+    const pdfData = buildReturnPDFData();
+    showShareOptions({
+      invoiceNumber: returnInvoice.returnNumber || returnInvoice.id || '',
+      invoiceId: returnInvoice.id,
+      businessId: businessData?.business?.id,
+      invoiceType: 'return',
+      invoicePdfData: pdfData,
+    });
   };
 
-  const handlePrint = () => {
-    Alert.alert('Print', 'Return invoice printing functionality will be implemented');
+  const handlePrint = async () => {
+    try {
+      const pdfData = buildReturnPDFData();
+      await printInvoice(pdfData);
+    } catch (error: any) {
+      Alert.alert('Print Failed', error.message || 'Could not print invoice');
+    }
   };
 
   const handleViewOriginalInvoice = () => {
-    const originalInvoice = {
-      id: returnInvoice.originalInvoiceNumber?.replace('INV-', '') || '',
-      invoiceNumber: returnInvoice.originalInvoiceNumber || '',
-      customerName: returnInvoice.customerName || '',
-      customerType: returnInvoice.customerType || 'individual',
-      staffName: returnInvoice.staffName || '',
-      staffAvatar: returnInvoice.staffAvatar || '',
-      paymentStatus: 'paid',
-      amount: returnInvoice.amount || 0,
-      itemCount: returnInvoice.itemCount || 0,
-      date: returnInvoice.date || '',
-      customerDetails: returnInvoice.customerDetails || {},
-    };
+    const origId = returnInvoice.originalInvoiceId
+      || returnInvoice.original_invoice_id
+      || returnInvoice.originalInvoice?.id
+      || '';
 
-    router.push({
-      pathname: '/invoice-details',
-      params: {
-        invoiceId: originalInvoice.id,
-        invoiceData: JSON.stringify(originalInvoice),
-        fromReturn: 'true'
-      }
-    });
+    if (origId) {
+      safeRouter.push({
+        pathname: '/invoice-details',
+        params: { invoiceId: origId, fromReturn: 'true' }
+      });
+    } else {
+      Alert.alert('Original Invoice', 'Could not find the original invoice ID.');
+    }
   };
 
   return (
@@ -252,135 +414,129 @@ export default function ReturnDetailsScreen() {
           </View>
         </View>
 
-        {/* IRN & Acknowledgment Section */}
-        <View style={styles.irnSection}>
-          <Text style={styles.sectionTitle}>E-Invoice Details</Text>
-          
-          <View style={styles.irnCard}>
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>IRN (Invoice Reference Number):</Text>
-              <Text style={styles.irnValue}>
-                98765432109876543210987654321098765432109876543210987654321098765
-              </Text>
-            </View>
+        {/* E-Invoice Details — only when data exists */}
+        {!!(returnInvoice.irn || returnInvoice.acknowledgmentNumber) && (
+          <View style={styles.irnSection}>
+            <Text style={styles.sectionTitle}>E-Invoice Details</Text>
             
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>Acknowledgment Number:</Text>
-              <Text style={styles.irnValue}>112410600000686</Text>
-            </View>
-            
-            <View style={styles.irnRow}>
-              <Text style={styles.irnLabel}>Acknowledgment Date:</Text>
-              <Text style={styles.irnValue}>{formatDate(returnInvoice.date)} 15:45:30</Text>
+            <View style={styles.irnCard}>
+              {returnInvoice.irn ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>IRN (Invoice Reference Number):</Text>
+                  <Text style={styles.irnValue}>{returnInvoice.irn}</Text>
+                </View>
+              ) : null}
+              
+              {returnInvoice.acknowledgmentNumber ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>Acknowledgment Number:</Text>
+                  <Text style={styles.irnValue}>{returnInvoice.acknowledgmentNumber}</Text>
+                </View>
+              ) : null}
+              
+              {returnInvoice.acknowledgmentDate ? (
+                <View style={styles.irnRow}>
+                  <Text style={styles.irnLabel}>Acknowledgment Date:</Text>
+                  <Text style={styles.irnValue}>{formatDate(returnInvoice.acknowledgmentDate)}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Business Details */}
-        <View style={styles.businessSection}>
-          <Text style={styles.sectionTitle}>Business Details</Text>
-          
-          <View style={styles.businessCard}>
-            <View style={styles.businessHeader}>
-              <Building2 size={24} color={Colors.primary} />
-              <Text style={styles.businessName}>ABC Electronics Pvt Ltd</Text>
-            </View>
+        {/* Return From/To — Customer/Supplier Details */}
+        {customer && (
+          <View style={styles.customerSection}>
+            <Text style={styles.sectionTitle}>
+              {(returnInvoice?.returnType === 'supplier' || returnInvoice?.return_type === 'supplier') ? 'Return To' : 'Return From'}
+            </Text>
             
-            <View style={styles.businessDetails}>
-              <View style={styles.businessRow}>
-                <MapPin size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>
-                  123, Electronic City, Phase 1, Bangalore, Karnataka - 560100
+            <View style={styles.customerCard}>
+              <View style={styles.billToHeader}>
+                <User size={20} color={Colors.error} />
+                <Text style={styles.customerName}>
+                  {isBusinessCustomer && customer.businessName ? customer.businessName : (customer.name || returnInvoice.customerName || '')}
                 </Text>
               </View>
-              
-              <View style={styles.businessRow}>
-                <Hash size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>GSTIN: 29ABCDE1234F1Z5</Text>
-              </View>
-              
-              <View style={styles.businessRow}>
-                <Phone size={16} color={Colors.textLight} />
-                <Text style={styles.businessText}>+91 80 1234 5678</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+              {isBusinessCustomer && customer.name && customer.businessName && customer.name !== customer.businessName && (
+                <Text style={styles.contactPerson}>{customer.name}</Text>
+              )}
+              {isBusinessCustomer && customer.gstin ? (
+                <View style={styles.billToRow}>
+                  <Hash size={14} color={Colors.textLight} />
+                  <Text style={styles.customerGstin}>GSTIN: {customer.gstin}</Text>
+                </View>
+              ) : null}
+              {customer.mobile ? (
+                <View style={styles.billToRow}>
+                  <Phone size={14} color={Colors.textLight} />
+                  <Text style={styles.billToText}>{customer.mobile}</Text>
+                </View>
+              ) : null}
+              {customer.address ? (
+                <View style={styles.billToRow}>
+                  <MapPin size={14} color={Colors.textLight} />
+                  <Text style={styles.billToText}>{customer.address}</Text>
+                </View>
+              ) : null}
 
-        {/* Customer Details */}
-        <View style={styles.customerSection}>
-          <Text style={styles.sectionTitle}>Return To</Text>
-          
-          <View style={styles.customerCard}>
-            <Text style={styles.customerName}>
-              {isBusinessCustomer ? customer.businessName : customer.name}
-            </Text>
-            {isBusinessCustomer && customer.gstin && (
-              <Text style={styles.customerGstin}>GSTIN: {customer.gstin}</Text>
-            )}
-            {!isBusinessCustomer && (
-              <Text style={styles.contactPerson}>Contact: {customer.name}</Text>
-            )}
-            <Text style={styles.customerDetails}>
-              Mobile: {customer.mobile}{'\n'}
-              Address: {customer.address}
-            </Text>
-            {isBusinessCustomer && customer.paymentTerms && (
-              <View style={styles.paymentTermsSection}>
-                <Text style={styles.paymentTermsLabel}>Payment Terms:</Text>
-                <Text style={styles.paymentTermsValue}>{customer.paymentTerms}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Ship To Address (only for business customers with different shipping address) */}
-        {isBusinessCustomer && customer.shipToAddress && customer.shipToAddress.trim() !== '' && customer.shipToAddress !== customer.address && (
-          <View style={styles.shipToSection}>
-            <Text style={styles.sectionTitle}>Ship To</Text>
-            
-            <View style={styles.shipToCard}>
-              <Text style={styles.shipToName}>
-                {customer.businessName}
-              </Text>
-              <Text style={styles.shipToDetails}>
-                Address: {customer.shipToAddress}
-              </Text>
+              {(returnInvoice?.customerId || returnInvoice?.customer_id) && (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.grey[100] }}
+                  onPress={() => safeRouter.push(`/people/customer-details?customerId=${returnInvoice.customerId || returnInvoice.customer_id}` as any)}
+                  activeOpacity={0.7}
+                >
+                  <ExternalLink size={15} color={Colors.primary} />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.primary }}>View Customer Details</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
 
         {/* Return Items */}
         <View style={styles.itemsSection}>
-          <Text style={styles.sectionTitle}>Returned Items</Text>
+          <Text style={styles.sectionTitle}>Returned Items ({returnItems.length})</Text>
           
-          <View style={styles.itemsTable}>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderText, styles.itemNameHeader]}>Item</Text>
-              <Text style={[styles.tableHeaderText, styles.qtyHeader]}>Qty</Text>
-              <Text style={[styles.tableHeaderText, styles.rateHeader]}>Rate</Text>
-              <Text style={[styles.tableHeaderText, styles.amountHeader]}>Amount</Text>
+          {isLoadingItems ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={{ marginTop: 8, fontSize: 13, color: Colors.textLight }}>Loading items...</Text>
             </View>
-            
-            {/* Table Rows */}
-            {returnItems.map((item) => (
-              <View key={item.id} style={styles.tableRow}>
-                <View style={styles.itemNameCell}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemTax}>GST @ {item.taxRate}%</Text>
-                  <Text style={styles.itemReason}>Reason: {item.reason}</Text>
-                </View>
-                <Text style={[styles.tableCellText, styles.qtyCell]}>{item.quantity}</Text>
-                <Text style={[styles.tableCellText, styles.rateCell]}>
-                  {formatAmount(item.rate)}
-                </Text>
-                <Text style={[styles.tableCellText, styles.amountCell]}>
-                  {formatAmount(item.total)}
-                </Text>
+          ) : returnItems.length === 0 ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <Package size={24} color={Colors.textLight} />
+              <Text style={{ marginTop: 8, fontSize: 13, color: Colors.textLight }}>No items found</Text>
+            </View>
+          ) : (
+            <View style={styles.itemsTable}>
+              {/* Table Header */}
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderText, styles.itemNameHeader]}>Item</Text>
+                <Text style={[styles.tableHeaderText, styles.qtyHeader]}>Qty</Text>
+                <Text style={[styles.tableHeaderText, styles.rateHeader]}>Rate</Text>
+                <Text style={[styles.tableHeaderText, styles.amountHeader]}>Amount</Text>
               </View>
-            ))}
-          </View>
+              
+              {/* Table Rows */}
+              {returnItems.map((item) => (
+                <View key={item.id} style={styles.tableRow}>
+                  <View style={styles.itemNameCell}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    <Text style={styles.itemTax}>GST @ {item.taxRate}%</Text>
+                    {item.reason ? <Text style={styles.itemReason}>Reason: {item.reason}</Text> : null}
+                  </View>
+                  <Text style={[styles.tableCellText, styles.qtyCell]}>{formatQty(item.quantity)}</Text>
+                  <Text style={[styles.tableCellText, styles.rateCell]}>
+                    {formatAmount(item.rate)}
+                  </Text>
+                  <Text style={[styles.tableCellText, styles.amountCell]}>
+                    {formatAmount(item.total)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Refund Summary */}
@@ -431,10 +587,10 @@ export default function ReturnDetailsScreen() {
             
             <View style={styles.refundDetails}>
               <Text style={styles.refundDetailText}>
-                {returnInvoice.refundStatus === 'refunded' 
-                  ? `Refund processed on ${formatDate(returnInvoice.date)} at 15:45`
+              {returnInvoice.refundStatus === 'refunded'
+                  ? `Refund processed on ${formatDate(returnInvoice.date)}`
                   : returnInvoice.refundStatus === 'partially_refunded'
-                  ? `Partial refund of ${formatAmount(grandTotal * 0.6)} processed`
+                  ? `Partial refund of ${formatAmount(Number(returnInvoice.paidAmount) || 0)} processed`
                   : 'Refund processing pending'
                 }
               </Text>
@@ -447,8 +603,19 @@ export default function ReturnDetailsScreen() {
           <Text style={styles.sectionTitle}>Processed By</Text>
           
           <View style={styles.staffCard}>
-            <Text style={styles.staffName}>{returnInvoice.staffName}</Text>
-            <Text style={styles.staffRole}>Sales Executive</Text>
+            <View style={styles.staffRow}>
+              <View style={styles.staffAvatar}>
+                <User size={18} color={Colors.error} />
+              </View>
+              <View style={styles.staffInfo}>
+                <Text style={styles.staffName}>
+                  {returnInvoice.staffName || returnInvoice.staff_name || businessData?.business?.owner_name || 'N/A'}
+                </Text>
+                <Text style={styles.staffRole}>
+                  {(returnInvoice.staffName || returnInvoice.staff_name) ? 'Staff' : (businessData?.business?.owner_name ? 'Owner' : '')}
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -655,114 +822,54 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     lineHeight: 20,
   },
-  businessSection: {
-    marginBottom: 16,
-  },
-  businessCard: {
-    backgroundColor: Colors.background,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-  },
-  businessHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  businessName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.text,
-    marginLeft: 12,
-  },
-  businessDetails: {
-    gap: 8,
-  },
-  businessRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  businessText: {
-    fontSize: 14,
-    color: Colors.textLight,
-    flex: 1,
-    lineHeight: 20,
-  },
   customerSection: {
     marginBottom: 16,
   },
   customerCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
   },
+  billToHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
   customerName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: Colors.text,
-    marginBottom: 8,
+    flex: 1,
   },
   customerGstin: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: Colors.primary,
-    marginBottom: 8,
     fontFamily: 'monospace',
   },
   contactPerson: {
     fontSize: 14,
     color: Colors.textLight,
-    marginBottom: 8,
+    marginBottom: 6,
+    marginLeft: 30,
   },
-  customerDetails: {
-    fontSize: 14,
-    color: Colors.textLight,
-    lineHeight: 20,
-  },
-  paymentTermsSection: {
+  billToRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 6,
+    marginLeft: 30,
   },
-  paymentTermsLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginRight: 8,
-  },
-  paymentTermsValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#3f66ac',
-  },
-  shipToSection: {
-    marginBottom: 16,
-  },
-  shipToCard: {
-    backgroundColor: '#fff7ed',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#fed7aa',
-  },
-  shipToName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  shipToDetails: {
+  billToText: {
     fontSize: 14,
-    color: Colors.textLight,
+    color: Colors.text,
+    flex: 1,
     lineHeight: 20,
   },
   itemsSection: {
@@ -936,18 +1043,34 @@ const styles = StyleSheet.create({
   staffCard: {
     backgroundColor: Colors.grey[50],
     borderRadius: 12,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+  },
+  staffRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  staffAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.grey[200],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  staffInfo: {
+    flex: 1,
   },
   staffName: {
     fontSize: 16,
     fontWeight: '600',
     color: Colors.text,
-    marginBottom: 4,
   },
   staffRole: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textLight,
+    marginTop: 2,
   },
 });

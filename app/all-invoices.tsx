@@ -1,20 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  FlatList,
   TextInput,
   Image,
-  Modal,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { getInvoices } from '@/services/backendApi';
+import { getInvoices, getReturns, getPurchaseInvoices, invalidateApiCache } from '@/services/backendApi';
+import { ListSkeleton } from '@/components/SkeletonLoader';
+import ExportModal from '@/components/ExportModal';
+import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
 import { 
   ArrowLeft, 
@@ -26,13 +30,10 @@ import {
   FileText,
   User,
   Building2,
-  Calendar,
   Banknote,
   Smartphone,
   CreditCard,
   IndianRupee,
-  ChevronDown,
-  X,
   Search,
   Filter,
   Plus
@@ -72,7 +73,7 @@ interface Invoice {
   supplierName?: string;
 }
 
-type TimeRange = 'today' | 'week' | 'month' | 'custom';
+// TimeRange type imported from DateFilterBar
 
 function mapPaymentStatus(dbStatus: string): 'paid' | 'partially_paid' | 'pending' {
   if (dbStatus === 'paid') return 'paid';
@@ -86,80 +87,129 @@ export default function AllInvoicesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState<Invoice[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns' | 'purchases'>('all');
-  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('today');
-  const [showTimeRangeModal, setShowTimeRangeModal] = useState(false);
+  const [selectedTimeRange, setSelectedTimeRange] = useState<TimeRange>('month');
+  const [showExportModal, setShowExportModal] = useState(false);
   const [customFromDate, setCustomFromDate] = useState('');
   const [customToDate, setCustomToDate] = useState('');
   const [isNavigating, setIsNavigating] = useState(false);
   const [showFABMenu, setShowFABMenu] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   
   // Use debounced navigation for FAB buttons
   const debouncedNavigate = useDebounceNavigation(500);
 
-  useEffect(() => {
-    (async () => {
-      const { success, invoices } = await getInvoices();
-      if (success && invoices) {
-        const mapped: Invoice[] = invoices.map((inv: any) => {
-          const invoiceDate = inv.invoice_date ? new Date(inv.invoice_date) : new Date();
-          const dateStr = invoiceDate.toISOString().split('T')[0];
-          const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-          return {
-            id: inv.id,
-            invoiceNumber: inv.invoice_number ?? '',
-            customerName: inv.customer_name ?? '',
-            customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
-            staffName: inv.staff_name ?? '',
-            staffAvatar: 'https://via.placeholder.com/40',
-            paymentStatus: mapPaymentStatus(inv.payment_status ?? 'unpaid'),
-            paymentMethod: (inv.payment_method ?? 'others') as 'cash' | 'upi' | 'card' | 'others',
-            amount: Number(inv.total_amount ?? 0),
-            itemCount: 0,
-            date: dateStr,
-            time: timeStr,
-            status: 'sale' as const,
-          };
+  const loadAllTransactions = useCallback(async () => {
+    const allMapped: Invoice[] = [];
+
+    const [salesResult, returnsResult, purchasesResult] = await Promise.allSettled([
+      getInvoices(),
+      getReturns(),
+      getPurchaseInvoices(),
+    ]);
+
+    // Map sales invoices
+    if (salesResult.status === 'fulfilled' && salesResult.value.success && salesResult.value.invoices) {
+      salesResult.value.invoices.forEach((inv: any) => {
+        const invoiceDate = inv.invoice_date ? new Date(inv.invoice_date) : new Date();
+        const dateStr = invoiceDate.toISOString().split('T')[0];
+        const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        allMapped.push({
+          id: inv.id,
+          invoiceNumber: inv.invoice_number ?? '',
+          customerName: inv.customer_name ?? '',
+          customerType: (inv.customer_type === 'business' ? 'business' : 'individual') as 'individual' | 'business',
+          staffName: inv.staff_name || '',
+          staffAvatar: '',
+          paymentStatus: mapPaymentStatus(inv.payment_status ?? 'unpaid'),
+          paymentMethod: (inv.payment_method ?? 'others') as 'cash' | 'upi' | 'card' | 'others',
+          amount: Number(inv.total_amount ?? 0),
+          itemCount: inv.item_count || 0,
+          date: dateStr,
+          time: timeStr,
+          status: 'sale' as const,
         });
-        setAllInvoices(mapped);
-      }
-    })();
+      });
+    }
+
+    // Map returns
+    if (returnsResult.status === 'fulfilled' && returnsResult.value.success && returnsResult.value.returns) {
+      returnsResult.value.returns.forEach((ret: any) => {
+        const returnDate = ret.return_date || ret.created_at ? new Date(ret.return_date || ret.created_at) : new Date();
+        const dateStr = returnDate.toISOString().split('T')[0];
+        const timeStr = returnDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        allMapped.push({
+          id: ret.id,
+          invoiceNumber: ret.return_number ?? '',
+          customerName: ret.customer_name ?? '',
+          customerType: 'individual' as const,
+          staffName: ret.staff_name || '',
+          staffAvatar: '',
+          paymentStatus: ret.refund_status === 'refunded' ? 'paid' : 'pending',
+          paymentMethod: (ret.refund_method ?? 'others') as 'cash' | 'upi' | 'card' | 'others',
+          amount: Number(ret.refund_amount ?? ret.total_amount ?? 0),
+          itemCount: ret.item_count || 0,
+          date: dateStr,
+          time: timeStr,
+          status: 'return' as const,
+          originalInvoice: ret.original_invoice_number ?? '',
+        });
+      });
+    }
+
+    // Map purchase invoices
+    if (purchasesResult.status === 'fulfilled' && purchasesResult.value.success && purchasesResult.value.invoices) {
+      purchasesResult.value.invoices.forEach((inv: any) => {
+        const invoiceDate = inv.invoice_date || inv.created_at ? new Date(inv.invoice_date || inv.created_at) : new Date();
+        const dateStr = invoiceDate.toISOString().split('T')[0];
+        const timeStr = invoiceDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        allMapped.push({
+          id: inv.id,
+          invoiceNumber: inv.invoice_number ?? '',
+          customerName: inv.supplier_name ?? '',
+          customerType: 'business' as const,
+          staffName: inv.staff_name || '',
+          staffAvatar: '',
+          paymentStatus: mapPaymentStatus(inv.payment_status ?? 'unpaid'),
+          paymentMethod: (inv.payment_method ?? 'others') as 'cash' | 'upi' | 'card' | 'others',
+          amount: Number(inv.total_amount ?? 0),
+          itemCount: inv.item_count || 0,
+          date: dateStr,
+          time: timeStr,
+          status: 'purchase' as const,
+          supplierName: inv.supplier_name ?? '',
+        });
+      });
+    }
+
+    // Sort by date descending
+    allMapped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    setAllInvoices(allMapped);
   }, []);
 
   useEffect(() => {
-    applyFilters(searchQuery, selectedFilter, selectedTimeRange);
-  }, [allInvoices, searchQuery, selectedFilter, selectedTimeRange, customFromDate, customToDate]);
+    (async () => {
+      await loadAllTransactions();
+      setIsLoading(false);
+    })();
+  }, [loadAllTransactions]);
 
-  const timeRangeOptions = [
-    { value: 'today', label: 'Today' },
-    { value: 'week', label: 'This Week' },
-    { value: 'month', label: 'This Month' },
-    { value: 'custom', label: 'Custom Range' },
-  ];
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateApiCache();
+    loadAllTransactions().catch(e => console.error('Refresh failed:', e));
+    setTimeout(() => setRefreshing(false), 600);
+  }, [loadAllTransactions]);
+
+  // filtering handled by the useEffect with filterByDateRange
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    applyFilters(query, selectedFilter, selectedTimeRange);
   };
 
   const handleFilterChange = (filter: typeof selectedFilter) => {
     setSelectedFilter(filter);
-    applyFilters(searchQuery, filter, selectedTimeRange);
-  };
-
-  const handleTimeRangeChange = (timeRange: TimeRange) => {
-    setSelectedTimeRange(timeRange);
-    if (timeRange !== 'custom') {
-      setShowTimeRangeModal(false);
-      applyFilters(searchQuery, selectedFilter, timeRange);
-    }
-  };
-
-  const applyCustomDateRange = () => {
-    if (!customFromDate || !customToDate) {
-      return;
-    }
-    setShowTimeRangeModal(false);
-    applyFilters(searchQuery, selectedFilter, 'custom');
   };
 
   const handleNewSalePress = () => {
@@ -189,60 +239,31 @@ export default function AllInvoicesScreen() {
     setTimeout(() => setIsNavigating(false), 1000);
   };
 
-  const applyFilters = (query: string, filter: typeof selectedFilter, timeRange: TimeRange) => {
+  useEffect(() => {
     let filtered = allInvoices;
 
-    // Apply search filter
-    if (query.trim() !== '') {
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase();
       filtered = filtered.filter(invoice =>
-        invoice.invoiceNumber.toLowerCase().includes(query.toLowerCase()) ||
-        invoice.customerName.toLowerCase().includes(query.toLowerCase()) ||
-        invoice.staffName.toLowerCase().includes(query.toLowerCase())
+        invoice.invoiceNumber.toLowerCase().includes(q) ||
+        invoice.customerName.toLowerCase().includes(q) ||
+        invoice.staffName.toLowerCase().includes(q)
       );
     }
 
-    // Apply status filter
-    if (filter !== 'all') {
+    if (selectedFilter !== 'all') {
       filtered = filtered.filter(invoice => {
-        if (filter === 'sales') return invoice.status === 'sale';
-        if (filter === 'returns') return invoice.status === 'return';
-        if (filter === 'purchases') return invoice.status === 'purchase';
+        if (selectedFilter === 'sales') return invoice.status === 'sale';
+        if (selectedFilter === 'returns') return invoice.status === 'return';
+        if (selectedFilter === 'purchases') return invoice.status === 'purchase';
         return true;
       });
     }
 
-    // Apply time range filter
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    
-    filtered = filtered.filter(invoice => {
-      const invoiceDate = new Date(invoice.date);
-      
-      switch (timeRange) {
-        case 'today':
-          return invoice.date === todayStr;
-        case 'week':
-          const weekAgo = new Date(today);
-          weekAgo.setDate(today.getDate() - 7);
-          return invoiceDate >= weekAgo && invoiceDate <= today;
-        case 'month':
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(today.getMonth() - 1);
-          return invoiceDate >= monthAgo && invoiceDate <= today;
-        case 'custom':
-          if (customFromDate && customToDate) {
-            const fromDate = new Date(customFromDate);
-            const toDate = new Date(customToDate);
-            return invoiceDate >= fromDate && invoiceDate <= toDate;
-          }
-          return true;
-        default:
-          return true;
-      }
-    });
+    filtered = filterByDateRange(filtered, (inv) => inv.date, selectedTimeRange, customFromDate, customToDate);
 
     setFilteredInvoices(filtered);
-  };
+  }, [allInvoices, searchQuery, selectedFilter, selectedTimeRange, customFromDate, customToDate]);
 
   const handleInvoicePress = (invoice: Invoice) => {
     if (invoice.status === 'return') {
@@ -250,19 +271,19 @@ export default function AllInvoicesScreen() {
       const returnData = {
         id: invoice.id,
         returnNumber: invoice.invoiceNumber,
-        originalInvoiceNumber: invoice.originalInvoice || 'INV-2024-001',
+        originalInvoiceNumber: invoice.originalInvoice || '',
         customerName: invoice.customerName,
         customerType: invoice.customerType,
         staffName: invoice.staffName,
         staffAvatar: invoice.staffAvatar,
-        refundStatus: 'refunded',
+        refundStatus: (invoice as any).refundStatus || 'pending',
         amount: invoice.amount,
         itemCount: invoice.itemCount,
         date: invoice.date,
-        reason: 'Customer return',
+        reason: (invoice as any).reason || '',
         customerDetails: {
           name: invoice.customerName,
-          mobile: '+91 98765 43210',
+          mobile: (invoice as any).customerMobile || '',
           address: ''
         }
       };
@@ -274,8 +295,12 @@ export default function AllInvoicesScreen() {
           returnData: JSON.stringify(returnData)
         }
       });
+    } else if (invoice.status === 'purchase') {
+      router.push({
+        pathname: '/purchasing/invoice-details',
+        params: { invoiceId: invoice.id }
+      });
     } else {
-      // Navigate to invoice details
       const invoiceData = {
         id: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -284,14 +309,17 @@ export default function AllInvoicesScreen() {
         staffName: invoice.staffName,
         staffAvatar: invoice.staffAvatar,
         paymentStatus: invoice.paymentStatus,
+        paymentMethod: (invoice as any).paymentMethod || '',
         amount: invoice.amount,
+        totalAmount: invoice.amount,
         itemCount: invoice.itemCount,
         date: invoice.date,
+        invoiceDate: invoice.date,
         customerDetails: {
           name: invoice.customerName,
-          mobile: '+91 98765 43210',
+          mobile: (invoice as any).customerMobile || '',
           businessName: invoice.customerType === 'business' ? invoice.customerName : undefined,
-          address: ''
+          address: (invoice as any).customerAddress || '',
         }
       };
 
@@ -332,20 +360,6 @@ export default function AllInvoicesScreen() {
       case 'card': return 'Card';
       case 'others': return 'Others';
       default: return method;
-    }
-  };
-
-  const getTimeRangeLabel = () => {
-    switch (selectedTimeRange) {
-      case 'today': return 'Today';
-      case 'week': return 'This Week';
-      case 'month': return 'This Month';
-      case 'custom': 
-        if (customFromDate && customToDate) {
-          return `${customFromDate} to ${customToDate}`;
-        }
-        return 'Custom Range';
-      default: return 'Today';
     }
   };
 
@@ -447,11 +461,17 @@ export default function AllInvoicesScreen() {
         <View style={styles.invoiceFooter}>
           {/* Left Side - Staff Info */}
           <View style={styles.staffInfo}>
-            <Image 
-              source={{ uri: invoice.staffAvatar }}
-              style={styles.staffAvatar}
-            />
-            <Text style={styles.staffName}>Processed by {invoice.staffName}</Text>
+            {invoice.staffAvatar ? (
+              <Image 
+                source={{ uri: invoice.staffAvatar }}
+                style={styles.staffAvatar}
+              />
+            ) : (
+              <View style={[styles.staffAvatar, { backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }]}>
+                <User size={14} color="#6B7280" />
+              </View>
+            )}
+            <Text style={styles.staffName} numberOfLines={1}>Processed by {invoice.staffName || 'Unknown'}</Text>
           </View>
 
           {/* Right Side - Action Icons */}
@@ -504,7 +524,15 @@ export default function AllInvoicesScreen() {
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>All Invoices</Text>
-        
+
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={() => setShowExportModal(true)}
+          activeOpacity={0.7}
+        >
+          <Download size={20} color={Colors.primary} />
+        </TouchableOpacity>
+
         <View style={styles.headerRight}>
           <Text style={styles.totalCount}>
             {filteredInvoices.length} invoices
@@ -512,19 +540,15 @@ export default function AllInvoicesScreen() {
         </View>
       </View>
 
-      {/* Time Range Selector */}
-      <View style={styles.timeRangeContainer}>
-        <Text style={styles.timeRangeLabel}>Time Period:</Text>
-        <TouchableOpacity
-          style={styles.timeRangeSelector}
-          onPress={() => setShowTimeRangeModal(true)}
-          activeOpacity={0.7}
-        >
-          <Calendar size={20} color={Colors.primary} />
-          <Text style={styles.timeRangeText}>{getTimeRangeLabel()}</Text>
-          <ChevronDown size={20} color={Colors.primary} />
-        </TouchableOpacity>
-      </View>
+      {/* Date Filter Chips */}
+      <DateFilterBar
+        selectedRange={selectedTimeRange}
+        onRangeChange={setSelectedTimeRange}
+        customFromDate={customFromDate}
+        customToDate={customToDate}
+        onCustomFromChange={setCustomFromDate}
+        onCustomToChange={setCustomToDate}
+      />
 
       {/* Summary Stats */}
       <View style={styles.summaryContainer}>
@@ -713,23 +737,28 @@ export default function AllInvoicesScreen() {
       </View>
 
       {/* Invoice List */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {filteredInvoices.length === 0 ? (
-          <View style={styles.emptyState}>
-            <FileText size={64} color={Colors.textLight} />
-            <Text style={styles.emptyStateTitle}>No Invoices Found</Text>
-            <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No invoices match your search criteria' : 'No invoices for the selected time period'}
-            </Text>
-          </View>
-        ) : (
-          filteredInvoices.map(renderInvoiceCard)
-        )}
-      </ScrollView>
+      {isLoading ? (
+        <ListSkeleton itemCount={6} showSearch={true} showFilter={true} />
+      ) : (
+        <FlatList
+          data={filteredInvoices}
+          renderItem={({item}) => renderInvoiceCard(item)}
+          keyExtractor={(item) => item.id}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <FileText size={64} color={Colors.textLight} />
+              <Text style={styles.emptyStateTitle}>No Invoices Found</Text>
+              <Text style={styles.emptyStateText}>
+                {searchQuery ? 'No invoices match your search criteria' : 'No invoices for the selected time period'}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
 
 
@@ -778,96 +807,30 @@ export default function AllInvoicesScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Time Range Selection Modal */}
-      <Modal
-        visible={showTimeRangeModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowTimeRangeModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Time Period</Text>
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={() => setShowTimeRangeModal(false)}
-                activeOpacity={0.7}
-              >
-                <X size={24} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalContent}>
-              {timeRangeOptions.map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.timeRangeOption,
-                    selectedTimeRange === option.value && styles.selectedTimeRangeOption
-                  ]}
-                  onPress={() => handleTimeRangeChange(option.value as TimeRange)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.timeRangeOptionText,
-                    selectedTimeRange === option.value && styles.selectedTimeRangeText
-                  ]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              {selectedTimeRange === 'custom' && (
-                <View style={styles.customDateContainer}>
-                  <Text style={styles.customDateLabel}>Custom Date Range</Text>
-                  
-                  <View style={styles.dateInputRow}>
-                    <View style={styles.dateInputGroup}>
-                      <Text style={styles.dateInputLabel}>From Date</Text>
-                      <TextInput
-                        style={styles.dateInput}
-                        value={customFromDate}
-                        onChangeText={setCustomFromDate}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={Colors.textLight}
-                      />
-                    </View>
-                    
-                    <View style={styles.dateInputGroup}>
-                      <Text style={styles.dateInputLabel}>To Date</Text>
-                      <TextInput
-                        style={styles.dateInput}
-                        value={customToDate}
-                        onChangeText={setCustomToDate}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={Colors.textLight}
-                      />
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.applyCustomButton,
-                      (!customFromDate || !customToDate) && styles.disabledButton
-                    ]}
-                    onPress={applyCustomDateRange}
-                    disabled={!customFromDate || !customToDate}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[
-                      styles.applyCustomButtonText,
-                      (!customFromDate || !customToDate) && styles.disabledButtonText
-                    ]}>
-                      Apply Custom Range
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        config={{
+          title: 'All Invoices',
+          fileName: 'all_invoices',
+          columns: [
+            { key: 'invoiceNumber', header: 'Invoice #' },
+            { key: 'date', header: 'Date' },
+            { key: 'status', header: 'Type', format: (v) => v === 'sale' ? 'Sale' : v === 'return' ? 'Return' : 'Purchase' },
+            { key: 'customerName', header: 'Customer/Supplier', format: (v, row) => row.supplierName || v || '' },
+            { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'paymentStatus', header: 'Payment Status', format: (v) => v === 'paid' ? 'Paid' : v === 'partially_paid' ? 'Partially Paid' : 'Pending' },
+            { key: 'paymentMethod', header: 'Payment Method', format: (v) => v === 'cash' ? 'Cash' : v === 'upi' ? 'UPI' : v === 'card' ? 'Card' : 'Others' },
+            { key: 'staffName', header: 'Processed By' },
+          ],
+          data: filteredInvoices,
+          summaryRows: [
+            { label: 'Total Invoices', value: String(filteredInvoices.length) },
+            { label: 'Total Amount', value: `₹${filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+          ],
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -902,41 +865,21 @@ const styles = StyleSheet.create({
   headerRight: {
     alignItems: 'flex-end',
   },
+  exportButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
   totalCount: {
     fontSize: 14,
     color: Colors.textLight,
   },
-  timeRangeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: Colors.grey[50],
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  timeRangeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  timeRangeSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  timeRangeText: {
-    fontSize: 14,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
+  // timeRange styles removed - now using DateFilterBar
+  // old timeRange selector styles removed
   summaryContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -1242,126 +1185,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // Search bar styles removed - now using AnimatedSearchBar component
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalContainer: {
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-    width: '100%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.grey[200],
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.text,
-  },
-  modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    padding: 20,
-  },
-  timeRangeOption: {
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 8,
-    backgroundColor: Colors.grey[50],
-  },
-  selectedTimeRangeOption: {
-    backgroundColor: '#f0f4ff',
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  timeRangeOptionText: {
-    fontSize: 16,
-    color: Colors.text,
-  },
-  selectedTimeRangeText: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  customDateContainer: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.grey[200],
-  },
-  customDateLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 12,
-  },
-  dateInputRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  dateInputGroup: {
-    flex: 1,
-  },
-  dateInputLabel: {
-    fontSize: 14,
-    color: Colors.textLight,
-    marginBottom: 8,
-  },
-  dateInput: {
-    backgroundColor: Colors.grey[50],
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: Colors.text,
-    
-  },
-  applyCustomButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  applyCustomButtonText: {
-    color: Colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  disabledButton: {
-    backgroundColor: Colors.grey[300],
-  },
-  disabledButtonText: {
-    color: Colors.textLight,
-  },
+  // old modal styles removed - now using DateFilterBar
   fabContainer: {
     position: 'absolute',
     bottom: Platform.OS === 'ios' ? 50 : 40,

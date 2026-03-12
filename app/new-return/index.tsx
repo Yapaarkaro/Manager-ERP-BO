@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,14 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
+import { safeRouter } from '@/utils/safeRouter';
+import { getInvoices, getInvoiceWithItems, getPurchaseInvoices } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   Search, 
@@ -19,7 +22,8 @@ import {
   FileText,
   Calendar,
   User,
-  Building2
+  Building2,
+  Truck
 } from 'lucide-react-native';
 
 const Colors = {
@@ -44,9 +48,8 @@ interface Invoice {
   customerName: string;
   customerType: 'individual' | 'business';
   staffName: string;
-  staffAvatar: string;
-  paymentStatus: 'paid' | 'partially_paid' | 'pending';
-  paymentMethod: 'cash' | 'upi' | 'card' | 'others';
+  paymentStatus: string;
+  paymentMethod: string;
   amount: number;
   itemCount: number;
   date: string;
@@ -56,211 +59,153 @@ interface Invoice {
     businessName?: string;
     gstin?: string;
     address: string;
-    shipToAddress?: string;
-    paymentTerms?: string;
   };
-  items: {
-    id: string;
-    name: string;
-    quantity: number;
-    rate: number;
-    amount: number;
-    taxRate: number;
-    taxAmount: number;
-    total: number;
-  }[];
+  items: any[];
+  supplierId?: string;
+  supplierName?: string;
 }
-
-const recentInvoices: Invoice[] = [
-  {
-    id: '1',
-    invoiceNumber: 'INV-2024-001',
-    customerName: 'Rajesh Kumar',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'cash',
-    amount: 155000,
-    itemCount: 3,
-    date: '2024-01-15',
-    customerDetails: {
-      name: 'Rajesh Kumar',
-      mobile: '+91 98765 43210',
-      address: '123, MG Road, Bangalore, Karnataka - 560001'
-    },
-    items: [
-      {
-        id: '1',
-        name: 'iPhone 14 Pro 128GB',
-        quantity: 1,
-        rate: 129900,
-        amount: 129900,
-        taxRate: 18,
-        taxAmount: 23382,
-        total: 153282
-      },
-      {
-        id: '2',
-        name: 'AirPods Pro 2nd Gen',
-        quantity: 1,
-        rate: 24900,
-        amount: 24900,
-        taxRate: 18,
-        taxAmount: 4482,
-        total: 29382
-      }
-    ]
-  },
-  {
-    id: '2',
-    invoiceNumber: 'INV-2024-002',
-    customerName: 'TechCorp Solutions Pvt Ltd',
-    customerType: 'business',
-    staffName: 'Rajesh Kumar',
-    staffAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'upi',
-    amount: 87500,
-    itemCount: 2,
-    date: '2024-01-14',
-    customerDetails: {
-      name: 'Amit Singh',
-      mobile: '+91 87654 32109',
-      businessName: 'TechCorp Solutions Pvt Ltd',
-      gstin: '29ABCDE1234F2Z6',
-      address: '456, Electronic City, Phase 2, Bangalore, Karnataka - 560100',
-      shipToAddress: '789, Whitefield, ITPL Road, Bangalore, Karnataka - 560066',
-      paymentTerms: 'Net 30 Days'
-    },
-    items: [
-      {
-        id: '1',
-        name: 'MacBook Air M2',
-        quantity: 1,
-        rate: 114900,
-        amount: 114900,
-        taxRate: 18,
-        taxAmount: 20682,
-        total: 135582
-      },
-      {
-        id: '2',
-        name: 'Magic Mouse',
-        quantity: 2,
-        rate: 7900,
-        amount: 15800,
-        taxRate: 18,
-        taxAmount: 2844,
-        total: 18644
-      }
-    ]
-  },
-  {
-    id: '3',
-    invoiceNumber: 'INV-2024-003',
-    customerName: 'Sunita Devi',
-    customerType: 'individual',
-    staffName: 'Priya Sharma',
-    staffAvatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'card',
-    amount: 223000,
-    itemCount: 5,
-    date: '2024-01-13',
-    customerDetails: {
-      name: 'Sunita Devi',
-      mobile: '+91 76543 21098',
-      address: '321, Jayanagar, 4th Block, Bangalore, Karnataka - 560011'
-    },
-    items: [
-      {
-        id: '1',
-        name: 'Samsung Galaxy S23 Ultra',
-        quantity: 1,
-        rate: 124999,
-        amount: 124999,
-        taxRate: 18,
-        taxAmount: 22499,
-        total: 147498
-      },
-      {
-        id: '2',
-        name: 'Galaxy Buds Pro',
-        quantity: 1,
-        rate: 19999,
-        amount: 19999,
-        taxRate: 18,
-        taxAmount: 3599,
-        total: 23598
-      },
-      {
-        id: '3',
-        name: 'Wireless Charger',
-        quantity: 2,
-        rate: 2999,
-        amount: 5998,
-        taxRate: 18,
-        taxAmount: 1079,
-        total: 7077
-      }
-    ]
-  },
-  {
-    id: '4',
-    invoiceNumber: 'INV-2024-004',
-    customerName: 'Global Enterprises Ltd',
-    customerType: 'business',
-    staffName: 'Amit Singh',
-    staffAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?auto=compress&cs=tinysrgb&w=100&h=100&dpr=1',
-    paymentStatus: 'paid',
-    paymentMethod: 'others',
-    amount: 128000,
-    itemCount: 4,
-    date: '2024-01-12',
-    customerDetails: {
-      name: 'Vikram Patel',
-      mobile: '+91 99887 76655',
-      businessName: 'Global Enterprises Ltd',
-      gstin: '27FGHIJ5678K3L9',
-      address: '567, Bandra West, Mumbai, Maharashtra - 400050',
-      shipToAddress: '567, Bandra West, Mumbai, Maharashtra - 400050',
-      paymentTerms: 'Net 15 Days'
-    },
-    items: [
-      {
-        id: '1',
-        name: 'Dell Laptop',
-        quantity: 2,
-        rate: 65000,
-        amount: 130000,
-        taxRate: 18,
-        taxAmount: 23400,
-        total: 153400
-      }
-    ]
-  },
-];
 
 export default function NewReturnScreen() {
   const { handleBack } = useWebBackNavigation();
   const [searchQuery, setSearchQuery] = useState('');
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingInvoiceId, setLoadingInvoiceId] = useState<string | null>(null);
+  const [returnType, setReturnType] = useState<'customer' | 'supplier'>('customer');
 
-  const handleInvoiceSelect = (invoice: Invoice) => {
+  const loadInvoices = useCallback(async () => {
+    setLoading(true);
+    try {
+      if (returnType === 'customer') {
+        const result = await getInvoices();
+        if (result.success && result.invoices) {
+          const mapped: Invoice[] = result.invoices.map((inv: any) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoice_number || '',
+            customerName: inv.customer_name || 'Walk-in Customer',
+            customerType: inv.customer_type || 'individual',
+            staffName: inv.staff_name || '',
+            paymentStatus: inv.payment_status || 'unpaid',
+            paymentMethod: inv.payment_method || 'cash',
+            amount: parseFloat(inv.total_amount) || 0,
+            itemCount: 0,
+            date: inv.invoice_date || inv.created_at || '',
+            customerDetails: {
+              name: inv.customer_name || '',
+              mobile: '',
+              address: '',
+            },
+            items: [],
+          }));
+          setInvoices(mapped);
+        }
+      } else {
+        const result = await getPurchaseInvoices();
+        if (result.success && result.invoices) {
+          const mapped: Invoice[] = result.invoices.map((inv: any) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoice_number || inv.purchase_invoice_number || '',
+            customerName: inv.supplier_name || 'Unknown Supplier',
+            customerType: 'business' as const,
+            staffName: inv.staff_name || '',
+            paymentStatus: inv.payment_status || 'unpaid',
+            paymentMethod: inv.payment_method || 'bank_transfer',
+            amount: parseFloat(inv.total_amount) || 0,
+            itemCount: inv.items?.length || 0,
+            date: inv.invoice_date || inv.created_at || '',
+            customerDetails: {
+              name: inv.supplier_name || '',
+              mobile: '',
+              address: '',
+            },
+            items: inv.items || [],
+            supplierId: inv.supplier_id,
+            supplierName: inv.supplier_name,
+          }));
+          setInvoices(mapped);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load invoices:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [returnType]);
+
+  useEffect(() => {
+    loadInvoices();
+  }, [loadInvoices]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadInvoices();
+  }, [loadInvoices]);
+
+  const handleInvoiceSelect = async (invoice: Invoice) => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('process return')) return;
-    router.push({
-      pathname: '/new-return/select-items',
-      params: {
-        invoiceData: JSON.stringify(invoice)
+
+    setLoadingInvoiceId(invoice.id);
+    try {
+      let items: any[] = [];
+
+      if (returnType === 'customer') {
+        const result = await getInvoiceWithItems(invoice.id);
+        if (result.success && result.items && result.items.length > 0) {
+          items = result.items.map((item: any) => ({
+            id: item.id,
+            productId: item.product_id || item.productId || item.id,
+            name: item.product_name || item.name || '',
+            quantity: parseFloat(item.quantity) || 0,
+            rate: parseFloat(item.unit_price) || 0,
+            amount: (parseFloat(item.unit_price) || 0) * (parseFloat(item.quantity) || 0),
+            taxRate: parseFloat(item.tax_rate) || 0,
+            taxAmount: parseFloat(item.tax_amount) || 0,
+            total: parseFloat(item.total_price) || 0,
+          }));
+        }
+      } else {
+        if (invoice.items && invoice.items.length > 0) {
+          items = invoice.items.map((item: any, idx: number) => ({
+            id: item.id || `pi-item-${idx}`,
+            productId: item.product_id || item.productId || item.id,
+            name: item.product_name || item.name || '',
+            quantity: parseFloat(item.quantity) || 0,
+            rate: parseFloat(item.unit_price || item.rate) || 0,
+            amount: (parseFloat(item.unit_price || item.rate) || 0) * (parseFloat(item.quantity) || 0),
+            taxRate: parseFloat(item.tax_rate || item.taxRate) || 0,
+            taxAmount: parseFloat(item.tax_amount || item.taxAmount) || 0,
+            total: parseFloat(item.total_price || item.total) || 0,
+          }));
+        }
       }
-    });
+
+      const invoiceWithItems = {
+        ...invoice,
+        items,
+        itemCount: items.length,
+        returnType,
+        supplierId: (invoice as any).supplierId || '',
+        supplierName: (invoice as any).supplierName || invoice.customerName,
+      };
+
+      safeRouter.push({
+        pathname: '/new-return/select-items',
+        params: { invoiceData: JSON.stringify(invoiceWithItems) }
+      });
+    } catch (e) {
+      console.warn('Failed to fetch invoice items:', e);
+    } finally {
+      setLoadingInvoiceId(null);
+    }
   };
 
   const handleScanInvoice = () => {
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('scan invoice for return')) return;
-    router.push('/new-return/scan-invoice');
+    safeRouter.push('/new-return/scan-invoice');
   };
 
   const handleSearch = (query: string) => {
@@ -284,6 +229,23 @@ export default function NewReturnScreen() {
     });
   };
 
+  const getPaymentStatusColor = (status: string) => {
+    switch (status) {
+      case 'paid': return Colors.success;
+      case 'partial': case 'partially_paid': return Colors.warning;
+      default: return Colors.error;
+    }
+  };
+
+  const getPaymentStatusText = (status: string) => {
+    switch (status) {
+      case 'paid': return 'Paid';
+      case 'partial': case 'partially_paid': return 'Partial';
+      case 'unpaid': return 'Unpaid';
+      default: return status;
+    }
+  };
+
   const getPaymentMethodText = (method: string) => {
     switch (method) {
       case 'cash': return 'Cash';
@@ -294,10 +256,10 @@ export default function NewReturnScreen() {
     }
   };
 
-  const filteredInvoices = recentInvoices.filter(invoice =>
+  const filteredInvoices = invoices.filter(invoice =>
     invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     invoice.customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    invoice.staffName.toLowerCase().includes(searchQuery.toLowerCase())
+    (invoice.staffName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -319,11 +281,39 @@ export default function NewReturnScreen() {
         </View>
       </View>
 
+      {/* Return Type Toggle */}
+      <View style={styles.returnTypeContainer}>
+        <TouchableOpacity
+          style={[styles.returnTypeBtn, returnType === 'customer' && styles.returnTypeBtnActive]}
+          onPress={() => setReturnType('customer')}
+          activeOpacity={0.7}
+        >
+          <RotateCcw size={16} color={returnType === 'customer' ? '#fff' : Colors.text} />
+          <Text style={[styles.returnTypeBtnText, returnType === 'customer' && styles.returnTypeBtnTextActive]}>
+            Customer Return
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.returnTypeBtn, returnType === 'supplier' && styles.returnTypeBtnActive, returnType === 'supplier' && { backgroundColor: '#D97706' }]}
+          onPress={() => setReturnType('supplier')}
+          activeOpacity={0.7}
+        >
+          <Truck size={16} color={returnType === 'supplier' ? '#fff' : Colors.text} />
+          <Text style={[styles.returnTypeBtnText, returnType === 'supplier' && styles.returnTypeBtnTextActive]}>
+            Return to Supplier
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Instructions */}
-      <View style={styles.instructionsContainer}>
-        <Text style={styles.instructionsTitle}>Select Invoice to Return</Text>
-        <Text style={styles.instructionsText}>
-          Choose the original invoice for which you want to process a return
+      <View style={[styles.instructionsContainer, returnType === 'supplier' && { backgroundColor: '#FFFBEB', borderBottomColor: '#FDE68A' }]}>
+        <Text style={[styles.instructionsTitle, returnType === 'supplier' && { color: '#D97706' }]}>
+          {returnType === 'customer' ? 'Select Invoice to Return' : 'Select Purchase Invoice'}
+        </Text>
+        <Text style={[styles.instructionsText, returnType === 'supplier' && { color: '#92400E' }]}>
+          {returnType === 'customer'
+            ? 'Choose the original sales invoice for which you want to process a return. For unpaid invoices, the return amount will be deducted from receivables.'
+            : 'Choose the purchase invoice for items you want to return to the supplier. The return amount will be adjusted in payables.'}
         </Text>
       </View>
 
@@ -356,84 +346,95 @@ export default function NewReturnScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Paid Invoices</Text>
+          <Text style={styles.sectionTitle}>{returnType === 'customer' ? 'Sales Invoices' : 'Purchase Invoices'}</Text>
           <Text style={styles.sectionSubtitle}>
-            Only paid invoices are eligible for returns
+            {returnType === 'customer' ? 'Select an invoice to process a return' : 'Select a purchase invoice to return items to supplier'}
           </Text>
         </View>
 
-        <View style={styles.invoicesContainer}>
-          {filteredInvoices.map((invoice) => (
-            <TouchableOpacity
-              key={invoice.id}
-              style={styles.invoiceCard}
-              onPress={() => handleInvoiceSelect(invoice)}
-              activeOpacity={0.7}
-            >
-              {/* Invoice Header */}
-              <View style={styles.invoiceHeader}>
-                <View style={styles.invoiceLeft}>
-                  <View style={styles.invoiceIconContainer}>
-                    <FileText size={20} color={Colors.primary} />
-                  </View>
-                  <View style={styles.invoiceInfo}>
-                    <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
-                    <View style={styles.customerInfo}>
-                      {invoice.customerType === 'business' ? (
-                        <Building2 size={14} color={Colors.textLight} />
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={[styles.emptyStateText, { marginTop: 16 }]}>Loading invoices...</Text>
+          </View>
+        ) : (
+          <View style={styles.invoicesContainer}>
+            {filteredInvoices.map((invoice) => (
+              <TouchableOpacity
+                key={invoice.id}
+                style={[styles.invoiceCard, { borderLeftColor: getPaymentStatusColor(invoice.paymentStatus) }]}
+                onPress={() => handleInvoiceSelect(invoice)}
+                activeOpacity={0.7}
+                disabled={loadingInvoiceId === invoice.id}
+              >
+                {/* Invoice Header */}
+                <View style={styles.invoiceHeader}>
+                  <View style={styles.invoiceLeft}>
+                    <View style={styles.invoiceIconContainer}>
+                      {loadingInvoiceId === invoice.id ? (
+                        <ActivityIndicator size="small" color={Colors.primary} />
                       ) : (
-                        <User size={14} color={Colors.textLight} />
+                        <FileText size={20} color={Colors.primary} />
                       )}
-                      <Text style={styles.customerName}>{invoice.customerName}</Text>
+                    </View>
+                    <View style={styles.invoiceInfo}>
+                      <Text style={styles.invoiceNumber}>{invoice.invoiceNumber}</Text>
+                      <View style={styles.customerInfo}>
+                        {returnType === 'supplier' ? (
+                          <Truck size={14} color={Colors.textLight} />
+                        ) : invoice.customerType === 'business' ? (
+                          <Building2 size={14} color={Colors.textLight} />
+                        ) : (
+                          <User size={14} color={Colors.textLight} />
+                        )}
+                        <Text style={styles.customerName}>{invoice.customerName}</Text>
+                      </View>
                     </View>
                   </View>
+
+                  <View style={styles.invoiceRight}>
+                    <Text style={[styles.invoiceAmount, { color: getPaymentStatusColor(invoice.paymentStatus) }]}>
+                      {formatAmount(invoice.amount)}
+                    </Text>
+                    <Text style={[styles.paymentStatusBadge, { 
+                      color: getPaymentStatusColor(invoice.paymentStatus),
+                      backgroundColor: `${getPaymentStatusColor(invoice.paymentStatus)}15`,
+                    }]}>
+                      {getPaymentStatusText(invoice.paymentStatus)}
+                    </Text>
+                  </View>
                 </View>
 
-                <View style={styles.invoiceRight}>
-                  <Text style={styles.invoiceAmount}>
-                    {formatAmount(invoice.amount)}
-                  </Text>
-                  <Text style={styles.itemCount}>
-                    {invoice.itemCount} {invoice.itemCount === 1 ? 'item' : 'items'}
-                  </Text>
-                </View>
-              </View>
+                {/* Invoice Details */}
+                <View style={styles.invoiceDetails}>
+                  <View style={styles.detailRow}>
+                    <Calendar size={14} color={Colors.textLight} />
+                    <Text style={styles.detailText}>
+                      {formatDate(invoice.date)}
+                    </Text>
+                  </View>
 
-              {/* Invoice Details */}
-              <View style={styles.invoiceDetails}>
-                <View style={styles.detailRow}>
-                  <Calendar size={14} color={Colors.textLight} />
-                  <Text style={styles.detailText}>
-                    {formatDate(invoice.date)}
-                  </Text>
+                  {invoice.staffName ? (
+                    <View style={styles.detailRow}>
+                      <User size={14} color={Colors.textLight} />
+                      <Text style={styles.detailText}>by {invoice.staffName}</Text>
+                    </View>
+                  ) : null}
                 </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-                <View style={styles.detailRow}>
-                  <Text style={styles.paymentMethodLabel}>
-                    Paid via {getPaymentMethodText(invoice.paymentMethod)}
-                  </Text>
-                </View>
-
-                <View style={styles.staffInfo}>
-                  <Image 
-                    source={{ uri: invoice.staffAvatar }}
-                    style={styles.staffAvatar}
-                  />
-                  <Text style={styles.staffName}>Processed by {invoice.staffName}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {filteredInvoices.length === 0 && (
+        {!loading && filteredInvoices.length === 0 && (
           <View style={styles.emptyState}>
             <FileText size={64} color={Colors.textLight} />
             <Text style={styles.emptyStateTitle}>No Invoices Found</Text>
             <Text style={styles.emptyStateText}>
-              {searchQuery ? 'No invoices match your search criteria' : 'No recent paid invoices available for returns'}
+              {searchQuery ? 'No invoices match your search criteria' : returnType === 'customer' ? 'No sales invoices available for returns' : 'No purchase invoices available for returns'}
             </Text>
           </View>
         )}
@@ -472,6 +473,40 @@ const styles = StyleSheet.create({
   headerRight: {
     alignItems: 'flex-end',
     marginLeft: 'auto',
+  },
+  returnTypeContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+    backgroundColor: Colors.grey[50],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  returnTypeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  returnTypeBtnActive: {
+    backgroundColor: Colors.error,
+    borderColor: Colors.error,
+  },
+  returnTypeBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  returnTypeBtnTextActive: {
+    color: '#FFFFFF',
   },
   instructionsContainer: {
     backgroundColor: '#fef2f2',
@@ -588,6 +623,16 @@ const styles = StyleSheet.create({
   itemCount: {
     fontSize: 12,
     color: Colors.textLight,
+  },
+  paymentStatusBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginTop: 4,
+    textAlign: 'center',
   },
   invoiceDetails: {
     gap: 8,

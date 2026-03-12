@@ -8,7 +8,7 @@ interface ResponsiveContainerProps {
   fullWidth?: boolean; // Option to disable max-width constraint
 }
 
-export default function ResponsiveContainer({ children, style, fullWidth = false }: ResponsiveContainerProps) {
+function ResponsiveContainer({ children, style, fullWidth = false }: ResponsiveContainerProps) {
   const webStyles = getWebContainerStyles();
   const { width } = Dimensions.get('window');
   
@@ -26,4 +26,6 @@ export default function ResponsiveContainer({ children, style, fullWidth = false
   // On mobile or small screens, just return children
   return <View style={[{ flex: 1 }, style]}>{children}</View>;
 }
+
+export default React.memo(ResponsiveContainer);
 

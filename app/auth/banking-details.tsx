@@ -29,7 +29,7 @@ import {
 import { useThemeColors } from '@/hooks/useColorScheme';
 import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksWithOthers } from '@/data/indianBanks';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
-import { dataStore, BankAccount } from '@/utils/dataStore';
+import type { BankAccount } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { supabase } from '@/lib/supabase';
@@ -96,6 +96,9 @@ export default function BankingDetailsScreen() {
       : ''
   );
   const [upiId, setUpiId] = useState(prefilledUpiId as string || '');
+  const [acceptsUpiPayments, setAcceptsUpiPayments] = useState(
+    (prefilledUpiId as string || '').length > 0
+  );
   const [ifscSelection, setIfscSelection] = useState<{start: number, end: number} | undefined>();
   const [showBankModal, setShowBankModal] = useState(false);
   const [bankSearch, setBankSearch] = useState('');
@@ -130,118 +133,58 @@ export default function BankingDetailsScreen() {
   const isLongAmountText = amountInWords && amountInWords.length > 60;
 
   useEffect(() => {
-    // Pre-fill bank if editing and store original account
-    if (editMode === 'true' && editAccountId) {
-      // ✅ Try to find account by ID first, then by backendId (handles both cases)
-      let existingAccount = dataStore.getBankAccountById(editAccountId as string);
-      if (!existingAccount) {
-        existingAccount = dataStore.getBankAccounts().find(acc => acc.backendId === editAccountId);
-      }
-      
-      // ✅ If still not found and coming from summary, wait a bit and retry (DataStore might be syncing)
-      if (!existingAccount && fromSummary === 'true') {
-        console.log('🔄 Bank account not immediately found in DataStore, waiting for sync...');
-        const retryTimeout = setTimeout(() => {
-          // Retry finding the account
-          let retryAccount = dataStore.getBankAccountById(editAccountId as string);
-          if (!retryAccount) {
-            retryAccount = dataStore.getBankAccounts().find(acc => acc.backendId === editAccountId);
-          }
-          
-          if (retryAccount) {
-            console.log('✅ Bank account found after retry:', retryAccount.id);
-            // Pre-fill all fields with retry account
-            setOriginalAccount({
-              bankId: retryAccount.bankId,
-              bankName: retryAccount.bankName,
-              accountHolderName: retryAccount.accountHolderName,
-              accountNumber: retryAccount.accountNumber,
-              ifscCode: retryAccount.ifscCode,
-              accountType: retryAccount.accountType,
-              initialBalance: retryAccount.initialBalance?.toString() || '0',
-              upiId: retryAccount.upiId || '',
-            });
-            
-            setAccountHolderName(retryAccount.accountHolderName || '');
-            setAccountNumber(retryAccount.accountNumber || '');
-            setConfirmAccountNumber(retryAccount.accountNumber || '');
-            setIfscCode(retryAccount.ifscCode || '');
-            setAccountType(retryAccount.accountType || 'Savings');
-            setInitialBalance(retryAccount.initialBalance?.toString() || '');
-            setUpiId(retryAccount.upiId || '');
-            
-            const bank = allBanksWithOthers.find(b => b.id === retryAccount.bankId || b.shortName === retryAccount.bankId);
-            if (bank) {
-              setSelectedBank(bank);
-              if (bank.id === 'others') {
-                setCustomBankName(retryAccount.bankName || '');
-              }
-            } else if (retryAccount.bankId) {
-              const othersBank = allBanksWithOthers.find(b => b.id === 'others');
-              if (othersBank) {
-                setSelectedBank(othersBank);
-                setCustomBankName(retryAccount.bankName || '');
-              }
-            }
-          } else {
-            console.error('❌ Bank account still not found after retry:', editAccountId);
-            console.error('📋 Available accounts in DataStore:', dataStore.getBankAccounts().map(a => ({ id: a.id, backendId: a.backendId, accountNumber: a.accountNumber })));
-          }
-        }, 300); // Wait 300ms for DataStore sync
-        
-        return () => clearTimeout(retryTimeout);
-      }
-      
-      if (existingAccount) {
-        // Store original account for change detection
+    // Pre-fill from route params (data is passed directly, no DataStore lookup needed)
+    if (editMode === 'true') {
+      if (prefilledAccountHolderName) {
         setOriginalAccount({
-          bankId: existingAccount.bankId,
-          bankName: existingAccount.bankName,
-          accountHolderName: existingAccount.accountHolderName,
-          accountNumber: existingAccount.accountNumber,
-          ifscCode: existingAccount.ifscCode,
-          accountType: existingAccount.accountType,
-          initialBalance: existingAccount.initialBalance?.toString() || '0',
-          upiId: existingAccount.upiId || '',
+          bankId: prefilledBankId as string,
+          bankName: '',
+          accountHolderName: prefilledAccountHolderName as string,
+          accountNumber: prefilledAccountNumber as string,
+          ifscCode: prefilledIFSC as string,
+          accountType: (prefilledAccountType as string) || 'Savings',
+          initialBalance: prefilledInitialBalance as string || '0',
+          upiId: prefilledUpiId as string || '',
         });
         
-        // Pre-fill form fields
-        setAccountHolderName(existingAccount.accountHolderName || '');
-        setAccountNumber(existingAccount.accountNumber || '');
-        setConfirmAccountNumber(existingAccount.accountNumber || '');
-        setIfscCode(existingAccount.ifscCode || '');
-        setAccountType(existingAccount.accountType || 'Savings');
-        setInitialBalance(existingAccount.initialBalance?.toString() || '');
-        setUpiId(existingAccount.upiId || '');
-        
-        // Pre-fill bank
-        const bank = allBanksWithOthers.find(b => b.id === existingAccount.bankId || b.shortName === existingAccount.bankId);
+        setAccountHolderName(prefilledAccountHolderName as string || '');
+        setAccountNumber(prefilledAccountNumber as string || '');
+        setConfirmAccountNumber(prefilledAccountNumber as string || '');
+        setIfscCode(prefilledIFSC as string || '');
+        setAccountType((prefilledAccountType as string || 'Savings') as 'Savings' | 'Current');
+        setInitialBalance(prefilledInitialBalance as string || '');
+        setUpiId(prefilledUpiId as string || '');
+      }
+      
+      // Pre-fill bank selector
+      const bankId = prefilledBankId as string;
+      if (bankId) {
+        const bank = allBanksWithOthers.find(b => b.id === bankId || b.shortName === bankId);
         if (bank) {
           setSelectedBank(bank);
           if (bank.id === 'others') {
-            setCustomBankName(existingAccount.bankName || '');
+            // For "others" bank, the bankName would need to be passed via params
+            // Try to find it from allBankAccounts
+            try {
+              const accounts = JSON.parse(allBankAccounts as string || '[]');
+              const editAcc = accounts.find((a: any) => a.id === editAccountId || a.bankId === bankId);
+              if (editAcc?.bankName) setCustomBankName(editAcc.bankName);
+            } catch {}
           }
-        } else if (existingAccount.bankId) {
-          // If bank not found in list, try to create an "Others" entry
-          // This handles cases where the bank might not be in our preset list
+        } else {
           const othersBank = allBanksWithOthers.find(b => b.id === 'others');
           if (othersBank) {
             setSelectedBank(othersBank);
-            setCustomBankName(existingAccount.bankName || '');
+            try {
+              const accounts = JSON.parse(allBankAccounts as string || '[]');
+              const editAcc = accounts.find((a: any) => a.id === editAccountId);
+              if (editAcc?.bankName) setCustomBankName(editAcc.bankName);
+            } catch {}
           }
         }
-      } else if (fromSummary !== 'true') {
-        // Only log error if not from summary (fromSummary will retry above)
-        console.error('❌ Bank account not found with ID:', editAccountId);
-        console.error('📋 Available accounts in DataStore:', dataStore.getBankAccounts().map(a => ({ id: a.id, backendId: a.backendId, accountNumber: a.accountNumber })));
-      }
-    } else if (editMode === 'true' && prefilledBankId) {
-      const bank = allBanksWithOthers.find(b => b.id === prefilledBankId);
-      if (bank) {
-        setSelectedBank(bank);
       }
     }
-  }, [editMode, editAccountId, prefilledBankId, fromSummary]);
+  }, [editMode, editAccountId, prefilledBankId]);
 
   useEffect(() => {
     Animated.timing(slideAnimation, {
@@ -468,8 +411,9 @@ export default function BankingDetailsScreen() {
       (accountType === 'Savings' || accountType === 'Current') &&
       initialBalance.length > 0 &&
       !isNaN(parseFloat(initialBalance)) &&
-      // ✅ UPI ID is optional - only validate if provided
-      (upiId.length === 0 || validateUPI(upiId))
+      (acceptsUpiPayments
+        ? (upiId.trim().length > 0 && validateUPI(upiId))
+        : (upiId.length === 0 || validateUPI(upiId)))
     );
   };
 
@@ -493,11 +437,7 @@ export default function BankingDetailsScreen() {
   };
 
   const handleCancel = () => {
-    // Get latest data from dataStore to ensure we have the most up-to-date information
-    const latestBankAccounts = dataStore.getBankAccounts();
-    const latestAddresses = dataStore.getAddresses();
-    
-    // Navigate back to bank accounts screen
+    // Navigate back using route params as-is (no DataStore dependency)
     if (fromSummary === 'true') {
       router.replace({
         pathname: '/auth/business-summary',
@@ -509,13 +449,14 @@ export default function BankingDetailsScreen() {
           businessName,
           businessType,
           customBusinessType,
-          allAddresses: JSON.stringify(latestAddresses),
-          allBankAccounts: JSON.stringify(latestBankAccounts),
+          allAddresses,
+          allBankAccounts,
           initialCashBalance: currentCashBalance,
           invoicePrefix: currentInvoicePrefix,
           invoicePattern: currentInvoicePattern,
           startingInvoiceNumber: currentStartingNumber,
           fiscalYear: currentFiscalYear,
+          mobile,
         }
       });
     } else {
@@ -529,8 +470,8 @@ export default function BankingDetailsScreen() {
           businessName,
           businessType,
           customBusinessType,
-          allAddresses: JSON.stringify(latestAddresses),
-          allBankAccounts: JSON.stringify(latestBankAccounts),
+          allAddresses,
+          allBankAccounts,
         }
       });
     }
@@ -549,7 +490,7 @@ export default function BankingDetailsScreen() {
     if (!validateIFSC(ifscCode)) return 'Invalid IFSC code format';
     if (accountType !== 'Savings' && accountType !== 'Current') return 'Please select account type';
     if (!initialBalance || isNaN(parseFloat(initialBalance))) return 'Please enter valid initial balance';
-    // ✅ UPI ID is optional - only validate if provided
+    if (acceptsUpiPayments && !upiId.trim()) return 'Please enter your UPI ID';
     if (upiId.trim() && !validateUPI(upiId)) return 'Please enter a valid UPI ID (e.g., username@bankname)';
     return '';
   };
@@ -593,14 +534,20 @@ export default function BankingDetailsScreen() {
     };
 
     try {
-      // ✅ Optimistic update: Update DataStore immediately, sync backend in background
-      // ✅ Await backend sync to ensure changes are persisted before navigation
+      // Save bank account to backend
+      let saveResult: any;
       if (editMode === 'true') {
-        // Optimistically update existing account
-        await optimisticUpdateBankAccount(editAccountId as string, bankAccount, { showError: false, awaitSync: true });
+        saveResult = await optimisticUpdateBankAccount(editAccountId as string, bankAccount, { showError: false, awaitSync: true });
       } else {
-        // Optimistically add new account
-        await optimisticAddBankAccount(bankAccount as BankAccount, { showError: false, awaitSync: true });
+        saveResult = await optimisticAddBankAccount(bankAccount as BankAccount, { showError: false, awaitSync: true });
+      }
+      
+      if (!saveResult.success) {
+        console.error('❌ Bank account save failed:', saveResult.error);
+        Alert.alert('Error', saveResult.error || 'Failed to save bank account. Please try again.');
+        setIsLoading(false);
+        setIsNavigating(false);
+        return;
       }
       
       // ✅ Clear cache to ensure fresh data is loaded when navigating back
@@ -639,9 +586,19 @@ export default function BankingDetailsScreen() {
       })();
       
       setIsLoading(false);
-      // Get latest data from dataStore to ensure we have the most up-to-date information
-      const latestBankAccounts = dataStore.getBankAccounts();
-      const latestAddresses = dataStore.getAddresses();
+      // Build updated bank accounts list from current state + new/updated account
+      let updatedBankAccounts: any[];
+      try {
+        updatedBankAccounts = JSON.parse(allBankAccounts as string || '[]');
+      } catch { updatedBankAccounts = []; }
+      
+      if (editMode === 'true') {
+        updatedBankAccounts = updatedBankAccounts.map((acc: any) => 
+          acc.id === editAccountId ? bankAccount : acc
+        );
+      } else {
+        updatedBankAccounts.push(bankAccount);
+      }
       
       // Check if we came from business summary page
       if (fromSummary === 'true') {
@@ -656,13 +613,14 @@ export default function BankingDetailsScreen() {
             businessName,
             businessType,
             customBusinessType,
-            allAddresses: JSON.stringify(latestAddresses),
-            allBankAccounts: JSON.stringify(latestBankAccounts),
-            initialCashBalance: currentCashBalance, // Preserve actual cash balance
+            allAddresses,
+            allBankAccounts: JSON.stringify(updatedBankAccounts),
+            initialCashBalance: currentCashBalance,
             invoicePrefix: currentInvoicePrefix,
             invoicePattern: currentInvoicePattern,
             startingInvoiceNumber: currentStartingNumber,
             fiscalYear: currentFiscalYear,
+            mobile,
           }
         });
       } else {
@@ -677,8 +635,8 @@ export default function BankingDetailsScreen() {
             businessName,
             businessType,
             customBusinessType,
-            allAddresses: JSON.stringify(latestAddresses),
-            allBankAccounts: JSON.stringify(latestBankAccounts),
+            allAddresses,
+            allBankAccounts: JSON.stringify(updatedBankAccounts),
           }
         });
       }
@@ -740,7 +698,7 @@ export default function BankingDetailsScreen() {
         >
             <TouchableOpacity
               style={styles.backButton}
-            onPress={editMode === 'true' ? handleCancel : () => router.back()}
+            onPress={editMode === 'true' ? handleCancel : () => router.canGoBack() ? router.back() : router.replace('/auth/mobile')}
               activeOpacity={0.7}
             >
               <ArrowLeft size={24} color="#3f66ac" />
@@ -840,7 +798,7 @@ export default function BankingDetailsScreen() {
                         focusedField === 'customBankName' && inputFocusStyles.inputContainerFocused,
                       ].filter(Boolean) as any, // ✅ Filter false values and type assert
                       default: styles.inputWrapper,
-                    }) as any}> {/* ✅ Type assertion for Platform.select with arrays */}
+                    }) as any}>
                       <Building2 size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                       <TextInput
                         style={Platform.OS === 'web' 
@@ -880,7 +838,7 @@ export default function BankingDetailsScreen() {
                       focusedField === 'accountHolderName' && inputFocusStyles.inputContainerFocused,
                     ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
+                  }) as any}>
                     <User size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <CapitalizedTextInput
                       ref={accountHolderNameRef}
@@ -924,7 +882,7 @@ export default function BankingDetailsScreen() {
                       confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber && styles.errorInputContainer,
                     ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
+                  }) as any}>
                     <Hash size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
                       ref={accountNumberRef}
@@ -969,7 +927,7 @@ export default function BankingDetailsScreen() {
                       confirmAccountNumber.length > 0 && accountNumber !== confirmAccountNumber && styles.errorInputContainer,
                     ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
+                  }) as any}>
                     <Hash size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
                       style={Platform.OS === 'web' 
@@ -1015,7 +973,7 @@ export default function BankingDetailsScreen() {
                       focusedField === 'ifscCode' && inputFocusStyles.inputContainerFocused,
                     ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
+                  }) as any}>
                     <Building2 size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
                     <TextInput
                       ref={ifscInputRef}
@@ -1053,55 +1011,94 @@ export default function BankingDetailsScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>UPI ID (Optional)</Text>
-                  <View style={Platform.select({
-                    web: [
-                      inputFocusStyles.inputContainer,
-                      focusedField === 'upiId' && inputFocusStyles.inputContainerFocused,
-                      upiId.length > 0 && !validateUPI(upiId) && styles.errorInputContainer,
-                    ].filter(Boolean) as any, // ✅ Filter false values
-                    default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
-                    <CreditCard size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
-                    <TextInput
-                      style={Platform.OS === 'web' 
-                        ? inputFocusStyles.input
-                        : [
-                            {
-                              borderWidth: 2,
-                              borderColor: (upiId.length > 0 && !validateUPI(upiId)) 
-                                ? '#ef4444' 
-                                : (focusedField === 'upiId' ? '#3f66ac' : '#E5E7EB'),
-                              borderRadius: 12,
-                              paddingHorizontal: 16,
-                              paddingLeft: 44,
-                              paddingVertical: 18,
-                              fontSize: 16,
-                              color: '#1a1a1a',
-                              backgroundColor: '#ffffff',
-                              minHeight: 50,
-                              zIndex: 1, // Lower than icon to ensure icon stays visible
-                              ...(focusedField === 'upiId' ? { ...getFocusedShadow(), elevation: 2 } : {}),
-                            },
-                          ] as any} // ✅ Use Platform.OS directly for arrays
-                      value={upiId}
-                      onChangeText={handleUPIChange}
-                      placeholder="username@bankname (optional)"
-                      placeholderTextColor="#999999"
-                      autoCapitalize="words"
-                      autoCorrect={false}
-                      editable={true}
-                      onFocus={() => setFocusedField('upiId')}
-                      onBlur={() => setFocusedField(null)}
-                    />
+                  <Text style={styles.label}>Do you collect UPI payments?</Text>
+                  <View style={styles.upiToggleContainer}>
+                    <TouchableOpacity
+                      style={[
+                        styles.upiToggleButton,
+                        acceptsUpiPayments && styles.upiToggleButtonActive,
+                      ]}
+                      onPress={() => {
+                        setAcceptsUpiPayments(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.upiToggleButtonText,
+                        acceptsUpiPayments && styles.upiToggleButtonTextActive,
+                      ]}>Yes</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.upiToggleButton,
+                        !acceptsUpiPayments && styles.upiToggleButtonInactive,
+                      ]}
+                      onPress={() => {
+                        setAcceptsUpiPayments(false);
+                        setUpiId('');
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.upiToggleButtonText,
+                        !acceptsUpiPayments && styles.upiToggleButtonTextInactive,
+                      ]}>No</Text>
+                    </TouchableOpacity>
                   </View>
-                  <Text style={styles.fieldHint}>
-                    This UPI ID will be used for all UPI-related payments (optional)
-                  </Text>
-                  {(upiId.length > 0 && !validateUPI(upiId)) ? (
-                    <Text style={styles.errorText}>Please enter a valid UPI ID (e.g., username@bankname)</Text>
-                  ) : null}
                 </View>
+
+                {acceptsUpiPayments ? (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>UPI ID *</Text>
+                    <View style={Platform.select({
+                      web: [
+                        inputFocusStyles.inputContainer,
+                        focusedField === 'upiId' && inputFocusStyles.inputContainerFocused,
+                        upiId.length > 0 && !validateUPI(upiId) && styles.errorInputContainer,
+                      ].filter(Boolean) as any,
+                      default: styles.inputWrapper,
+                    }) as any}>
+                      <CreditCard size={20} color="#64748b" style={Platform.OS === 'web' ? styles.inputIcon : styles.inputIconAbsolute} />
+                      <TextInput
+                        style={Platform.OS === 'web' 
+                          ? inputFocusStyles.input
+                          : [
+                              {
+                                borderWidth: 2,
+                                borderColor: (upiId.length > 0 && !validateUPI(upiId)) 
+                                  ? '#ef4444' 
+                                  : (focusedField === 'upiId' ? '#3f66ac' : '#E5E7EB'),
+                                borderRadius: 12,
+                                paddingHorizontal: 16,
+                                paddingLeft: 44,
+                                paddingVertical: 18,
+                                fontSize: 16,
+                                color: '#1a1a1a',
+                                backgroundColor: '#ffffff',
+                                minHeight: 50,
+                                zIndex: 1,
+                                ...(focusedField === 'upiId' ? { ...getFocusedShadow(), elevation: 2 } : {}),
+                              },
+                            ] as any}
+                        value={upiId}
+                        onChangeText={handleUPIChange}
+                        placeholder="e.g., yourname@upi"
+                        placeholderTextColor="#999999"
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        editable={true}
+                        onFocus={() => setFocusedField('upiId')}
+                        onBlur={() => setFocusedField(null)}
+                      />
+                    </View>
+                    <Text style={styles.fieldHint}>
+                      This UPI ID will be used for collecting payments from customers
+                    </Text>
+                    {(upiId.length > 0 && !validateUPI(upiId)) ? (
+                      <Text style={styles.errorText}>Please enter a valid UPI ID (e.g., username@bankname)</Text>
+                    ) : null}
+                  </View>
+                ) : null}
 
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Account Type *</Text>
@@ -1150,7 +1147,7 @@ export default function BankingDetailsScreen() {
                       focusedField === 'initialBalance' && inputFocusStyles.inputContainerFocused,
                     ].filter(Boolean) as any, // ✅ Filter false values
                     default: styles.inputWrapper,
-                  }) as any}> {/* ✅ Type assertion */}
+                  }) as any}>
                     {Platform.OS === 'web' ? (
                       <Text style={styles.currencySymbol}>₹</Text>
                     ) : (
@@ -1844,5 +1841,37 @@ const styles = StyleSheet.create({
   },
   amountInWordsTextCenter: {
     textAlign: 'center',
+  },
+  upiToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 2,
+    borderColor: '#e9ecef',
+  },
+  upiToggleButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  upiToggleButtonActive: {
+    backgroundColor: '#10b981',
+  },
+  upiToggleButtonInactive: {
+    backgroundColor: '#94a3b8',
+  },
+  upiToggleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  upiToggleButtonTextActive: {
+    color: '#ffffff',
+  },
+  upiToggleButtonTextInactive: {
+    color: '#ffffff',
   },
 });
