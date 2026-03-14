@@ -222,7 +222,7 @@ export default function ConversationScreen() {
         setResolvedName(convo.participant_other_name || routeName || 'Chat');
       }
     })();
-  }, [conversationId, routeName, isStaff, isCrossBusiness]);
+  }, [conversationId, routeName, isStaff, staffId, isCrossBusiness, type]);
 
   // Load messages on mount
   useEffect(() => {

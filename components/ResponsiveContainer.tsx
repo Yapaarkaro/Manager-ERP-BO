@@ -15,7 +15,7 @@ function ResponsiveContainer({ children, style, fullWidth = false, narrow = fals
   const { width } = Dimensions.get('window');
   
   if (Platform.OS === 'web' && !fullWidth && width > 768) {
-    const effectiveMaxWidth = maxWidth || (narrow ? 520 : 1400);
+    const effectiveMaxWidth = maxWidth || (narrow ? 680 : 1400);
     return (
       <View style={[webStyles.webContainer, style]}>
         <View style={[webStyles.webContentWrapper, { maxWidth: effectiveMaxWidth }]}>

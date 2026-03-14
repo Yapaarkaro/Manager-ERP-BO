@@ -483,21 +483,22 @@ export async function updateAddress(params: {
   const updateData: any = { updated_at: new Date().toISOString() };
   if (params.name !== undefined) updateData.name = params.name;
   if (params.type !== undefined) updateData.type = params.type;
-  if (params.managerName !== undefined) updateData.manager_name = params.managerName;
-  if (params.managerMobileNumber !== undefined) updateData.manager_mobile_number = params.managerMobileNumber;
+  if (params.managerName !== undefined) updateData.contact_name = params.managerName;
+  if (params.managerMobileNumber !== undefined) updateData.contact_phone = params.managerMobileNumber;
   if (params.isPrimary !== undefined) updateData.is_primary = params.isPrimary;
   if (params.latitude !== undefined) updateData.latitude = params.latitude;
   if (params.longitude !== undefined) updateData.longitude = params.longitude;
   if (params.addressJson !== undefined) {
     const addrObj = typeof params.addressJson === 'string' ? JSON.parse(params.addressJson) : params.addressJson;
     if (addrObj.doorNumber !== undefined) updateData.door_number = addrObj.doorNumber;
-    if (addrObj.addressLine1 !== undefined) updateData.address_line1 = addrObj.addressLine1;
-    if (addrObj.addressLine2 !== undefined) updateData.address_line2 = addrObj.addressLine2;
+    if (addrObj.addressLine1 !== undefined) updateData.address_line_1 = addrObj.addressLine1;
+    if (addrObj.addressLine2 !== undefined) updateData.address_line_2 = addrObj.addressLine2;
     if (addrObj.city !== undefined) updateData.city = addrObj.city;
     if (addrObj.pincode !== undefined) updateData.pincode = addrObj.pincode;
-    if (addrObj.state !== undefined) updateData.state = addrObj.state;
+    if (addrObj.stateName !== undefined) updateData.state = addrObj.stateName;
+    if (addrObj.state !== undefined && !addrObj.stateName) updateData.state = addrObj.state;
     if (addrObj.stateCode !== undefined) updateData.state_code = addrObj.stateCode;
-    if (addrObj.additionalLines !== undefined) updateData.additional_lines = addrObj.additionalLines;
+    if (addrObj.additionalLines !== undefined) updateData.address_line_3 = Array.isArray(addrObj.additionalLines) ? addrObj.additionalLines.join(', ') : addrObj.additionalLines;
   }
 
   const { data, error } = await supabase

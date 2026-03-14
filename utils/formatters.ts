@@ -227,3 +227,11 @@ export function getAvatarColor(name: string | null | undefined): string {
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
+
+/**
+ * Capitalize the first letter of each word.
+ * Works on web where autoCapitalize="words" is not supported.
+ */
+export function capitalizeWords(text: string): string {
+  return text.replace(/(^|\s)\S/g, (match) => match.toUpperCase());
+}

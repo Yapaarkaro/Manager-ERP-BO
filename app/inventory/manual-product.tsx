@@ -1182,28 +1182,34 @@ export default function ManualProductScreen() {
     setIsSubmitting(true);
 
     // Auto-generate barcode if none exists
-    if (!formData.barcode || formData.barcode.trim().length === 0) {
+    let barcodeToUse = formData.barcode;
+    if (!barcodeToUse || barcodeToUse.trim().length === 0) {
       try {
         const barcodeResult = await assignBarcode({ locationId: formData.locationId });
         if (barcodeResult.success && barcodeResult.barcode) {
-          formData.barcode = barcodeResult.barcode;
+          barcodeToUse = barcodeResult.barcode;
+          setFormData(prev => ({ ...prev, barcode: barcodeToUse }));
           setBarcodeGenerated(true);
           generatedBarcodeRef.current = barcodeResult.barcode;
+        } else {
+          console.warn('Barcode generation failed:', barcodeResult.error);
         }
-      } catch {}
+      } catch (e) {
+        console.warn('Barcode generation error:', e);
+      }
     }
 
     let finalProductImages = [...formData.productImages];
     let barcodeDataUri: string | null = null;
     
-    if (formData.barcode && formData.barcode.trim().length > 0) {
+    if (barcodeToUse && barcodeToUse.trim().length > 0) {
       const hasBarcodeImage = finalProductImages.some(uri =>
         uri.includes('barcode_') || uri.startsWith('data:image')
       );
 
       if (!hasBarcodeImage) {
         try {
-          barcodeDataUri = await generateBarcodeImage(formData.barcode.trim());
+          barcodeDataUri = await generateBarcodeImage(barcodeToUse.trim());
           if (barcodeDataUri) {
             finalProductImages = [...finalProductImages, barcodeDataUri];
           }
@@ -1239,9 +1245,9 @@ export default function ManualProductScreen() {
       image: finalProductImages.length > 0 ? finalProductImages[0] : '',
       category: formData.category || formData.customCategory.trim(),
       hsnCode: formData.hsnCode.trim(),
-      barcode: formData.barcode.trim(),
+      barcode: barcodeToUse.trim(),
       taxRate: formData.taxRate,
-      taxInclusive: formData.taxInclusive, // Include tax inclusion setting
+      taxInclusive: formData.taxInclusive,
       primaryUnit: formData.primaryUnit,
       secondaryUnit: formData.secondaryUnit !== 'None' ? formData.secondaryUnit : undefined,
       tertiaryUnit: formData.tertiaryUnit !== 'None' ? formData.tertiaryUnit : undefined,
@@ -1382,7 +1388,7 @@ export default function ManualProductScreen() {
             useCompoundUnit: formData.useCompoundUnit,
             conversionRatio: formData.conversionRatio || '',
             hsnCode: formData.hsnCode || '',
-            barcode: formData.barcode || '',
+            barcode: barcodeToUse || '',
             pendingProductData: pendingCreateParams,
           };
 
@@ -1471,7 +1477,7 @@ export default function ManualProductScreen() {
           useCompoundUnit: formData.useCompoundUnit,
           conversionRatio: formData.conversionRatio || '',
           hsnCode: formData.hsnCode || '',
-          barcode: formData.barcode || '',
+          barcode: barcodeToUse || '',
         };
         
         Alert.alert('Success', 'Product updated successfully. Returning to stock in...', [

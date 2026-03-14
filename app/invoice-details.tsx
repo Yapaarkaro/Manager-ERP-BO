@@ -154,51 +154,44 @@ export default function InvoiceDetailsScreen() {
     let finalInv: any = null;
     let finalItems: any[] = [];
 
-    // Step 1: Try edge function first
+    // Step 1: Query Supabase directly (fast & reliable)
     try {
-      const result = await getInvoiceWithItems(idToFetch);
-      if (result.success && result.invoice) {
-        finalInv = result.invoice;
-        const ri = result.items;
-        if (ri && ri.length > 0) {
-          finalItems = ri;
-        } else if (finalInv.items && finalInv.items.length > 0) {
-          finalItems = finalInv.items;
-        } else if (finalInv.invoice_items && finalInv.invoice_items.length > 0) {
-          finalItems = finalInv.invoice_items;
-        }
+      const { data: directInv } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', idToFetch)
+        .maybeSingle();
+      if (directInv) finalInv = directInv;
+    } catch (e) {
+      console.warn('Direct invoice query failed:', e);
+    }
+
+    // Step 2: Get invoice items directly
+    try {
+      const { data: directItems } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', idToFetch);
+      if (directItems && directItems.length > 0) {
+        finalItems = directItems;
       }
     } catch (e) {
-      console.warn('Edge function fetch failed:', e);
+      console.warn('Direct invoice_items query failed:', e);
     }
 
-    // Step 2: If edge function gave no items (or failed), query Supabase directly
-    if (finalItems.length === 0) {
-      try {
-        const { data: directItems } = await supabase
-          .from('invoice_items')
-          .select('*')
-          .eq('invoice_id', idToFetch)
-          .eq('is_deleted', false);
-        if (directItems && directItems.length > 0) {
-          finalItems = directItems;
-        }
-      } catch (e) {
-        console.warn('Direct invoice_items query failed:', e);
-      }
-    }
-
-    // Step 3: If edge function failed entirely, get invoice row directly
+    // Step 3: Fallback to edge function if direct queries gave nothing
     if (!finalInv) {
       try {
-        const { data: directInv } = await supabase
-          .from('invoices')
-          .select('*')
-          .eq('id', idToFetch)
-          .maybeSingle();
-        if (directInv) finalInv = directInv;
+        const result = await getInvoiceWithItems(idToFetch);
+        if (result.success && result.invoice) {
+          finalInv = result.invoice;
+          const ri = result.items;
+          if (ri && ri.length > 0) finalItems = ri;
+          else if (finalInv.items?.length > 0) finalItems = finalInv.items;
+          else if (finalInv.invoice_items?.length > 0) finalItems = finalInv.invoice_items;
+        }
       } catch (e) {
-        console.warn('Direct invoice query failed:', e);
+        console.warn('Edge function fetch failed:', e);
       }
     }
 

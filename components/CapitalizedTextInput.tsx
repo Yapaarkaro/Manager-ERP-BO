@@ -93,8 +93,7 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
     // BUT: Only capitalize when user is typing at the very end of the text
     // This prevents cursor jumping when editing in the middle
     if (Platform.OS === 'web' && autoCapitalize === 'words') {
-      // Check if user is typing at the end (text is longer and starts with previous value)
-      const isTypingAtEnd = text.length > internalValue.length && text.startsWith(internalValue);
+      const isTypingAtEnd = text.length >= internalValue.length && text.toLowerCase().startsWith(internalValue.toLowerCase());
       
       if (isTypingAtEnd) {
         // User is typing at the end - safe to capitalize

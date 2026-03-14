@@ -1257,14 +1257,20 @@ export default function CartScreen() {
                     <View style={styles.cardPriceInline}>
                       <View style={styles.cardPriceLeft}>
                         <Text style={styles.cardUnitPrice}>
-                          {formatPrice(getCurrentUoMPrice(item))}/{currentUnit}
+                          {item.taxInclusive 
+                            ? `${formatPrice(getBasePriceForTax(item, getCurrentUoMPrice(item)))}/${currentUnit}`
+                            : `${formatPrice(getCurrentUoMPrice(item))}/${currentUnit}`}
                         </Text>
                         {itemGST > 0 && (
-                          <Text style={styles.cardGstInline}> +{itemGST}% GST</Text>
+                          <Text style={styles.cardGstInline}> +{itemGST}% GST{item.taxInclusive ? ' (incl.)' : ''}</Text>
                         )}
                         <Text style={styles.cardEditHint}> · Tap to edit</Text>
                       </View>
-                      <Text style={styles.cardTotalPrice}>{formatPrice(itemTotal)}</Text>
+                      <Text style={styles.cardTotalPrice}>
+                        {item.taxInclusive 
+                          ? formatPrice(itemTotal) 
+                          : formatPrice(taxableBase + gstAmount)}
+                      </Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -1478,12 +1484,9 @@ export default function CartScreen() {
             {/* Total Section */}
             <View style={styles.totalSection}>
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Subtotal:</Text>
+                <Text style={styles.totalLabel}>Taxable Subtotal:</Text>
                 <Text style={styles.totalAmount}>
-                  {formatPrice(cartItems.reduce((total, item) => {
-                    const currentUoMPrice = getCurrentUoMPrice(item);
-                    return total + (currentUoMPrice * item.quantity);
-                  }, 0))}
+                  {formatPrice(cartTotals.discountedSubtotal)}
                 </Text>
               </View>
               <View style={styles.totalRow}>

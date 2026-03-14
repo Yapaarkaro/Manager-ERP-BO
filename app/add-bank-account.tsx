@@ -89,22 +89,22 @@ export default function AddBankAccount() {
   // Initialize form values when editing
   useEffect(() => {
     if (isEditMode && existingAccount) {
-      setAccountHolderName(existingAccount.accountHolderName || '');
-      setAccountNumber(existingAccount.accountNumber || '');
-      setConfirmAccountNumber(existingAccount.accountNumber || '');
-      setIfscCode(existingAccount.ifscCode || '');
-      setUpiId(existingAccount.upiId || '');
-      setAccountType(existingAccount.accountType === 'Savings' ? 'Savings' : 'Current');
-      setIsPrimary(existingAccount.isPrimary || false);
-      const bal = existingAccount.balance ?? existingAccount.current_balance ?? existingAccount.initialBalance ?? '';
-      setInitialBalance(bal !== '' ? String(bal) : '0');
+      setAccountHolderName(existingAccount.accountHolderName || existingAccount.account_holder_name || '');
+      setAccountNumber(existingAccount.accountNumber || existingAccount.account_number || '');
+      setConfirmAccountNumber(existingAccount.accountNumber || existingAccount.account_number || '');
+      setIfscCode(existingAccount.ifscCode || existingAccount.ifsc_code || '');
+      setUpiId(existingAccount.upiId || existingAccount.upi_id || '');
+      setAccountType((existingAccount.accountType || existingAccount.account_type) === 'Savings' ? 'Savings' : 'Current');
+      setIsPrimary(existingAccount.isPrimary ?? existingAccount.is_primary ?? false);
+      const bal = existingAccount.current_balance ?? existingAccount.balance ?? existingAccount.initial_balance ?? existingAccount.initialBalance;
+      setInitialBalance(bal != null ? String(bal) : '0');
 
-      // Find and set the bank
-      const bank = allBanksWithOthers.find(b => b.id === existingAccount.bankCode || b.shortName === existingAccount.bankCode);
+      const bankCode = existingAccount.bankCode || existingAccount.bank_short_name || existingAccount.bankShortName || existingAccount.bank_id || existingAccount.bankId;
+      const bank = allBanksWithOthers.find(b => b.id === bankCode || b.shortName === bankCode);
       if (bank) {
         setSelectedBank(bank);
         if (bank.id === 'others') {
-          setCustomBankName(existingAccount.bankName);
+          setCustomBankName(existingAccount.bankName || existingAccount.bank_name || '');
         }
       }
     }
