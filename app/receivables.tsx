@@ -19,7 +19,7 @@ import { Receivable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { getReceivables, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
-import { getInitials, getAvatarColor } from '@/utils/formatters';
+import { getInitials, getAvatarColor, formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
@@ -235,13 +235,7 @@ export default function ReceivablesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -830,8 +824,8 @@ export default function ReceivablesScreen() {
           columns: [
             { key: 'customerName', header: 'Customer' },
             { key: 'mobile', header: 'Mobile' },
-            { key: 'totalReceivable', header: 'Total Receivable (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
-            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'totalReceivable', header: 'Total Receivable (₹)', format: (v) => formatIndianNumber(v || 0) },
+            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'invoiceCount', header: 'Invoices', format: (v) => String(v || 0) },
             { key: 'daysPastDue', header: 'Days Past Due', format: (v) => String(v || 0) },
             { key: 'status', header: 'Status', format: (v) => v === 'current' ? 'Current' : v === 'overdue' ? 'Overdue' : 'Critical' },
@@ -839,8 +833,8 @@ export default function ReceivablesScreen() {
           ],
           data: filteredReceivables,
           summaryRows: [
-            { label: 'Total Receivable', value: `₹${filteredReceivables.reduce((s, r) => s + (r.totalReceivable || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-            { label: 'Total Overdue', value: `₹${filteredReceivables.reduce((s, r) => s + (r.overdueAmount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Receivable', value: formatCurrencyINR(filteredReceivables.reduce((s, r) => s + (r.totalReceivable || 0), 0)) },
+            { label: 'Total Overdue', value: formatCurrencyINR(filteredReceivables.reduce((s, r) => s + (r.overdueAmount || 0), 0)) },
           ],
         }}
       />

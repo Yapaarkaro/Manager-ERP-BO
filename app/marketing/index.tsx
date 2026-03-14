@@ -7,11 +7,13 @@ import {
   ScrollView,
   TextInput,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { getCampaigns } from '@/services/backendApi';
 import { 
   ArrowLeft, 
@@ -198,13 +200,7 @@ export default function MarketingScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
@@ -384,7 +380,7 @@ export default function MarketingScreen() {
               onPress={() => console.log('Advanced filter')}
               activeOpacity={0.7}
             >
-              <Filter size={20} color={Colors.textLight} />
+              <Filter size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -591,7 +587,7 @@ const styles = StyleSheet.create({
   },
   addCampaignFAB: {
     position: 'absolute',
-    bottom: 90,
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
@@ -638,12 +634,13 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.background,
+    backgroundColor: 'transparent',
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
-    borderColor: Colors.grey[300],
+    borderColor: Colors.grey[200],
+    minHeight: 52,
   },
   searchInput: {
     flex: 1,
@@ -653,13 +650,11 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
   },
 }); 

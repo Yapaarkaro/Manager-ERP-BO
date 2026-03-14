@@ -19,6 +19,7 @@ import {
   Hash,
   X,
 } from 'lucide-react-native';
+import { productStore } from '@/utils/productStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -115,25 +116,48 @@ export default function ScanProductScreen() {
     setIsLoading(true);
     
     try {
+      // Check local product store first (includes Manager-generated barcodes)
+      const localProduct = productStore.findByBarcode(barcode);
+
+      if (localProduct) {
+        setIsLoading(false);
+        Alert.alert(
+          'Product Found in Inventory',
+          `📦 ${localProduct.name}\n🏷️ Barcode: ${localProduct.barcode}\n📂 Category: ${localProduct.category}\n💰 Price: ₹${localProduct.salesPrice || localProduct.unitPrice}\n📦 Stock: ${localProduct.currentStock} ${localProduct.primaryUnit || 'units'}`,
+          [
+            { text: 'Scan Again', onPress: () => setScanned(false), style: 'cancel' },
+            {
+              text: 'View Product',
+              onPress: () => {
+                safeRouter.push({
+                  pathname: '/inventory/product-details',
+                  params: { productId: localProduct.id }
+                });
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      // Not in local store - try OpenFoodFacts
       const result = await fetchProductDetails(barcode);
       setIsLoading(false);
       
       if (result.found && result.product) {
-        // Product found in OpenFoodFacts
         const productData = {
           barcode: barcode,
           name: result.product.name || 'Unknown Product',
           brand: result.product.brand,
           quantity: result.product.quantity,
-          hsnCode: '', // Will be filled manually
-          taxRate: 18, // Default GST rate
+          hsnCode: '',
+          taxRate: 18,
           cessRate: 0,
           category: result.product.category || 'Others',
           primaryUnit: 'Piece',
           image: result.product.image,
         };
 
-        // Auto-navigate to manual product entry with found data
         safeRouter.push({
           pathname: '/inventory/manual-product',
           params: {
@@ -142,34 +166,27 @@ export default function ScanProductScreen() {
           }
         });
       } else {
-        // Product not found
         Alert.alert(
           'Product Not Found',
-          'Product not found in OpenFoodFacts database. Add manually?',
+          `Barcode: ${barcode}\n\nNot found in your inventory or online databases. Add manually?`,
           [
-            {
-              text: 'Scan Again',
-              onPress: () => setScanned(false),
-              style: 'cancel',
-            },
+            { text: 'Scan Again', onPress: () => setScanned(false), style: 'cancel' },
             {
               text: 'Add Manually',
               onPress: () => {
-                const basicProductData = {
-                  barcode: barcode,
-                  name: '',
-                  hsnCode: '',
-                  taxRate: 18,
-                  cessRate: 0,
-                  category: '',
-                  primaryUnit: 'Piece',
-                  image: null,
-                };
-                
                 safeRouter.push({
                   pathname: '/inventory/manual-product',
                   params: {
-                    scannedData: JSON.stringify(basicProductData),
+                    scannedData: JSON.stringify({
+                      barcode: barcode,
+                      name: '',
+                      hsnCode: '',
+                      taxRate: 18,
+                      cessRate: 0,
+                      category: '',
+                      primaryUnit: 'Piece',
+                      image: null,
+                    }),
                     isScanned: 'true'
                   }
                 });
@@ -181,7 +198,7 @@ export default function ScanProductScreen() {
     } catch (error) {
       setIsLoading(false);
       setScanned(false);
-      Alert.alert('Error', 'Failed to fetch product details. Please try again.');
+      Alert.alert('Error', 'Failed to process barcode. Please try again.');
     }
   };
 
@@ -228,20 +245,20 @@ export default function ScanProductScreen() {
         </View>
 
         {/* Camera */}
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          flash={flashOn ? 'on' : 'off'}
-        >
-          <View style={styles.overlay}>
+        <View style={styles.cameraContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+            flash={flashOn ? 'on' : 'off'}
+          />
+          <View style={[StyleSheet.absoluteFillObject, styles.overlay]} pointerEvents="box-none">
             <View style={styles.scanArea}>
               <View style={styles.scanFrame} />
               <Text style={styles.scanText}>
                 Position the product barcode within the frame
               </Text>
               
-              {/* Flash Button - Floating */}
               <TouchableOpacity
                 style={styles.floatingFlashButton}
                 onPress={() => setFlashOn(!flashOn)}
@@ -256,12 +273,12 @@ export default function ScanProductScreen() {
               
               {isLoading && (
                 <View style={styles.loadingContainer}>
-                  <Text style={styles.loadingText}>Fetching product details...</Text>
+                  <Text style={styles.loadingText}>Looking up product...</Text>
                 </View>
               )}
             </View>
           </View>
-        </CameraView>
+        </View>
 
         {/* Instructions */}
         <View style={styles.instructions}>
@@ -303,7 +320,9 @@ export default function ScanProductScreen() {
                 onChangeText={setManualBarcode}
                 placeholder="Enter barcode number"
                 placeholderTextColor={Colors.textLight}
-                keyboardType="numeric"
+                keyboardType="default"
+                autoCapitalize="characters"
+                autoCorrect={false}
                 autoFocus
               />
               
@@ -366,6 +385,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cameraContainer: {
+    flex: 1,
+    position: 'relative',
   },
   camera: {
     flex: 1,

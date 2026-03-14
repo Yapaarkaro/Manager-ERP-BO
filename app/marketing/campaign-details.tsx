@@ -25,6 +25,7 @@ import {
   MapPin,
   MessageSquare
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -122,11 +123,7 @@ export default function CampaignDetailsScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {
@@ -283,7 +280,7 @@ export default function CampaignDetailsScreen() {
                 <View style={styles.analyticsRow}>
                   <IndianRupee size={20} color={Colors.textLight} />
                   <Text style={styles.analyticsLabel}>Cost Per Click (CPC)</Text>
-                  <Text style={styles.analyticsValue}>₹{calculateCPC()}</Text>
+                  <Text style={styles.analyticsValue}>{formatCurrencyINR(calculateCPC())}</Text>
                 </View>
                 
                 <View style={styles.analyticsRow}>

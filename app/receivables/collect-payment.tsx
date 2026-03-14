@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   CreditCard,
@@ -28,6 +29,8 @@ import {
 } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { recordTransactionForModule, updateInvoicePayment } from '@/services/backendApi';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { consumeNavData } from '@/utils/navStore';
 
 const C = {
   bg: '#FFFFFF',
@@ -52,8 +55,9 @@ const METHODS: { method: PaymentMethod; icon: any; title: string; desc: string }
 ];
 
 export default function CollectPaymentScreen() {
-  const { customerData } = useLocalSearchParams();
-  const customer = JSON.parse(customerData as string);
+  const { customerData: paramCustomerData } = useLocalSearchParams();
+  const navCustomer = consumeNavData('collectPaymentCustomer');
+  const customer = navCustomer || JSON.parse(paramCustomerData as string);
   const { data: businessData } = useBusinessData();
 
   const [paymentAmount, setPaymentAmount] = useState(customer.totalReceivable.toString());
@@ -79,7 +83,7 @@ export default function CollectPaymentScreen() {
   const selectedBank = bankAccounts.find(a => a.id === selectedBankId);
   const getBankLabel = (a: any) => `${a.bank_name || a.bankName || 'Bank'} ••••${(a.account_number || a.accountNumber || '').slice(-4)}`;
 
-  const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(n);
+  const fmt = (n: number) => formatCurrencyINR(n);
 
   const handleAmountChange = (text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
@@ -122,20 +126,16 @@ export default function CollectPaymentScreen() {
       }
     }
 
-    safeRouter.replace({
-      pathname: '/receivables/payment-success',
-      params: {
-        paymentData: JSON.stringify({
-          customerId: customer.id,
-          customerName: customer.customerName,
-          paymentAmount: amount,
-          paymentMethod: selectedMethod,
-          isFullPayment: amount === customer.totalReceivable,
-          remainingBalance: customer.totalReceivable - amount,
-          processedAt: new Date().toISOString(),
-        }),
-      },
-    } as any);
+    setNavData('receivablePaymentResult', {
+      customerId: customer.id,
+      customerName: customer.customerName,
+      paymentAmount: amount,
+      paymentMethod: selectedMethod,
+      isFullPayment: amount === customer.totalReceivable,
+      remainingBalance: customer.totalReceivable - amount,
+      processedAt: new Date().toISOString(),
+    });
+    safeRouter.replace({ pathname: '/receivables/payment-success' } as any);
     setIsProcessing(false);
   };
 

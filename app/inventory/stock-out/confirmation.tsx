@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { createWriteOff } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { usePermissions } from '@/contexts/PermissionContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -21,6 +22,7 @@ import {
   FileText,
   Image as ImageIcon,
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -65,16 +67,17 @@ interface StockOutData {
 }
 
 export default function ConfirmationScreen() {
-  const { stockOutData } = useLocalSearchParams<{ stockOutData: string }>();
+  const params = useLocalSearchParams<{ stockOutData: string }>();
   const [isSaving, setIsSaving] = useState(false);
   const { staffId, staffName } = usePermissions();
   
-  // Parse stock out data
-  const data: StockOutData = stockOutData ? JSON.parse(stockOutData) : {
-    reason: '',
-    items: [],
-    generalNotes: '',
-  };
+  const rawStockOut = consumeNavData('stockOutData') || (params.stockOutData ? params.stockOutData : null);
+  const data: StockOutData = (() => {
+    if (rawStockOut) {
+      try { return typeof rawStockOut === 'string' ? JSON.parse(rawStockOut) : rawStockOut; } catch {}
+    }
+    return { reason: '', items: [], generalNotes: '' };
+  })();
 
   const handleConfirm = () => {
     Alert.alert(
@@ -124,14 +127,7 @@ export default function ConfirmationScreen() {
     router.back();
   };
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(price);
-  };
+  const formatPrice = (price: number) => formatCurrencyINR(price, 3, 0);
 
   const totalItems = data.items.reduce((sum, item) => sum + item.quantityToRemove, 0);
   const totalValue = data.items.reduce((sum, item) => 

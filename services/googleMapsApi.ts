@@ -1,5 +1,5 @@
 // Google Maps API service for address autocomplete, geocoding, and places search
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/config';
 
 export interface GooglePlacePrediction {
   place_id: string;

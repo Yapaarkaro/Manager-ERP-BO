@@ -1,5 +1,6 @@
 import * as Sharing from 'expo-sharing';
 import { Platform, Alert } from 'react-native';
+import { formatCurrencyINR } from './formatters';
 import { generateInvoiceLinkURL, InvoiceQRData } from './invoiceQRGenerator';
 import { downloadInvoiceOnWeb } from './invoicePdfGenerator';
 import type { InvoicePDFData } from './invoicePdfGenerator';
@@ -89,7 +90,7 @@ export async function shareToChat(params: ShareToChatParams): Promise<{ success:
     }
 
     const typeLabel = params.invoiceType === 'sale' ? 'Sales Invoice' : params.invoiceType === 'purchase' ? 'Purchase Invoice' : 'Return/Credit Note';
-    const message = `📄 ${typeLabel} #${params.invoiceNumber}\nAmount: ₹${params.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n\nThis invoice has been shared with you from Manager.`;
+    const message = `📄 ${typeLabel} #${params.invoiceNumber}\nAmount: ${formatCurrencyINR(params.totalAmount)}\n\nThis invoice has been shared with you from Manager.`;
 
     const { data: { session } } = await supabase.auth.getSession();
     const sType = convResult.crossBusiness ? 'supplier' : 'owner';
@@ -158,7 +159,7 @@ export async function autoSendDocumentToChat(params: {
       purchase_order: 'Purchase Order',
     };
     const label = typeLabels[params.documentType] || params.documentType;
-    const message = `📄 ${label} #${params.documentNumber}\nAmount: ₹${params.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n\nThis document has been shared with you from Manager.`;
+    const message = `📄 ${label} #${params.documentNumber}\nAmount: ${formatCurrencyINR(params.totalAmount)}\n\nThis document has been shared with you from Manager.`;
 
     const { data: { session } } = await supabase.auth.getSession();
     const sType = convResult.crossBusiness ? 'supplier' : 'owner';

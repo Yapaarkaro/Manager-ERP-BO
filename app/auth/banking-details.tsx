@@ -36,37 +36,39 @@ import { supabase } from '@/lib/supabase';
 import { numberToWords } from '@/utils/numberToWords';
 import { optimisticAddBankAccount, optimisticUpdateBankAccount, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
 import { getPlatformShadow } from '@/utils/shadowUtils';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 export default function BankingDetailsScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    allAddresses,
-    allBankAccounts = '[]',
-    isAddingSecondary = 'false',
-    editMode = 'false',
-    editAccountId = '',
-    prefilledBankId = '',
-    prefilledAccountHolderName = '',
-    prefilledAccountNumber = '',
-    prefilledIFSC = '',
-    prefilledAccountType = '',
-    prefilledInitialBalance = '',
-    prefilledUpiId = '',
-    prefilledIsPrimary = 'false',
-    fromSummary = 'false',
-    currentCashBalance = '0',
-    currentInvoicePrefix = 'INV',
-    currentInvoicePattern = '',
-    currentStartingNumber = '1',
-    currentFiscalYear = 'APR-MAR',
-  } = useLocalSearchParams();
+  const _params = useLocalSearchParams();
+  const _store = getSignupData();
+
+  const type = (_params.type ?? _store.type ?? '') as string;
+  const value = (_params.value ?? _store.value ?? '') as string;
+  const gstinData = (_params.gstinData ?? _store.gstinData ?? '') as string;
+  const name = (_params.name ?? _store.name ?? '') as string;
+  const businessName = (_params.businessName ?? _store.businessName ?? '') as string;
+  const businessType = (_params.businessType ?? _store.businessType ?? '') as string;
+  const customBusinessType = (_params.customBusinessType ?? _store.customBusinessType ?? '') as string;
+  const mobile = (_params.mobile ?? _store.mobile ?? '') as string;
+  const allAddresses = (_params.allAddresses ?? _store.allAddresses ?? '') as string;
+  const allBankAccounts = (_params.allBankAccounts ?? _store.allBankAccounts ?? '[]') as string;
+  const isAddingSecondary = (_params.isAddingSecondary ?? _store.isAddingSecondary ?? 'false') as string;
+  const editMode = (_params.editMode ?? _store.editMode ?? 'false') as string;
+  const editAccountId = (_params.editAccountId ?? _store.editAccountId ?? '') as string;
+  const prefilledBankId = (_params.prefilledBankId ?? _store.prefilledBankId ?? '') as string;
+  const prefilledAccountHolderName = (_params.prefilledAccountHolderName ?? _store.prefilledAccountHolderName ?? '') as string;
+  const prefilledAccountNumber = (_params.prefilledAccountNumber ?? _store.prefilledAccountNumber ?? '') as string;
+  const prefilledIFSC = (_params.prefilledIFSC ?? _store.prefilledIFSC ?? '') as string;
+  const prefilledAccountType = (_params.prefilledAccountType ?? _store.prefilledAccountType ?? '') as string;
+  const prefilledInitialBalance = (_params.prefilledInitialBalance ?? _store.prefilledInitialBalance ?? '') as string;
+  const prefilledUpiId = (_params.prefilledUpiId ?? _store.prefilledUpiId ?? '') as string;
+  const prefilledIsPrimary = (_params.prefilledIsPrimary ?? _store.prefilledIsPrimary ?? 'false') as string;
+  const fromSummary = (_params.fromSummary ?? _store.fromSummary ?? 'false') as string;
+  const currentCashBalance = (_params.currentCashBalance ?? _store.currentCashBalance ?? '0') as string;
+  const currentInvoicePrefix = (_params.currentInvoicePrefix ?? _store.currentInvoicePrefix ?? 'INV') as string;
+  const currentInvoicePattern = (_params.currentInvoicePattern ?? _store.currentInvoicePattern ?? '') as string;
+  const currentStartingNumber = (_params.currentStartingNumber ?? _store.currentStartingNumber ?? '1') as string;
+  const currentFiscalYear = (_params.currentFiscalYear ?? _store.currentFiscalYear ?? 'APR-MAR') as string;
 
   const [selectedBank, setSelectedBank] = useState<IndianBank | null>(null);
   const [customBankName, setCustomBankName] = useState('');
@@ -439,41 +441,37 @@ export default function BankingDetailsScreen() {
   const handleCancel = () => {
     // Navigate back using route params as-is (no DataStore dependency)
     if (fromSummary === 'true') {
-      router.replace({
-        pathname: '/auth/business-summary',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses,
-          allBankAccounts,
-          initialCashBalance: currentCashBalance,
-          invoicePrefix: currentInvoicePrefix,
-          invoicePattern: currentInvoicePattern,
-          startingInvoiceNumber: currentStartingNumber,
-          fiscalYear: currentFiscalYear,
-          mobile,
-        }
+      setSignupData({
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        allAddresses,
+        allBankAccounts,
+        initialCashBalance: currentCashBalance,
+        invoicePrefix: currentInvoicePrefix,
+        invoicePattern: currentInvoicePattern,
+        startingInvoiceNumber: currentStartingNumber,
+        fiscalYear: currentFiscalYear,
+        mobile,
       });
+      router.replace('/auth/business-summary');
     } else {
-      router.replace({
-        pathname: '/auth/bank-accounts',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses,
-          allBankAccounts,
-        }
+      setSignupData({
+        type,
+        value,
+        gstinData,
+        name,
+        businessName,
+        businessType,
+        customBusinessType,
+        allAddresses,
+        allBankAccounts,
       });
+      router.replace('/auth/bank-accounts');
     }
   };
 
@@ -602,43 +600,37 @@ export default function BankingDetailsScreen() {
       
       // Check if we came from business summary page
       if (fromSummary === 'true') {
-        // Return to business summary page with preserved values
-        router.replace({
-          pathname: '/auth/business-summary',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            allAddresses,
-            allBankAccounts: JSON.stringify(updatedBankAccounts),
-            initialCashBalance: currentCashBalance,
-            invoicePrefix: currentInvoicePrefix,
-            invoicePattern: currentInvoicePattern,
-            startingInvoiceNumber: currentStartingNumber,
-            fiscalYear: currentFiscalYear,
-            mobile,
-          }
+        setSignupData({
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          allAddresses,
+          allBankAccounts: JSON.stringify(updatedBankAccounts),
+          initialCashBalance: currentCashBalance,
+          invoicePrefix: currentInvoicePrefix,
+          invoicePattern: currentInvoicePattern,
+          startingInvoiceNumber: currentStartingNumber,
+          fiscalYear: currentFiscalYear,
+          mobile,
         });
+        router.replace('/auth/business-summary');
       } else {
-        // Navigate back to bank accounts management screen
-        router.replace({
-          pathname: '/auth/bank-accounts',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            allAddresses,
-            allBankAccounts: JSON.stringify(updatedBankAccounts),
-          }
+        setSignupData({
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          allAddresses,
+          allBankAccounts: JSON.stringify(updatedBankAccounts),
         });
+        router.replace('/auth/bank-accounts');
       }
       
       // Reset navigation flag immediately

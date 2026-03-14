@@ -9,12 +9,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { 
   ArrowLeft, 
   Flashlight,
   FlashlightOff,
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -84,7 +86,7 @@ export default function ScanInvoiceScreen() {
 
     Alert.alert(
       'Invoice Found',
-      `Invoice: ${scannedInvoice.invoiceNumber}\nCustomer: ${scannedInvoice.customerName}\nAmount: ₹${scannedInvoice.amount.toLocaleString('en-IN')}`,
+      `Invoice: ${scannedInvoice.invoiceNumber}\nCustomer: ${scannedInvoice.customerName}\nAmount: ${formatCurrencyINR(scannedInvoice.amount)}`,
       [
         {
           text: 'Scan Again',
@@ -94,12 +96,8 @@ export default function ScanInvoiceScreen() {
         {
           text: 'Process Return',
           onPress: () => {
-            safeRouter.push({
-              pathname: '/new-return/select-items',
-              params: {
-                invoiceData: JSON.stringify(scannedInvoice)
-              }
-            });
+            setNavData('returnFlowInvoice', scannedInvoice);
+            safeRouter.push({ pathname: '/new-return/select-items' });
           },
         },
       ]

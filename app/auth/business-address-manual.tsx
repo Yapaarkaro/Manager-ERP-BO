@@ -27,6 +27,7 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 import { createAddress, updateAddress, createStaff } from '@/services/backendApi';
 import { BusinessAddress } from '@/utils/dataStore';
 import { getPlatformShadow } from '@/utils/shadowUtils';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -68,35 +69,37 @@ const indianStates = [
 ];
 
 export default function BusinessAddressManualScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    addressType = 'primary',
-    existingAddresses = '[]',
-    editMode = 'false',
-    editAddressId = '',
-    prefilledAddressName = '',
-    prefilledDoorNumber = '',
-    prefilledStreet = '',
-    prefilledArea = '',
-    prefilledCity = '',
-    prefilledState = '',
-    prefilledPincode = '',
-    prefilledFormatted = '',
-    prefilledContactName = '',
-    prefilledContactPhone = '',
-    prefilledLat = '',
-    prefilledLng = '',
-  } = useLocalSearchParams();
+  const _params = useLocalSearchParams();
+  const _stored = getSignupData();
+
+  const type = (_params.type as string) ?? _stored.type ?? '';
+  const value = (_params.value as string) ?? _stored.value ?? '';
+  const gstinData = (_params.gstinData as string) ?? _stored.gstinData ?? '';
+  const name = (_params.name as string) ?? _stored.name ?? '';
+  const businessName = (_params.businessName as string) ?? _stored.businessName ?? '';
+  const businessType = (_params.businessType as string) ?? _stored.businessType ?? '';
+  const customBusinessType = (_params.customBusinessType as string) ?? _stored.customBusinessType ?? '';
+  const mobile = (_params.mobile as string) ?? _stored.mobile ?? '';
+  const addressType = (_params.addressType as string) ?? _stored.addressType ?? 'primary';
+  const existingAddresses = (_params.existingAddresses as string) ?? _stored.existingAddresses ?? '[]';
+  const editMode = (_params.editMode as string) ?? _stored.editMode ?? 'false';
+  const editAddressId = (_params.editAddressId as string) ?? _stored.editAddressId ?? '';
+  const prefilledAddressName = (_params.prefilledAddressName as string) ?? _stored.prefilledAddressName ?? '';
+  const prefilledDoorNumber = (_params.prefilledDoorNumber as string) ?? _stored.prefilledDoorNumber ?? '';
+  const prefilledStreet = (_params.prefilledStreet as string) ?? _stored.prefilledStreet ?? '';
+  const prefilledArea = (_params.prefilledArea as string) ?? _stored.prefilledArea ?? '';
+  const prefilledCity = (_params.prefilledCity as string) ?? _stored.prefilledCity ?? '';
+  const prefilledState = (_params.prefilledState as string) ?? _stored.prefilledState ?? '';
+  const prefilledPincode = (_params.prefilledPincode as string) ?? _stored.prefilledPincode ?? '';
+  const prefilledFormatted = (_params.prefilledFormatted as string) ?? _stored.prefilledFormatted ?? '';
+  const prefilledContactName = (_params.prefilledContactName as string) ?? _stored.prefilledContactName ?? '';
+  const prefilledContactPhone = (_params.prefilledContactPhone as string) ?? _stored.prefilledContactPhone ?? '';
+  const prefilledLat = (_params.prefilledLat as string) ?? _stored.prefilledLat ?? '';
+  const prefilledLng = (_params.prefilledLng as string) ?? _stored.prefilledLng ?? '';
   
   const insets = useSafeAreaInsets();
-  const [addressName, setAddressName] = useState(prefilledAddressName as string);
+  const isPrimaryAddress = addressType === 'primary';
+  const [addressName, setAddressName] = useState(isPrimaryAddress ? (prefilledAddressName as string) : '');
   const [addressLine1, setAddressLine1] = useState(prefilledStreet as string);
   const [addressLine2, setAddressLine2] = useState(prefilledArea as string);
   const [additionalLines, setAdditionalLines] = useState<string[]>([]);
@@ -115,9 +118,11 @@ export default function BusinessAddressManualScreen() {
   const [staffOtpCode, setStaffOtpCode] = useState('');
   const [staffOtpName, setStaffOtpName] = useState('');
   const [contactPersonName, setContactPersonName] = useState(
-    (prefilledContactName as string) || (name as string) || ''
+    isPrimaryAddress ? ((prefilledContactName as string) || (name as string) || '') : ''
   );
-  const initialContactPhone = ((prefilledContactPhone as string) || (mobile as string) || '').replace(/\D/g, '').slice(0, 10);
+  const initialContactPhone = isPrimaryAddress
+    ? ((prefilledContactPhone as string) || (mobile as string) || '').replace(/\D/g, '').slice(0, 10)
+    : '';
   const [contactPhone, setContactPhone] = useState(initialContactPhone);
   const [latitude, setLatitude] = useState<number | null>(prefilledLat ? parseFloat(prefilledLat as string) : null);
   const [longitude, setLongitude] = useState<number | null>(prefilledLng ? parseFloat(prefilledLng as string) : null);
@@ -171,9 +176,25 @@ export default function BusinessAddressManualScreen() {
         };
       }
     } else {
-      // Default to primary address styling for new addresses
+      if (addressType === 'branch') {
+        const branchAddresses = parsedAddresses.filter((addr: any) => addr.type === 'branch');
+        const branchNumber = branchAddresses.length + 1;
+        return {
+          color: '#3f66ac',
+          title: `Branch Address - ${branchNumber}`,
+          subtitle: 'Enter your branch address details'
+        };
+      } else if (addressType === 'warehouse') {
+        const warehouseAddresses = parsedAddresses.filter((addr: any) => addr.type === 'warehouse');
+        const warehouseNumber = warehouseAddresses.length + 1;
+        return {
+          color: '#f59e0b',
+          title: `Warehouse Address - ${warehouseNumber}`,
+          subtitle: 'Enter your warehouse address details'
+        };
+      }
       return {
-        color: '#ffc754', // Primary business address color
+        color: '#ffc754',
         title: 'Primary Business Address',
         subtitle: 'Enter your primary business address details'
       };
@@ -1053,7 +1074,8 @@ export default function BusinessAddressManualScreen() {
         }
       }
 
-      router.replace({ pathname: '/auth/address-confirmation', params: navigateParams });
+      setSignupData(navigateParams);
+      router.replace('/auth/address-confirmation');
       setIsNavigating(false);
       setIsLoading(false);
     } catch (error: any) {
@@ -1067,7 +1089,8 @@ export default function BusinessAddressManualScreen() {
   const handleDismissStaffOtpModal = () => {
     setShowStaffOtpModal(false);
     if (pendingNavigateRef.current) {
-      router.replace({ pathname: '/auth/address-confirmation', params: pendingNavigateRef.current });
+      setSignupData(pendingNavigateRef.current);
+      router.replace('/auth/address-confirmation');
       pendingNavigateRef.current = null;
     }
     setIsNavigating(false);
@@ -1144,14 +1167,34 @@ export default function BusinessAddressManualScreen() {
                   {typeInfo.subtitle}
                 </Text>
                 
-                <View style={styles.primaryNotice}>
-                  <Text style={styles.primaryNoticeText}>
-                    📍 This is your <Text style={styles.primaryBold}>Primary Address</Text>
-                  </Text>
-                  <Text style={styles.primaryNoticeSubtext}>
-                    You can add more locations later
-                  </Text>
-                </View>
+                {addressType === 'primary' ? (
+                  <View style={styles.primaryNotice}>
+                    <Text style={styles.primaryNoticeText}>
+                      📍 This is your <Text style={styles.primaryBold}>Primary Address</Text>
+                    </Text>
+                    <Text style={styles.primaryNoticeSubtext}>
+                      You can add more locations later
+                    </Text>
+                  </View>
+                ) : addressType === 'branch' ? (
+                  <View style={[styles.primaryNotice, { backgroundColor: '#eff6ff', borderColor: '#3f66ac' }]}>
+                    <Text style={[styles.primaryNoticeText, { color: '#3f66ac' }]}>
+                      🏢 Adding a <Text style={styles.primaryBold}>Branch Office</Text>
+                    </Text>
+                    <Text style={[styles.primaryNoticeSubtext, { color: '#3f66ac' }]}>
+                      Enter the details for this branch location
+                    </Text>
+                  </View>
+                ) : addressType === 'warehouse' ? (
+                  <View style={[styles.primaryNotice, { backgroundColor: '#fffbeb', borderColor: '#f59e0b' }]}>
+                    <Text style={[styles.primaryNoticeText, { color: '#92400e' }]}>
+                      📦 Adding a <Text style={styles.primaryBold}>Warehouse</Text>
+                    </Text>
+                    <Text style={[styles.primaryNoticeSubtext, { color: '#b45309' }]}>
+                      Enter the details for this warehouse location
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               {prefilledFormatted ? (
@@ -1644,21 +1687,14 @@ export default function BusinessAddressManualScreen() {
                       setShowDuplicateModal(false);
                       // Navigate to edit the existing address
                       if (duplicateAddressInfo) {
-                        router.push({
-                          pathname: '/edit-address-simple',
-                          params: {
-                            editAddressId: duplicateAddressInfo.id,
-                            addressType: duplicateAddressInfo.type,
-                            type,
-                            value,
-                            name,
-                            businessName,
-                            businessType,
-                            customBusinessType,
-                            existingAddresses: existingAddresses,
-                            fromSummary: 'false',
-                          }
+                        setSignupData({
+                          editAddressId: duplicateAddressInfo.id,
+                          addressType: duplicateAddressInfo.type,
+                          type, value, name, businessName, businessType, customBusinessType,
+                          existingAddresses,
+                          fromSummary: 'false',
                         });
+                        router.push('/edit-address-simple');
                       }
                       setDuplicateAddressInfo(null);
                     }}
@@ -1729,21 +1765,12 @@ export default function BusinessAddressManualScreen() {
                             
                             // Address synced to Supabase backend via optimistic sync
                             
-                            // Navigate immediately (no delay)
-                            router.replace({
-                              pathname: '/auth/address-confirmation',
-                              params: {
-                                type,
-                                value,
-                                gstinData,
-                                name,
-                                businessName,
-                                businessType,
-                                customBusinessType,
-                                mobile,
-                                allAddresses: JSON.stringify(allAddresses),
-                              }
+                            setSignupData({
+                              type, value, gstinData, name, businessName, businessType,
+                              customBusinessType, mobile,
+                              allAddresses: JSON.stringify(allAddresses),
                             });
+                            router.replace('/auth/address-confirmation');
                             setIsLoading(false);
                             setDuplicateAddressInfo(null);
                           }}

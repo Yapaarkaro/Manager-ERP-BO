@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { ArrowLeft, CheckCircle, Crown, Users, MapPin, FileText, Star } from 'lucide-react-native';
 import { subscriptionStore, subscriptionPlans, addOns, oneTimeServices, SubscriptionPlan, AddOn, OneTimeService } from '@/utils/subscriptionStore';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 export default function SubscriptionScreen() {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
@@ -87,13 +88,7 @@ export default function SubscriptionScreen() {
     }
   };
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price: number) => formatCurrencyINR(price, 2, 0);
 
   const formatTrialEndDate = (dateString: string) => {
     const date = new Date(dateString);

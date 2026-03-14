@@ -43,8 +43,8 @@ const WebAddressSearch: React.FC<WebAddressSearchProps> = ({
       
       try {
         // Load Google Maps API if not already loaded
-        const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
-        await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
+        const { GOOGLE_MAPS_API_KEY: mapsKey } = require('@/lib/config');
+        await loadGoogleMapsScript(mapsKey);
         
         // Create services using utility functions
         autocompleteService.current = createAutocompleteService();

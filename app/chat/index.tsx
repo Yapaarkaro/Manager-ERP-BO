@@ -256,6 +256,8 @@ export default function ChatListScreen() {
   useEffect(() => {
     if (!businessId) return;
 
+    let cancelled = false;
+
     const channel = supabase
       .channel(`conversations:${businessId}`)
       .on(
@@ -267,35 +269,35 @@ export default function ChatListScreen() {
           filter: `business_id=eq.${businessId}`,
         },
         () => {
-          loadConversations();
+          if (!cancelled) loadConversations();
         }
       )
       .subscribe();
 
-    const channels = [channel];
+    const channels: ReturnType<typeof supabase.channel>[] = [channel];
 
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) {
-        const crossChannel = supabase
-          .channel(`cross-conversations:${session.user.id}`)
-          .on(
-            'postgres_changes',
-            {
-              event: '*',
-              schema: 'public',
-              table: 'messages',
-            },
-            () => {
-              loadConversations();
-            }
-          )
-          .subscribe();
-        channels.push(crossChannel);
-      }
+      if (cancelled || !session?.user?.id) return;
+      const crossChannel = supabase
+        .channel(`cross-conversations:${session.user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'messages',
+          },
+          () => {
+            if (!cancelled) loadConversations();
+          }
+        )
+        .subscribe();
+      channels.push(crossChannel);
     })();
 
     return () => {
+      cancelled = true;
       channels.forEach(ch => supabase.removeChannel(ch));
     };
   }, [businessId, loadConversations]);

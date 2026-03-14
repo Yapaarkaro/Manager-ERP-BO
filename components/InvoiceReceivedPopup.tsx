@@ -8,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { FileText, Eye, Package, X, ShoppingCart } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -67,7 +68,7 @@ export default function InvoiceReceivedPopup({
           {amount !== undefined && (
             <View style={st.amountCard}>
               <Text style={st.amountLabel}>Invoice Amount</Text>
-              <Text style={st.amountValue}>₹{amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</Text>
+              <Text style={st.amountValue}>{formatCurrencyINR(amount)}</Text>
             </View>
           )}
 

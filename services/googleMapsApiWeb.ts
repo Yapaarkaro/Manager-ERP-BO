@@ -20,8 +20,8 @@ export const getPlacePredictions = async (input: string): Promise<GooglePlacePre
     // Ensure Google Maps API is loaded
     if (typeof window === 'undefined' || !window.google || !window.google.maps || !window.google.maps.places) {
       console.log('⏳ Google Maps API not loaded, attempting to load...');
-      const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
       try {
+        const { GOOGLE_MAPS_API_KEY } = require('@/lib/config');
         await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
       } catch (error) {
         console.error('❌ Failed to load Google Maps API:', error);
@@ -84,8 +84,8 @@ export const getPlaceDetails = async (placeId: string): Promise<any> => {
     // Ensure Google Maps API is loaded
     if (typeof window === 'undefined' || !window.google || !window.google.maps || !window.google.maps.places) {
       console.log('⏳ Google Maps API not loaded, attempting to load...');
-      const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
       try {
+        const { GOOGLE_MAPS_API_KEY } = require('@/lib/config');
         await loadGoogleMapsScript(GOOGLE_MAPS_API_KEY);
       } catch (error) {
         console.error('❌ Failed to load Google Maps API:', error);

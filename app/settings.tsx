@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   View,
   Text,
@@ -538,12 +539,9 @@ export default function SettingsScreen() {
     
     setIsAddingBankAccount(true);
     
-    // Navigate to edit bank account page
+    setNavData('editBankAccount', account);
     safeRouter.push({
       pathname: '/add-bank-account',
-      params: { 
-        account: JSON.stringify(account)
-      }
     } as any);
   };
 

@@ -8,9 +8,11 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, User, Phone, Mail, MapPin, Calendar, Clock, IndianRupee, FileText, CreditCard, TriangleAlert as AlertTriangle, TrendingUp, TrendingDown, Eye, Download, Share } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
@@ -51,11 +53,7 @@ export default function CustomerDetailsScreen() {
   const [selectedTab, setSelectedTab] = useState<'summary' | 'transactions'>('summary');
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {
@@ -120,11 +118,11 @@ export default function CustomerDetailsScreen() {
         }
       };
 
+      setNavData('invoiceData', invoiceData);
       safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
-          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }

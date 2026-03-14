@@ -23,6 +23,7 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 import { verifyGSTINOTP, verifyPAN, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { autoFormatDateInput, parseDDMMYYYY } from '@/utils/formatters';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -37,7 +38,12 @@ const COLORS = {
 
 export default function GstinPanOTPScreen() {
   const { setStatusBarStyle } = useStatusBar();
-  const { type, value, gstinData, mobile } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const signupData = getSignupData();
+  const type = (params.type as string) || signupData.type || '';
+  const value = (params.value as string) || signupData.value || '';
+  const gstinData = params.gstinData || signupData.gstinData || '';
+  const mobile = (params.mobile as string) || signupData.mobile || '';
   const insets = useSafeAreaInsets();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [countdown, setCountdown] = useState(30);
@@ -179,17 +185,15 @@ export default function GstinPanOTPScreen() {
         })();
         
         // Navigate immediately (no delay)
-        router.replace({
-          pathname: '/auth/business-details',
-          params: { 
-            type: type,
-            value: panValue,
-            panName: panNameValue,
-            panDob: dateOfBirth ? 
-              `${dateOfBirth.getFullYear()}-${String(dateOfBirth.getMonth() + 1).padStart(2, '0')}-${String(dateOfBirth.getDate()).padStart(2, '0')}` : '',
-            mobile: mobile,
-          }
+        setSignupData({
+          type: type,
+          value: panValue,
+          panName: panNameValue,
+          panDob: dateOfBirth ? 
+            `${dateOfBirth.getFullYear()}-${String(dateOfBirth.getMonth() + 1).padStart(2, '0')}-${String(dateOfBirth.getDate()).padStart(2, '0')}` : '',
+          mobile: mobile,
         });
+        router.replace('/auth/business-details');
       } else {
         Alert.alert('Verification Failed', result.error || 'PAN verification failed. Please check your details and try again.');
       }
@@ -244,15 +248,13 @@ export default function GstinPanOTPScreen() {
           
           // Navigate immediately (don't wait for signup progress save)
           setIsVerifying(false);
-          router.replace({
-            pathname: '/auth/business-details',
-            params: { 
-              type: type,
-              value: gstinValue,
-              gstinData: gstinData,
-              mobile: mobile,
-            }
+          setSignupData({
+            type: type,
+            value: gstinValue,
+            gstinData: gstinData,
+            mobile: mobile,
           });
+          router.replace('/auth/business-details');
         } else {
           setOtp(['', '', '', '', '', '']);
           inputRefs.current[0]?.focus();

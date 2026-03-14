@@ -31,5 +31,11 @@ yarn-error.*
 .env*.local
 .env
 
+# test files with credentials
+test-with-auth.js
+
 # typescript
 *.tsbuildinfo
+
+# separate projects
+Manager Website/

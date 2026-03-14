@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { setNavData } from '@/utils/navStore';
 import * as ImagePicker from 'expo-image-picker';
 import { productStore, Product } from '@/utils/productStore';
 import { Supplier as StoreSupplier } from '@/utils/dataStore';
@@ -26,14 +27,15 @@ import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
 import { generateBarcodeImage } from '@/utils/barcodeGenerator';
 import { showSuccess, showError } from '@/utils/notifications';
-import { autoFormatDateInput, parseDDMMYYYY, ddmmyyyyToISO } from '@/utils/formatters';
+import { autoFormatDateInput, parseDDMMYYYY, ddmmyyyyToISO, formatCurrencyINR } from '@/utils/formatters';
 import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
   Package, 
   Search, 
   X, 
-  ChevronDown, 
+  ChevronDown,
+  ChevronUp, 
   Camera,
   Upload,
   Building2,
@@ -181,6 +183,8 @@ interface ProductFormData {
   location: string;
   locationId: string | null;
   productImages: string[];
+  quantityDecimals: number;
+  roundOffOpeningStock: boolean;
   // Advanced options
   batchNumber: string;
   expiryDate: string;
@@ -284,7 +288,7 @@ export default function ManualProductScreen() {
     tertiaryUnit: 'None',
     tertiaryConversionRatio: '',
     priceUnit: 'primary',
-    salesPriceUnit: 'secondary',
+    salesPriceUnit: 'primary',
     stockUoM: 'primary',
     cessType: 'none',
     perUnitPrice: '',
@@ -298,6 +302,8 @@ export default function ManualProductScreen() {
     location: 'Primary Address',
     locationId: null,
     productImages: [],
+    quantityDecimals: 0,
+    roundOffOpeningStock: true,
     // Advanced options
     batchNumber: '',
     expiryDate: '',
@@ -340,6 +346,7 @@ export default function ManualProductScreen() {
   const [isGeneratingBarcode, setIsGeneratingBarcode] = useState(false);
   const [barcodeGenerated, setBarcodeGenerated] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const generatedBarcodeRef = useRef<string | null>(null);
   const productSavedRef = useRef(false);
 
@@ -429,9 +436,12 @@ export default function ManualProductScreen() {
 
   // Handle edit mode - populate form with existing product data
   useEffect(() => {
-    if (editMode === 'true' && productData) {
+    if (editMode === 'true' && (productData || productId)) {
       try {
-        const product = JSON.parse(productData as string);
+        const product = productData
+          ? JSON.parse(productData as string)
+          : productStore.getProductById(productId as string);
+        if (!product) return;
         
         setFormData({
           name: product.name || '',
@@ -451,7 +461,7 @@ export default function ManualProductScreen() {
           tertiaryUnit: product.tertiaryUnit || 'None',
           tertiaryConversionRatio: product.tertiaryConversionRatio || '',
           priceUnit: 'primary',
-          salesPriceUnit: 'secondary',
+          salesPriceUnit: 'primary',
           stockUoM: 'primary',
           cessType: product.cessType || 'none',
           perUnitPrice: product.unitPrice?.toString() || '',
@@ -465,6 +475,8 @@ export default function ManualProductScreen() {
           location: product.location || 'Primary Address',
           locationId: product.locationId || null,
           productImages: product.productImages || product.images || (product.image ? [product.image] : []),
+          quantityDecimals: product.quantityDecimals ?? 0,
+          roundOffOpeningStock: true,
           batchNumber: product.batchNumber || '',
           expiryDate: product.expiryDate || '',
           showAdvancedOptions: false,
@@ -958,25 +970,25 @@ export default function ManualProductScreen() {
     switch (cessType) {
       case 'value':
         cessTotal = Math.round((basePrice * cessRateDecimal) * 1000) / 1000;
-        cessBreakdown = `Value-based (${cessRate}% of ₹${basePrice.toFixed(3)})`;
+        cessBreakdown = `Value-based (${cessRate}% of ${formatCurrencyINR(basePrice)})`;
         break;
         
       case 'quantity':
         cessTotal = Math.round(cessAmount * 1000) / 1000; // For single unit
-        cessBreakdown = `Quantity-based (₹${cessAmount.toFixed(3)} per unit)`;
+        cessBreakdown = `Quantity-based (${formatCurrencyINR(cessAmount)} per unit)`;
         break;
         
       case 'value_and_quantity':
         const valueCess = Math.round((basePrice * cessRateDecimal) * 1000) / 1000;
         const quantityCess = Math.round(cessAmount * 1000) / 1000; // For single unit
         cessTotal = Math.round((valueCess + quantityCess) * 1000) / 1000;
-        cessBreakdown = `Value + Quantity (${cessRate}% + ₹${cessAmount.toFixed(3)} per unit)`;
+        cessBreakdown = `Value + Quantity (${cessRate}% + ${formatCurrencyINR(cessAmount)} per unit)`;
         break;
         
       case 'mrp':
         const effectiveMRP = mrp > 0 ? mrp : basePrice;
         cessTotal = Math.round((effectiveMRP * cessRateDecimal) * 1000) / 1000;
-        cessBreakdown = `MRP-based (${cessRate}% of MRP ₹${effectiveMRP.toFixed(3)})`;
+        cessBreakdown = `MRP-based (${cessRate}% of MRP ${formatCurrencyINR(effectiveMRP)})`;
         break;
         
       default:
@@ -1004,8 +1016,7 @@ export default function ManualProductScreen() {
     };
   };
 
-  // Helper function to get display prices based on tax inclusion toggle
-  const getDisplayPrices = () => {
+  const displayPrices = useMemo(() => {
     const perUnitPrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
     const salesPrice = parseFloat(formData.salesPrice) || 0;
     const taxRate = formData.taxRate;
@@ -1015,55 +1026,24 @@ export default function ManualProductScreen() {
     const mrp = parseFloat(formData.mrp) || 0;
 
     if (formData.taxInclusive) {
-      // Prices entered are inclusive, calculate base price and breakdown
       const perUnitBasePrice = calculateBasePriceFromTaxInclusive(
-        perUnitPrice, 
-        taxRate, 
-        cessType, 
-        cessRate, 
-        cessAmount, 
-        mrp
+        perUnitPrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
-      
       const salesBasePrice = calculateBasePriceFromTaxInclusive(
-        salesPrice, 
-        taxRate, 
-        cessType, 
-        cessRate, 
-        cessAmount, 
-        mrp
+        salesPrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
-      
-      // Calculate full breakdown for display
       const perUnitBreakdown = calculateTaxAndCessBreakdown(
-        perUnitBasePrice,
-        taxRate,
-        cessType,
-        cessRate,
-        cessAmount,
-        mrp
+        perUnitBasePrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
-      
       const salesBreakdown = calculateTaxAndCessBreakdown(
-        salesBasePrice,
-        taxRate,
-        cessType,
-        cessRate,
-        cessAmount,
-        mrp
+        salesBasePrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
-      
       return {
-        perUnitBasePrice,
-        salesBasePrice,
-        perUnitFinalPrice: perUnitPrice,
-        salesFinalPrice: salesPrice,
-        perUnitBreakdown,
-        salesBreakdown,
-        showCalculation: true
+        perUnitBasePrice, salesBasePrice,
+        perUnitFinalPrice: perUnitPrice, salesFinalPrice: salesPrice,
+        perUnitBreakdown, salesBreakdown, showCalculation: true
       };
     } else {
-      // Prices entered are exclusive, calculate inclusive for display
       const perUnitBreakdown = calculateTaxAndCessBreakdown(
         perUnitPrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
@@ -1071,20 +1051,30 @@ export default function ManualProductScreen() {
         salesPrice, taxRate, cessType, cessRate, cessAmount, mrp
       );
       return {
-        perUnitBasePrice: perUnitPrice,
-        salesBasePrice: salesPrice,
-        perUnitFinalPrice: perUnitBreakdown.total,
-        salesFinalPrice: salesBreakdown.total,
-        perUnitBreakdown,
-        salesBreakdown,
-        showCalculation: true
+        perUnitBasePrice: perUnitPrice, salesBasePrice: salesPrice,
+        perUnitFinalPrice: perUnitBreakdown.total, salesFinalPrice: salesBreakdown.total,
+        perUnitBreakdown, salesBreakdown, showCalculation: true
       };
     }
-  };
+  }, [formData.purchasePrice, formData.perUnitPrice, formData.salesPrice, formData.taxRate,
+      formData.taxInclusive, formData.cessType, formData.cessRate, formData.cessAmount, formData.mrp]);
+
+  const getDisplayPrices = () => displayPrices;
+
+  const priceDec = Math.max(formData.quantityDecimals, 2);
+  const fmtPrice = (n: number) => formatCurrencyINR(n, priceDec, 2);
 
   const handleStockChange = (field: 'minStockLevel' | 'maxStockLevel' | 'openingStock', text: string) => {
-    const cleaned = text.replace(/[^0-9]/g, '');
-    updateFormData(field, cleaned);
+    const decimals = formData.quantityDecimals;
+    if (decimals > 0) {
+      const regex = new RegExp(`^\\d*\\.?\\d{0,${decimals}}$`);
+      if (regex.test(text) || text === '') {
+        updateFormData(field, text);
+      }
+    } else {
+      const cleaned = text.replace(/[^0-9]/g, '');
+      updateFormData(field, cleaned);
+    }
   };
 
   const isFormValid = () => {
@@ -1144,16 +1134,16 @@ export default function ManualProductScreen() {
     if (useCompound) {
       normalizedPurchase = formData.priceUnit === 'primary'
         ? rawPurchase / convRatio : rawPurchase;
-      normalizedSale = formData.salesPriceUnit === 'primary'
+      normalizedSale = formData.priceUnit === 'primary'
         ? rawSale / convRatio : rawSale;
     }
 
     if (normalizedPurchase >= normalizedSale) {
       const purchaseLabel = formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit;
-      const salesLabel = formData.salesPriceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit;
+      const salesLabel = formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit;
       Alert.alert(
         'Invalid Pricing', 
-        `Purchase price (₹${rawPurchase}/${purchaseLabel}) must be lower than sale price (₹${rawSale}/${salesLabel}) to ensure profitability.`,
+        `Purchase price (${formatCurrencyINR(rawPurchase)}/${purchaseLabel}) must be lower than sale price (${formatCurrencyINR(rawSale)}/${salesLabel}) to ensure profitability.`,
         [{ text: 'OK' }]
       );
       return;
@@ -1192,6 +1182,7 @@ export default function ManualProductScreen() {
     setIsSubmitting(true);
 
     let finalProductImages = [...formData.productImages];
+    let barcodeDataUri: string | null = null;
     
     if (formData.barcode && formData.barcode.trim().length > 0) {
       const hasBarcodeImage = finalProductImages.some(uri =>
@@ -1200,26 +1191,34 @@ export default function ManualProductScreen() {
 
       if (!hasBarcodeImage) {
         try {
-          const barcodeImageUri = await generateBarcodeImage(formData.barcode.trim());
-          if (barcodeImageUri) {
-            finalProductImages = [...finalProductImages, barcodeImageUri];
+          barcodeDataUri = await generateBarcodeImage(formData.barcode.trim());
+          if (barcodeDataUri) {
+            finalProductImages = [...finalProductImages, barcodeDataUri];
           }
         } catch (error) {
-          console.error('❌ Error generating barcode image:', error);
+          console.error('Error generating barcode image:', error);
         }
       }
     }
 
     // Upload local images to Supabase Storage
-    const hadLocalImages = finalProductImages.some(uri => !uri.startsWith('http'));
-    try {
-      finalProductImages = await uploadProductImages(finalProductImages);
-    } catch (uploadErr) {
-      console.warn('⚠️ Image upload failed:', uploadErr);
-      finalProductImages = [];
+    const localImages = finalProductImages.filter(uri => !uri.startsWith('http'));
+    const remoteImages = finalProductImages.filter(uri => uri.startsWith('http'));
+    
+    if (localImages.length > 0) {
+      try {
+        const uploaded = await uploadProductImages(localImages);
+        finalProductImages = [...remoteImages, ...uploaded];
+      } catch (uploadErr) {
+        console.warn('Image upload failed:', uploadErr);
+        finalProductImages = [...remoteImages];
+      }
     }
-    if (hadLocalImages && finalProductImages.length === 0) {
-      Alert.alert('Image Upload Failed', 'Product images could not be uploaded. The product will be saved without images. You can edit the product later to add images.');
+
+    if (finalProductImages.length === 0 && barcodeDataUri) {
+      finalProductImages = [barcodeDataUri];
+    } else if (barcodeDataUri && !finalProductImages.some(u => u.includes('barcode'))) {
+      finalProductImages.push(barcodeDataUri);
     }
 
     const productData: Product = {
@@ -1238,24 +1237,24 @@ export default function ManualProductScreen() {
       tertiaryConversionRatio: formData.tertiaryConversionRatio || undefined,
       unitPrice: parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0,
       salesPrice: parseFloat(formData.salesPrice),
-      minStockLevel: parseInt(formData.minStockLevel),
-      maxStockLevel: parseInt(formData.maxStockLevel),
-      currentStock: parseInt(formData.openingStock || '0'),
+      minStockLevel: parseFloat(formData.minStockLevel) || 0,
+      maxStockLevel: parseFloat(formData.maxStockLevel) || 0,
+      currentStock: parseFloat(formData.openingStock || '0'),
       supplier: formData.preferredSupplier,
       location: formData.location,
       lastRestocked: new Date().toISOString(),
-      stockValue: (parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock || '0'),
+      stockValue: (parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseFloat(formData.openingStock || '0'),
       urgencyLevel: 'normal',
       batchNumber: formData.batchNumber || '',
-      openingStock: parseInt(formData.openingStock || '0'),
+      openingStock: parseFloat(formData.openingStock || '0'),
       mrp: formData.mrp || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      // CESS fields
       cessType: formData.cessType,
       cessRate: formData.cessRate,
       cessAmount: parseFloat(formData.cessAmount) || 0,
       cessUnit: formData.cessUnit,
+      quantityDecimals: formData.quantityDecimals,
     };
 
     try {
@@ -1300,6 +1299,7 @@ export default function ManualProductScreen() {
           mrpPrice: parseFloat(formData.mrp) || 0,
           preferredSupplierId: formData.preferredSupplier || undefined,
           storageLocationName: productData.location || undefined,
+          quantityDecimals: formData.quantityDecimals,
         });
 
         if (!updateResult.success || !updateResult.product) {
@@ -1352,6 +1352,7 @@ export default function ManualProductScreen() {
             mrpPrice: parseFloat(formData.mrp) || 0,
             preferredSupplierId: formData.preferredSupplier || undefined,
             storageLocationName: productData.location || undefined,
+            quantityDecimals: formData.quantityDecimals,
           };
 
           const stockInProductData = {
@@ -1376,9 +1377,9 @@ export default function ManualProductScreen() {
           Alert.alert('Success', 'Product added. Returning to stock in...', [{
             text: 'OK',
             onPress: () => {
+              setNavData('newStockInProduct', stockInProductData);
               safeRouter.push({
                 pathname: '/inventory/stock-in/manual',
-                params: { newProduct: JSON.stringify(stockInProductData) }
               });
             }
           }]);
@@ -1424,6 +1425,7 @@ export default function ManualProductScreen() {
           mrpPrice: parseFloat(formData.mrp) || 0,
           preferredSupplierId: formData.preferredSupplier || undefined,
           storageLocationName: productData.location || undefined,
+          quantityDecimals: formData.quantityDecimals,
         });
 
         if (!createResult.success || !createResult.product) {
@@ -1502,7 +1504,7 @@ export default function ManualProductScreen() {
                   tertiaryUnit: 'None',
                   tertiaryConversionRatio: '',
                   priceUnit: 'primary',
-                  salesPriceUnit: 'secondary',
+                  salesPriceUnit: 'primary',
                   stockUoM: 'primary',
                   cessType: 'none',
                   perUnitPrice: '',
@@ -1516,6 +1518,8 @@ export default function ManualProductScreen() {
                   location: 'Primary Address',
                   locationId: null,
                   productImages: [],
+                  quantityDecimals: 0,
+                  roundOffOpeningStock: true,
                   batchNumber: '',
                   expiryDate: '',
                   showAdvancedOptions: false,
@@ -1577,7 +1581,7 @@ export default function ManualProductScreen() {
                   tertiaryUnit: 'None',
                   tertiaryConversionRatio: '',
                   priceUnit: 'primary',
-                  salesPriceUnit: 'secondary',
+                  salesPriceUnit: 'primary',
                   stockUoM: 'primary',
                   cessType: 'none',
                   perUnitPrice: '',
@@ -1591,6 +1595,8 @@ export default function ManualProductScreen() {
                   location: 'Primary Address',
                   locationId: null,
                   productImages: [],
+                  quantityDecimals: 0,
+                  roundOffOpeningStock: true,
                   batchNumber: '',
                   expiryDate: '',
                   showAdvancedOptions: false,
@@ -2295,8 +2301,8 @@ export default function ManualProductScreen() {
                 <Text style={styles.dropdownText}>
                   {formData.cessType === 'none' ? 'No CESS' : 
                    formData.cessType === 'value' ? `Value Based (${formData.cessRate}%)` :
-                   formData.cessType === 'quantity' ? `Quantity Based (₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
-                   formData.cessType === 'value_and_quantity' ? `Value & Quantity (${formData.cessRate}% + ₹${formData.cessAmount}/${formData.cessUnit || 'unit'})` :
+                   formData.cessType === 'quantity' ? `Quantity Based (${formatCurrencyINR(formData.cessAmount)}/${formData.cessUnit || 'unit'})` :
+                   formData.cessType === 'value_and_quantity' ? `Value & Quantity (${formData.cessRate}% + ${formatCurrencyINR(formData.cessAmount)}/${formData.cessUnit || 'unit'})` :
                    formData.cessType === 'mrp' ? `MRP Based (${formData.cessRate}%)` :
                    'Select CESS calculation method'
                   }
@@ -2396,9 +2402,9 @@ export default function ManualProductScreen() {
                   onChangeText={(text) => handleStockChange('openingStock', text)}
                   onFocus={() => setFocusedField('openingStock')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder="Enter opening stock quantity"
+                  placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
                   placeholderTextColor={Colors.textLight}
-                  keyboardType="numeric"
+                  keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
                 />
               </FocusableInput>
             </View>
@@ -2417,9 +2423,9 @@ export default function ManualProductScreen() {
                     onChangeText={(text) => handleStockChange('minStockLevel', text)}
                     onFocus={() => setFocusedField('minStockLevel')}
                     onBlur={() => setFocusedField(null)}
-                    placeholder="Min level"
+                    placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
                     placeholderTextColor={Colors.textLight}
-                    keyboardType="numeric"
+                    keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
                   />
                 </FocusableInput>
               </View>
@@ -2436,11 +2442,50 @@ export default function ManualProductScreen() {
                     onChangeText={(text) => handleStockChange('maxStockLevel', text)}
                     onFocus={() => setFocusedField('maxStockLevel')}
                     onBlur={() => setFocusedField(null)}
-                    placeholder="Max level"
+                    placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
                     placeholderTextColor={Colors.textLight}
-                    keyboardType="numeric"
+                    keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
                   />
                 </FocusableInput>
+              </View>
+            </View>
+          </View>
+
+          {/* Quantity Decimal Precision */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Quantity Precision</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>How many decimals for quantity?</Text>
+              <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 8 }}>
+                {formData.quantityDecimals === 0
+                  ? 'Whole numbers only (e.g. 1, 2, 10)'
+                  : `Up to ${formData.quantityDecimals} decimal${formData.quantityDecimals > 1 ? 's' : ''} (e.g. ${formData.quantityDecimals === 1 ? '1.5' : formData.quantityDecimals === 2 ? '1.75' : formData.quantityDecimals === 3 ? '1.999' : '1.9999'})`}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[0, 1, 2, 3, 4].map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      backgroundColor: formData.quantityDecimals === d ? Colors.primary : Colors.grey[100],
+                      borderWidth: 1,
+                      borderColor: formData.quantityDecimals === d ? Colors.primary : Colors.grey[200],
+                      alignItems: 'center',
+                    }}
+                    onPress={() => updateFormData('quantityDecimals', d)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: '600',
+                      color: formData.quantityDecimals === d ? '#fff' : Colors.text,
+                    }}>
+                      {d}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           </View>
@@ -2563,26 +2608,25 @@ export default function ManualProductScreen() {
                   const gst = Math.round((base * taxRate / 100) * 100) / 100;
                   const cess = formData.cessType !== 'none' ? Math.round((dp.perUnitBreakdown?.cessTotal ?? 0) * 100) / 100 : 0;
                   const total = dp.perUnitFinalPrice;
-                  const fmt = (n: number) => `₹${n.toFixed(2)}`;
                   return (
                     <View style={{ backgroundColor: '#FEF2F2', borderRadius: 8, padding: 10, marginTop: 8, gap: 2 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 12, color: '#64748b' }}>Base Price</Text>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(base)}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(base)}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 12, color: '#64748b' }}>GST ({taxRate}%)</Text>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(gst)}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(gst)}</Text>
                       </View>
                       {cess > 0 && (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                           <Text style={{ fontSize: 12, color: '#64748b' }}>CESS</Text>
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(cess)}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(cess)}</Text>
                         </View>
                       )}
                       <View style={{ borderTopWidth: 1, borderTopColor: '#FECACA', paddingTop: 3, marginTop: 2, flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>Total (incl. tax)</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{fmt(total)}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>{fmtPrice(total)}</Text>
                       </View>
                     </View>
                   );
@@ -2595,7 +2639,7 @@ export default function ManualProductScreen() {
               <Text style={styles.label}>
                 Sales Price *
                 <Text style={styles.unitIndicator}>
-                  {` (per ${formData.salesPriceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit}${formData.taxInclusive ? ', tax inclusive' : ', before tax'})`}
+                  {` (per ${formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit}${formData.taxInclusive ? ', tax inclusive' : ', before tax'})`}
                 </Text>
               </Text>
               <FocusableInput style={[
@@ -2623,26 +2667,25 @@ export default function ManualProductScreen() {
                   const gst = Math.round((base * taxRate / 100) * 100) / 100;
                   const cess = formData.cessType !== 'none' ? Math.round((dp.salesBreakdown?.cessTotal ?? 0) * 100) / 100 : 0;
                   const total = dp.salesFinalPrice;
-                  const fmt = (n: number) => `₹${n.toFixed(2)}`;
                   return (
                     <View style={{ backgroundColor: '#F0FDF4', borderRadius: 8, padding: 10, marginTop: 8, gap: 2 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 12, color: '#64748b' }}>Base Price</Text>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(base)}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(base)}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 12, color: '#64748b' }}>GST ({taxRate}%)</Text>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(gst)}</Text>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(gst)}</Text>
                       </View>
                       {cess > 0 && (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                           <Text style={{ fontSize: 12, color: '#64748b' }}>CESS</Text>
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmt(cess)}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#1F2937' }}>{fmtPrice(cess)}</Text>
                         </View>
                       )}
                       <View style={{ borderTopWidth: 1, borderTopColor: '#BBF7D0', paddingTop: 3, marginTop: 2, flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>Total (incl. tax)</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>{fmt(total)}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#059669' }}>{fmtPrice(total)}</Text>
                       </View>
                     </View>
                   );
@@ -2652,7 +2695,14 @@ export default function ManualProductScreen() {
 
             {/* MRP */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>MRP (Maximum Retail Price)</Text>
+              <Text style={styles.label}>
+                MRP (Maximum Retail Price)
+                {formData.useCompoundUnit && (
+                  <Text style={styles.unitIndicator}>
+                    {` (per ${formData.priceUnit === 'primary' ? formData.primaryUnit : formData.secondaryUnit})`}
+                  </Text>
+                )}
+              </Text>
               <FocusableInput style={[
                 inputFocusStyles.inputContainer,
                 focusedField === 'mrp' && inputFocusStyles.inputContainerFocused
@@ -2682,172 +2732,275 @@ export default function ManualProductScreen() {
                   <View style={[styles.marginContainer, isNegative && styles.warningContainer]}>
                     {isNegative ? (
                       <Text style={styles.warningText}>
-                        ⚠️ Purchase price is higher than sale price. Margin: ₹{marginAbs.toFixed(2)} ({marginPct.toFixed(1)}%)
+                        ⚠️ Purchase price is higher than sale price. Margin: {fmtPrice(marginAbs)} ({marginPct.toFixed(1)}%)
                       </Text>
                     ) : (
                       <>
                         <Text style={styles.marginLabel}>Profit Margin:</Text>
-                        <Text style={styles.marginValue}>₹{marginAbs.toFixed(2)} ({marginPct.toFixed(1)}%)</Text>
+                        <Text style={styles.marginValue}>{fmtPrice(marginAbs)} ({marginPct.toFixed(1)}%)</Text>
                       </>
                     )}
                   </View>
                 );
               })()
             )}
+
+            {/* UoM Price Conversion Table - shown only for compound units with prices entered */}
+            {formData.useCompoundUnit && formData.secondaryUnit && formData.secondaryUnit !== 'None' && parseFloat(formData.conversionRatio) > 0 && (parseFloat(formData.purchasePrice) > 0 || parseFloat(formData.salesPrice) > 0) && (
+              (() => {
+                const dp = getDisplayPrices();
+                const convRatio = parseFloat(formData.conversionRatio) || 1;
+                const pUnit = formData.primaryUnit;
+                const sUnit = formData.secondaryUnit;
+                const priceIsPerPrimary = formData.priceUnit === 'primary';
+                const fmt = fmtPrice;
+
+                const purchaseRaw = parseFloat(formData.purchasePrice) || 0;
+                const salesRaw = parseFloat(formData.salesPrice) || 0;
+
+                const purchasePerPrimary = priceIsPerPrimary ? purchaseRaw : purchaseRaw * convRatio;
+                const purchasePerSecondary = priceIsPerPrimary ? purchaseRaw / convRatio : purchaseRaw;
+                const salesPerPrimary = priceIsPerPrimary ? salesRaw : salesRaw * convRatio;
+                const salesPerSecondary = priceIsPerPrimary ? salesRaw / convRatio : salesRaw;
+
+                const taxLabel = formData.taxInclusive ? 'incl. tax' : 'before tax';
+
+                const purchaseBasePerPrimary = formData.taxInclusive
+                  ? dp.perUnitBasePrice * (priceIsPerPrimary ? 1 : convRatio)
+                  : purchasePerPrimary;
+                const purchaseBasePerSecondary = purchaseBasePerPrimary / convRatio;
+                const salesBasePerPrimary = formData.taxInclusive
+                  ? dp.salesBasePrice * (priceIsPerPrimary ? 1 : convRatio)
+                  : salesPerPrimary;
+                const salesBasePerSecondary = salesBasePerPrimary / convRatio;
+
+                const taxRate = formData.taxRate / 100;
+                const purchaseTaxPerPrimary = Math.round(purchaseBasePerPrimary * taxRate * 100) / 100;
+                const purchaseTaxPerSecondary = Math.round(purchaseBasePerSecondary * taxRate * 100) / 100;
+                const salesTaxPerPrimary = Math.round(salesBasePerPrimary * taxRate * 100) / 100;
+                const salesTaxPerSecondary = Math.round(salesBasePerSecondary * taxRate * 100) / 100;
+
+                const purchaseTotalPerPrimary = Math.round((purchaseBasePerPrimary + purchaseTaxPerPrimary) * 100) / 100;
+                const purchaseTotalPerSecondary = Math.round((purchaseBasePerSecondary + purchaseTaxPerSecondary) * 100) / 100;
+                const salesTotalPerPrimary = Math.round((salesBasePerPrimary + salesTaxPerPrimary) * 100) / 100;
+                const salesTotalPerSecondary = Math.round((salesBasePerSecondary + salesTaxPerSecondary) * 100) / 100;
+
+                return (
+                  <View style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginTop: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B', marginBottom: 4 }}>
+                      Price Conversion Table
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 10 }}>
+                      1 {pUnit} = {convRatio} {sUnit}{convRatio > 1 ? 's' : ''}
+                    </Text>
+
+                    {/* Table Header */}
+                    <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#CBD5E1', paddingBottom: 6, marginBottom: 6 }}>
+                      <Text style={{ flex: 2, fontSize: 11, fontWeight: '600', color: '#475569' }}> </Text>
+                      <Text style={{ flex: 3, fontSize: 11, fontWeight: '600', color: '#475569', textAlign: 'center' }}>Per {pUnit}</Text>
+                      <Text style={{ flex: 3, fontSize: 11, fontWeight: '600', color: '#475569', textAlign: 'center' }}>Per {sUnit}</Text>
+                    </View>
+
+                    {/* Purchase Price Row */}
+                    {purchaseRaw > 0 && (
+                      <>
+                        <View style={{ flexDirection: 'row', paddingVertical: 4 }}>
+                          <Text style={{ flex: 2, fontSize: 11, fontWeight: '600', color: '#DC2626' }}>Purchase</Text>
+                          <Text style={{ flex: 3, fontSize: 12, fontWeight: '600', color: '#1E293B', textAlign: 'center' }}>{fmt(purchaseTotalPerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 12, fontWeight: '600', color: '#1E293B', textAlign: 'center' }}>{fmt(purchaseTotalPerSecondary)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', paddingVertical: 1 }}>
+                          <Text style={{ flex: 2, fontSize: 10, color: '#94A3B8' }}>  Base</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(purchaseBasePerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(purchaseBasePerSecondary)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', paddingVertical: 1, marginBottom: 4 }}>
+                          <Text style={{ flex: 2, fontSize: 10, color: '#94A3B8' }}>  GST ({formData.taxRate}%)</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(purchaseTaxPerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(purchaseTaxPerSecondary)}</Text>
+                        </View>
+                      </>
+                    )}
+
+                    {/* Sales Price Row */}
+                    {salesRaw > 0 && (
+                      <>
+                        <View style={{ flexDirection: 'row', paddingVertical: 4, borderTopWidth: purchaseRaw > 0 ? 1 : 0, borderTopColor: '#E2E8F0', paddingTop: purchaseRaw > 0 ? 6 : 4 }}>
+                          <Text style={{ flex: 2, fontSize: 11, fontWeight: '600', color: '#059669' }}>Sales</Text>
+                          <Text style={{ flex: 3, fontSize: 12, fontWeight: '600', color: '#1E293B', textAlign: 'center' }}>{fmt(salesTotalPerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 12, fontWeight: '600', color: '#1E293B', textAlign: 'center' }}>{fmt(salesTotalPerSecondary)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', paddingVertical: 1 }}>
+                          <Text style={{ flex: 2, fontSize: 10, color: '#94A3B8' }}>  Base</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(salesBasePerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(salesBasePerSecondary)}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', paddingVertical: 1 }}>
+                          <Text style={{ flex: 2, fontSize: 10, color: '#94A3B8' }}>  GST ({formData.taxRate}%)</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(salesTaxPerPrimary)}</Text>
+                          <Text style={{ flex: 3, fontSize: 10, color: '#94A3B8', textAlign: 'center' }}>{fmt(salesTaxPerSecondary)}</Text>
+                        </View>
+                      </>
+                    )}
+
+                    {/* Margin per unit */}
+                    {purchaseRaw > 0 && salesRaw > 0 && (
+                      <View style={{ flexDirection: 'row', paddingVertical: 6, borderTopWidth: 1, borderTopColor: '#CBD5E1', marginTop: 6 }}>
+                        <Text style={{ flex: 2, fontSize: 11, fontWeight: '600', color: '#475569' }}>Margin</Text>
+                        <Text style={{ flex: 3, fontSize: 12, fontWeight: '700', color: (salesTotalPerPrimary - purchaseTotalPerPrimary) >= 0 ? '#059669' : '#DC2626', textAlign: 'center' }}>
+                          {fmt(salesTotalPerPrimary - purchaseTotalPerPrimary)}
+                        </Text>
+                        <Text style={{ flex: 3, fontSize: 12, fontWeight: '700', color: (salesTotalPerSecondary - purchaseTotalPerSecondary) >= 0 ? '#059669' : '#DC2626', textAlign: 'center' }}>
+                          {fmt(salesTotalPerSecondary - purchaseTotalPerSecondary)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()
+            )}
             
-                         {/* Opening Stock Summary */}
-             {returnToStockIn !== 'true' && (formData.purchasePrice || formData.perUnitPrice) && formData.openingStock && (
-               <View style={styles.summaryContainer}>
-                 <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
-                 
-                 {formData.taxInclusive ? (
-                   // For tax-inclusive pricing, show breakdown from base price
-                   <>
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>Price Entered (Tax-Inclusive):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock)).toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>Base Price (Before Tax):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{(getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock)).toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>GST ({formData.taxRate}% of Base Price):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{((getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                     {formData.cessType !== 'none' && (
-                       <>
-                         <View style={styles.summaryRow}>
-                           <Text style={styles.summaryLabel}>CESS:</Text>
-                           <Text style={styles.summaryValue}>
-                             ₹{(() => {
-                               const basePrice = getDisplayPrices().perUnitBasePrice * parseInt(formData.openingStock);
-                               switch (formData.cessType) {
-                                 case 'value':
-                                   return (basePrice * formData.cessRate / 100).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'quantity':
-                                   return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'value_and_quantity':
-                                   const valueCess = basePrice * formData.cessRate / 100;
-                                   const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                                   return (valueCess + quantityCess).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'mrp':
-                                   const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
-                                   return (mrpPrice * formData.cessRate / 100).toFixed(4).replace(/\.?0+$/, '');
-                                 default:
-                                   return '0.00';
-                               }
-                             })()}
-                           </Text>
-                         </View>
+            {/* Opening Stock Summary */}
+            {returnToStockIn !== 'true' && (formData.purchasePrice || formData.perUnitPrice) && formData.openingStock && (
+              (() => {
+                const purchasePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
+                const openingStock = parseFloat(formData.openingStock) || 0;
+                if (isNaN(purchasePrice) || isNaN(openingStock) || openingStock === 0) return null;
 
-                       </>
-                     )}
+                const priceEntered = purchasePrice * openingStock;
+                const basePriceTotal = formData.taxInclusive
+                  ? displayPrices.perUnitBasePrice * openingStock
+                  : priceEntered;
+                const gstTotal = (formData.taxInclusive
+                  ? displayPrices.perUnitBasePrice * openingStock
+                  : priceEntered) * formData.taxRate / 100;
 
-                   </>
-                 ) : (
-                   // For tax-exclusive pricing, show normal breakdown
-                   <>
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>Base Price (Tax-Exclusive):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock)).toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>GST ({formData.taxRate}% of Base Price):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{(((parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock) * formData.taxRate) / 100).toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                     {formData.cessType !== 'none' && (
-                       <>
-                         <View style={styles.summaryRow}>
-                           <Text style={styles.summaryLabel}>CESS:</Text>
-                           <Text style={styles.summaryValue}>
-                             ₹{(() => {
-                               const basePrice = (parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0) * parseInt(formData.openingStock);
-                               switch (formData.cessType) {
-                                 case 'value':
-                                   return (basePrice * formData.cessRate / 100).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'quantity':
-                                   return (parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0')).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'value_and_quantity':
-                                   const valueCess = basePrice * formData.cessRate / 100;
-                                   const quantityCess = parseInt(formData.openingStock) * parseFloat(formData.cessAmount || '0');
-                                   return (valueCess + quantityCess).toFixed(4).replace(/\.?0+$/, '');
-                                 case 'mrp':
-                                   const mrpPrice = parseFloat(formData.mrp) * parseInt(formData.openingStock);
-                                   return (mrpPrice * formData.cessRate / 100).toFixed(4).replace(/\.?0+$/, '');
-                                 default:
-                                   return '0.00';
-                               }
-                             })()}
-                           </Text>
-                         </View>
+                let cessTotal = 0;
+                const cessBase = formData.taxInclusive ? displayPrices.perUnitBasePrice * openingStock : priceEntered;
+                switch (formData.cessType) {
+                  case 'value': cessTotal = cessBase * formData.cessRate / 100; break;
+                  case 'quantity': cessTotal = openingStock * parseFloat(formData.cessAmount || '0'); break;
+                  case 'value_and_quantity':
+                    cessTotal = (cessBase * formData.cessRate / 100) + (openingStock * parseFloat(formData.cessAmount || '0')); break;
+                  case 'mrp':
+                    cessTotal = ((parseFloat(formData.mrp) || 0) * openingStock) * formData.cessRate / 100; break;
+                }
 
-                       </>
-                     )}
-                     <View style={styles.summaryRow}>
-                       <Text style={styles.summaryLabel}>Final Price (Tax-Inclusive):</Text>
-                       <Text style={styles.summaryValue}>
-                         ₹{getDisplayPrices().perUnitFinalPrice.toFixed(4).replace(/\.?0+$/, '')}
-                       </Text>
-                     </View>
-                   </>
-                 )}
-                 
-                 <View style={[styles.summaryRow, styles.totalRow]}>
-                   <Text style={styles.totalLabel}>Total Value:</Text>
-                   <Text style={styles.totalValue}>
-                     ₹{(() => {
-                       const purchasePrice = parseFloat(formData.purchasePrice) || parseFloat(formData.perUnitPrice) || 0;
-                       const openingStock = parseInt(formData.openingStock) || 0;
-                       
-                       if (isNaN(purchasePrice) || isNaN(openingStock) || openingStock === 0) {
-                         return '0.00';
-                       }
-                       
-                       if (formData.taxInclusive) {
-                         // For tax-inclusive, total is the price entered × quantity
-                         return (purchasePrice * openingStock).toFixed(4).replace(/\.?0+$/, '');
-                       } else {
-                         // For tax-exclusive, calculate total including taxes
-                         const basePrice = purchasePrice * openingStock;
-                         const gstAmount = (basePrice * formData.taxRate) / 100;
-                         let cessAmount = 0;
-                         
-                         switch (formData.cessType) {
-                           case 'value':
-                             cessAmount = basePrice * formData.cessRate / 100;
-                             break;
-                           case 'quantity':
-                             cessAmount = openingStock * parseFloat(formData.cessAmount || '0');
-                             break;
-                           case 'value_and_quantity':
-                             const valueCess = basePrice * formData.cessRate / 100;
-                             const quantityCess = openingStock * parseFloat(formData.cessAmount || '0');
-                             cessAmount = valueCess + quantityCess;
-                             break;
-                           case 'mrp':
-                             const mrpPrice = (parseFloat(formData.mrp) || 0) * openingStock;
-                             cessAmount = mrpPrice * formData.cessRate / 100;
-                             break;
-                         }
-                         
-                         return (basePrice + gstAmount + cessAmount).toFixed(4).replace(/\.?0+$/, '');
-                       }
-                     })()}
-                   </Text>
-                 </View>
-               </View>
-             )}
+                let exactTotal = formData.taxInclusive
+                  ? priceEntered
+                  : basePriceTotal + gstTotal + cessTotal;
+
+                const roundedTotal = Math.round(exactTotal);
+                const roundOffDiff = Math.round((roundedTotal - exactTotal) * 100) / 100;
+
+                return (
+                  <View style={styles.summaryContainer}>
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                      onPress={() => setSummaryExpanded(!summaryExpanded)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.summaryTitle}>Opening Stock Summary</Text>
+                      {summaryExpanded
+                        ? <ChevronUp size={18} color={Colors.textLight} />
+                        : <ChevronDown size={18} color={Colors.textLight} />}
+                    </TouchableOpacity>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>
+                        Price Entered ({formData.taxInclusive ? 'Tax-Inclusive' : 'Tax-Exclusive'}):
+                      </Text>
+                      <Text style={styles.summaryValue}>{fmtPrice(priceEntered)}</Text>
+                    </View>
+
+                    <View style={[styles.summaryRow, styles.totalRow]}>
+                      <Text style={styles.totalLabel}>Total Value:</Text>
+                      <Text style={styles.totalValue}>
+                        {formData.roundOffOpeningStock
+                          ? formatCurrencyINR(roundedTotal, 2, 0)
+                          : fmtPrice(exactTotal)}
+                      </Text>
+                    </View>
+
+                    {summaryExpanded && (
+                      <>
+                        <View style={{ borderTopWidth: 1, borderTopColor: '#E2E8F0', marginVertical: 8 }} />
+                        {formData.taxInclusive ? (
+                          <>
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>Base Price (Before Tax):</Text>
+                              <Text style={styles.summaryValue}>{fmtPrice(basePriceTotal)}</Text>
+                            </View>
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>GST ({formData.taxRate}%):</Text>
+                              <Text style={styles.summaryValue}>{fmtPrice(gstTotal)}</Text>
+                            </View>
+                            {formData.cessType !== 'none' && cessTotal > 0 && (
+                              <View style={styles.summaryRow}>
+                                <Text style={styles.summaryLabel}>CESS:</Text>
+                                <Text style={styles.summaryValue}>{fmtPrice(cessTotal)}</Text>
+                              </View>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>Base Price (Tax-Exclusive):</Text>
+                              <Text style={styles.summaryValue}>{fmtPrice(basePriceTotal)}</Text>
+                            </View>
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>GST ({formData.taxRate}%):</Text>
+                              <Text style={styles.summaryValue}>{fmtPrice(gstTotal)}</Text>
+                            </View>
+                            {formData.cessType !== 'none' && cessTotal > 0 && (
+                              <View style={styles.summaryRow}>
+                                <Text style={styles.summaryLabel}>CESS:</Text>
+                                <Text style={styles.summaryValue}>{fmtPrice(cessTotal)}</Text>
+                              </View>
+                            )}
+                            <View style={styles.summaryRow}>
+                              <Text style={styles.summaryLabel}>Total (Tax-Inclusive):</Text>
+                              <Text style={styles.summaryValue}>{fmtPrice(exactTotal)}</Text>
+                            </View>
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 4, gap: 8 }}
+                      onPress={() => updateFormData('roundOffOpeningStock', !formData.roundOffOpeningStock)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{
+                        width: 20, height: 20, borderRadius: 4, borderWidth: 2,
+                        borderColor: formData.roundOffOpeningStock ? Colors.primary : Colors.grey[300],
+                        backgroundColor: formData.roundOffOpeningStock ? Colors.primary : 'transparent',
+                        alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {formData.roundOffOpeningStock && <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>✓</Text>}
+                      </View>
+                      <Text style={{ fontSize: 13, color: Colors.text }}>Round off total value</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 4 }}>
+                      <Text style={{ fontSize: 13, color: '#475569' }}>
+                        Round Off{!formData.roundOffOpeningStock ? ' (not applied)' : ''}:
+                      </Text>
+                      <Text style={{
+                        fontSize: 13,
+                        fontWeight: '600',
+                        color: formData.roundOffOpeningStock
+                          ? (roundOffDiff >= 0 ? '#059669' : '#DC2626')
+                          : '#94A3B8',
+                      }}>
+                        {roundOffDiff >= 0 ? '+' : ''}{formatCurrencyINR(roundOffDiff, 2, 2)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })()
+            )}
           </View>
 
 

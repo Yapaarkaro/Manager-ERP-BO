@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   FileText,
@@ -119,8 +120,10 @@ interface StockInProduct {
   useCompoundUnit: boolean;
   conversionRatio: string;
   priceUnit: 'primary' | 'secondary';
+  quantityUoM: 'primary' | 'secondary';
   hsnCode?: string;
   pendingProductData?: any;
+  quantityDecimals?: number;
 }
 
 interface ManualStockInData {
@@ -360,7 +363,9 @@ export default function ManualStockInScreen() {
       useCompoundUnit: selectedProduct.useCompoundUnit || selectedProduct.use_compound_unit || false,
       conversionRatio: selectedProduct.conversionRatio || selectedProduct.conversion_ratio || '',
       priceUnit: 'primary',
+      quantityUoM: 'primary',
       hsnCode: selectedProduct.hsnCode || selectedProduct.hsn_code || '',
+      quantityDecimals: selectedProduct.quantityDecimals ?? selectedProduct.quantity_decimals ?? 0,
     };
 
     const updatedProducts = [...formData.products, newProduct];
@@ -399,7 +404,9 @@ export default function ManualStockInScreen() {
       useCompoundUnit: selectedProduct.useCompoundUnit || selectedProduct.use_compound_unit || false,
       conversionRatio: selectedProduct.conversionRatio || selectedProduct.conversion_ratio || '',
       priceUnit: 'primary',
+      quantityUoM: 'primary',
       hsnCode: selectedProduct.hsnCode || selectedProduct.hsn_code || '',
+      quantityDecimals: selectedProduct.quantityDecimals ?? selectedProduct.quantity_decimals ?? 0,
     };
     
     const updatedProducts = [...formData.products, newProduct];
@@ -468,7 +475,9 @@ export default function ManualStockInScreen() {
         useCompoundUnit: newProduct.useCompoundUnit || false,
         conversionRatio: newProduct.conversionRatio || '',
         priceUnit: 'primary',
+        quantityUoM: 'primary',
         hsnCode: newProduct.hsnCode || '',
+        quantityDecimals: newProduct.quantityDecimals ?? 0,
       };
       
       updateFormData('products', [...formData.products, productToAdd]);
@@ -500,8 +509,10 @@ export default function ManualStockInScreen() {
           useCompoundUnit: productData.useCompoundUnit || false,
           conversionRatio: productData.conversionRatio || '',
           priceUnit: 'primary',
+          quantityUoM: 'primary',
           hsnCode: productData.hsnCode || '',
           pendingProductData: productData.pendingProductData || undefined,
+          quantityDecimals: productData.quantityDecimals ?? 0,
         };
         
         setFormData(prev => ({ ...prev, products: [...prev.products, productToAdd] }));
@@ -576,13 +587,13 @@ export default function ManualStockInScreen() {
     return product.purchasePrice;
   };
 
-  // Helper function to calculate base price for products
   const calculateBasePrice = (product: StockInProduct) => {
     if (product.useCompoundUnit && product.conversionRatio) {
       const conversionRatio = parseFloat(product.conversionRatio);
-      const piecesPerUnit = conversionRatio;
-      const totalPieces = product.quantity * piecesPerUnit;
       const pricePerPiece = calculateEffectivePrice(product);
+      const totalPieces = product.quantityUoM === 'secondary'
+        ? product.quantity
+        : product.quantity * conversionRatio;
       return totalPieces * pricePerPiece;
     } else {
       const effectivePrice = calculateEffectivePrice(product);
@@ -590,24 +601,28 @@ export default function ManualStockInScreen() {
     }
   };
 
-  // Helper function to calculate CESS amount
   const calculateCessAmount = (product: StockInProduct) => {
     const basePrice = calculateBasePrice(product);
+    let effectiveQty = product.quantity;
+    if (product.useCompoundUnit && product.conversionRatio) {
+      const conv = parseFloat(product.conversionRatio);
+      effectiveQty = product.quantityUoM === 'secondary'
+        ? product.quantity
+        : product.quantity * conv;
+    }
     
     switch (product.cessType) {
       case 'none':
         return 0;
       case 'value':
-        // CESS based on value (percentage)
         return basePrice * (product.cessRate / 100);
       case 'quantity':
-        // CESS based on quantity (₹ per unit)
-        return product.quantity * product.cessAmount;
-      case 'value_and_quantity':
-        // CESS based on both value and quantity
+        return effectiveQty * product.cessAmount;
+      case 'value_and_quantity': {
         const valueCess = basePrice * (product.cessRate / 100);
-        const quantityCess = product.quantity * product.cessAmount;
+        const quantityCess = effectiveQty * product.cessAmount;
         return valueCess + quantityCess;
+      }
       default:
         return 0;
     }
@@ -726,12 +741,8 @@ export default function ManualStockInScreen() {
       }
     }
 
-    safeRouter.push({
-      pathname: '/inventory/stock-in/confirmation',
-      params: {
-        stockInData: JSON.stringify(formData)
-      }
-    });
+    setNavData('stockInData', formData);
+    safeRouter.push({ pathname: '/inventory/stock-in/confirmation' });
   };
 
   const filteredProducts = existingProducts.filter((product: any) => {
@@ -1059,7 +1070,7 @@ export default function ManualStockInScreen() {
                           <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
                           {!isExpanded && (
                             <Text style={{ fontSize: 12, color: Colors.textLight, marginTop: 2 }}>
-                              Qty: {product.quantity} {product.primaryUnit}  •  {formatCurrencyINR(product.totalPrice, 4)}
+                              Qty: {product.quantity} {product.quantityUoM === 'secondary' ? product.secondaryUnit : product.primaryUnit}  •  {formatCurrencyINR(product.totalPrice, 4)}
                             </Text>
                           )}
                         </View>
@@ -1112,18 +1123,54 @@ export default function ManualStockInScreen() {
                             </View>
                           )}
 
+                          {product.useCompoundUnit && product.secondaryUnit && product.secondaryUnit !== 'None' && product.conversionRatio && (
+                            <View style={styles.uomSelectorRow}>
+                              <Text style={styles.productLabel}>Quantity in:</Text>
+                              <View style={styles.uomToggle}>
+                                <TouchableOpacity
+                                  style={[styles.uomOption, product.quantityUoM === 'primary' && styles.uomOptionActive]}
+                                  onPress={() => updateProduct(product.id, 'quantityUoM', 'primary')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.uomOptionText, product.quantityUoM === 'primary' && styles.uomOptionTextActive]}>
+                                    {product.primaryUnit}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.uomOption, product.quantityUoM === 'secondary' && styles.uomOptionActive]}
+                                  onPress={() => updateProduct(product.id, 'quantityUoM', 'secondary')}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.uomOptionText, product.quantityUoM === 'secondary' && styles.uomOptionTextActive]}>
+                                    {product.secondaryUnit}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
+
                           <View style={styles.productRow}>
                             <Text style={styles.productLabel}>
-                              Quantity ({product.primaryUnit}):
+                              Quantity ({product.quantityUoM === 'secondary' ? product.secondaryUnit : product.primaryUnit}):
                               {product.useCompoundUnit && product.conversionRatio && (
-                                <Text style={styles.piecesInfo}> ({product.conversionRatio} {product.secondaryUnit} per {product.primaryUnit})</Text>
+                                <Text style={styles.piecesInfo}> (1 {product.primaryUnit} = {product.conversionRatio} {product.secondaryUnit})</Text>
                               )}
                             </Text>
                             <TextInput
                               style={styles.quantityInput}
                               value={product.quantity.toString()}
-                              onChangeText={(text) => updateProduct(product.id, 'quantity', parseInt(text) || 0)}
-                              keyboardType="numeric"
+                              onChangeText={(text) => {
+                                const qtyDec = product.quantityDecimals ?? 0;
+                                if (qtyDec > 0) {
+                                  const regex = new RegExp(`^\\d*\\.?\\d{0,${qtyDec}}$`);
+                                  if (regex.test(text) || text === '') {
+                                    updateProduct(product.id, 'quantity', parseFloat(text) || 0);
+                                  }
+                                } else {
+                                  updateProduct(product.id, 'quantity', parseInt(text) || 0);
+                                }
+                              }}
+                              keyboardType={(product.quantityDecimals ?? 0) > 0 ? 'decimal-pad' : 'numeric'}
                               placeholder="0"
                             />
                           </View>
@@ -1161,9 +1208,9 @@ export default function ManualStockInScreen() {
                                     case 'value':
                                       return `(${product.cessRate}%)`;
                                     case 'quantity':
-                                      return `(₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                      return `(${formatCurrencyINR(product.cessAmount)}/${product.cessUnit || product.primaryUnit})`;
                                     case 'value_and_quantity':
-                                      return `(${product.cessRate}% + ₹${product.cessAmount}/${product.cessUnit || product.primaryUnit})`;
+                                      return `(${product.cessRate}% + ${formatCurrencyINR(product.cessAmount)}/${product.cessUnit || product.primaryUnit})`;
                                     default:
                                       return '';
                                   }

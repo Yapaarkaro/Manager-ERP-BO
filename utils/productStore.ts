@@ -38,6 +38,7 @@ export interface Product {
   cessRate?: number;
   cessAmount?: number;
   cessUnit?: string;
+  quantityDecimals?: number;
 }
 
 class ProductStore {
@@ -77,14 +78,20 @@ class ProductStore {
     return false;
   }
 
+  findByBarcode(barcode: string): Product | undefined {
+    if (!barcode) return undefined;
+    const bc = barcode.toLowerCase();
+    return this.products.find(p => (p.barcode || '').toLowerCase() === bc);
+  }
+
   searchProducts(query: string): Product[] {
     const q = query.toLowerCase();
     return this.products.filter(p =>
       p.name.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q) ||
       (p.supplier && p.supplier.toLowerCase().includes(q)) ||
-      p.hsnCode.toLowerCase().includes(q) ||
-      p.barcode.toLowerCase().includes(q)
+      (p.hsnCode || '').toLowerCase().includes(q) ||
+      (p.barcode || '').toLowerCase().includes(q)
     );
   }
 
@@ -190,6 +197,7 @@ class ProductStore {
           cessRate: bp.cess_rate || 0,
           cessAmount: bp.cess_amount || 0,
           cessUnit: bp.cess_unit || undefined,
+          quantityDecimals: bp.quantity_decimals ?? 0,
         };
       });
 

@@ -34,6 +34,7 @@ import {
 } from 'lucide-react-native';
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import * as ImagePicker from 'expo-image-picker';
 import { addBankTransaction, addCashTransaction, getBankAccounts } from '@/services/backendApi';
 
@@ -113,7 +114,8 @@ export default function AddExpenseScreen() {
 
     if (res.success) {
       clearBusinessDataCache();
-      safeRouter.replace({ pathname: '/expenses/success', params: { expenseData: JSON.stringify({ type, amount, paymentMethod: isCash ? 'Cash' : getPaymentLabel(), notes }) } } as any);
+      setNavData('expenseSuccessData', { type, amount, paymentMethod: isCash ? 'Cash' : getPaymentLabel(), notes });
+      safeRouter.replace({ pathname: '/expenses/success' } as any);
       setIsSubmitting(false);
     } else {
       setIsSubmitting(false);

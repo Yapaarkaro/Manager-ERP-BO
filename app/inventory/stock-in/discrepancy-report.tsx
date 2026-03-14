@@ -28,6 +28,7 @@ import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils'
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -260,7 +261,7 @@ export default function DiscrepancyReportScreen() {
     const itemsList = discrepancyReport.products
       .map(p => `• ${p.name}: Billed ${p.billedQuantity}, Received ${p.receivedQuantity} (${p.discrepancyType})`)
       .join('\n');
-    const msg = `Stock Discrepancy Report\nPO: ${discrepancyReport.poNumber}\nDate: ${discrepancyReport.reportDate}\n\nItems:\n${itemsList}\n\nTotal Discrepancy Value: ₹${discrepancyReport.totalDiscrepancyValue.toLocaleString('en-IN')}\n\nSent from Manager`;
+    const msg = `Stock Discrepancy Report\nPO: ${discrepancyReport.poNumber}\nDate: ${discrepancyReport.reportDate}\n\nItems:\n${itemsList}\n\nTotal Discrepancy Value: ${formatCurrencyINR(discrepancyReport.totalDiscrepancyValue)}\n\nSent from Manager`;
     openWhatsApp(phone, msg);
   };
 
@@ -285,12 +286,7 @@ export default function DiscrepancyReportScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   if (!po || !discrepancyReport) {

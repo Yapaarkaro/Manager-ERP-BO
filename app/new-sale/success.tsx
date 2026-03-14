@@ -39,6 +39,25 @@ const Colors = {
   }
 };
 
+const getUoMPrice = (item: any): number => {
+  const basePrimary = item.price || 0;
+  const uom = item.selectedUoM || 'primary';
+  if (uom === 'primary' || !item.conversionRatio) return basePrimary;
+  const conv = parseFloat(item.conversionRatio || '1');
+  if (uom === 'secondary') return basePrimary / conv;
+  if (uom === 'tertiary' && item.tertiaryConversionRatio) {
+    return basePrimary / (conv * parseFloat(item.tertiaryConversionRatio || '1'));
+  }
+  return basePrimary;
+};
+
+const getUoMUnit = (item: any): string => {
+  const uom = item.selectedUoM || 'primary';
+  if (uom === 'secondary') return item.secondaryUnit || item.primaryUnit || 'unit';
+  if (uom === 'tertiary') return item.tertiaryUnit || item.primaryUnit || 'unit';
+  return item.primaryUnit || 'unit';
+};
+
 const generateInvoiceNumber = () => {
   const date = new Date();
   const year = date.getFullYear();
@@ -67,7 +86,7 @@ export default function SaleSuccessScreen() {
   const [invoiceNumber, setInvoiceNumber] = useState(() => generateInvoiceNumber());
   const hasSavedRef = useRef(false);
   const createdInvoiceIdRef = useRef<string | undefined>(undefined);
-  const { businessData } = useBusinessData();
+  const { data: businessData } = useBusinessData();
   const { isStaff, staffId, staffName, staffBusinessId } = usePermissions();
 
   const isValid = payment && payment.customer && payment.cartItems && Array.isArray(payment.cartItems);
@@ -139,21 +158,25 @@ export default function SaleSuccessScreen() {
       }
 
       // Create sale data
-      const saleItems: SaleItem[] = payment.cartItems.map((item: any) => ({
-        productId: item.productDbId || item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        productName: item.name,
-        quantity: item.quantity,
-        unitPrice: item.price,
-        totalPrice: item.price * item.quantity,
-        taxRate: item.taxRate || 0,
-        taxAmount: (item.price * item.quantity) * ((item.taxRate || 0) / 100),
-        cessType: item.cessType || 'none',
-        cessRate: item.cessRate || 0,
-        cessAmount: item.cessAmount ?? 0,
-        hsnCode: item.hsnCode || item.category,
-        batchNumber: item.batchNumber,
-        primaryUnit: item.primaryUnit || 'unit',
-      }));
+      const saleItems: SaleItem[] = payment.cartItems.map((item: any) => {
+        const effectivePrice = getUoMPrice(item);
+        const lineTotal = effectivePrice * item.quantity;
+        return {
+          productId: item.productDbId || item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          productName: item.name,
+          quantity: item.quantity,
+          unitPrice: effectivePrice,
+          totalPrice: lineTotal,
+          taxRate: item.taxRate || 0,
+          taxAmount: lineTotal * ((item.taxRate || 0) / 100),
+          cessType: item.cessType || 'none',
+          cessRate: item.cessRate || 0,
+          cessAmount: item.cessAmount ?? 0,
+          hsnCode: item.hsnCode || item.category,
+          batchNumber: item.batchNumber,
+          primaryUnit: getUoMUnit(item),
+        };
+      });
 
       const subtotal = saleItems.reduce((sum, item) => sum + item.totalPrice, 0);
       const taxAmountTotal = saleItems.reduce((sum, item) => sum + item.taxAmount, 0);
@@ -267,12 +290,7 @@ export default function SaleSuccessScreen() {
   }, []);
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const applyRoundOff = (amount: number) => {
@@ -303,12 +321,16 @@ export default function SaleSuccessScreen() {
     const customer = payment?.customer;
     const items = payment?.cartItems || [];
     const invoiceExtras = invoiceExtrasRef.current;
+    const bizAddr = businessData?.addresses?.[0];
+    const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : '';
+    const bank = businessData?.bankAccounts?.[0];
     return {
       type: 'sale',
       invoiceNumber,
       invoiceDate: new Date().toISOString(),
       business: {
         name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
+        address: bizAddress,
         gstin: businessData?.business?.tax_id || '',
         phone: businessData?.business?.phone,
       },
@@ -324,8 +346,8 @@ export default function SaleSuccessScreen() {
         name: item.name || item.productName || '',
         hsnCode: item.hsnCode || item.hsn_code,
         quantity: Number(item.quantity) || 1,
-        unit: item.primaryUnit || item.unit,
-        rate: Number(item.price || item.sellingPrice || item.rate) || 0,
+        unit: getUoMUnit(item),
+        rate: Number(getUoMPrice(item) || item.sellingPrice || item.rate) || 0,
         discount: Number(item.discount) || 0,
         taxRate: Number(item.gstRate || item.taxRate) || 0,
         taxAmount: Number(item.taxAmount || item.gstAmount) || 0,
@@ -341,6 +363,7 @@ export default function SaleSuccessScreen() {
       invoiceExtras,
       invoiceId: createdInvoiceIdRef.current,
       businessId: businessData?.business?.id,
+      bankDetails: bank ? { bankName: bank.bank_name || bank.bankName || '', accountNo: bank.account_number || bank.accountNumber || '', ifsc: bank.ifsc_code || bank.ifscCode || '', branch: bank.branch || '' } : undefined,
     };
   };
 
@@ -642,10 +665,11 @@ export default function SaleSuccessScreen() {
 
                 {/* Table Rows */}
                 {payment.cartItems.map((item: any, index: number) => {
-                  const itemTotal = item.price * item.quantity;
+                  const effectivePrice = getUoMPrice(item);
+                  const effectiveUnit = getUoMUnit(item);
+                  const itemTotal = effectivePrice * item.quantity;
                   let basePrice = itemTotal;
                   
-                  // Apply item discount if any
                   if (item.discountValue && item.discountValue > 0) {
                     if (item.discountType === 'percentage') {
                       basePrice = basePrice * (1 - item.discountValue / 100);
@@ -654,10 +678,8 @@ export default function SaleSuccessScreen() {
                     }
                   }
                   
-                  // Calculate GST
                   const taxAmount = basePrice * ((item.taxRate || 0) / 100);
                   
-                  // Calculate CESS
                   let cessAmount = 0;
                   if (item.cessType && item.cessType !== 'none') {
                     if (item.cessType === 'value') {
@@ -684,7 +706,7 @@ export default function SaleSuccessScreen() {
                       </View>
                       <View style={[styles.detailsColumn]}>
                         <Text style={styles.itemDetails}>
-                          {item.quantity} × {formatAmount(item.price)} per {item.primaryUnit || 'unit'}
+                          {item.quantity} × {formatAmount(effectivePrice)} per {effectiveUnit}
                         </Text>
                         <Text style={styles.itemAmount}>
                           Amount: {formatAmount(applyRoundOff(itemTotal))}
@@ -718,7 +740,7 @@ export default function SaleSuccessScreen() {
                   <Text style={styles.totalLabel}>Invoice Total:</Text>
                   <Text style={styles.totalAmount}>
                     {formatAmount(applyRoundOff(payment.cartItems.reduce((total: number, item: any) => {
-                      const itemTotal = item.price * item.quantity;
+                      const itemTotal = getUoMPrice(item) * item.quantity;
                       let basePrice = itemTotal;
                       
                       // Apply item discount if any
@@ -754,7 +776,7 @@ export default function SaleSuccessScreen() {
                   <Text style={styles.totalLabel}>Whole Invoice GST Amount:</Text>
                   <Text style={styles.totalAmount}>
                     {formatAmount(applyRoundOff(payment.cartItems.reduce((total: number, item: any) => {
-                      const itemTotal = item.price * item.quantity;
+                      const itemTotal = getUoMPrice(item) * item.quantity;
                       let basePrice = itemTotal;
                       
                       // Apply item discount if any
@@ -775,7 +797,7 @@ export default function SaleSuccessScreen() {
                   <Text style={styles.totalLabel}>Whole Invoice CESS Total:</Text>
                   <Text style={styles.totalAmount}>
                     {formatAmount(applyRoundOff(payment.cartItems.reduce((total: number, item: any) => {
-                      const itemTotal = item.price * item.quantity;
+                      const itemTotal = getUoMPrice(item) * item.quantity;
                       let basePrice = itemTotal;
                       
                       // Apply item discount if any
@@ -816,7 +838,7 @@ export default function SaleSuccessScreen() {
                   <Text style={styles.grandTotalLabel}>Invoice Total:</Text>
                   <Text style={styles.grandTotalAmount}>
                     {formatAmount(applyRoundOff(payment.cartItems.reduce((total: number, item: any) => {
-                      const itemTotal = item.price * item.quantity;
+                      const itemTotal = getUoMPrice(item) * item.quantity;
                       let basePrice = itemTotal;
                       
                       // Apply item discount if any

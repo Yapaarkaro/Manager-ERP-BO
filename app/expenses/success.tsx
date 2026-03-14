@@ -14,6 +14,8 @@ import {
   Home,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -41,7 +43,7 @@ interface ExpenseData {
 }
 
 export default function ExpenseSuccessScreen() {
-  const { expenseData } = useLocalSearchParams();
+  const params = useLocalSearchParams();
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -62,18 +64,12 @@ export default function ExpenseSuccessScreen() {
 
   let expense: ExpenseData | null = null;
   try {
-    expense = JSON.parse(expenseData as string);
+    expense = consumeNavData<ExpenseData>('expenseSuccessData') || (params.expenseData ? JSON.parse(params.expenseData as string) : null);
   } catch (error) {
     console.error('Error parsing expense data:', error);
   }
 
-  const formatAmount = (amount: string) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(parseFloat(amount) || 0);
-  };
+  const formatAmount = (amount: string) => formatCurrencyINR(parseFloat(amount) || 0, 2, 0);
 
   const getExpenseTypeName = (type: string) => {
     const typeNames: { [key: string]: string } = {

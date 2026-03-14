@@ -15,6 +15,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Shield, ArrowLeft } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { notifyStaffLogin } from '@/services/backendApi';
+import { getSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -28,10 +29,11 @@ const COLORS = {
 
 export default function StaffVerifyScreen() {
   const params = useLocalSearchParams();
-  const staffId = params.staffId as string;
-  const staffName = params.staffName as string;
-  const businessId = params.businessId as string;
-  const mobile = params.mobile as string;
+  const signupData = getSignupData();
+  const staffId = (params.staffId as string) || signupData.staffId || '';
+  const staffName = (params.staffName as string) || signupData.staffName || '';
+  const businessId = (params.businessId as string) || signupData.businessId || '';
+  const mobile = (params.mobile as string) || signupData.mobile || '';
 
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -77,60 +79,33 @@ export default function StaffVerifyScreen() {
 
     setIsVerifying(true);
     try {
-      const { data: staffRow, error: staffError } = await supabase
-        .from('staff')
-        .select('*')
-        .eq('id', staffId)
-        .single();
+      // Single RPC call that verifies code, creates users row, and links staff — all bypassing RLS
+      const { data: verifyResult, error: verifyError } = await supabase.rpc('verify_and_create_staff_user', {
+        p_staff_id: staffId,
+        p_verification_code: enteredCode,
+      });
 
-      if (staffError || !staffRow) {
-        Alert.alert('Error', 'Staff record not found. Please contact your business owner.');
+      if (verifyError) {
+        console.warn('Staff verify RPC error:', verifyError.message);
+        Alert.alert('Error', 'Verification failed. Please try again.');
         setIsVerifying(false);
         return;
       }
 
-      if (staffRow.verification_code !== enteredCode) {
-        Alert.alert('Incorrect Code', 'The verification code does not match. Please check with your business owner.');
-        setCode(['', '', '', '', '', '']);
-        inputRefs.current[0]?.focus();
+      const result = typeof verifyResult === 'string' ? JSON.parse(verifyResult) : verifyResult;
+
+      if (!result?.success) {
+        const errMsg = result?.error || 'Verification failed';
+        if (errMsg.includes('Invalid verification code')) {
+          Alert.alert('Incorrect Code', 'The verification code does not match. Please check with your business owner.');
+          setCode(['', '', '', '', '', '']);
+          inputRefs.current[0]?.focus();
+        } else {
+          Alert.alert('Error', errMsg);
+        }
         setIsVerifying(false);
         return;
       }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        Alert.alert('Error', 'Session expired. Please log in again.');
-        router.replace('/auth/mobile');
-        return;
-      }
-
-      const { error: insertError } = await supabase
-        .from('users')
-        .insert({
-          id: session.user.id,
-          business_id: staffRow.business_id,
-          name: staffRow.name,
-          role: 'Staff',
-        });
-
-      if (insertError) {
-        await supabase
-          .from('users')
-          .update({
-            business_id: staffRow.business_id,
-            name: staffRow.name,
-            role: 'Staff',
-          })
-          .eq('id', session.user.id);
-      }
-
-      try {
-        await supabase
-          .from('staff')
-          .update({ user_id: session.user.id, verification_code: null })
-          .eq('id', staffId);
-      } catch {}
-
 
       try {
         const { clearBusinessContext } = await import('@/services/backendApi');

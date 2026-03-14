@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { formatCurrencyINR } from '@/utils/formatters';
 import {
   ArrowLeft,
   IndianRupee,
@@ -193,7 +194,7 @@ export default function IncomeExpenseToggleScreen() {
 
       if (result.success) {
         clearBusinessDataCache();
-        Alert.alert('Success', `${mode === 'income' ? 'Income' : 'Expense'} of \u20B9${txAmount.toLocaleString('en-IN')} recorded successfully`, [
+        Alert.alert('Success', `${mode === 'income' ? 'Income' : 'Expense'} of ${formatCurrencyINR(txAmount)} recorded successfully`, [
           { text: 'OK', onPress: () => router.back() },
         ]);
       } else {
@@ -423,7 +424,7 @@ export default function IncomeExpenseToggleScreen() {
                   <View style={[st.accountIcon, { backgroundColor: '#EBF0F8' }]}><CreditCard size={20} color={Colors.primary} /></View>
                   <View style={{ flex: 1 }}>
                     <Text style={st.accountName}>{acc.bankName}</Text>
-                    <Text style={st.accountSub}>****{acc.accountNumber.slice(-4)} {'\u00B7'} Bal: {'\u20B9'}{acc.currentBalance.toLocaleString('en-IN')}</Text>
+                    <Text style={st.accountSub}>****{acc.accountNumber.slice(-4)} {'\u00B7'} Bal: {formatCurrencyINR(acc.currentBalance)}</Text>
                   </View>
                   {paymentAccount === acc.id && <Check size={20} color={Colors.primary} />}
                 </TouchableOpacity>

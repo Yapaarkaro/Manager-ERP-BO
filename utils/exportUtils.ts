@@ -3,6 +3,7 @@ import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { Platform, Alert } from 'react-native';
 import * as XLSX from 'xlsx';
+import { formatIndianNumber } from './formatters';
 
 export type ExportFormat = 'pdf' | 'csv' | 'excel' | 'json';
 
@@ -30,7 +31,7 @@ function getCellValue(row: any, col: ExportColumn): string {
 function formatAmountPlain(amount: number | string): string {
   const n = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(n)) return '0.00';
-  return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatIndianNumber(n, 2, 2);
 }
 
 function generateCSV(config: ExportConfig): string {

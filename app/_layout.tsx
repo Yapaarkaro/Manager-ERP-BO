@@ -47,9 +47,91 @@ global.clearAllData = async () => {
 
 function RouteGuard() {
   const pathname = usePathname();
-  const { canAccessRoute, loading, isStaff, permissions } = usePermissions();
+  const { canAccessRoute, loading, isStaff, permissions, role } = usePermissions();
   const lastDenied = useRef('');
+  const authCheckDone = useRef(false);
 
+  // Strip query params from the browser URL to prevent PII leakage
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const timer = setTimeout(() => {
+      try {
+        const loc = window.location;
+        if (loc.search) {
+          window.history.replaceState(window.history.state, '', loc.pathname);
+        }
+      } catch {}
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [pathname]);
+
+  // Routes that are used during onboarding and only need an active session (not completed onboarding)
+  const onboardingAllowedRoutes = ['/edit-address-simple', '/edit-address', '/add-address', '/subscription', '/subscription-success'];
+
+  // Protect app routes: require completed auth & onboarding
+  useEffect(() => {
+    if (pathname.startsWith('/auth') || pathname === '/' || pathname === '/index') return;
+    if (pathname.startsWith('/admin')) return;
+    if (authCheckDone.current) return;
+
+    const isOnboardingRoute = onboardingAllowedRoutes.includes(pathname);
+
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          if (!cancelled) router.replace('/');
+          return;
+        }
+
+        // Onboarding-allowed routes only need an active session
+        if (isOnboardingRoute) return;
+
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('business_id, role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (!userRow?.business_id) {
+          if (!cancelled) router.replace('/');
+          return;
+        }
+
+        // Staff members skip the onboarding check
+        if (userRow.role === 'Staff') {
+          authCheckDone.current = true;
+          return;
+        }
+
+        const { data: biz } = await supabase
+          .from('businesses')
+          .select('is_onboarding_complete')
+          .eq('id', userRow.business_id)
+          .maybeSingle();
+
+        if (!biz?.is_onboarding_complete) {
+          if (!cancelled) router.replace('/');
+          return;
+        }
+        authCheckDone.current = true;
+      } catch {
+        if (!cancelled) router.replace('/');
+      }
+    };
+    check();
+    return () => { cancelled = true; };
+  }, [pathname]);
+
+  // Reset auth check when user logs out (navigates to auth)
+  useEffect(() => {
+    if (pathname === '/' || pathname === '/index' || pathname.startsWith('/auth')) {
+      authCheckDone.current = false;
+    }
+  }, [pathname]);
+
+  // Permission-based route guard for staff
   useEffect(() => {
     if (loading || !isStaff) return;
     if (permissions.length === 0) return;
@@ -143,19 +225,37 @@ export default function RootLayout() {
 
   const handleDeepLink = useCallback((url: string) => {
     try {
-      const parsed = Linking.parse(url);
-      if (parsed.path === 'invoice-link' || parsed.hostname === 'invoice-link') {
-        const params = parsed.queryParams || {};
-        if (params.invoice_id && params.business_id) {
-          setInvoiceLinkData({
-            invoiceId: params.invoice_id as string,
-            businessId: params.business_id as string,
-            type: (params.type as string) || 'sale',
-            businessName: params.business_name as string | undefined,
-            invoiceNumber: params.invoice_number as string | undefined,
-            amount: params.amount ? Number(params.amount) : undefined,
-          });
+      // Handle both native (manager://invoice-link?...) and web (https://app.getmanager.in/invoice-link?...) URLs
+      let params: Record<string, string> = {};
+      let isInvoiceLink = false;
+
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.pathname === '/invoice-link' || urlObj.pathname === '//invoice-link') {
+          isInvoiceLink = true;
+          urlObj.searchParams.forEach((val, key) => { params[key] = val; });
         }
+      } catch {
+        // Not a full URL, try Linking.parse for native scheme
+      }
+
+      if (!isInvoiceLink) {
+        const parsed = Linking.parse(url);
+        if (parsed.path === 'invoice-link' || parsed.hostname === 'invoice-link') {
+          isInvoiceLink = true;
+          params = (parsed.queryParams || {}) as Record<string, string>;
+        }
+      }
+
+      if (isInvoiceLink && params.invoice_id && params.business_id) {
+        setInvoiceLinkData({
+          invoiceId: params.invoice_id,
+          businessId: params.business_id,
+          type: params.type || 'sale',
+          businessName: params.business_name,
+          invoiceNumber: params.invoice_number,
+          amount: params.amount ? Number(params.amount) : undefined,
+        });
       }
     } catch {}
   }, []);

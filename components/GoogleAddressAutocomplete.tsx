@@ -7,9 +7,18 @@ import {
   StyleSheet,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { MapPin, Navigation, X } from 'lucide-react-native';
-import { getPlacePredictions, getPlaceDetails, extractAddressComponents } from '../services/googleMapsApi';
+import { extractAddressComponents } from '../services/googleMapsApi';
+
+const getPlacePredictions = Platform.OS === 'web'
+  ? require('@/services/googleMapsApiWeb').getPlacePredictions
+  : require('@/services/googleMapsApi').getPlacePredictions;
+
+const getPlaceDetails = Platform.OS === 'web'
+  ? require('@/services/googleMapsApiWeb').getPlaceDetails
+  : require('@/services/googleMapsApi').getPlaceDetails;
 
 interface AddressSuggestion {
   place_id: string;

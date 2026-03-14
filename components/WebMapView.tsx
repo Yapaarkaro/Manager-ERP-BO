@@ -32,8 +32,7 @@ const WebMapView: React.FC<WebMapViewProps> = ({
     selectedLocation || initialLocation || { lat: 28.6139, lng: 77.2090 }
   );
 
-  // Google Maps API Key - Real API key
-  const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+  const { GOOGLE_MAPS_API_KEY } = require('@/lib/config');
 
   // Load Google Maps API
   useEffect(() => {

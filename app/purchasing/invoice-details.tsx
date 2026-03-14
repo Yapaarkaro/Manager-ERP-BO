@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { getPurchaseInvoices, getCachedPurchaseInvoiceItems, updatePurchaseInvoicePayment, getBankAccounts, invalidateApiCache, getSuppliers } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { formatQty } from '@/utils/formatters';
+import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import {
   ArrowLeft,
   Building2,
@@ -44,6 +44,7 @@ import {
     ExternalLink,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 
@@ -65,7 +66,9 @@ const Colors = {
 type PaymentMethod = 'cash' | 'upi' | 'cheque' | 'bank_transfer';
 
 export default function InvoiceDetailsScreen() {
-  const { invoiceId, invoiceData } = useLocalSearchParams();
+  const { invoiceId, invoiceData: invoiceDataParam } = useLocalSearchParams();
+  const navInvoiceData = consumeNavData('purchaseInvoiceData');
+  const invoiceData = navInvoiceData ? JSON.stringify(navInvoiceData) : invoiceDataParam;
   const { data: businessData } = useBusinessData();
   const [invoice, setInvoice] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -122,7 +125,7 @@ export default function InvoiceDetailsScreen() {
     }
   };
 
-  const fmt = (n: number | null | undefined) => `₹${(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmt = (n: number | null | undefined) => formatCurrencyINR(n || 0);
 
   const fmtDate = (d: string | null | undefined) => {
     if (!d) return '—';
@@ -198,16 +201,21 @@ export default function InvoiceDetailsScreen() {
   const buildPurchasePDFData = (): InvoicePDFData => {
     const bizNamePdf = businessData?.business?.legal_name || businessData?.business?.owner_name || '';
     const bizAddrPdf = businessData?.addresses?.[0];
+    const bizAddress = bizAddrPdf ? [bizAddrPdf.door_number || bizAddrPdf.doorNumber, bizAddrPdf.address_line_1 || bizAddrPdf.addressLine1, bizAddrPdf.address_line_2 || bizAddrPdf.addressLine2, bizAddrPdf.city, bizAddrPdf.state || bizAddrPdf.stateName, bizAddrPdf.pincode].filter(Boolean).join(', ') : '';
+    const bank = businessData?.bankAccounts?.[0];
     return {
       type: 'purchase',
       invoiceNumber: invoiceNum,
       invoiceDate: invoiceDateStr || '',
       business: {
         name: bizNamePdf,
-        address: bizAddrPdf ? [bizAddrPdf.door_number || bizAddrPdf.doorNumber, bizAddrPdf.address_line_1 || bizAddrPdf.addressLine1, bizAddrPdf.address_line_2 || bizAddrPdf.addressLine2, bizAddrPdf.city, bizAddrPdf.state || bizAddrPdf.stateName, bizAddrPdf.pincode].filter(Boolean).join(', ') : '',
+        address: bizAddress,
         gstin: bizGstin,
+        phone: businessData?.business?.phone,
       },
       supplierName,
+      supplierAddress: invoice.supplier_address || '',
+      supplierGstin: invoice.supplier_gstin || '',
       items: items.map((item: any) => ({
         name: item.product_name || item.productName || '',
         hsnCode: item.hsn_code || item.hsnCode,
@@ -239,6 +247,7 @@ export default function InvoiceDetailsScreen() {
       staffName: invoice.staff_name || businessData?.business?.owner_name,
       invoiceId: invoice.id,
       businessId: businessData?.business?.id,
+      bankDetails: bank ? { bankName: bank.bank_name || bank.bankName || '', accountNo: bank.account_number || bank.accountNumber || '', ifsc: bank.ifsc_code || bank.ifscCode || '', branch: bank.branch || '' } : undefined,
     };
   };
 

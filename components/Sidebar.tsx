@@ -35,6 +35,7 @@ import {
   ChevronLeft,
   Wallet,
   MessageSquare,
+  Briefcase,
 } from 'lucide-react-native';
 
 interface SidebarProps {
@@ -129,11 +130,16 @@ const menuSections: MenuSection[] = [
     permission: 'reports',
   },
   {
-    id: 'marketing',
-    title: 'Marketing',
-    icon: Megaphone,
-    route: '/marketing',
+    id: 'services',
+    title: 'Marketing & Services',
+    icon: Briefcase,
     permission: 'master_access',
+    subsections: [
+      { id: 'marketing', title: 'Marketing', route: '/marketing' },
+      { id: 'tax-compliance', title: 'Tax Compliance', route: '/services/coming-soon?service=Tax Compliance' },
+      { id: 'business-consultation', title: 'Business Consultation', route: '/services/coming-soon?service=Business Consultation' },
+      { id: 'working-capital', title: 'Working Capital', route: '/services/coming-soon?service=Working Capital Assistance' },
+    ],
   },
   {
     id: 'chat',

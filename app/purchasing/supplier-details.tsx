@@ -17,6 +17,8 @@ import { useBusinessData } from '@/hooks/useBusinessData';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { setNavData } from '@/utils/navStore';
 
 // Helper function to get initials from name
 const getInitials = (name: string): string => {
@@ -191,13 +193,7 @@ export default function SupplierDetailsScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, [supplierId]);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -274,14 +270,12 @@ export default function SupplierDetailsScreen() {
     });
 
     if (result.success && result.conversation) {
+      setNavData('chatMeta', { name: supplierDisplayName, type: result.crossBusiness ? 'customer' : 'supplier', crossBusiness: !!result.crossBusiness });
       safeRouter.push({
         pathname: '/chat/conversation',
         params: {
           conversationId: result.conversation.id,
-          name: supplierDisplayName,
-          type: result.crossBusiness ? 'customer' : 'supplier',
           otherPartyId: supplier.id,
-          ...(result.crossBusiness ? { crossBusiness: 'true' } : {}),
         }
       });
     }
@@ -874,7 +868,7 @@ export default function SupplierDetailsScreen() {
                     <TouchableOpacity
                       key={inv.id}
                       style={styles.txCard}
-                      onPress={() => safeRouter.push({ pathname: '/purchasing/invoice-details', params: { invoiceId: inv.id, invoiceData: JSON.stringify(inv) } })}
+                      onPress={() => { setNavData('purchaseInvoiceData', inv); safeRouter.push({ pathname: '/purchasing/invoice-details', params: { invoiceId: inv.id } } as any); }}
                       activeOpacity={0.7}
                     >
                       <View style={styles.txCardTop}>

@@ -11,8 +11,7 @@ import {
 import * as Location from 'expo-location';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
-// Google Maps API Key
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBqLe3lHfzB5epezdgwdKDzkdFkECuUN1o';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/config';
 
 // Web fallback component
 const WebMapFallback: React.FC<{

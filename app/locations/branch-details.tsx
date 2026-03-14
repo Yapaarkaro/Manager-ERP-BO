@@ -132,6 +132,10 @@ export default function BranchDetailsScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [duplicateAddressInfo, setDuplicateAddressInfo] = useState<any>(null);
+  const [showStaffOtpModal, setShowStaffOtpModal] = useState(false);
+  const [staffOtpCode, setStaffOtpCode] = useState('');
+  const [staffOtpName, setStaffOtpName] = useState('');
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
 
@@ -427,30 +431,64 @@ export default function BranchDetailsScreen() {
         }
       }
 
-      // Create staff from manager info (non-blocking)
+      // Create staff from manager info
       if (backendResult && managerName.trim() && managerPhone) {
-        createStaff({
-          name: managerName.trim(),
-          mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
-          role: 'Branch Manager',
-          locationId: backendResult.id,
-          locationType: 'branch',
-          locationName: branchName.trim(),
-        }).then((staffResult) => {
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        try {
+          const staffResult = await createStaff({
+            name: managerName.trim(),
+            mobile: managerPhone.replace(/\D/g, '').slice(0, 10),
+            role: 'Branch Manager',
+            locationId: backendResult.id,
+            locationType: 'branch',
+            locationName: branchName.trim(),
+            verificationCode,
+          });
           if (staffResult.success) {
             console.log('✅ Staff created from branch manager in backend:', managerName.trim());
+            // Show OTP modal and defer navigation
+            const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
+            clearBusinessDataCache();
+            const updatedAddresses = JSON.stringify([...parsedExistingAddresses, newBranch]);
+            setStaffOtpName(managerName.trim());
+            setStaffOtpCode(verificationCode);
+            setIsLoading(false);
+            const doNavigate = () => {
+              if (fromSummary === 'true') {
+                safeRouter.replace({
+                  pathname: '/auth/business-summary',
+                  params: {
+                    type, value, gstinData, name, businessName, businessType, customBusinessType,
+                    allAddresses: updatedAddresses,
+                    allBankAccounts, initialCashBalance, invoicePrefix, invoicePattern, startingInvoiceNumber, fiscalYear,
+                  }
+                });
+              } else if (type && value) {
+                safeRouter.replace({
+                  pathname: '/auth/address-confirmation',
+                  params: {
+                    type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+                    allAddresses: updatedAddresses,
+                  }
+                });
+              } else {
+                safeRouter.push('/settings');
+              }
+            };
+            setPendingNavigation(() => doNavigate);
+            setShowStaffOtpModal(true);
+            return;
           } else {
-            console.warn('⚠️ Staff creation failed (non-blocking):', staffResult.error);
+            console.warn('⚠️ Staff creation failed:', staffResult.error);
           }
-        }).catch((staffError) => {
-          console.warn('⚠️ Staff creation error (non-blocking):', staffError);
-        });
+        } catch (staffError) {
+          console.warn('⚠️ Staff creation error:', staffError);
+        }
       }
     } catch (error) {
       console.error('Error preparing branch for backend:', error);
     }
     
-    // ✅ Clear cache to ensure fresh data is loaded when navigating back
     const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
     clearBusinessDataCache();
     
@@ -475,8 +513,15 @@ export default function BranchDetailsScreen() {
         }
       });
     } else {
-      // User is not in signup flow, go to settings
       safeRouter.push('/settings');
+    }
+  };
+
+  const handleDismissStaffOtpModal = () => {
+    setShowStaffOtpModal(false);
+    if (pendingNavigation) {
+      pendingNavigation();
+      setPendingNavigation(null);
     }
   };
 
@@ -1065,6 +1110,33 @@ export default function BranchDetailsScreen() {
                     return null;
                   })()}
                 </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Staff OTP Modal */}
+          <Modal
+            visible={showStaffOtpModal}
+            transparent
+            animationType="fade"
+            onRequestClose={handleDismissStaffOtpModal}
+          >
+            <View style={styles.staffOtpOverlay}>
+              <View style={styles.staffOtpContainer}>
+                <Text style={{ fontSize: 40, marginBottom: 12 }}>🔑</Text>
+                <Text style={styles.staffOtpTitle}>Staff Verification Code</Text>
+                <Text style={styles.staffOtpSubtitle}>
+                  Share this code with <Text style={{ fontWeight: '700' }}>{staffOtpName}</Text> for their first login.
+                </Text>
+                <View style={styles.staffOtpCodeBox}>
+                  <Text style={styles.staffOtpCodeText} selectable>{staffOtpCode}</Text>
+                </View>
+                <Text style={styles.staffOtpHint}>
+                  The staff member will use the same Manager app with the Staff Login option, verify their mobile number, and enter this code to access your business. No separate app is needed — staff access is role-based within Manager.
+                </Text>
+                <TouchableOpacity style={styles.staffOtpButton} onPress={handleDismissStaffOtpModal} activeOpacity={0.8}>
+                  <Text style={styles.staffOtpButtonText}>Done</Text>
+                </TouchableOpacity>
               </View>
             </View>
           </Modal>
@@ -1776,5 +1848,69 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  staffOtpOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  staffOtpContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center' as const,
+  },
+  staffOtpTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: '#1e293b',
+    marginBottom: 8,
+  },
+  staffOtpSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center' as const,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  staffOtpCodeBox: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  staffOtpCodeText: {
+    fontSize: 28,
+    fontWeight: '700' as const,
+    color: '#1e293b',
+    letterSpacing: 8,
+    textAlign: 'center' as const,
+  },
+  staffOtpHint: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center' as const,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  staffOtpButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    width: '100%' as const,
+    alignItems: 'center' as const,
+  },
+  staffOtpButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600' as const,
   },
 });

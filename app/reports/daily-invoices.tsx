@@ -13,6 +13,7 @@ import { invalidateApiCache } from '@/services/backendApi';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
 import { 
   ArrowLeft, 
   Search, 
@@ -31,6 +32,7 @@ import {
   CreditCard,
   IndianRupee
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -50,7 +52,8 @@ const Colors = {
 
 export default function DailyInvoicesScreen() {
   const { date, invoices } = useLocalSearchParams();
-  const invoicesList = JSON.parse(invoices as string);
+  const navInvoices = consumeNavData('dailyInvoices');
+  const invoicesList = navInvoices || JSON.parse(invoices as string);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredInvoices, setFilteredInvoices] = useState(invoicesList);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'sales' | 'returns'>('all');
@@ -125,11 +128,11 @@ export default function DailyInvoicesScreen() {
         }
       };
 
+      setNavData('returnData', returnData);
       safeRouter.push({
         pathname: '/return-details',
         params: {
           returnId: returnData.id,
-          returnData: JSON.stringify(returnData)
         }
       });
     } else {
@@ -153,11 +156,11 @@ export default function DailyInvoicesScreen() {
         }
       };
 
+      setNavData('invoiceData', invoiceData);
       safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
-          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }
@@ -193,13 +196,7 @@ export default function DailyInvoicesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

@@ -26,7 +26,7 @@ import {
   ChevronDown,
   AlertTriangle
 } from 'lucide-react-native';
-import { verifyGSTIN } from '@/services/gstinApi';
+import { verifyGSTIN } from '@/services/backendApi';
 import { Customer } from '@/utils/dataStore';
 import { createCustomer } from '@/services/backendApi';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
@@ -114,8 +114,8 @@ export default function AddCustomerScreen() {
     try {
       const result = await verifyGSTIN(gstinUpper);
       
-      if (result.error) {
-        Alert.alert('GSTIN Verification Failed', result.message || 'Invalid GSTIN number');
+      if (!result.success) {
+        Alert.alert('GSTIN Verification Failed', result.error || 'Invalid GSTIN number');
       } else if (result.taxpayerInfo) {
         const gstinData = result.taxpayerInfo;
         

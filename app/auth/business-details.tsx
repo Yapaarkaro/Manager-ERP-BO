@@ -21,6 +21,7 @@ import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtil
 import { submitBusinessDetails } from '@/services/backendApi';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { optimisticAddAddress, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -44,25 +45,23 @@ const businessTypes = [
 ];
 
 export default function BusinessDetailsScreen() {
-  const { 
-    type, 
-    value, 
-    gstinData, 
-    panName, 
-    panDob, 
-    mobile,
-    // Incoming data from business summary (when user clicks back)
-    name: incomingName,
-    businessName: incomingBusinessName,
-    businessType: incomingBusinessType,
-    customBusinessType: incomingCustomBusinessType,
-    // Invoice configuration (for returning users from business summary)
-    initialCashBalance,
-    invoicePrefix,
-    invoicePattern,
-    startingInvoiceNumber,
-    fiscalYear,
-  } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const signupData = getSignupData();
+  const type = (params.type as string) || signupData.type || '';
+  const value = (params.value as string) || signupData.value || '';
+  const gstinData = (params.gstinData as string) || signupData.gstinData || '';
+  const panName = (params.panName as string) || signupData.panName || '';
+  const panDob = (params.panDob as string) || signupData.panDob || '';
+  const mobile = (params.mobile as string) || signupData.mobile || '';
+  const incomingName = (params.name as string) || signupData.name || '';
+  const incomingBusinessName = (params.businessName as string) || signupData.businessName || '';
+  const incomingBusinessType = (params.businessType as string) || signupData.businessType || '';
+  const incomingCustomBusinessType = (params.customBusinessType as string) || signupData.customBusinessType || '';
+  const initialCashBalance = (params.initialCashBalance as string) || signupData.initialCashBalance || '';
+  const invoicePrefix = (params.invoicePrefix as string) || signupData.invoicePrefix || '';
+  const invoicePattern = (params.invoicePattern as string) || signupData.invoicePattern || '';
+  const startingInvoiceNumber = (params.startingInvoiceNumber as string) || signupData.startingInvoiceNumber || '';
+  const fiscalYear = (params.fiscalYear as string) || signupData.fiscalYear || '';
   
   const insets = useSafeAreaInsets();
   
@@ -487,21 +486,18 @@ export default function BusinessDetailsScreen() {
           } else {
             // No address in GSTIN data, fall back to normal flow
             console.warn('⚠️ No address in GSTIN data, falling back to normal flow');
-            // Navigate immediately to business-address screen
-            router.replace({
-              pathname: '/auth/business-address',
-              params: {
-                type,
-                value,
-                gstinData,
-                name,
-                businessName,
-                businessType: businessType !== 'Others' ? businessType : customBusinessType,
-                customBusinessType: businessType === 'Others' ? customBusinessType : '',
-                mobile,
-                addressType: 'primary',
-              }
+            setSignupData({
+              type,
+              value,
+              gstinData,
+              name,
+              businessName,
+              businessType: businessType !== 'Others' ? businessType : customBusinessType,
+              customBusinessType: businessType === 'Others' ? customBusinessType : '',
+              mobile,
+              addressType: 'primary',
             });
+            router.replace('/auth/business-address');
             setIsCompleting(false);
             setIsNavigating(false);
             return;
@@ -510,27 +506,23 @@ export default function BusinessDetailsScreen() {
           console.log('🏢 Primary address already exists, skipping auto-creation from GSTIN data');
         }
         
-        // Navigate immediately to address confirmation screen (no delay, no await)
-        router.replace({
-          pathname: '/auth/address-confirmation',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType: businessType !== 'Others' ? businessType : customBusinessType,
-            customBusinessType: businessType === 'Others' ? customBusinessType : '',
-            mobile,
-            allAddresses: JSON.stringify(mapLocationsToAddresses(existingAddresses)),
-            // Pass invoice configuration for returning users
-            initialCashBalance,
-            invoicePrefix,
-            invoicePattern,
-            startingInvoiceNumber,
-            fiscalYear,
-          }
+        setSignupData({
+          type,
+          value,
+          gstinData,
+          name,
+          businessName,
+          businessType: businessType !== 'Others' ? businessType : customBusinessType,
+          customBusinessType: businessType === 'Others' ? customBusinessType : '',
+          mobile,
+          allAddresses: JSON.stringify(mapLocationsToAddresses(existingAddresses)),
+          initialCashBalance,
+          invoicePrefix,
+          invoicePattern,
+          startingInvoiceNumber,
+          fiscalYear,
         });
+        router.replace('/auth/address-confirmation');
         setIsCompleting(false);
         setIsNavigating(false);
       } else {
@@ -545,39 +537,33 @@ export default function BusinessDetailsScreen() {
         const hasPrimaryAddress = panAddresses.some((addr: any) => addr.is_primary);
         
         if (hasPrimaryAddress) {
-          // Primary address exists, skip to address confirmation (navigate immediately)
-          router.replace({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile,
-              allAddresses: JSON.stringify(mapLocationsToAddresses(panAddresses)),
-            }
+          setSignupData({
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType: businessType !== 'Others' ? businessType : customBusinessType,
+            customBusinessType: businessType === 'Others' ? customBusinessType : '',
+            mobile,
+            allAddresses: JSON.stringify(mapLocationsToAddresses(panAddresses)),
           });
+          router.replace('/auth/address-confirmation');
           setIsCompleting(false);
           setIsNavigating(false);
         } else {
-          // No primary address exists, continue with normal flow (navigate immediately)
-          router.replace({
-            pathname: '/auth/business-address',
-            params: {
-              type,
-              value,
-              gstinData,
-              name,
-              businessName,
-              businessType: businessType !== 'Others' ? businessType : customBusinessType,
-              customBusinessType: businessType === 'Others' ? customBusinessType : '',
-              mobile, // Add mobile parameter for PAN users
-              addressType: 'primary', // ✅ Explicitly set addressType to 'primary'
-            }
+          setSignupData({
+            type,
+            value,
+            gstinData,
+            name,
+            businessName,
+            businessType: businessType !== 'Others' ? businessType : customBusinessType,
+            customBusinessType: businessType === 'Others' ? customBusinessType : '',
+            mobile,
+            addressType: 'primary',
           });
+          router.replace('/auth/business-address');
           setIsCompleting(false);
           setIsNavigating(false);
         }

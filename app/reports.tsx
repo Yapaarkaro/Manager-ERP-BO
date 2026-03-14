@@ -55,6 +55,7 @@ import {
 import { useBusinessData } from '@/hooks/useBusinessData';
 import ExportModal from '@/components/ExportModal';
 import { ExportConfig } from '@/utils/exportUtils';
+import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
 
 const C = {
   bg: '#FFFFFF',
@@ -130,11 +131,9 @@ function inRange(dateStr: string | undefined, start: Date, end: Date): boolean {
   return d >= start && d <= end;
 }
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+const fmt = (n: number) => formatCurrencyINR(n, 0, 0);
 
-const fmtNum = (n: number) =>
-  new Intl.NumberFormat('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+const fmtNum = (n: number) => formatIndianNumber(n, 0, 0);
 
 const pct = (part: number, total: number) => (total === 0 ? 0 : Math.round((part / total) * 100));
 

@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { invalidateApiCache, getCustomers, getInvoiceWithItems } from '@/services/backendApi';
-import { formatQty } from '@/utils/formatters';
+import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -34,6 +34,7 @@ import {
   ExternalLink,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
@@ -67,7 +68,9 @@ interface InvoiceItem {
 }
 
 export default function InvoiceDetailsScreen() {
-  const { invoiceId, invoiceData } = useLocalSearchParams();
+  const { invoiceId, invoiceData: invoiceDataParam } = useLocalSearchParams();
+  const navInvoiceData = consumeNavData('invoiceData');
+  const invoiceData = navInvoiceData ? JSON.stringify(navInvoiceData) : invoiceDataParam;
   const { data: businessData } = useBusinessData();
   const [invoice, setInvoice] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
@@ -333,14 +336,7 @@ export default function InvoiceDetailsScreen() {
   const hasInvoiceExtras = invoice.invoiceExtras && typeof invoice.invoiceExtras === 'object' &&
     Object.entries(invoice.invoiceExtras).some(([key, val]) => key !== 'irn' && key !== 'acknowledgmentNumber' && key !== 'acknowledgmentDate' && val && String(val).trim().length > 0);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 3, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -353,13 +349,15 @@ export default function InvoiceDetailsScreen() {
 
   const buildPDFData = (): InvoicePDFData => {
     const bizAddr = businessData?.addresses?.[0];
+    const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : invoice.businessAddress;
+    const bank = businessData?.bankAccounts?.[0];
     return {
       type: 'sale',
       invoiceNumber: invoice.invoiceNumber || invoice.invoice_number || '',
       invoiceDate: invoice.invoiceDate || invoice.invoice_date || '',
       business: {
         name: businessData?.business?.legal_name || businessData?.business?.owner_name || invoice.businessName || '',
-        address: bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : invoice.businessAddress,
+        address: bizAddress,
         gstin: businessData?.business?.tax_id || invoice.gstin,
         phone: businessData?.business?.phone || invoice.businessPhone,
       },
@@ -373,10 +371,14 @@ export default function InvoiceDetailsScreen() {
       } : undefined,
       items: invoiceItems.map(item => ({
         name: item.name,
+        hsnCode: item.hsnCode || item.hsn_code,
         quantity: item.quantity,
+        unit: item.unit,
         rate: item.rate,
+        discount: item.discount || 0,
         taxRate: item.taxRate,
         taxAmount: item.taxAmount,
+        cessAmount: item.cessAmount || 0,
         total: item.total,
       })),
       subtotal,
@@ -391,6 +393,7 @@ export default function InvoiceDetailsScreen() {
       invoiceExtras: invoice.invoiceExtras || invoice.invoice_extras,
       invoiceId: invoice.id,
       businessId: businessData?.business?.id,
+      bankDetails: bank ? { bankName: bank.bank_name || bank.bankName || '', accountNo: bank.account_number || bank.accountNumber || '', ifsc: bank.ifsc_code || bank.ifscCode || '', branch: bank.branch || '' } : undefined,
     };
   };
 

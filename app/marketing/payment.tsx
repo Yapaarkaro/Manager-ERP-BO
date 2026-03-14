@@ -10,9 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { createCampaign, createMarketingRequest } from '@/services/backendApi';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -81,19 +84,13 @@ export default function PaymentScreen() {
     console.error('Error parsing campaign data:', error);
   }
 
-  const formatAmount = (amount: string) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(parseInt(amount) || 0);
-  };
+  const formatAmount = (amount: string) => formatCurrencyINR(parseInt(amount) || 0, 2, 0);
 
   const handlePaymentMethodSelect = (methodId: string) => {
     setSelectedPaymentMethod(methodId);
   };
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
     if (!selectedPaymentMethod) {
       Alert.alert('Select Payment Method', 'Please select a payment method to continue');
       return;
@@ -101,16 +98,44 @@ export default function PaymentScreen() {
 
     setIsProcessing(true);
 
-    // Simulate payment processing
-    setTimeout(() => {
+    try {
+      const campaignResult = await createCampaign({
+        name: campaignInfo.name,
+        platform: campaignInfo.platform,
+        startDate: campaignInfo.startDate,
+        endDate: campaignInfo.endDate,
+        budget: parseInt(campaignInfo.budget) || 0,
+        status: 'pending',
+        targetAudience: campaignInfo.targetAudience || [],
+        objective: campaignInfo.objective,
+      });
+
+      await createMarketingRequest({
+        serviceType: 'campaign',
+        title: campaignInfo.name,
+        description: `${campaignInfo.platform} campaign - ${campaignInfo.objective}`,
+        budgetRange: `${formatCurrencyINR(campaignInfo.budget)}`,
+        targetPlatforms: [campaignInfo.platform],
+        targetAudience: (campaignInfo.targetAudience || []).join(', '),
+        urgency: 'normal',
+      });
+
       setIsProcessing(false);
-      Alert.alert('Payment Successful', 'Your campaign has been created successfully. One of our ad managers will be in touch with you soon.', [
-        {
-          text: 'OK',
-          onPress: () => router.push('/marketing')
-        }
-      ]);
-    }, 2000);
+
+      if (!campaignResult.success) {
+        Alert.alert('Error', campaignResult.error || 'Failed to create campaign. Please try again.');
+        return;
+      }
+
+      Alert.alert(
+        'Campaign Created',
+        'Your campaign has been submitted successfully. One of our ad managers will be in touch with you soon.',
+        [{ text: 'OK', onPress: () => router.push('/marketing') }]
+      );
+    } catch (error: any) {
+      setIsProcessing(false);
+      Alert.alert('Error', error.message || 'Something went wrong. Please try again.');
+    }
   };
 
   const renderPaymentMethod = (method: PaymentMethod) => (

@@ -13,7 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { getInvoices, getInvoiceWithItems, getPurchaseInvoices } from '@/services/backendApi';
+import { productStore } from '@/utils/productStore';
 import { 
   ArrowLeft, 
   Search, 
@@ -164,6 +167,7 @@ export default function NewReturnScreen() {
             taxRate: parseFloat(item.tax_rate) || 0,
             taxAmount: parseFloat(item.tax_amount) || 0,
             total: parseFloat(item.total_price) || 0,
+            quantityDecimals: (() => { const p = productStore.getProductById(item.product_id); return p?.quantityDecimals ?? 0; })(),
           }));
         }
       } else {
@@ -178,6 +182,7 @@ export default function NewReturnScreen() {
             taxRate: parseFloat(item.tax_rate || item.taxRate) || 0,
             taxAmount: parseFloat(item.tax_amount || item.taxAmount) || 0,
             total: parseFloat(item.total_price || item.total) || 0,
+            quantityDecimals: (() => { const pId = item.product_id || item.productId; const p = pId ? productStore.getProductById(pId) : null; return p?.quantityDecimals ?? 0; })(),
           }));
         }
       }
@@ -191,10 +196,8 @@ export default function NewReturnScreen() {
         supplierName: (invoice as any).supplierName || invoice.customerName,
       };
 
-      safeRouter.push({
-        pathname: '/new-return/select-items',
-        params: { invoiceData: JSON.stringify(invoiceWithItems) }
-      });
+      setNavData('returnFlowInvoice', invoiceWithItems);
+      safeRouter.push({ pathname: '/new-return/select-items' });
     } catch (e) {
       console.warn('Failed to fetch invoice items:', e);
     } finally {
@@ -213,11 +216,7 @@ export default function NewReturnScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {

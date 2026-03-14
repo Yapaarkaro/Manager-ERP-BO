@@ -7,9 +7,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (req.method !== 'GET') {
+    return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
   try {
@@ -20,6 +26,14 @@ serve(async (req: Request) => {
 
     if (!invoiceId || !businessId) {
       return new Response('Missing required parameters', { status: 400, headers: corsHeaders });
+    }
+
+    if (!UUID_RE.test(invoiceId) || !UUID_RE.test(businessId)) {
+      return new Response('Invalid parameters', { status: 400, headers: corsHeaders });
+    }
+
+    if (!['sale', 'purchase', 'return'].includes(type)) {
+      return new Response('Invalid type', { status: 400, headers: corsHeaders });
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -41,6 +55,7 @@ serve(async (req: Request) => {
         .from('invoices')
         .select('id, invoice_number, invoice_date, total_amount, customer_name, payment_status, tax_amount, discount_amount, subtotal')
         .eq('id', invoiceId)
+        .eq('business_id', businessId)
         .maybeSingle();
       invoice = data;
       if (data) {
@@ -55,6 +70,7 @@ serve(async (req: Request) => {
         .from('purchase_invoices')
         .select('id, invoice_number, invoice_date, total_amount, supplier_name, payment_status, tax_amount, discount_amount, subtotal')
         .eq('id', invoiceId)
+        .eq('business_id', businessId)
         .maybeSingle();
       invoice = data;
       if (data) {
@@ -69,6 +85,7 @@ serve(async (req: Request) => {
         .from('returns')
         .select('id, return_number, return_date, total_amount, customer_name, tax_amount, subtotal')
         .eq('id', invoiceId)
+        .eq('business_id', businessId)
         .maybeSingle();
       invoice = data;
       if (data) {
@@ -87,7 +104,10 @@ serve(async (req: Request) => {
     const date = invoice?.invoice_date || invoice?.return_date || '';
     const formattedDate = date ? new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 
-    const deepLinkUrl = `myapp://invoice-link?invoice_id=${invoiceId}&business_id=${businessId}&type=${type}&business_name=${encodeURIComponent(businessName)}&invoice_number=${encodeURIComponent(invoiceNumber)}&amount=${invoice?.total_amount || ''}`;
+    const queryStr = `invoice_id=${invoiceId}&business_id=${businessId}&type=${type}&business_name=${encodeURIComponent(businessName)}&invoice_number=${encodeURIComponent(invoiceNumber)}&amount=${invoice?.total_amount || ''}`;
+    const webUrl = `https://app.getmanager.in/invoice-link?${queryStr}`;
+    const nativeUrl = `manager://invoice-link?${queryStr}`;
+    const deepLinkUrl = webUrl;
 
     const typeLabel = type === 'sale' ? 'Sales Invoice' : type === 'purchase' ? 'Purchase Invoice' : 'Return / Credit Note';
     const partyLabel = type === 'purchase' ? 'Supplier' : 'Customer';
@@ -187,7 +207,7 @@ serve(async (req: Request) => {
 
   <div class="inv-actions">
     <a href="${deepLinkUrl}" class="btn btn-primary">Open in Manager App</a>
-    <a href="https://apps.apple.com/app/manager-erp" class="btn btn-secondary">Download Manager App</a>
+    <a href="https://getmanager.in" class="btn btn-secondary">Visit Manager Website</a>
   </div>
 
   <div class="inv-footer">
@@ -204,7 +224,7 @@ serve(async (req: Request) => {
         'Content-Type': 'text/html; charset=utf-8',
       },
     });
-  } catch (error) {
-    return new Response(`Error: ${error.message}`, { status: 500, headers: corsHeaders });
+  } catch (_error) {
+    return new Response('Something went wrong', { status: 500, headers: corsHeaders });
   }
 });

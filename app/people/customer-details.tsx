@@ -12,9 +12,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
-import { getInitials as getNameInitials, getAvatarColor } from '@/utils/formatters';
+import { getInitials as getNameInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
 import { getCustomers, getCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -162,13 +163,7 @@ export default function CustomerDetailsScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, [customerId]);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -216,15 +211,16 @@ export default function CustomerDetailsScreen() {
   };
 
   const handleChatPress = () => {
+    setNavData('customerChatMeta', {
+      customerId: customer.id,
+      customerName: customer.businessName || customer.name || customer.contact_person || '',
+      customerAvatar: customer.avatar || '',
+      customerPhone: customer.mobile || customer.mobile_number || customer.phone || '',
+      isOnManager: customer.business_id ? 'true' : 'false',
+    });
     safeRouter.push({
       pathname: '/people/customer-chat',
-      params: {
-        customerId: customer.id,
-        customerName: customer.businessName || customer.name || customer.contact_person || '',
-        customerAvatar: customer.avatar || '',
-        customerPhone: customer.mobile || customer.mobile_number || customer.phone || '',
-        isOnManager: customer.business_id ? 'true' : 'false',
-      }
+      params: { customerId: customer.id }
     });
   };
 
@@ -297,12 +293,8 @@ export default function CustomerDetailsScreen() {
     
     console.log('Creating sale with customer data:', preSelectedCustomerData);
     
-    safeRouter.push({
-      pathname: '/new-sale',
-      params: {
-        preSelectedCustomer: JSON.stringify(preSelectedCustomerData)
-      }
-    });
+    setNavData('preSelectedCustomer', preSelectedCustomerData);
+    safeRouter.push({ pathname: '/new-sale' });
   };
 
   const renderTransactionLog = (transaction: TransactionLog) => {

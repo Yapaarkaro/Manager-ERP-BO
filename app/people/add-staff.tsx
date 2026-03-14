@@ -47,6 +47,7 @@ import { createStaff, updateStaff, getStaff, invalidateApiCache } from '@/servic
 import { getInputFocusStyles } from '@/utils/platformUtils';
 import GoogleAddressAutocomplete from '@/components/GoogleAddressAutocomplete';
 import TimeInputWithPicker from '@/components/TimeInputWithPicker';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -532,6 +533,28 @@ export default function AddStaffScreen() {
         }
       }
 
+      if (!editMode && otp) {
+        try {
+          const { supabase: sb } = await import('@/lib/supabase');
+          const { data: { session: sess } } = await sb.auth.getSession();
+          if (sess?.user) {
+            const { data: uData } = await sb.from('users').select('business_id').eq('id', sess.user.id).single();
+            const bid = uData?.business_id || businessData?.business?.id;
+            if (bid) {
+              const { data: checkRow } = await sb
+                .from('staff')
+                .select('id, verification_code')
+                .eq('business_id', bid)
+                .eq('mobile', formData.mobile)
+                .maybeSingle();
+              if (checkRow && !checkRow.verification_code) {
+                await sb.from('staff').update({ verification_code: otp }).eq('id', checkRow.id);
+              }
+            }
+          }
+        } catch {}
+      }
+
       setIsSubmitting(false);
 
       if (editMode) {
@@ -560,25 +583,12 @@ export default function AddStaffScreen() {
 
   const handleOtpConfirm = () => {
     setShowOtpModal(false);
-    Alert.alert(
-      'Staff Added Successfully',
-      `${formData.name} has been added to your team. They will receive an OTP to join using the Manager Staff App.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => router.back()
-        }
-      ]
-    );
+    router.back();
   };
 
-  const formatAmount = (amount: string) => {
+  const formatAmount = (amount: number | string | null | undefined) => {
     if (!amount) return '₹0';
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(parseInt(amount));
+    return formatCurrencyINR(amount);
   };
 
   const getTotalSalary = () => {
@@ -1771,8 +1781,8 @@ export default function AddStaffScreen() {
                   <Text style={styles.otpInstructionsTitle}>Next Steps:</Text>
                   <Text style={styles.otpInstructionsText}>
                     1. Share the Employee ID and OTP with {formData.name}
-                    {'\n'}2. Ask them to download the "Manager Staff App"
-                    {'\n'}3. They can use the OTP to join your business
+                    {'\n'}2. They can log in using the Staff Login option in the Manager app
+                    {'\n'}3. After verifying their mobile number, they enter this OTP to join your business
                     {'\n'}4. Once verified, they'll have access to their assigned permissions
                   </Text>
                 </View>

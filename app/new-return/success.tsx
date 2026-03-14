@@ -12,7 +12,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, RotateCcw, Eye, Send } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { openWhatsApp } from '@/utils/invoiceShareUtils';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -31,8 +33,8 @@ const Colors = {
 };
 
 export default function ReturnSuccessScreen() {
-  const { returnData } = useLocalSearchParams();
-  const returnInfo = JSON.parse(returnData as string);
+  const params = useLocalSearchParams();
+  const returnInfo = consumeNavData('returnSuccessData') || (params.returnData ? JSON.parse(params.returnData as string) : {});
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -52,13 +54,7 @@ export default function ReturnSuccessScreen() {
     return unsubscribe;
   }, [navigation]);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const getRefundMethodText = () => {
     switch (returnInfo.refundMethod) {

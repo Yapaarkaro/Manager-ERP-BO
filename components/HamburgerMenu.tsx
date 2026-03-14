@@ -11,7 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet, MessageSquare } from 'lucide-react-native';
+import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet, MessageSquare, Briefcase } from 'lucide-react-native';
 import { usePermissions } from '@/contexts/PermissionContext';
 
 interface HamburgerMenuProps {
@@ -106,11 +106,16 @@ const menuSections: MenuSection[] = [
     permission: 'reports',
   },
   {
-    id: 'marketing',
-    title: 'Marketing',
-    icon: Megaphone,
-    route: '/marketing',
+    id: 'services',
+    title: 'Marketing & Services',
+    icon: Briefcase,
     permission: 'master_access',
+    subsections: [
+      { id: 'marketing', title: 'Marketing', route: '/marketing' },
+      { id: 'tax-compliance', title: 'Tax Compliance', route: '/services/coming-soon?service=Tax Compliance' },
+      { id: 'business-consultation', title: 'Business Consultation', route: '/services/coming-soon?service=Business Consultation' },
+      { id: 'working-capital', title: 'Working Capital', route: '/services/coming-soon?service=Working Capital Assistance' },
+    ],
   },
   {
     id: 'chat',

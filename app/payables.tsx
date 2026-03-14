@@ -20,6 +20,7 @@ import { getPayables, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -232,13 +233,7 @@ export default function PayablesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -762,8 +757,8 @@ export default function PayablesScreen() {
           columns: [
             { key: 'supplierName', header: 'Supplier' },
             { key: 'mobile', header: 'Mobile' },
-            { key: 'totalPayable', header: 'Total Payable (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
-            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'totalPayable', header: 'Total Payable (₹)', format: (v) => formatIndianNumber(v || 0) },
+            { key: 'overdueAmount', header: 'Overdue (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'billCount', header: 'Bills', format: (v) => String(v || 0) },
             { key: 'daysPastDue', header: 'Days Past Due', format: (v) => String(v || 0) },
             { key: 'status', header: 'Status', format: (v) => v === 'current' ? 'Current' : v === 'overdue' ? 'Overdue' : 'Critical' },
@@ -771,8 +766,8 @@ export default function PayablesScreen() {
           ],
           data: filteredPayables,
           summaryRows: [
-            { label: 'Total Payable', value: `₹${filteredPayables.reduce((s, p) => s + (p.totalPayable || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-            { label: 'Total Overdue', value: `₹${filteredPayables.reduce((s, p) => s + (p.overdueAmount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Payable', value: formatCurrencyINR(filteredPayables.reduce((s, p) => s + (p.totalPayable || 0), 0)) },
+            { label: 'Total Overdue', value: formatCurrencyINR(filteredPayables.reduce((s, p) => s + (p.overdueAmount || 0), 0)) },
           ],
         }}
       />

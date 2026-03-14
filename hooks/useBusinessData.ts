@@ -113,6 +113,7 @@ export function useBusinessData(): UseBusinessDataReturn {
   
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const hasEverLoadedRef = useRef(initializedWithCacheRef.current);
 
   const fetchData = useCallback(async (useCache = true) => {
     // Check cache first - return immediately if valid
@@ -155,8 +156,8 @@ export function useBusinessData(): UseBusinessDataReturn {
       }
     }
 
-    // Only set loading if we don't have cached data
-    if (!globalCache.data) {
+    // Only show loading skeleton on initial load; keep stale data visible during refreshes
+    if (!globalCache.data && !hasEverLoadedRef.current) {
       setLoading(true);
     }
     setError(null);
@@ -273,6 +274,7 @@ export function useBusinessData(): UseBusinessDataReturn {
     try {
       const result = await fetchPromise;
       if (mountedRef.current) {
+        hasEverLoadedRef.current = true;
         setData(result);
         setLoading(false);
         setError(null);
@@ -280,6 +282,7 @@ export function useBusinessData(): UseBusinessDataReturn {
     } catch (err: any) {
       if (mountedRef.current) {
         setError(err.message || 'Failed to load data');
+        // Only set loading false; keep previously loaded data visible
         setLoading(false);
       }
     }
@@ -306,8 +309,7 @@ export function useBusinessData(): UseBusinessDataReturn {
   useEffect(() => {
     const unsubscribe = onTransactionChange(() => {
       if (!mountedRef.current) return;
-      // Invalidate cache and silently refetch without showing loading
-      globalCache.data = null;
+      // Mark cache as stale but keep existing data visible (stale-while-revalidate)
       globalCache.timestamp = 0;
       globalCache.promise = null;
       fetchData(false).catch(() => {});
@@ -330,6 +332,7 @@ export function clearBusinessDataCache() {
     data: null,
     timestamp: 0,
     promise: null,
+    lastBackgroundRefresh: 0,
   };
 }
 

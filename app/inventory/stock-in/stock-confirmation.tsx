@@ -8,6 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { safeRouter } from '@/utils/safeRouter';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -93,12 +94,7 @@ export default function StockConfirmationScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   if (!po) {

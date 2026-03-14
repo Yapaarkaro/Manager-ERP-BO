@@ -20,6 +20,7 @@ import { useBusinessData } from '@/hooks/useBusinessData';
 import { generateInvoicePDF, InvoicePDFData } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF } from '@/utils/invoiceShareUtils';
 import * as ImagePicker from 'expo-image-picker';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -80,13 +81,7 @@ export default function DiscrepancyDetailsScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -193,13 +188,17 @@ export default function DiscrepancyDetailsScreen() {
 
   const handleDownloadReport = async () => {
     try {
+      const bizAddr = businessData?.addresses?.[0];
+      const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : '';
       const pdfData: InvoicePDFData = {
         type: 'stock_discrepancy',
         invoiceNumber: `DISC-${discrepancy.id || discrepancyId}`,
         invoiceDate: discrepancy.reportedDate || discrepancy.date || new Date().toISOString(),
         business: {
           name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
+          address: bizAddress,
           gstin: businessData?.business?.tax_id || '',
+          phone: businessData?.business?.phone,
         },
         items: [],
         subtotal: 0,

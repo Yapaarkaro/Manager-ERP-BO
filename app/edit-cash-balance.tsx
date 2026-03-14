@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, Banknote, Save } from 'lucide-react-native';
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { updateBusinessCashBalance } from '@/services/backendApi';
 
 export default function EditCashBalanceScreen() {
@@ -120,11 +121,7 @@ export default function EditCashBalanceScreen() {
   };
 
   const formatBalanceWithSymbol = (balance: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(balance);
+    return formatCurrencyINR(balance);
   };
 
   return (

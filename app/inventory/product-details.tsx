@@ -23,10 +23,11 @@ import { getProductInventoryLogs, getProductInventoryLogsByLocation, getProductL
 import { ArrowLeft, Package, ChartBar as BarChart3, Hash, Scan, Building2, MapPin, Calendar, TrendingUp, TrendingDown, ShoppingCart, FileText, Eye, Plus, Minus, Trash2, Percent, IndianRupee, Edit3, Phone, ChevronDown, Filter, X, Printer, GripHorizontal, Download } from 'lucide-react-native';
 import { generateBarcodeImage } from '@/utils/barcodeGenerator';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { formatQty } from '@/utils/formatters';
+import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -178,7 +179,7 @@ body { width: ${w}mm; height: ${h}mm; display: flex; flex-direction: column; ali
 </style></head><body>
 ${printShowStoreName && storeName && area >= 800 ? `<div class="store">${storeName}</div>` : ''}
 ${printShowProductName && area >= 600 ? `<div class="name">${product.name}</div>` : ''}
-${printShowMRP ? `<div class="price">MRP ₹${(product.mrp || product.salesPrice || 0).toFixed ? (product.mrp || product.salesPrice || 0).toFixed(2).replace(/\.?0+$/, '') : (product.mrp || product.salesPrice || 0)}</div>` : ''}
+${printShowMRP ? `<div class="price">MRP ${formatCurrencyINR(product.mrp || product.salesPrice || 0)}</div>` : ''}
 <div class="barcode-wrap">
 ${barcodeDataUri ? `<img class="barcode-img" src="${barcodeDataUri}" />` : ''}
 </div>
@@ -469,14 +470,7 @@ ${barcodeDataUri ? `<img class="barcode-img" src="${barcodeDataUri}" />` : ''}
     setTimeout(() => setRefreshing(false), 600);
   }, [finalProductId, selectedLocationId]);
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(price);
-  };
+  const formatPrice = (price: number) => formatCurrencyINR(price, 3, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -707,13 +701,11 @@ ${barcodeDataUri ? `<img class="barcode-img" src="${barcodeDataUri}" />` : ''}
   };
 
   const handleEditProduct = () => {
-    // Navigate to the manual product screen with existing product data for editing
     safeRouter.push({
       pathname: '/inventory/manual-product',
       params: {
         editMode: 'true',
         productId: product.id,
-        productData: JSON.stringify(product)
       }
     });
   };
@@ -791,12 +783,10 @@ This action cannot be undone.`;
       const supplier = suppliersCache[supplierId];
       
       if (supplier) {
+        setNavData('supplierData', supplier);
         safeRouter.push({
           pathname: '/purchasing/supplier-details',
-          params: {
-            supplierId: supplierId,
-            supplierData: JSON.stringify(supplier)
-          }
+          params: { supplierId: supplierId }
         });
       } else {
         Alert.alert(
@@ -1123,7 +1113,7 @@ This action cannot be undone.`;
                     <Text style={styles.detailValue}>
                       {product.cessType === 'value' ? `${product.cessRate}%` :
                        product.cessType === 'quantity' ? `${product.cessRate}%` :
-                       product.cessType === 'value_and_quantity' ? `${product.cessRate}%+₹${product.cessAmount || 0}/${product.cessUnit || product.primaryUnit}` :
+                       product.cessType === 'value_and_quantity' ? `${product.cessRate}%+${formatCurrencyINR(product.cessAmount || 0)}/${product.cessUnit || product.primaryUnit}` :
                        product.cessType === 'mrp' ? `${product.cessRate}%` : `${product.cessRate}%`}
                     </Text>
                   </View>
@@ -1273,8 +1263,8 @@ This action cannot be undone.`;
                   <View style={styles.pricingCard}>
                     <Text style={styles.pricingCardLabel}>
                       CESS ({product.cessType === 'value' ? `${product.cessRate}%` :
-                             product.cessType === 'quantity' ? `₹${product.cessAmount}/${product.cessUnit || product.primaryUnit}` :
-                             product.cessType === 'value_and_quantity' ? `${product.cessRate}%+₹${product.cessAmount}/${product.cessUnit || product.primaryUnit}` :
+                             product.cessType === 'quantity' ? `${formatCurrencyINR(product.cessAmount)}/${product.cessUnit || product.primaryUnit}` :
+                             product.cessType === 'value_and_quantity' ? `${product.cessRate}%+${formatCurrencyINR(product.cessAmount)}/${product.cessUnit || product.primaryUnit}` :
                              product.cessType === 'mrp' ? `${product.cessRate}%` : 'Applied'})
                     </Text>
                     <Text style={[styles.pricingCardValue, { color: Colors.error }]}>
@@ -1876,7 +1866,7 @@ This action cannot be undone.`;
                         <Text style={styles.previewName} numberOfLines={1}>{product.name}</Text>
                       ) : null}
                       {printShowMRP ? (
-                        <Text style={styles.previewPrice}>MRP ₹{(product.mrp || product.salesPrice || 0)}</Text>
+                        <Text style={styles.previewPrice}>MRP {formatCurrencyINR(product.mrp || product.salesPrice || 0)}</Text>
                       ) : null}
                       {hasBarcodeImg ? (
                         <Image source={{ uri: barcodeImg }} style={{ width: prevW * 0.9, height: prevH * 0.4, flex: 1 }} resizeMode="contain" />

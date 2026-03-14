@@ -12,6 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { ArrowLeft, MessageSquare, Check, X, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 
 const Colors = {
@@ -62,9 +64,10 @@ interface ItemReason {
 }
 
 export default function ReturnReasonsScreen() {
-  const { invoiceData, selectedItems, returnAmount } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
-  const items = JSON.parse(selectedItems as string);
+  const params = useLocalSearchParams();
+  const invoice = consumeNavData('returnFlowInvoice') || (params.invoiceData ? JSON.parse(params.invoiceData as string) : {});
+  const items = consumeNavData('returnFlowItems') || (params.selectedItems ? JSON.parse(params.selectedItems as string) : []);
+  const returnAmount = consumeNavData<string>('returnFlowAmount') || (params.returnAmount as string) || '0';
   const isSupplierReturn = invoice.returnType === 'supplier';
   const presetReasons = isSupplierReturn ? supplierReturnReasons : customerReturnReasons;
   
@@ -127,11 +130,7 @@ export default function ReturnReasonsScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const handleContinue = () => {
@@ -140,15 +139,11 @@ export default function ReturnReasonsScreen() {
       return;
     }
 
-    safeRouter.push({
-      pathname: '/new-return/refund-method',
-      params: {
-        invoiceData: JSON.stringify(invoice),
-        selectedItems: JSON.stringify(items),
-        itemReasons: JSON.stringify(itemReasons),
-        returnAmount
-      }
-    });
+    setNavData('returnFlowInvoice', invoice);
+    setNavData('returnFlowItems', items);
+    setNavData('returnFlowReasons', itemReasons);
+    setNavData('returnFlowAmount', returnAmount);
+    safeRouter.push({ pathname: '/new-return/refund-method' });
   };
 
   return (
@@ -168,7 +163,7 @@ export default function ReturnReasonsScreen() {
           
           <View style={styles.headerRight}>
             <Text style={styles.returnAmountHeader}>
-              {formatAmount(parseFloat(returnAmount as string))}
+              {formatAmount(parseFloat(returnAmount))}
             </Text>
           </View>
         </View>
@@ -240,7 +235,7 @@ export default function ReturnReasonsScreen() {
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total Refund:</Text>
             <Text style={styles.totalValue}>
-              {formatAmount(parseFloat(returnAmount as string))}
+              {formatAmount(parseFloat(returnAmount))}
             </Text>
           </View>
         </View>

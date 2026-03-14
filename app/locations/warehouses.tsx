@@ -20,6 +20,9 @@ import { getAddresses, invalidateApiCache } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
+
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -163,25 +166,19 @@ export default function WarehousesScreen() {
     return parts.join(', ');
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatCurrency = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const handleAddWarehouse = () => {
     safeRouter.push('/locations/add-warehouse');
   };
 
   const handleEditWarehouse = (warehouse: WarehouseData) => {
+    setNavData('editWarehouse', warehouse);
     safeRouter.push({
       pathname: '/locations/warehouse-details',
       params: {
         warehouseId: warehouse.id,
         editMode: 'true',
-        editWarehouse: JSON.stringify(warehouse)
       }
     });
   };
@@ -1039,12 +1036,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+    minHeight: 52,
   },
   searchInput: {
     flex: 1,

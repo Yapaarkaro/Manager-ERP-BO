@@ -51,6 +51,7 @@ import {
   searchProducts,
   verifySuperadmin,
 } from '@/services/superadminApi';
+import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
 
 const C = {
   primary: '#3F66AC',
@@ -80,10 +81,9 @@ const C = {
 };
 
 const fmt = (n: number) => {
-  if (n >= 10000000) return '\u20B9' + (n / 10000000).toFixed(2) + ' Cr';
-  if (n >= 100000) return '\u20B9' + (n / 100000).toFixed(2) + ' L';
-  if (n >= 1000) return '\u20B9' + (n / 1000).toFixed(1) + 'K';
-  return '\u20B9' + n.toLocaleString('en-IN');
+  if (n >= 10000000) return '₹' + formatIndianNumber(n / 10000000, 2) + ' Cr';
+  if (n >= 100000) return '₹' + formatIndianNumber(n / 100000, 2) + ' L';
+  return formatCurrencyINR(n, 2, 0);
 };
 
 const fmtDate = (d: string | null | undefined) => {

@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, Clock, IndianRupee, Award, Target, Eye, UserCheck, UserX, AlertCircle, ChevronRight, User } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { getStaff as getStaffFromBackend, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
@@ -479,11 +480,7 @@ export default function StaffScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {
@@ -626,6 +623,15 @@ export default function StaffScreen() {
             <View style={styles.verificationCodeBadge}>
               <Text style={styles.verificationCodeLabel}>Pending Verification</Text>
               <Text style={styles.verificationCodeValue} selectable>{staff.verificationCode}</Text>
+            </View>
+          </View>
+        )}
+
+        {!staff.hasLoggedIn && !staff.verificationCode && (
+          <View style={styles.verificationCodeRow}>
+            <View style={[styles.verificationCodeBadge, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+              <Text style={[styles.verificationCodeLabel, { color: '#DC2626' }]}>No Login Code</Text>
+              <Text style={{ fontSize: 10, color: '#9CA3AF' }}>Tap to generate</Text>
             </View>
           </View>
         )}

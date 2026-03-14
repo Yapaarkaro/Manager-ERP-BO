@@ -15,6 +15,9 @@ import {
   Animated as RNAnimated,
   Share,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,13 +54,16 @@ import {
   Share2,
   KeyRound,
   X,
+  CalendarDays,
+  Check,
+  CircleX,
 } from 'lucide-react-native';
 import HamburgerMenu from '@/components/HamburgerMenu';
 import FAB from '@/components/FAB';
 import { DashboardSkeleton } from '@/components/SkeletonLoader';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
-import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders } from '@/services/backendApi';
+import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -73,6 +79,7 @@ import {
 } from '@/utils/geofenceService';
 import { supabase } from '@/lib/supabase';
 import { onTransactionChange } from '@/utils/transactionEvents';
+import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -157,7 +164,7 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   
   const { data: businessData, loading: dataLoading, refetch } = useBusinessData();
-  const { hasPermission, isOwner, isStaff, refreshPermissions, staffId, staffLocationId, staffBusinessId } = usePermissions();
+  const { hasPermission, isOwner, isStaff, refreshPermissions, staffId, staffName, staffLocationId, staffBusinessId } = usePermissions();
 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [onlineStaff, setOnlineStaff] = useState<any[]>([]);
@@ -168,6 +175,24 @@ export default function DashboardScreen() {
   const [incompleteStaffList, setIncompleteStaffList] = useState<any[]>([]);
   const [showIncompleteStaffBanner, setShowIncompleteStaffBanner] = useState(false);
   const incompleteStaffDismissedRef = useRef(false);
+
+  const [noCodeStaffList, setNoCodeStaffList] = useState<any[]>([]);
+  const [showNoCodeBanner, setShowNoCodeBanner] = useState(false);
+  const noCodeDismissedRef = useRef(false);
+  const [generatingCodeFor, setGeneratingCodeFor] = useState<string | null>(null);
+
+  // Leave management state
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [leaveStartDate, setLeaveStartDate] = useState('');
+  const [leaveEndDate, setLeaveEndDate] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [leaveSubmitting, setLeaveSubmitting] = useState(false);
+  const [myLeaveRequests, setMyLeaveRequests] = useState<any[]>([]);
+  const [pendingLeaveRequests, setPendingLeaveRequests] = useState<any[]>([]);
+  const [showLeaveReviewModal, setShowLeaveReviewModal] = useState(false);
+  const [reviewingLeave, setReviewingLeave] = useState<any>(null);
+  const [reviewNote, setReviewNote] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const [staffOnline, setStaffOnline] = useState(false);
   const [staffToggleLoading, setStaffToggleLoading] = useState(false);
@@ -363,6 +388,93 @@ export default function DashboardScreen() {
     }, [refetch, refreshPermissions, loadAllKPIData])
   );
 
+  // Load leave requests
+  const loadLeaveRequests = useCallback(async () => {
+    try {
+      if (isStaff && staffId) {
+        const res = await getLeaveRequests({ staffId });
+        if (res.success) setMyLeaveRequests(res.leaveRequests || []);
+      }
+      if (isOwner) {
+        const res = await getLeaveRequests({ status: 'pending' });
+        if (res.success) setPendingLeaveRequests(res.leaveRequests || []);
+      }
+    } catch {}
+  }, [isStaff, isOwner, staffId]);
+
+  useEffect(() => {
+    loadLeaveRequests();
+  }, [loadLeaveRequests]);
+
+  // Realtime subscription for leave requests
+  useEffect(() => {
+    const businessId = businessData?.business?.id;
+    if (!businessId) return;
+
+    const channel = supabase
+      .channel(`leave-requests-${businessId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_requests', filter: `business_id=eq.${businessId}` },
+        () => { loadLeaveRequests(); }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [businessData?.business?.id, loadLeaveRequests]);
+
+  const handleSubmitLeave = async () => {
+    if (!staffId || !leaveStartDate || !leaveEndDate || !leaveReason.trim()) {
+      Alert.alert('Incomplete', 'Please fill in all fields — start date, end date, and reason.');
+      return;
+    }
+    if (new Date(leaveEndDate) < new Date(leaveStartDate)) {
+      Alert.alert('Invalid Dates', 'End date cannot be before start date.');
+      return;
+    }
+    setLeaveSubmitting(true);
+    const res = await createLeaveRequest({
+      staffId,
+      staffName: staffName || 'Staff',
+      startDate: leaveStartDate,
+      endDate: leaveEndDate,
+      reason: leaveReason.trim(),
+    });
+    setLeaveSubmitting(false);
+    if (res.success) {
+      Alert.alert('Leave Applied', 'Your leave request has been submitted to the business owner for approval.');
+      setShowLeaveModal(false);
+      setLeaveStartDate('');
+      setLeaveEndDate('');
+      setLeaveReason('');
+      loadLeaveRequests();
+    } else {
+      Alert.alert('Error', res.error || 'Failed to submit leave request.');
+    }
+  };
+
+  const handleReviewLeave = async (status: 'approved' | 'rejected') => {
+    if (!reviewingLeave) return;
+    setReviewSubmitting(true);
+    const res = await updateLeaveRequest(reviewingLeave.id, {
+      status,
+      reviewerNote: reviewNote.trim() || undefined,
+    });
+    setReviewSubmitting(false);
+    if (res.success) {
+      Alert.alert(
+        status === 'approved' ? 'Leave Approved' : 'Leave Rejected',
+        `The leave request from ${reviewingLeave.staff_name} has been ${status}.`
+      );
+      setShowLeaveReviewModal(false);
+      setReviewingLeave(null);
+      setReviewNote('');
+      loadLeaveRequests();
+    } else {
+      Alert.alert('Error', res.error || 'Failed to update leave request.');
+    }
+  };
+
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     invalidateApiCache();
@@ -370,9 +482,10 @@ export default function DashboardScreen() {
       refetch(),
       refreshPermissions(),
       loadAllKPIData(),
+      loadLeaveRequests(),
     ]).catch(e => console.error('Refresh failed:', e));
     setTimeout(() => setRefreshing(false), 600);
-  }, [refetch, refreshPermissions, loadAllKPIData]);
+  }, [refetch, refreshPermissions, loadAllKPIData, loadLeaveRequests]);
 
   // Staff attendance: load active session on mount/focus
   useEffect(() => {
@@ -776,6 +889,67 @@ export default function DashboardScreen() {
     checkIncomplete();
   }, [isOwner, businessData?.user?.phone]);
 
+  useEffect(() => {
+    if (!isOwner || noCodeDismissedRef.current) return;
+    const checkNoCode = async () => {
+      try {
+        const result = await getStaffList();
+        if (!result.success || !result.staff) return;
+        const userPhone = businessData?.user?.phone || '';
+        const ownerPhoneLast10 = userPhone.replace(/\D/g, '').slice(-10);
+        const staffOnly = result.staff.filter((s: any) => {
+          if (s.is_deleted) return false;
+          const sRole = (s.role || '').toLowerCase();
+          if (sRole.includes('owner')) return false;
+          const sMobile = (s.mobile || '').replace(/\D/g, '').slice(-10);
+          if (ownerPhoneLast10 && sMobile === ownerPhoneLast10) return false;
+          return true;
+        });
+        const noCode = staffOnly.filter((s: any) => !s.user_id && !s.verification_code);
+        setNoCodeStaffList(noCode);
+        setShowNoCodeBanner(noCode.length > 0);
+      } catch {}
+    };
+    checkNoCode();
+  }, [isOwner, businessData?.user?.phone]);
+
+  const handleGenerateCodeForStaff = useCallback(async (staff: any) => {
+    setGeneratingCodeFor(staff.id);
+    try {
+      const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const { error } = await supabase
+        .from('staff')
+        .update({ verification_code: newCode })
+        .eq('id', staff.id);
+      if (error) {
+        Alert.alert('Error', 'Failed to generate code. Please try again.');
+        setGeneratingCodeFor(null);
+        return;
+      }
+      Alert.alert(
+        'Code Generated',
+        `Login code for ${staff.name}: ${newCode}\n\nShare this code with them so they can log in.`,
+        [
+          { text: 'Copy Code', onPress: async () => {
+            try { await Clipboard.setStringAsync(newCode); } catch {}
+          }},
+          { text: 'Share', onPress: async () => {
+            try { await Share.share({ message: `Hi ${staff.name}, your Manager ERP first-login code is: ${newCode}` }); } catch {}
+          }},
+          { text: 'OK' },
+        ]
+      );
+      setNoCodeStaffList(prev => prev.filter(s => s.id !== staff.id));
+      if (noCodeStaffList.length <= 1) {
+        setShowNoCodeBanner(false);
+      }
+    } catch {
+      Alert.alert('Error', 'Something went wrong.');
+    } finally {
+      setGeneratingCodeFor(null);
+    }
+  }, [noCodeStaffList.length]);
+
   const loadUnreadChats = useCallback(() => {
     const bid = staffBusinessId || businessData?.business?.id;
     if (!bid) return;
@@ -803,7 +977,33 @@ export default function DashboardScreen() {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    // Cross-business subscription for conversations where user is the other participant
+    let crossChannel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled || !session?.user?.id) return;
+      crossChannel = supabase.channel('dashboard-chat-cross')
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversations',
+          filter: `participant_other_user_id=eq.${session.user.id}`,
+        }, () => {
+          loadUnreadChats();
+        })
+        .subscribe();
+    })();
+
+    // Polling fallback to catch any missed realtime events
+    const pollInterval = setInterval(loadUnreadChats, 30000);
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+      if (crossChannel) supabase.removeChannel(crossChannel);
+      clearInterval(pollInterval);
+    };
   }, [businessData?.business?.id, staffBusinessId, loadUnreadChats]);
 
   // ✅ Save device snapshot in background (non-blocking, only once per session)
@@ -962,9 +1162,7 @@ export default function DashboardScreen() {
 
   const handleFABAction = (_action: string) => {};
 
-  // Render greeting section - use hook data directly for instant display
   const renderGreeting = () => {
-    // ✅ Use hook data directly (instant, no state copy delay)
     const displayUserName = businessData?.user?.full_name || '';
     const displayBusinessName = businessData?.business?.legal_name || '';
     
@@ -1049,10 +1247,7 @@ export default function DashboardScreen() {
     );
   };
 
-  const fmtCurrency = (val: number) => {
-    const formatted = new Intl.NumberFormat('en-IN').format(val);
-    return `₹${formatted}`;
-  };
+  const fmtCurrency = (val: number) => formatCurrencyINR(val, 2, 0);
 
   const renderKPICards = () => (
     <View style={styles.kpiContainer}>
@@ -1383,10 +1578,9 @@ export default function DashboardScreen() {
 
   // Render business overview section
   const fmtCompact = (val: number) => {
-    if (val >= 10000000) return `₹${(val / 10000000).toFixed(1)}Cr`;
-    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-    if (val >= 1000) return `₹${(val / 1000).toFixed(1)}K`;
-    return `₹${val}`;
+    if (val >= 10000000) return '₹' + formatIndianNumber(val / 10000000, 1) + ' Cr';
+    if (val >= 100000) return '₹' + formatIndianNumber(val / 100000, 1) + ' L';
+    return formatCurrencyINR(val, 2, 0);
   };
 
   const cashBalance = businessData?.business?.current_cash_balance ?? 0;
@@ -1478,9 +1672,127 @@ export default function DashboardScreen() {
     </View>
   );
 
+  const formatLeaveDate = (d: string) => {
+    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch { return d; }
+  };
+
+  const getLeaveStatusColor = (status: string) => {
+    if (status === 'approved') return Colors.success;
+    if (status === 'rejected') return Colors.error;
+    return Colors.warning;
+  };
+
+  const getTodayStr = () => new Date().toISOString().split('T')[0];
+
+  const renderApplyForLeave = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Leave Management</Text>
+        <CalendarDays size={20} color={Colors.text} />
+      </View>
+
+      <Pressable
+        onPress={() => {
+          setLeaveStartDate(getTodayStr());
+          setLeaveEndDate(getTodayStr());
+          setShowLeaveModal(true);
+        }}
+        style={({ pressed }) => [
+          {
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+            paddingVertical: 14, borderRadius: 12,
+            backgroundColor: pressed ? '#4338CA' : Colors.primary,
+          },
+        ]}
+      >
+        <CalendarDays size={18} color="#fff" />
+        <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Apply for Leave</Text>
+      </Pressable>
+
+      {myLeaveRequests.length > 0 && (
+        <View style={{ marginTop: 16, gap: 10 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>My Leave Requests</Text>
+          {myLeaveRequests.slice(0, 5).map((lr) => (
+            <View key={lr.id} style={{
+              backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12,
+              borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text }}>
+                  {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+                </Text>
+                <View style={{
+                  backgroundColor: getLeaveStatusColor(lr.status) + '20',
+                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
+                    {lr.status}
+                  </Text>
+                </View>
+              </View>
+              <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
+              {lr.reviewer_note && (
+                <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }}>
+                  Owner: {lr.reviewer_note}
+                </Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
+  const renderPendingLeaveRequests = () => {
+    if (pendingLeaveRequests.length === 0) return <View />;
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Pending Leave Requests</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ backgroundColor: Colors.warning, borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{pendingLeaveRequests.length}</Text>
+            </View>
+            <CalendarDays size={20} color={Colors.text} />
+          </View>
+        </View>
+
+        {pendingLeaveRequests.map((lr) => (
+          <Pressable
+            key={lr.id}
+            onPress={() => {
+              setReviewingLeave(lr);
+              setReviewNote('');
+              setShowLeaveReviewModal(true);
+            }}
+            style={{ marginBottom: 10 }}
+          >
+            <View style={{
+              backgroundColor: '#FEF3C7', borderRadius: 10, padding: 14,
+              borderLeftWidth: 3, borderLeftColor: Colors.warning,
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
+                <Text style={{ fontSize: 12, color: Colors.warning, fontWeight: '600' }}>Pending</Text>
+              </View>
+              <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 4 }}>
+                {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+              </Text>
+              <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
+              <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '500' }}>Tap to review</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
+
   const dashboardSections = [
     { id: 'greeting', render: renderGreeting },
     ...(isStaff ? [{ id: 'attendance-toggle', render: renderStaffAttendanceToggle }] : []),
+    ...(isStaff ? [{ id: 'apply-leave', render: renderApplyForLeave }] : []),
+    ...(isOwner && pendingLeaveRequests.length > 0 ? [{ id: 'pending-leaves', render: renderPendingLeaveRequests }] : []),
     { id: 'kpi', render: renderKPICards },
     ...(hasPermission('inventory') ? [{ id: 'discrepancies', render: renderStockDiscrepancies }] : []),
     { id: 'notifications', render: renderNotifications },
@@ -1583,8 +1895,95 @@ export default function DashboardScreen() {
                 ]}
               />
 
+              {/* Staff Without Login Codes Banner */}
+              {showNoCodeBanner && noCodeStaffList.length > 0 && staffLoginAlerts.length === 0 && (
+                <View style={{
+                  position: 'absolute' as const, top: Platform.OS === 'ios' ? 50 : 10,
+                  left: 12, right: 12, zIndex: 9997,
+                }}>
+                  <View style={{
+                    backgroundColor: '#FEF2F2', borderRadius: 16, padding: 16,
+                    borderWidth: 1.5, borderColor: '#FCA5A5',
+                    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.12, shadowRadius: 12, elevation: 6,
+                  }}>
+                    <View style={{ flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 10 }}>
+                      <View style={{
+                        width: 36, height: 36, borderRadius: 10, backgroundColor: '#DC2626',
+                        alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10,
+                      }}>
+                        <KeyRound size={18} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700' as const, color: '#1F2937' }}>
+                          {noCodeStaffList.length === 1
+                            ? `${noCodeStaffList[0].name} has no login code`
+                            : `${noCodeStaffList.length} staff members need login codes`}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#991B1B', marginTop: 1 }}>
+                          They cannot log in without a code
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          noCodeDismissedRef.current = true;
+                          setShowNoCodeBanner(false);
+                        }}
+                        hitSlop={12}
+                        style={{ padding: 4 }}
+                      >
+                        <X size={18} color="#9CA3AF" />
+                      </Pressable>
+                    </View>
+
+                    {noCodeStaffList.map((staff) => (
+                      <View key={staff.id} style={{
+                        flexDirection: 'row' as const, alignItems: 'center' as const,
+                        backgroundColor: '#fff', borderRadius: 10, padding: 10, marginBottom: 6,
+                        borderWidth: 1, borderColor: '#FECACA',
+                      }}>
+                        <View style={{
+                          width: 32, height: 32, borderRadius: 16, backgroundColor: '#FEE2E2',
+                          alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10,
+                        }}>
+                          <Text style={{ fontSize: 14, fontWeight: '700' as const, color: '#DC2626' }}>
+                            {(staff.name || '?')[0].toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '600' as const, color: '#1F2937' }}>
+                            {staff.name}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#6B7280' }}>{staff.mobile}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={{
+                            flexDirection: 'row' as const, alignItems: 'center' as const,
+                            backgroundColor: '#3F66AC', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
+                          }}
+                          activeOpacity={0.7}
+                          disabled={generatingCodeFor === staff.id}
+                          onPress={() => handleGenerateCodeForStaff(staff)}
+                        >
+                          {generatingCodeFor === staff.id ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <>
+                              <KeyRound size={14} color="#fff" />
+                              <Text style={{ fontSize: 12, fontWeight: '700' as const, color: '#fff', marginLeft: 4 }}>
+                                Generate
+                              </Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
               {/* Incomplete Staff Details Banner */}
-              {showIncompleteStaffBanner && incompleteStaffList.length > 0 && staffLoginAlerts.length === 0 && (
+              {showIncompleteStaffBanner && incompleteStaffList.length > 0 && staffLoginAlerts.length === 0 && !showNoCodeBanner && (
                 <View style={{
                   position: 'absolute' as const, top: Platform.OS === 'ios' ? 50 : 10,
                   left: 12, right: 12, zIndex: 9998,
@@ -1777,6 +2176,134 @@ export default function DashboardScreen() {
                   })}
                 </RNAnimated.View>
               )}
+              {/* Leave Application Modal (Staff) */}
+              <Modal visible={showLeaveModal} transparent animationType="fade" onRequestClose={() => setShowLeaveModal(false)}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Apply for Leave</Text>
+                      <TouchableOpacity onPress={() => setShowLeaveModal(false)}>
+                        <X size={22} color={Colors.textLight} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Start Date *</Text>
+                    <TextInput
+                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
+                      value={leaveStartDate}
+                      onChangeText={setLeaveStartDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={Colors.textLight}
+                    />
+
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>End Date *</Text>
+                    <TextInput
+                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
+                      value={leaveEndDate}
+                      onChangeText={setLeaveEndDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={Colors.textLight}
+                    />
+
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Reason *</Text>
+                    <TextInput
+                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 20, minHeight: 80, textAlignVertical: 'top' }}
+                      value={leaveReason}
+                      onChangeText={setLeaveReason}
+                      placeholder="Enter reason for leave"
+                      placeholderTextColor={Colors.textLight}
+                      multiline
+                      numberOfLines={3}
+                    />
+
+                    <Pressable
+                      onPress={handleSubmitLeave}
+                      disabled={leaveSubmitting}
+                      style={({ pressed }) => [{
+                        backgroundColor: leaveSubmitting ? Colors.grey[300] : pressed ? '#4338CA' : Colors.primary,
+                        borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+                      }]}
+                    >
+                      {leaveSubmitting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Submit Leave Request</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              </Modal>
+
+              {/* Leave Review Modal (Owner) */}
+              <Modal visible={showLeaveReviewModal} transparent animationType="fade" onRequestClose={() => setShowLeaveReviewModal(false)}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Leave Request</Text>
+                      <TouchableOpacity onPress={() => setShowLeaveReviewModal(false)}>
+                        <X size={22} color={Colors.textLight} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {reviewingLeave && (
+                      <>
+                        <View style={{ backgroundColor: '#FEF3C7', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.text, marginBottom: 6 }}>{reviewingLeave.staff_name}</Text>
+                          <Text style={{ fontSize: 14, color: Colors.text, marginBottom: 4 }}>
+                            {formatLeaveDate(reviewingLeave.start_date)} — {formatLeaveDate(reviewingLeave.end_date)}
+                          </Text>
+                          <Text style={{ fontSize: 14, color: Colors.textLight, marginBottom: 2 }}>
+                            {(() => {
+                              const days = Math.ceil((new Date(reviewingLeave.end_date).getTime() - new Date(reviewingLeave.start_date).getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                              return `${days} day${days > 1 ? 's' : ''}`;
+                            })()}
+                          </Text>
+                          <Text style={{ fontSize: 13, color: Colors.text, marginTop: 6 }}>
+                            Reason: {reviewingLeave.reason}
+                          </Text>
+                        </View>
+
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Note (optional)</Text>
+                        <TextInput
+                          style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 20, minHeight: 60, textAlignVertical: 'top' }}
+                          value={reviewNote}
+                          onChangeText={setReviewNote}
+                          placeholder="Add a note for the staff member"
+                          placeholderTextColor={Colors.textLight}
+                          multiline
+                        />
+
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                          <Pressable
+                            onPress={() => handleReviewLeave('rejected')}
+                            disabled={reviewSubmitting}
+                            style={({ pressed }) => [{
+                              flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                              backgroundColor: reviewSubmitting ? Colors.grey[300] : pressed ? '#B91C1C' : Colors.error,
+                              borderRadius: 12, paddingVertical: 14,
+                            }]}
+                          >
+                            <CircleX size={18} color="#fff" />
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>Reject</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleReviewLeave('approved')}
+                            disabled={reviewSubmitting}
+                            style={({ pressed }) => [{
+                              flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                              backgroundColor: reviewSubmitting ? Colors.grey[300] : pressed ? '#047857' : Colors.success,
+                              borderRadius: 12, paddingVertical: 14,
+                            }]}
+                          >
+                            <Check size={18} color="#fff" />
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>Approve</Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                </View>
+              </Modal>
             </SafeAreaView>
           </ResponsiveContainer>
   );

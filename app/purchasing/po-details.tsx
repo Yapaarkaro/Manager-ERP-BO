@@ -20,7 +20,10 @@ import { getSuppliers, invalidateApiCache, getOrCreateConversation, sendMessage,
 import { supabase } from '@/lib/supabase';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { safeRouter } from '@/utils/safeRouter';
-import { getInitials, getAvatarColor } from '@/utils/formatters';
+import { setNavData } from '@/utils/navStore';
+import { getInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
+import { InvoicePDFData, generateInvoicePDF } from '@/utils/invoicePdfGenerator';
+import { shareInvoicePDF } from '@/utils/invoiceShareUtils';
 
 const Colors = {
   background: '#FFFFFF',
@@ -264,9 +267,7 @@ export default function PODetailsScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return `₹${amount.toLocaleString('en-IN')}`;
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -344,19 +345,17 @@ export default function PODetailsScreen() {
   };
 
   const handleViewSupplier = () => {
+    setNavData('supplierData', {
+      id: po.supplierId || 'supplier_001',
+      name: po.supplierName,
+      businessName: po.businessName,
+      supplierType: po.supplierType,
+      gstin: po.gstin,
+      avatar: po.supplierAvatar,
+    });
     safeRouter.push({
       pathname: '/purchasing/supplier-details',
-      params: {
-        supplierId: po.supplierId || 'supplier_001',
-        supplierData: JSON.stringify({
-          id: po.supplierId || 'supplier_001',
-          name: po.supplierName,
-          businessName: po.businessName,
-          supplierType: po.supplierType,
-          gstin: po.gstin,
-          avatar: po.supplierAvatar
-        })
-      }
+      params: { supplierId: po.supplierId || 'supplier_001' }
     });
   };
 
@@ -442,8 +441,8 @@ export default function PODetailsScreen() {
 
           if (convResult.success && convResult.conversation) {
             const content = isEdited
-              ? `📋 Updated Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ₹${po.grandTotal || po.totalAmount || 0}`
-              : `📋 Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ₹${po.grandTotal || po.totalAmount || 0}`;
+              ? `📋 Updated Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ${formatCurrencyINR(po.grandTotal || po.totalAmount || 0)}`
+              : `📋 Purchase Order: ${po.poNumber}\n${po.products?.length || 0} item(s) · Total: ${formatCurrencyINR(po.grandTotal || po.totalAmount || 0)}`;
 
             const senderType = convResult.crossBusiness ? 'supplier' : 'owner';
             const { data: { session } } = await (await import('@/lib/supabase')).supabase.auth.getSession();
@@ -597,12 +596,57 @@ export default function PODetailsScreen() {
     });
   };
 
-  const handleDownload = () => {
-    Alert.alert('Download', 'PO will be downloaded as PDF.');
+  const buildPOPDFData = (): InvoicePDFData => {
+    const bizAddr = bizData?.addresses?.[0];
+    const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : '';
+    return {
+      type: 'purchase_order',
+      invoiceNumber: po.poNumber || po.id,
+      invoiceDate: po.date || new Date().toISOString(),
+      dueDate: po.expectedDelivery || undefined,
+      business: {
+        name: bizData?.business?.legal_name || bizData?.business?.owner_name || '',
+        address: bizAddress,
+        gstin: bizData?.business?.tax_id || '',
+        phone: bizData?.business?.phone,
+      },
+      supplierName: po.supplierName || '',
+      supplierGstin: po.gstin || '',
+      items: po.items.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        rate: item.price,
+        taxRate: 0,
+        taxAmount: 0,
+        total: item.total,
+      })),
+      subtotal: po.amount,
+      taxAmount: 0,
+      totalAmount: po.amount,
+      notes: po.notes || '',
+      staffName: po.staffName,
+      businessId: bizData?.business?.id,
+    };
   };
 
-  const handleShare = () => {
-    Alert.alert('Share', 'PO will be shared via available sharing options.');
+  const handleDownload = async () => {
+    try {
+      const pdfData = buildPOPDFData();
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, `PO-${po.poNumber}`);
+    } catch (error: any) {
+      Alert.alert('Download Failed', error.message || 'Could not generate PO PDF');
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      const pdfData = buildPOPDFData();
+      const fileUri = await generateInvoicePDF(pdfData);
+      await shareInvoicePDF(fileUri, `PO-${po.poNumber}`);
+    } catch (error: any) {
+      Alert.alert('Share Failed', error.message || 'Could not share PO PDF');
+    }
   };
 
   const updateItem = (itemId: string, field: keyof POItem, value: any) => {

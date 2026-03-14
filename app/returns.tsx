@@ -37,6 +37,8 @@ import { ListSkeleton } from '@/components/SkeletonLoader';
 import DateInputWithPicker from '@/components/DateInputWithPicker';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -278,13 +280,7 @@ export default function ReturnsScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -372,13 +368,15 @@ export default function ReturnsScreen() {
     return (
       <TouchableOpacity
         style={styles.returnCard}
-        onPress={() => debouncedNavigate({
-          pathname: '/return-details',
-          params: {
-            returnId: returnInvoice.id,
-            returnData: JSON.stringify(returnInvoice)
-          }
-        })}
+        onPress={() => {
+          setNavData('returnData', returnInvoice);
+          debouncedNavigate({
+            pathname: '/return-details',
+            params: {
+              returnId: returnInvoice.id,
+            }
+          });
+        }}
         activeOpacity={0.7}
       >
         {/* Top Section */}
@@ -852,7 +850,7 @@ export default function ReturnsScreen() {
             { key: 'originalInvoiceNumber', header: 'Original Invoice' },
             { key: 'customerName', header: 'Customer' },
             { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
-            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'refundStatus', header: 'Refund Status', format: (v) => v === 'refunded' ? 'Refunded' : v === 'partially_refunded' ? 'Partially Refunded' : 'Pending' },
             { key: 'reason', header: 'Reason' },
             { key: 'staffName', header: 'Processed By' },
@@ -860,7 +858,7 @@ export default function ReturnsScreen() {
           data: filteredReturns,
           summaryRows: [
             { label: 'Total Returns', value: String(filteredReturns.length) },
-            { label: 'Total Refund Amount', value: `₹${filteredReturns.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Refund Amount', value: formatCurrencyINR(filteredReturns.reduce((s, i) => s + (i.amount || 0), 0)) },
           ],
         }}
       />
@@ -1221,10 +1219,10 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     minHeight: 52,
     borderWidth: 1,
     borderColor: Colors.grey[200],

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   CreditCard,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { recordTransactionForModule, updatePurchaseInvoicePayment } from '@/services/backendApi';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const C = {
   bg: '#FFFFFF',
@@ -78,7 +80,7 @@ export default function ProcessPaymentScreen() {
   const selectedBank = bankAccounts.find(a => a.id === selectedBankId);
   const getBankLabel = (a: any) => `${a.bank_name || a.bankName || 'Bank'} ••••${(a.account_number || a.accountNumber || '').slice(-4)}`;
 
-  const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(n);
+  const fmt = (n: number) => formatCurrencyINR(n);
 
   const handleAmountChange = (text: string) => {
     const cleaned = text.replace(/[^0-9.]/g, '');
@@ -110,7 +112,7 @@ export default function ProcessPaymentScreen() {
       const deficit = amount - availableBalance;
       Alert.alert(
         'Insufficient Balance',
-        `Your ${balanceType} balance (₹${availableBalance.toFixed(4).replace(/\.?0+$/, '')}) is less than the payment amount (₹${amount.toFixed(4).replace(/\.?0+$/, '')}). This will result in a negative balance of ₹${deficit.toFixed(4).replace(/\.?0+$/, '')}.`,
+        `Your ${balanceType} balance (${formatCurrencyINR(availableBalance)}) is less than the payment amount (${formatCurrencyINR(amount)}). This will result in a negative balance of ${formatCurrencyINR(deficit)}.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -163,20 +165,16 @@ export default function ProcessPaymentScreen() {
       }
     }
 
-    safeRouter.replace({
-      pathname: '/payables/payment-success',
-      params: {
-        paymentData: JSON.stringify({
-          supplierId: supplier.id,
-          supplierName: supplier.supplierName,
-          paymentAmount: amount,
-          paymentMethod: selectedMethod,
-          isFullPayment: amount === supplier.totalPayable,
-          remainingBalance: supplier.totalPayable - amount,
-          processedAt: new Date().toISOString(),
-        }),
-      },
-    } as any);
+    setNavData('payablePaymentResult', {
+      supplierId: supplier.id,
+      supplierName: supplier.supplierName,
+      paymentAmount: amount,
+      paymentMethod: selectedMethod,
+      isFullPayment: amount === supplier.totalPayable,
+      remainingBalance: supplier.totalPayable - amount,
+      processedAt: new Date().toISOString(),
+    });
+    safeRouter.replace({ pathname: '/payables/payment-success' } as any);
     setIsProcessing(false);
   };
 

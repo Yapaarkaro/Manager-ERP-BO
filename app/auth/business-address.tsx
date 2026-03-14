@@ -23,6 +23,7 @@ import { useStatusBar } from '@/contexts/StatusBarContext';
 // DataStore removed - Supabase backend is the sole source of truth
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -39,26 +40,26 @@ interface SelectedAddress {
 }
 
 export default function BusinessAddressScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    addressType = 'primary',
-    existingAddresses = '[]',
-    // From business summary
-    fromSummary,
-    allBankAccounts,
-    initialCashBalance,
-    invoicePrefix,
-    invoicePattern,
-    startingInvoiceNumber,
-    fiscalYear,
-  } = useLocalSearchParams();
+  const _params = useLocalSearchParams();
+  const _stored = getSignupData();
+
+  const type = (_params.type as string) ?? _stored.type ?? '';
+  const value = (_params.value as string) ?? _stored.value ?? '';
+  const gstinData = (_params.gstinData as string) ?? _stored.gstinData ?? '';
+  const name = (_params.name as string) ?? _stored.name ?? '';
+  const businessName = (_params.businessName as string) ?? _stored.businessName ?? '';
+  const businessType = (_params.businessType as string) ?? _stored.businessType ?? '';
+  const customBusinessType = (_params.customBusinessType as string) ?? _stored.customBusinessType ?? '';
+  const mobile = (_params.mobile as string) ?? _stored.mobile ?? '';
+  const addressType = (_params.addressType as string) ?? _stored.addressType ?? 'primary';
+  const existingAddresses = (_params.existingAddresses as string) ?? _stored.existingAddresses ?? '[]';
+  const fromSummary = (_params.fromSummary as string) ?? _stored.fromSummary ?? '';
+  const allBankAccounts = (_params.allBankAccounts as string) ?? _stored.allBankAccounts ?? '';
+  const initialCashBalance = (_params.initialCashBalance as string) ?? _stored.initialCashBalance ?? '';
+  const invoicePrefix = (_params.invoicePrefix as string) ?? _stored.invoicePrefix ?? '';
+  const invoicePattern = (_params.invoicePattern as string) ?? _stored.invoicePattern ?? '';
+  const startingInvoiceNumber = (_params.startingInvoiceNumber as string) ?? _stored.startingInvoiceNumber ?? '';
+  const fiscalYear = (_params.fiscalYear as string) ?? _stored.fiscalYear ?? '';
 
   const { setStatusBarStyle } = useStatusBar();
   const [selectedAddress, setSelectedAddress] = useState<SelectedAddress | null>(null);
@@ -579,26 +580,16 @@ export default function BusinessAddressScreen() {
     console.log('📍 selectedAddress.area type:', typeof selectedAddress.area);
     console.log('📍 selectedAddress.area length:', selectedAddress.area?.length);
 
-    // Navigate to the correct form based on address type
-    const targetPath = addressType === 'branch' ? '/locations/branch-details' : 
-                      addressType === 'warehouse' ? '/locations/warehouse-details' : 
-                      '/auth/business-address-manual';
+    // During onboarding, always use the auth flow form for all address types
+    const targetPath = '/auth/business-address-manual';
     
     // Ensure area is always a string (not undefined or null)
     const areaValue = selectedAddress.area || '';
     
-    // Use replace to prevent going back to map screen after confirming address
-    const params: Record<string, any> = {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        mobile,
-        addressType: addressType,
-        existingAddresses: existingAddresses,
+    const navData: Record<string, any> = {
+        type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+        addressType,
+        existingAddresses,
         editMode: 'false',
         editAddressId: '',
         prefilledAddressName: businessName || '',
@@ -611,7 +602,6 @@ export default function BusinessAddressScreen() {
         prefilledFormatted: selectedAddress.formatted_address || '',
         prefilledLat: selectedAddress.lat?.toString() || '',
         prefilledLng: selectedAddress.lng?.toString() || '',
-        // Pass through business summary params
         fromSummary,
         allAddresses: existingAddresses,
         allBankAccounts,
@@ -621,38 +611,23 @@ export default function BusinessAddressScreen() {
         startingInvoiceNumber,
         fiscalYear,
     };
-    
-    console.log('📍 Passing params with prefilledArea:', params.prefilledArea);
 
     if (targetPath === '/auth/business-address-manual') {
-      params.prefilledContactName = resolvedName || '';
-      params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
-      }
+      navData.prefilledContactName = resolvedName || '';
+      navData.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
+    }
 
-    router.replace({
-      pathname: targetPath,
-      params,
-    }); // Use replace to prevent going back to map screen
+    setSignupData(navData);
+    router.replace(targetPath);
   };
 
   const handleManualEntry = () => {
-    // Navigate to the same manual details screen used after selecting an address
-    const targetPath = addressType === 'branch' ? '/locations/branch-details' :
-                      addressType === 'warehouse' ? '/locations/warehouse-details' :
-                      '/auth/business-address-manual';
+    const targetPath = '/auth/business-address-manual';
 
-    // Use replace to prevent going back to map screen
-    const params: Record<string, any> = {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        mobile,
-        addressType: addressType,
-        existingAddresses: existingAddresses,
+    const navData: Record<string, any> = {
+        type, value, gstinData, name, businessName, businessType, customBusinessType, mobile,
+        addressType,
+        existingAddresses,
         editMode: 'false',
         editAddressId: '',
         prefilledAddressName: businessName || '',
@@ -663,7 +638,6 @@ export default function BusinessAddressScreen() {
         prefilledState: '',
         prefilledPincode: '',
         prefilledFormatted: '',
-        // Pass through business summary params
         fromSummary,
         allAddresses: existingAddresses,
         allBankAccounts,
@@ -675,14 +649,12 @@ export default function BusinessAddressScreen() {
     };
 
     if (targetPath === '/auth/business-address-manual') {
-      params.prefilledContactName = resolvedName || '';
-      params.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
-      }
+      navData.prefilledContactName = resolvedName || '';
+      navData.prefilledContactPhone = resolvedMobileDigits || resolvedMobile || '';
+    }
 
-    router.replace({
-      pathname: targetPath,
-      params,
-    }); // Use replace to prevent going back to map screen
+    setSignupData(navData);
+    router.replace(targetPath);
   };
 
   const handleShowSearchAgain = () => {

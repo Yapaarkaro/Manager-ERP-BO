@@ -20,7 +20,7 @@ import { BankAccount } from '@/utils/dataStore';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { paymentDataBridge, saleFlowBridge, productStore, InvoiceExtras } from '@/utils/productStore';
 import { generateInvoiceUPIURL, formatUPIAmountDisplay } from '@/utils/upiQRGenerator';
-import { autoFormatDateInput, validateDateDDMMYYYY } from '@/utils/formatters';
+import { autoFormatDateInput, validateDateDDMMYYYY, formatCurrencyINR } from '@/utils/formatters';
 import { peekNextInvoiceNumber } from '@/services/backendApi';
 import { 
   ArrowLeft, 
@@ -222,11 +222,7 @@ export default function PaymentScreen() {
   );
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const calculateBalance = () => {

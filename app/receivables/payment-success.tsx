@@ -12,6 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CircleCheck as CheckCircle, Download, Share, Printer, Chrome as Home, IndianRupee, Eye, FileText } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -30,8 +32,8 @@ const Colors = {
 };
 
 export default function PaymentSuccessScreen() {
-  const { paymentData } = useLocalSearchParams();
-  const payment = JSON.parse(paymentData as string);
+  const params = useLocalSearchParams();
+  const payment = consumeNavData('receivablePaymentResult') || (params.paymentData ? JSON.parse(params.paymentData as string) : {});
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -51,11 +53,7 @@ export default function PaymentSuccessScreen() {
   }, [navigation]);
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const getPaymentMethodText = () => {
@@ -108,16 +106,14 @@ export default function PaymentSuccessScreen() {
   };
 
   const handleViewCustomerAccount = () => {
+    setNavData('receivableCustomerData', {
+      id: payment.customerId,
+      customerName: payment.customerName,
+      totalReceivable: payment.remainingBalance,
+    });
     safeRouter.push({
       pathname: '/receivables/customer-details',
-      params: {
-        customerId: payment.customerId,
-        customerData: JSON.stringify({
-          id: payment.customerId,
-          customerName: payment.customerName,
-          totalReceivable: payment.remainingBalance,
-        })
-      }
+      params: { customerId: payment.customerId }
     });
   };
 

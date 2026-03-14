@@ -22,6 +22,7 @@ import { deleteAddress, updateAddress, saveSignupProgress } from '@/services/bac
 import { supabase } from '@/lib/supabase';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 import { mapLocationToAddress } from '@/utils/dataStore';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 interface Address {
   id: string;
@@ -44,24 +45,24 @@ interface Address {
 type AddressSection = 'primary' | 'branch' | 'warehouse';
 
 export default function AddressConfirmationScreen() {
-  const { 
-    type: taxIdType,
-    value: taxIdValue,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    allAddresses = '[]',
-    addressType,
-    // Invoice configuration (for returning users from business summary)
-    initialCashBalance,
-    invoicePrefix,
-    invoicePattern,
-    startingInvoiceNumber,
-    fiscalYear,
-  } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const signup = getSignupData();
+
+  const taxIdType = (params.type || signup.type || '') as string;
+  const taxIdValue = (params.value || signup.value || '') as string;
+  const gstinData = (params.gstinData || signup.gstinData || '') as string;
+  const name = (params.name || signup.name || '') as string;
+  const businessName = (params.businessName || signup.businessName || '') as string;
+  const businessType = (params.businessType || signup.businessType || '') as string;
+  const customBusinessType = (params.customBusinessType || signup.customBusinessType || '') as string;
+  const mobile = (params.mobile || signup.mobile || '') as string;
+  const allAddresses = (params.allAddresses || signup.allAddresses || '[]') as string;
+  const addressType = (params.addressType || signup.addressType || '') as string;
+  const initialCashBalance = (params.initialCashBalance || signup.initialCashBalance || '') as string;
+  const invoicePrefix = (params.invoicePrefix || signup.invoicePrefix || '') as string;
+  const invoicePattern = (params.invoicePattern || signup.invoicePattern || '') as string;
+  const startingInvoiceNumber = (params.startingInvoiceNumber || signup.startingInvoiceNumber || '') as string;
+  const fiscalYear = (params.fiscalYear || signup.fiscalYear || '') as string;
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(true);
@@ -234,40 +235,35 @@ export default function AddressConfirmationScreen() {
     console.log('🏢 Adding new address of type:', addressTypeParam);
     console.log('📋 Current addresses before adding:', addresses);
     
-    router.push({
-      pathname: '/auth/business-address',
-      params: {
-        type: taxIdType, // TAX ID type (GSTIN/PAN)
-        value: taxIdValue,
-        gstinData: gstinData,
-        name: name,
-        businessName: businessName,
-        businessType: businessType,
-        customBusinessType: customBusinessType,
-        mobile: mobile,
-        addressType: addressTypeParam, // Address type (branch/warehouse)
-        existingAddresses: JSON.stringify(addresses),
-      }
+    setSignupData({
+      type: taxIdType,
+      value: taxIdValue,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      mobile,
+      addressType: addressTypeParam,
+      existingAddresses: JSON.stringify(addresses),
     });
+    router.push('/auth/business-address');
   };
 
   const handleEditAddress = (address: Address) => {
-    router.push({
-      pathname: '/edit-address-simple',
-      params: {
-        editAddressId: address.id,
-        addressType: address.type,
-        // Signup flow parameters
-        type: taxIdType,
-        value: taxIdValue,
-        gstinData: gstinData,
-        name: name,
-        businessName: businessName,
-        businessType: businessType,
-        customBusinessType: customBusinessType,
-        existingAddresses: JSON.stringify(addresses),
-      }
+    setSignupData({
+      editAddressId: address.id,
+      addressType: address.type,
+      type: taxIdType,
+      value: taxIdValue,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      existingAddresses: JSON.stringify(addresses),
     });
+    router.push('/edit-address-simple');
   };
 
   const handleDeleteAddress = (addressId: string) => {
@@ -524,44 +520,39 @@ export default function AddressConfirmationScreen() {
       if (hasExistingBanks) {
         // Returning user with existing banks - go directly to bank account management
         console.log('🔄 User has existing bank accounts, navigating to bank account management');
-        router.replace({
-          pathname: '/auth/bank-accounts',
-          params: {
-            type: taxIdType,
-            value: taxIdValue,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            mobile,
-            allAddresses: JSON.stringify(latestAddresses),
-            allBankAccounts: JSON.stringify(existingBankAccounts),
-            // Pass invoice configuration for returning users
-            initialCashBalance,
-            invoicePrefix,
-            invoicePattern,
-            startingInvoiceNumber,
-            fiscalYear,
-          }
+        setSignupData({
+          type: taxIdType,
+          value: taxIdValue,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          mobile,
+          allAddresses: JSON.stringify(latestAddresses),
+          allBankAccounts: JSON.stringify(existingBankAccounts),
+          initialCashBalance,
+          invoicePrefix,
+          invoicePattern,
+          startingInvoiceNumber,
+          fiscalYear,
         });
+        router.replace('/auth/bank-accounts');
       } else {
         // Fresh signup - go to banking details to add primary bank account
         console.log('📝 Fresh signup, navigating to banking details');
-        router.replace({
-          pathname: '/auth/banking-details',
-          params: {
-            type: taxIdType,
-            value: taxIdValue,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            mobile,
-            allAddresses: JSON.stringify(latestAddresses),
-          }
+        setSignupData({
+          type: taxIdType,
+          value: taxIdValue,
+          gstinData,
+          name,
+          businessName,
+          businessType,
+          customBusinessType,
+          mobile,
+          allAddresses: JSON.stringify(latestAddresses),
         });
+        router.replace('/auth/banking-details');
       }
     } catch (error: any) {
       console.error('❌ Error in handleContinue:', error);
@@ -825,25 +816,22 @@ export default function AddressConfirmationScreen() {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
-              router.replace({
-                pathname: '/auth/business-details',
-                params: {
-                  type: taxIdType,
-                  value: taxIdValue,
-                  gstinData,
-                  name,
-                  businessName,
-                  businessType,
-                  customBusinessType,
-                  mobile,
-                  // Pass invoice configuration for returning users
-                  initialCashBalance,
-                  invoicePrefix,
-                  invoicePattern,
-                  startingInvoiceNumber,
-                  fiscalYear,
-                }
+              setSignupData({
+                type: taxIdType,
+                value: taxIdValue,
+                gstinData,
+                name,
+                businessName,
+                businessType,
+                customBusinessType,
+                mobile,
+                initialCashBalance,
+                invoicePrefix,
+                invoicePattern,
+                startingInvoiceNumber,
+                fiscalYear,
               });
+              router.replace('/auth/business-details');
             }}
             activeOpacity={0.7}
           >

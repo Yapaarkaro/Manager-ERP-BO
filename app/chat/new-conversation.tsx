@@ -21,8 +21,10 @@ import {
   getSuppliers,
   getOrCreateConversation,
   autoLinkSupplierToUser,
+  autoLinkCustomerToUser,
 } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   primary: '#3f66ac',
@@ -98,38 +100,134 @@ export default function NewConversationScreen() {
         } else if (type === 'customer') {
           const result = await getCustomers();
           if (result.success && result.customers) {
+            const customers = result.customers;
+            const onManagerSet = new Set<string>();
+            try {
+              const phoneToCustomerIds = new Map<string, string[]>();
+              const gstinToCustomerIds = new Map<string, string[]>();
+              const uniquePhones: string[] = [];
+              const uniqueGstins: string[] = [];
+              for (const c of customers) {
+                const phone = (c.mobile || '').replace(/^\+91/, '').replace(/\D/g, '');
+                const normalized = phone.length >= 10 ? phone.slice(-10) : '';
+                if (normalized) {
+                  if (!phoneToCustomerIds.has(normalized)) {
+                    phoneToCustomerIds.set(normalized, []);
+                    uniquePhones.push(normalized);
+                  }
+                  phoneToCustomerIds.get(normalized)!.push(c.id);
+                }
+                const gstin = (c.gstin || '').trim().toUpperCase();
+                if (gstin.length >= 2) {
+                  if (!gstinToCustomerIds.has(gstin)) {
+                    gstinToCustomerIds.set(gstin, []);
+                    uniqueGstins.push(gstin);
+                  }
+                  gstinToCustomerIds.get(gstin)!.push(c.id);
+                }
+              }
+              if (uniquePhones.length > 0 || uniqueGstins.length > 0) {
+                const { data: matches } = await supabase.rpc('find_business_owners_by_phones_or_gstins', {
+                  lookup_phones: uniquePhones,
+                  lookup_gstins: uniqueGstins,
+                });
+                if (matches) {
+                  for (const m of matches) {
+                    const ids = m.match_type === 'phone'
+                      ? phoneToCustomerIds.get(m.match_value)
+                      : gstinToCustomerIds.get(m.match_value);
+                    if (ids) ids.forEach((id: string) => onManagerSet.add(id));
+                  }
+                }
+              }
+            } catch {}
             setContacts(
-              result.customers.map((c: any) => ({
+              customers.map((c: any) => ({
                 id: c.id,
                 name: c.name || c.customer_name || 'Unknown',
-                subtitle: c.phone || c.mobile || c.email || 'Customer',
+                subtitle: c.mobile || c.email || 'Customer',
+                onManager: onManagerSet.has(c.id),
               }))
             );
           }
         } else if (type === 'supplier') {
           const result = await getSuppliers();
           if (result.success && result.suppliers) {
-            const supplierIds = result.suppliers.map((s: any) => s.id);
-            let linkedMap: Record<string, boolean> = {};
+            const suppliers = result.suppliers;
+            const onManagerSet = new Set<string>();
+
+            const supplierIds = suppliers.map((s: any) => s.id);
+            const unlinkedById = new Map<string, string>();
+            const phoneToSupplierIds = new Map<string, string[]>();
+            const gstinToSupplierIds = new Map<string, string[]>();
+            const uniquePhones: string[] = [];
+            const uniqueGstins: string[] = [];
+
             if (supplierIds.length > 0) {
               try {
                 const { data: rows } = await supabase
                   .from('suppliers')
-                  .select('id, linked_user_id')
+                  .select('id, linked_user_id, mobile_number, gstin_pan')
                   .in('id', supplierIds);
                 if (rows) {
                   rows.forEach((r: any) => {
-                    if (r.linked_user_id) linkedMap[r.id] = true;
+                    if (r.linked_user_id) {
+                      onManagerSet.add(r.id);
+                    } else {
+                      unlinkedById.set(r.id, r.id);
+                      const sp = (r.mobile_number || '').replace(/^\+91/, '').replace(/\D/g, '');
+                      const normalizedPhone = sp.length >= 10 ? sp.slice(-10) : '';
+                      if (normalizedPhone) {
+                        if (!phoneToSupplierIds.has(normalizedPhone)) {
+                          phoneToSupplierIds.set(normalizedPhone, []);
+                          uniquePhones.push(normalizedPhone);
+                        }
+                        phoneToSupplierIds.get(normalizedPhone)!.push(r.id);
+                      }
+                      const gstin = (r.gstin_pan || '').trim().toUpperCase();
+                      if (gstin.length >= 2) {
+                        if (!gstinToSupplierIds.has(gstin)) {
+                          gstinToSupplierIds.set(gstin, []);
+                          uniqueGstins.push(gstin);
+                        }
+                        gstinToSupplierIds.get(gstin)!.push(r.id);
+                      }
+                    }
                   });
                 }
               } catch {}
             }
+
+            if (uniquePhones.length > 0 || uniqueGstins.length > 0) {
+              try {
+                const { data: matches } = await supabase.rpc('find_business_owners_by_phones_or_gstins', {
+                  lookup_phones: uniquePhones,
+                  lookup_gstins: uniqueGstins,
+                });
+                if (matches) {
+                  for (const m of matches) {
+                    const ids = m.match_type === 'phone'
+                      ? phoneToSupplierIds.get(m.match_value)
+                      : gstinToSupplierIds.get(m.match_value);
+                    if (ids) {
+                      for (const id of ids) {
+                        if (!onManagerSet.has(id)) {
+                          onManagerSet.add(id);
+                          supabase.from('suppliers').update({ linked_user_id: m.owner_user_id }).eq('id', id).then(() => {});
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch {}
+            }
+
             setContacts(
-              result.suppliers.map((s: any) => ({
+              suppliers.map((s: any) => ({
                 id: s.id,
                 name: s.business_name || s.contact_person || s.name || 'Unknown',
                 subtitle: s.mobile_number || s.phone || s.mobile || s.email || 'Supplier',
-                onManager: !!linkedMap[s.id],
+                onManager: onManagerSet.has(s.id),
               }))
             );
           }
@@ -170,9 +268,8 @@ export default function NewConversationScreen() {
       });
 
       if (convoResult.success && convoResult.conversation) {
-        router.replace(
-          `/chat/conversation?conversationId=${convoResult.conversation.id}&name=${encodeURIComponent(ownerRow.name || 'Business Owner')}&type=owner` as any
-        );
+        setNavData('chatMeta', { name: ownerRow.name || 'Business Owner', type: 'owner' });
+        router.replace(`/chat/conversation?conversationId=${convoResult.conversation.id}` as any);
       } else {
         setLoading(false);
       }
@@ -186,7 +283,7 @@ export default function NewConversationScreen() {
 
     const convoType = (type === 'owner' ? 'staff' : type) as 'staff' | 'customer' | 'supplier';
 
-    if (convoType === 'supplier' && !contact.onManager) {
+    if ((convoType === 'supplier' || convoType === 'customer') && !contact.onManager) {
       Alert.alert(
         'Not on Manager',
         `${contact.name} is not registered on Manager yet. You can reach them via phone, WhatsApp, or other messaging apps.\n\nOnce they sign up on Manager, you'll be able to chat with them here.`,
@@ -200,6 +297,9 @@ export default function NewConversationScreen() {
       let linkedUserId: string | undefined;
       if (convoType === 'supplier') {
         const uid = await autoLinkSupplierToUser(contact.id);
+        if (uid) linkedUserId = uid;
+      } else if (convoType === 'customer') {
+        const uid = await autoLinkCustomerToUser(contact.id);
         if (uid) linkedUserId = uid;
       }
 
@@ -217,9 +317,8 @@ export default function NewConversationScreen() {
           ? (convoType === 'supplier' ? 'customer' : convoType === 'customer' ? 'supplier' : convoType)
           : convoType;
         const crossParam = isCross ? '&crossBusiness=true' : '';
-        router.replace(
-          `/chat/conversation?conversationId=${result.conversation.id}&name=${encodeURIComponent(contact.name)}&type=${displayType}${crossParam}` as any
-        );
+        setNavData('chatMeta', { name: contact.name, type: displayType, crossBusiness: isCross });
+        router.replace(`/chat/conversation?conversationId=${result.conversation.id}` as any);
       }
     } catch (err) {
       console.error('Failed to create conversation:', err);
@@ -282,11 +381,11 @@ export default function NewConversationScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingBottom: 24 }}
           renderItem={({ item }) => {
-            const isSupplierType = type === 'supplier';
+            const showManagerBadge = type === 'supplier' || type === 'customer';
             const isOnManager = item.onManager === true;
             return (
               <TouchableOpacity
-                style={[styles.contactRow, isSupplierType && !isOnManager && { opacity: 0.55 }]}
+                style={[styles.contactRow, showManagerBadge && !isOnManager && { opacity: 0.55 }]}
                 activeOpacity={0.7}
                 onPress={() => handleSelectContact(item)}
                 disabled={!!creating}
@@ -298,7 +397,7 @@ export default function NewConversationScreen() {
                   <Text style={styles.contactName}>{item.name}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     <Text style={styles.contactSubtitle}>{item.subtitle}</Text>
-                    {isSupplierType && (
+                    {showManagerBadge && (
                       <View style={[
                         styles.managerBadge,
                         { backgroundColor: isOnManager ? '#ECFDF5' : '#FEF2F2' },

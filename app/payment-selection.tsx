@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, ArrowDownLeft, ArrowUpRight } from 'lucide-react-native';
 import { getReceivables, getPayables } from '@/services/backendApi';
+import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -29,10 +30,10 @@ const Colors = {
   }
 };
 
-const formatCurrency = (amount: number) => {
-  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
-  if (amount >= 100000) return `₹${(amount / 100000).toFixed(2)} L`;
-  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+const formatAmount = (amount: number) => {
+  if (amount >= 10000000) return '₹' + formatIndianNumber(amount / 10000000, 2) + ' Cr';
+  if (amount >= 100000) return '₹' + formatIndianNumber(amount / 100000, 2) + ' L';
+  return formatCurrencyINR(amount, 2, 0);
 };
 
 export default function PaymentSelectionScreen() {
@@ -149,7 +150,7 @@ export default function PaymentSelectionScreen() {
                 <ActivityIndicator size="small" color={Colors.success} style={{ marginTop: 4 }} />
               ) : (
                 <Text style={[styles.statValue, { color: Colors.success }]}>
-                  {totalReceivable > 0 ? formatCurrency(totalReceivable) : '₹0'}
+                  {totalReceivable > 0 ? formatAmount(totalReceivable) : '₹0'}
                 </Text>
               )}
             </View>
@@ -161,7 +162,7 @@ export default function PaymentSelectionScreen() {
                 <ActivityIndicator size="small" color={Colors.error} style={{ marginTop: 4 }} />
               ) : (
                 <Text style={[styles.statValue, { color: Colors.error }]}>
-                  {totalPayable > 0 ? formatCurrency(totalPayable) : '₹0'}
+                  {totalPayable > 0 ? formatAmount(totalPayable) : '₹0'}
                 </Text>
               )}
             </View>

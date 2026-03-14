@@ -8,8 +8,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import 'react-native-url-polyfill/auto';
 
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://xsmwzaaotncpharmtzcj.supabase.co';
-export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhzbXd6YWFvdG5jcGhhcm10emNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNjQ0NDYsImV4cCI6MjA3OTk0MDQ0Nn0.HnQACFAzQVRnFLFYPlWpq1dSRFNB_M1XG3KT1k-7QkM';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY env vars');
+}
 
 export const EDGE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 

@@ -1988,10 +1988,22 @@ export async function uploadProductImage(localUri: string): Promise<string> {
     let ext = 'jpg';
 
     if (localUri.startsWith('data:image')) {
-      const match = localUri.match(/^data:image\/(\w+);base64,/);
-      ext = match?.[1] || 'png';
-      contentType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-      const base64Data = localUri.replace(/^data:image\/\w+;base64,/, '');
+      const match = localUri.match(/^data:image\/([\w+.-]+);base64,/);
+      const rawExt = match?.[1] || 'png';
+      if (rawExt === 'png') {
+        ext = 'png';
+        contentType = 'image/png';
+      } else if (rawExt === 'jpeg' || rawExt === 'jpg') {
+        ext = 'jpg';
+        contentType = 'image/jpeg';
+      } else if (rawExt === 'webp') {
+        ext = 'webp';
+        contentType = 'image/webp';
+      } else {
+        ext = 'png';
+        contentType = 'image/png';
+      }
+      const base64Data = localUri.replace(/^data:image\/[\w+.-]+;base64,/, '');
       const binaryStr = atob(base64Data);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
@@ -2218,6 +2230,7 @@ export async function createProduct(params: {
   preferredSupplierId?: string;
   storageLocationId?: string;
   storageLocationName?: string;
+  quantityDecimals?: number;
   brand?: string;
   description?: string;
 }): Promise<{ success: boolean; product?: any; error?: string }> {
@@ -2259,6 +2272,7 @@ export async function createProduct(params: {
       preferred_supplier_id: params.preferredSupplierId || null,
       storage_location_id: params.storageLocationId || null,
       storage_location_name: params.storageLocationName || null,
+      quantity_decimals: params.quantityDecimals ?? 0,
       brand: params.brand || null,
       description: params.description || null,
     }, true);
@@ -2313,6 +2327,7 @@ export async function updateProduct(
     preferredSupplierId?: string;
     storageLocationId?: string;
     storageLocationName?: string;
+    quantityDecimals?: number;
     brand?: string;
     description?: string;
   }
@@ -2357,6 +2372,7 @@ export async function updateProduct(
     if (params.preferredSupplierId !== undefined) body.preferred_supplier_id = params.preferredSupplierId || null;
     if (params.storageLocationId !== undefined) body.storage_location_id = params.storageLocationId || null;
     if (params.storageLocationName !== undefined) body.storage_location_name = params.storageLocationName || null;
+    if (params.quantityDecimals !== undefined) body.quantity_decimals = params.quantityDecimals;
     if (params.brand !== undefined) body.brand = params.brand || null;
     if (params.description !== undefined) body.description = params.description || null;
 
@@ -3455,7 +3471,7 @@ export async function autoLinkSupplierToUser(supplierId: string): Promise<string
     const { supabase } = await import('@/lib/supabase');
     const { data: supplier } = await supabase
       .from('suppliers')
-      .select('id, mobile_number, email, linked_user_id')
+      .select('id, mobile_number, email, linked_user_id, gstin_pan')
       .eq('id', supplierId)
       .maybeSingle();
 
@@ -3463,24 +3479,53 @@ export async function autoLinkSupplierToUser(supplierId: string): Promise<string
     if (supplier.linked_user_id) return supplier.linked_user_id;
 
     const phone = (supplier.mobile_number || '').replace(/^\+91/, '').replace(/\D/g, '');
-    if (!phone) return null;
+    const normalizedPhone = phone.length >= 10 ? phone.slice(-10) : null;
+    const gstin = (supplier.gstin_pan || '').trim().toUpperCase();
+    const normalizedGstin = gstin.length >= 2 ? gstin : null;
 
-    const { data: matchedBiz } = await supabase
-      .from('businesses')
-      .select('id, owner_user_id, phone')
-      .eq('is_deleted', false);
+    if (!normalizedPhone && !normalizedGstin) return null;
 
-    if (!matchedBiz) return null;
+    const { data: match } = await supabase.rpc('find_business_owner_by_phone_or_gstin', {
+      lookup_phone: normalizedPhone,
+      lookup_gstin: normalizedGstin,
+    });
+    if (match && match.length > 0 && match[0].owner_user_id) {
+      await supabase
+        .from('suppliers')
+        .update({ linked_user_id: match[0].owner_user_id })
+        .eq('id', supplierId);
+      return match[0].owner_user_id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
-    for (const biz of matchedBiz) {
-      const bizPhone = (biz.phone || '').replace(/^\+91/, '').replace(/\D/g, '');
-      if (bizPhone && bizPhone === phone && biz.owner_user_id) {
-        await supabase
-          .from('suppliers')
-          .update({ linked_user_id: biz.owner_user_id })
-          .eq('id', supplierId);
-        return biz.owner_user_id;
-      }
+export async function autoLinkCustomerToUser(customerId: string): Promise<string | null> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id, mobile, email, customer_type, name, business_name, gstin')
+      .eq('id', customerId)
+      .maybeSingle();
+
+    if (!customer) return null;
+
+    const custPhone = (customer.mobile || '').replace(/^\+91/, '').replace(/\D/g, '');
+    const normalizedPhone = custPhone.length >= 10 ? custPhone.slice(-10) : null;
+    const gstin = (customer.gstin || '').trim().toUpperCase();
+    const normalizedGstin = gstin.length >= 2 ? gstin : null;
+
+    if (!normalizedPhone && !normalizedGstin) return null;
+
+    const { data: match } = await supabase.rpc('find_business_owner_by_phone_or_gstin', {
+      lookup_phone: normalizedPhone,
+      lookup_gstin: normalizedGstin,
+    });
+    if (match && match.length > 0 && match[0].owner_user_id) {
+      return match[0].owner_user_id;
     }
     return null;
   } catch {
@@ -3517,30 +3562,8 @@ export async function getOrCreateConversation(params: {
         }
       }
     } else if (params.otherPartyType === 'customer') {
-      const { data: custRow } = await supabase
-        .from('customers')
-        .select('mobile, customer_type, name, business_name')
-        .eq('id', params.otherPartyId)
-        .maybeSingle();
-      if (custRow && custRow.customer_type === 'business' && custRow.mobile) {
-        // Try to find the customer's business on Manager by phone
-        const custPhone = (custRow.mobile || '').replace(/^\+91/, '').replace(/\D/g, '');
-        if (custPhone) {
-          const { data: matchedBiz } = await supabase
-            .from('businesses')
-            .select('owner_user_id, phone')
-            .eq('is_deleted', false);
-          if (matchedBiz) {
-            for (const biz of matchedBiz) {
-              const bizPhone = (biz.phone || '').replace(/^\+91/, '').replace(/\D/g, '');
-              if (bizPhone && bizPhone === custPhone && biz.owner_user_id) {
-                resolvedOtherUserId = biz.owner_user_id;
-                break;
-              }
-            }
-          }
-        }
-      }
+      const linked = await autoLinkCustomerToUser(params.otherPartyId);
+      if (linked) resolvedOtherUserId = linked;
     }
     // Ensure we don't have a business_id as the user id
     if (resolvedOtherUserId) {
@@ -4121,5 +4144,115 @@ export async function generateBarcodeImage(barcodeValue: string): Promise<{ succ
     return { success: true, data: result.data };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to generate barcode' };
+  }
+}
+
+// ============================================
+// Leave Requests
+// ============================================
+
+export async function createLeaveRequest(params: {
+  staffId: string;
+  staffName: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+}): Promise<{ success: boolean; leaveRequest?: any; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Not authenticated' };
+
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .insert({
+        business_id: ctx.businessId,
+        staff_id: params.staffId,
+        staff_name: params.staffName,
+        start_date: params.startDate,
+        end_date: params.endDate,
+        reason: params.reason,
+        status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, leaveRequest: data };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create leave request' };
+  }
+}
+
+export async function getLeaveRequests(filters?: {
+  staffId?: string;
+  status?: string;
+}): Promise<{ success: boolean; leaveRequests?: any[]; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Not authenticated' };
+
+    let query = supabase
+      .from('leave_requests')
+      .select('*')
+      .eq('business_id', ctx.businessId)
+      .order('created_at', { ascending: false });
+
+    if (filters?.staffId) {
+      query = query.eq('staff_id', filters.staffId);
+    }
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+
+    const { data, error } = await query;
+    if (error) return { success: false, error: error.message };
+    return { success: true, leaveRequests: data || [] };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch leave requests' };
+  }
+}
+
+export async function updateLeaveRequest(
+  requestId: string,
+  params: {
+    status: 'approved' | 'rejected';
+    reviewerNote?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Not authenticated' };
+
+    const { error } = await supabase
+      .from('leave_requests')
+      .update({
+        status: params.status,
+        reviewer_note: params.reviewerNote || null,
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: ctx.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+      .eq('business_id', ctx.businessId);
+
+    if (error) return { success: false, error: error.message };
+
+    if (params.status === 'approved') {
+      const { data: leaveReq } = await supabase
+        .from('leave_requests')
+        .select('staff_id')
+        .eq('id', requestId)
+        .single();
+      if (leaveReq?.staff_id) {
+        await supabase
+          .from('staff')
+          .update({ status: 'on_leave', updated_at: new Date().toISOString() })
+          .eq('id', leaveReq.staff_id);
+      }
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update leave request' };
   }
 }

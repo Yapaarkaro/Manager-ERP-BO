@@ -10,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -39,10 +41,11 @@ const Colors = {
 type RefundMethod = 'same' | 'cash' | 'upi' | 'card' | 'bank_transfer';
 
 export default function RefundMethodScreen() {
-  const { invoiceData, selectedItems, itemReasons, returnAmount } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
-  const items = JSON.parse(selectedItems as string);
-  const reasons = JSON.parse(itemReasons as string);
+  const params = useLocalSearchParams();
+  const invoice = consumeNavData('returnFlowInvoice') || (params.invoiceData ? JSON.parse(params.invoiceData as string) : {});
+  const items = consumeNavData('returnFlowItems') || (params.selectedItems ? JSON.parse(params.selectedItems as string) : []);
+  const reasons = consumeNavData('returnFlowReasons') || (params.itemReasons ? JSON.parse(params.itemReasons as string) : []);
+  const returnAmount = consumeNavData<string>('returnFlowAmount') || (params.returnAmount as string) || '0';
   const isSupplierReturn = invoice.returnType === 'supplier';
   
   const [selectedRefundMethod, setSelectedRefundMethod] = useState<RefundMethod>(isSupplierReturn ? 'bank_transfer' : 'same');
@@ -68,11 +71,7 @@ export default function RefundMethodScreen() {
   };
 
   const formatAmount = (amount: string) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(parseFloat(amount));
+    return formatCurrencyINR(amount);
   };
 
   const handleContinue = () => {
@@ -81,16 +80,12 @@ export default function RefundMethodScreen() {
       return;
     }
 
-    safeRouter.push({
-      pathname: '/new-return/confirmation',
-      params: {
-        invoiceData: JSON.stringify(invoice),
-        selectedItems: JSON.stringify(items),
-        itemReasons: JSON.stringify(reasons),
-        returnAmount,
-        refundMethod: selectedRefundMethod
-      }
-    });
+    setNavData('returnFlowInvoice', invoice);
+    setNavData('returnFlowItems', items);
+    setNavData('returnFlowReasons', reasons);
+    setNavData('returnFlowAmount', returnAmount);
+    setNavData('returnFlowRefundMethod', selectedRefundMethod);
+    safeRouter.push({ pathname: '/new-return/confirmation' });
   };
 
   const renderRefundMethodCard = (
@@ -165,7 +160,7 @@ export default function RefundMethodScreen() {
           
           <View style={styles.headerRight}>
             <Text style={styles.returnAmountHeader}>
-              {formatAmount(returnAmount as string)}
+              {formatAmount(returnAmount)}
             </Text>
           </View>
         </View>
@@ -293,7 +288,7 @@ export default function RefundMethodScreen() {
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total Refund Amount:</Text>
               <Text style={styles.totalValue}>
-                {formatAmount(returnAmount as string)}
+                {formatAmount(returnAmount)}
               </Text>
             </View>
           </View>

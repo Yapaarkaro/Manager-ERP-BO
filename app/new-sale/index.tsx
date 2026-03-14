@@ -21,6 +21,8 @@ import {
   Package,
   ShoppingCart,
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { consumeNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -40,7 +42,9 @@ const Colors = {
 };
 
 export default function NewSaleScreen() {
-  const { preSelectedCustomer } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const navPreSelected = consumeNavData('preSelectedCustomer');
+  const preSelectedCustomer = navPreSelected ? JSON.stringify(navPreSelected) : (params.preSelectedCustomer || '');
   const [searchQuery, setSearchQuery] = useState('');
   const [recentProducts, setRecentProducts] = useState<Product[]>([]);
 
@@ -92,13 +96,7 @@ export default function NewSaleScreen() {
     // Implement search functionality
   };
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price: number) => formatCurrencyINR(price, 2, 0);
 
   const filteredProducts = recentProducts.filter(product => {
     const q = searchQuery.toLowerCase();

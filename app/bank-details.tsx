@@ -22,8 +22,10 @@ import { getBankTransactions, addBankTransaction, invalidateApiCache, clearBankT
 import { onTransactionChange } from '@/utils/transactionEvents';
 import DateInputWithPicker from '@/components/DateInputWithPicker';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
 
 const C = {
   bg: '#FFFFFF',
@@ -78,8 +80,8 @@ const PAYMENT_MODES: { label: string; value: PaymentSource }[] = [
 ];
 const CATEGORIES = ['Sales', 'Purchase', 'Salary', 'Rent', 'Utilities', 'Loan', 'Interest', 'Transfer', 'General', 'Other'];
 
-const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(n);
-const fmtDec = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(n);
+const fmt = (n: number) => formatCurrencyINR(n, 2, 0);
+const fmtDec = (n: number) => formatCurrencyINR(n);
 
 function fmtDateLabel(ds: string) {
   const d = new Date(ds);
@@ -252,7 +254,8 @@ export default function BankDetailsScreen() {
     } else if (t.relatedInvoiceId && !t.relatedCustomerId && !t.relatedSupplierId) {
       safeRouter.push({ pathname: '/invoice-details', params: { invoiceId: t.relatedInvoiceId } });
     } else {
-      safeRouter.push({ pathname: '/transaction-details', params: { transactionId: t.id, bankAccountId: bankAccountId as string, transactionType: 'bank', transactionData: JSON.stringify(t) } });
+      setNavData('transactionData', t);
+      safeRouter.push({ pathname: '/transaction-details', params: { transactionId: t.id, bankAccountId: bankAccountId as string, transactionType: 'bank' } });
     }
   };
 
@@ -642,7 +645,7 @@ export default function BankDetailsScreen() {
             { key: 'date', header: 'Date' },
             { key: 'description', header: 'Description' },
             { key: 'type', header: 'Type', format: (v) => v === 'credit' ? 'Credit' : 'Debit' },
-            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => formatIndianNumber(v || 0, 2, 2) },
             { key: 'source', header: 'Source' },
             { key: 'reference', header: 'Reference' },
             { key: 'counterpartyName', header: 'Counterparty' },
@@ -650,8 +653,8 @@ export default function BankDetailsScreen() {
           ],
           data: filtered,
           summaryRows: [
-            { label: 'Total Credits', value: `₹${filtered.filter(t => t.type === 'credit').reduce((s, t) => s + (t.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-            { label: 'Total Debits', value: `₹${filtered.filter(t => t.type === 'debit').reduce((s, t) => s + (t.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Credits', value: formatCurrencyINR(filtered.filter(t => t.type === 'credit').reduce((s, t) => s + (t.amount || 0), 0)) },
+            { label: 'Total Debits', value: formatCurrencyINR(filtered.filter(t => t.type === 'debit').reduce((s, t) => s + (t.amount || 0), 0)) },
           ],
         }}
       />

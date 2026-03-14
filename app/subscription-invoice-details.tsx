@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { consumeNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { 
   ArrowLeft, 
   Download, 
@@ -57,8 +59,8 @@ interface SubscriptionInvoiceItem {
 }
 
 export default function SubscriptionInvoiceDetailsScreen() {
-  const { invoiceId, invoiceData } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
+  const params = useLocalSearchParams();
+  const invoice = consumeNavData('subscriptionInvoiceData') || (params.invoiceData ? JSON.parse(params.invoiceData as string) : {});
   const customer = invoice.customerDetails;
   const isBusinessCustomer = invoice.customerType === 'business';
 
@@ -76,11 +78,7 @@ export default function SubscriptionInvoiceDetailsScreen() {
   const grandTotal = subtotal;
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {

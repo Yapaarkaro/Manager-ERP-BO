@@ -1,24 +1,28 @@
 {
   "expo": {
-    "name": "bolt-expo-nativewind",
-    "slug": "bolt-expo-nativewind",
+    "name": "Manager",
+    "slug": "manager-erp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "manager",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "in.getmanager.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app needs access to location to show your current position on the map",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to show your current position on the map"
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to show your current position on the map",
+        "NSCameraUsageDescription": "This app needs camera access to scan product barcodes"
       }
     },
     "android": {
+      "package": "in.getmanager.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
       ],
       "config": {
         "googleMaps": {
@@ -38,7 +42,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to show your position on the map."
+          "locationAlwaysAndWhenInUsePermission": "Allow Manager to use your location to show your position on the map."
         }
       ],
       "expo-audio"

@@ -19,6 +19,7 @@ import { useStatusBar } from '@/contexts/StatusBarContext';
 import { supabase } from '@/lib/supabase';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { getPlatformShadow } from '@/utils/shadowUtils';
+import { setSignupData, clearSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -40,6 +41,11 @@ export default function MobileScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
   const otpRetryCount = useRef(0);
   const mobileInputRef = useRef<TextInput>(null);
+
+  // Reset any previous signup state when the login flow starts
+  useEffect(() => {
+    clearSignupData();
+  }, []);
 
   // Set status bar to dark for white background
   useEffect(() => {
@@ -101,10 +107,8 @@ export default function MobileScreen() {
 
             if (!error) {
               console.log('📱 OTP sent successfully, navigating to OTP screen');
-              router.push({
-                pathname: '/auth/otp',
-                params: { mobile: mobileNumber },
-              });
+              setSignupData({ mobile: mobileNumber });
+              router.push('/auth/otp');
               return;
             }
 

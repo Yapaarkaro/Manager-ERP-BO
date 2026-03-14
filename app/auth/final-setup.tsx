@@ -21,29 +21,31 @@ import InvoicePatternConfig from '@/components/InvoicePatternConfig';
 import FiscalYearSelector from '@/components/FiscalYearSelector';
 import { saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { numberToWords } from '@/utils/numberToWords';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 export default function FinalSetupScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    allAddresses,
-    allBankAccounts,
-    // Invoice configuration from business summary (if coming back)
-    initialCashBalance: incomingCashBalance,
-    invoicePrefix: incomingInvoicePrefix,
-    invoicePattern: incomingInvoicePattern,
-    startingInvoiceNumber: incomingStartingNumber,
-    fiscalYear: incomingFiscalYear,
-  } = useLocalSearchParams();
+  const _params = useLocalSearchParams();
+  const _store = getSignupData();
+
+  const type = (_params.type as string) ?? _store.type ?? '';
+  const value = (_params.value as string) ?? _store.value ?? '';
+  const gstinData = (_params.gstinData as string) ?? _store.gstinData ?? '';
+  const name = (_params.name as string) ?? _store.name ?? '';
+  const businessName = (_params.businessName as string) ?? _store.businessName ?? '';
+  const businessType = (_params.businessType as string) ?? _store.businessType ?? '';
+  const customBusinessType = (_params.customBusinessType as string) ?? _store.customBusinessType ?? '';
+  const mobile = (_params.mobile as string) ?? _store.mobile ?? '';
+  const allAddresses = (_params.allAddresses as string) ?? _store.allAddresses ?? '[]';
+  const allBankAccounts = (_params.allBankAccounts as string) ?? _store.allBankAccounts ?? '[]';
+  const incomingCashBalance = (_params.initialCashBalance as string) ?? _store.initialCashBalance;
+  const incomingInvoicePrefix = (_params.invoicePrefix as string) ?? _store.invoicePrefix;
+  const incomingInvoicePattern = (_params.invoicePattern as string) ?? _store.invoicePattern;
+  const incomingStartingNumber = (_params.startingInvoiceNumber as string) ?? _store.startingInvoiceNumber;
+  const incomingFiscalYear = (_params.fiscalYear as string) ?? _store.fiscalYear;
 
   // Check if we have incoming invoice config (returning user from business summary)
   // Need to check for actual values, not just truthy check (empty string '' is falsy)
@@ -176,15 +178,8 @@ export default function FinalSetupScreen() {
     }, 50);
   };
 
-  const formatBalance = (balance: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'decimal',
-      minimumFractionDigits: 2,
-    }).format(balance);
-  };
-
   const formatBalanceWithSymbol = (balance: number) => {
-    return `₹${formatBalance(balance)}`;
+    return formatCurrencyINR(balance);
   };
 
   const handleContinue = async () => {
@@ -232,27 +227,24 @@ export default function FinalSetupScreen() {
     const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
     clearBusinessDataCache();
     
-    // Navigate using route params (already passed through screens, backend is source of truth)
-    router.replace({
-      pathname: '/auth/business-summary',
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses,
-        allBankAccounts,
-        initialCashBalance: totalCashBalance.toString(),
-        invoicePrefix,
-        invoicePattern,
-        startingInvoiceNumber,
-        fiscalYear,
-        mobile,
-      }
+    setSignupData({
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      allAddresses,
+      allBankAccounts,
+      initialCashBalance: totalCashBalance.toString(),
+      invoicePrefix,
+      invoicePattern,
+      startingInvoiceNumber,
+      fiscalYear,
+      mobile,
     });
+    router.replace('/auth/business-summary' as any);
     
     // Reset loading state immediately
     setIsLoading(false);
@@ -296,26 +288,24 @@ export default function FinalSetupScreen() {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
-              router.replace({
-                pathname: '/auth/bank-accounts',
-                params: {
-                  type,
-                  value,
-                  gstinData,
-                  name,
-                  businessName,
-                  businessType,
-                  customBusinessType,
-                  allAddresses,
-                  allBankAccounts,
-                  // Pass current invoice configuration
-                  initialCashBalance,
-                  invoicePrefix,
-                  invoicePattern,
-                  startingInvoiceNumber,
-                  fiscalYear,
-                }
+              setSignupData({
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType,
+                customBusinessType,
+                allAddresses,
+                allBankAccounts,
+                initialCashBalance,
+                invoicePrefix,
+                invoicePattern,
+                startingInvoiceNumber,
+                fiscalYear,
+                mobile,
               });
+              router.replace('/auth/bank-accounts' as any);
             }}
             activeOpacity={0.7}
           >

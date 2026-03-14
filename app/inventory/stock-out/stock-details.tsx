@@ -12,10 +12,12 @@ import {
   Platform,
 } from 'react-native';
 import { showError, showInfo } from '@/utils/notifications';
+import { formatCurrencyINR } from '@/utils/formatters';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   Plus,
@@ -89,8 +91,15 @@ export default function StockDetailsScreen() {
   }, [products]);
 
   const handleQuantityChange = (productId: string, quantity: string) => {
-    const numQuantity = parseInt(quantity) || 0;
     const product = stockOutItems.find(item => item.product.id === productId);
+    const qtyDec = (product?.product as any)?.quantityDecimals ?? 0;
+    
+    if (qtyDec > 0) {
+      const regex = new RegExp(`^\\d*\\.?\\d{0,${qtyDec}}$`);
+      if (!regex.test(quantity) && quantity !== '') return;
+    }
+    
+    const numQuantity = qtyDec > 0 ? (parseFloat(quantity) || 0) : (parseInt(quantity) || 0);
     
     if (product && numQuantity > product.product.currentStock) {
       showError('Quantity to remove cannot exceed current stock', 'Invalid Quantity');
@@ -230,21 +239,12 @@ export default function StockDetailsScreen() {
       generalNotes: notes,
     };
 
-    safeRouter.push({
-      pathname: '/inventory/stock-out/confirmation',
-      params: {
-        stockOutData: JSON.stringify(stockOutData)
-      }
-    });
+    setNavData('stockOutData', stockOutData);
+    safeRouter.push({ pathname: '/inventory/stock-out/confirmation' });
   };
 
   const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(price);
+    return formatCurrencyINR(price);
   };
 
   const renderProductCard = (item: StockOutItem) => {
@@ -290,7 +290,7 @@ export default function StockDetailsScreen() {
               placeholderTextColor={Colors.textLight}
               value={quantityToRemove.toString()}
               onChangeText={(text) => handleQuantityChange(product.id, text)}
-              keyboardType="numeric"
+              keyboardType={((product as any)?.quantityDecimals ?? 0) > 0 ? 'decimal-pad' : 'numeric'}
             />
           </View>
         </View>

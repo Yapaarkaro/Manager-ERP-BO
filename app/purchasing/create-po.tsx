@@ -24,7 +24,7 @@ import {
   SquareCheck as CheckSquare,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
-import { getInitials, getAvatarColor } from '@/utils/formatters';
+import { getInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
 import { productStore, Product } from '@/utils/productStore';
 
 const Colors = {
@@ -48,11 +48,18 @@ interface SelectedProduct {
   name: string;
   category: string;
   price: number;
+  basePricePerPrimary: number;
   unit: string;
   hsnCode: string;
   taxRate: number;
   currentStock: number;
   orderQuantity: number;
+  useCompoundUnit?: boolean;
+  primaryUnit: string;
+  secondaryUnit?: string;
+  conversionRatio?: number;
+  selectedUoM: 'primary' | 'secondary';
+  quantityDecimals?: number;
 }
 
 export default function CreatePOScreen() {
@@ -87,8 +94,8 @@ export default function CreatePOScreen() {
     return (
       p.name.toLowerCase().includes(q) ||
       p.category.toLowerCase().includes(q) ||
-      p.hsnCode.toLowerCase().includes(q) ||
-      p.barcode.toLowerCase().includes(q)
+      (p.hsnCode || '').toLowerCase().includes(q) ||
+      (p.barcode || '').toLowerCase().includes(q)
     );
   });
 
@@ -97,6 +104,8 @@ export default function CreatePOScreen() {
     if (exists) {
       setSelectedProducts((prev) => prev.filter((sp) => sp.id !== product.id));
     } else {
+      const convRatio = parseFloat(product.conversionRatio || '0') || 0;
+      const hasCompound = product.useCompoundUnit && product.secondaryUnit && product.secondaryUnit !== 'None' && convRatio > 0;
       setSelectedProducts((prev) => [
         ...prev,
         {
@@ -104,11 +113,18 @@ export default function CreatePOScreen() {
           name: product.name,
           category: product.category,
           price: product.unitPrice || product.salesPrice || 0,
+          basePricePerPrimary: product.unitPrice || product.salesPrice || 0,
           unit: product.primaryUnit || 'pcs',
           hsnCode: product.hsnCode || '',
           taxRate: product.taxRate || 0,
           currentStock: product.currentStock || 0,
           orderQuantity: 1,
+          useCompoundUnit: !!hasCompound,
+          primaryUnit: product.primaryUnit || 'pcs',
+          secondaryUnit: product.secondaryUnit || undefined,
+          conversionRatio: hasCompound ? convRatio : undefined,
+          selectedUoM: 'primary',
+          quantityDecimals: product.quantityDecimals ?? 0,
         },
       ]);
     }
@@ -118,7 +134,9 @@ export default function CreatePOScreen() {
     setSelectedProducts((prev) =>
       prev.map((sp) => {
         if (sp.id === productId) {
-          const newQty = Math.max(1, sp.orderQuantity + change);
+          const qtyDec = sp.quantityDecimals ?? 0;
+          const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+          const newQty = parseFloat(Math.max(step, sp.orderQuantity + (change > 0 ? step : -step)).toFixed(qtyDec));
           return { ...sp, orderQuantity: newQty };
         }
         return sp;
@@ -127,10 +145,35 @@ export default function CreatePOScreen() {
   };
 
   const handleQuantityInput = (productId: string, text: string) => {
-    const num = parseInt(text, 10);
-    if (isNaN(num) || num < 1) return;
+    const sp = selectedProducts.find(s => s.id === productId);
+    const qtyDec = sp?.quantityDecimals ?? 0;
+    if (qtyDec > 0) {
+      const regex = new RegExp(`^\\d*\\.?\\d{0,${qtyDec}}$`);
+      if (!regex.test(text) && text !== '') return;
+      const num = parseFloat(text);
+      if (isNaN(num) || num < 0) return;
+      setSelectedProducts((prev) =>
+        prev.map((s) => (s.id === productId ? { ...s, orderQuantity: num } : s))
+      );
+    } else {
+      const num = parseInt(text, 10);
+      if (isNaN(num) || num < 1) return;
+      setSelectedProducts((prev) =>
+        prev.map((s) => (s.id === productId ? { ...s, orderQuantity: num } : s))
+      );
+    }
+  };
+
+  const handleUoMChange = (productId: string, uom: 'primary' | 'secondary') => {
     setSelectedProducts((prev) =>
-      prev.map((sp) => (sp.id === productId ? { ...sp, orderQuantity: num } : sp))
+      prev.map((sp) => {
+        if (sp.id !== productId) return sp;
+        const conv = sp.conversionRatio || 1;
+        const newPrice = uom === 'secondary'
+          ? sp.basePricePerPrimary / conv
+          : sp.basePricePerPrimary;
+        return { ...sp, selectedUoM: uom, price: newPrice, unit: uom === 'primary' ? sp.primaryUnit : (sp.secondaryUnit || sp.primaryUnit) };
+      })
     );
   };
 
@@ -140,8 +183,7 @@ export default function CreatePOScreen() {
   const calculateTotal = () =>
     selectedProducts.reduce((sum, sp) => sum + sp.price * sp.orderQuantity, 0);
 
-  const formatAmount = (amount: number) =>
-    `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: amount % 1 !== 0 ? 2 : 0 })}`;
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const handleContinue = () => {
     if (selectedProducts.length === 0) {
@@ -201,33 +243,55 @@ export default function CreatePOScreen() {
         </TouchableOpacity>
 
         {sel && sp && (
-          <View style={styles.qtySection}>
-            <Text style={styles.qtyLabel}>Qty:</Text>
-            <View style={styles.qtyControls}>
-              <TouchableOpacity
-                style={styles.qtyBtn}
-                onPress={() => handleQuantityChange(product.id, -1)}
-                disabled={sp.orderQuantity <= 1}
-                activeOpacity={0.7}
-              >
-                <Minus size={16} color={sp.orderQuantity <= 1 ? Colors.grey[300] : Colors.text} />
-              </TouchableOpacity>
-              <TextInput
-                style={styles.qtyInput}
-                value={String(sp.orderQuantity)}
-                onChangeText={(t) => handleQuantityInput(product.id, t)}
-                keyboardType="number-pad"
-                selectTextOnFocus
-              />
-              <TouchableOpacity
-                style={styles.qtyBtn}
-                onPress={() => handleQuantityChange(product.id, 1)}
-                activeOpacity={0.7}
-              >
-                <Plus size={16} color={Colors.text} />
-              </TouchableOpacity>
+          <View>
+            {sp.useCompoundUnit && sp.secondaryUnit && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, gap: 8 }}>
+                <Text style={{ fontSize: 12, color: Colors.textLight, fontWeight: '500' }}>Order in:</Text>
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 6, backgroundColor: sp.selectedUoM === 'primary' ? Colors.primary : Colors.grey[100], borderWidth: 1, borderColor: sp.selectedUoM === 'primary' ? Colors.primary : Colors.grey[200] }}
+                  onPress={() => handleUoMChange(product.id, 'primary')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: sp.selectedUoM === 'primary' ? '#fff' : Colors.text }}>{sp.primaryUnit}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 6, backgroundColor: sp.selectedUoM === 'secondary' ? Colors.primary : Colors.grey[100], borderWidth: 1, borderColor: sp.selectedUoM === 'secondary' ? Colors.primary : Colors.grey[200] }}
+                  onPress={() => handleUoMChange(product.id, 'secondary')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: sp.selectedUoM === 'secondary' ? '#fff' : Colors.text }}>{sp.secondaryUnit}</Text>
+                </TouchableOpacity>
+                <Text style={{ fontSize: 10, color: Colors.textLight }}>(1 {sp.primaryUnit} = {sp.conversionRatio} {sp.secondaryUnit})</Text>
+              </View>
+            )}
+            <View style={styles.qtySection}>
+              <Text style={styles.qtyLabel}>Qty ({sp.unit}):</Text>
+              <View style={styles.qtyControls}>
+                <TouchableOpacity
+                  style={styles.qtyBtn}
+                  onPress={() => handleQuantityChange(product.id, -1)}
+                  disabled={sp.orderQuantity <= 1}
+                  activeOpacity={0.7}
+                >
+                  <Minus size={16} color={sp.orderQuantity <= 1 ? Colors.grey[300] : Colors.text} />
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.qtyInput}
+                  value={String(sp.orderQuantity)}
+                  onChangeText={(t) => handleQuantityInput(product.id, t)}
+                  keyboardType={(sp.quantityDecimals ?? 0) > 0 ? 'decimal-pad' : 'number-pad'}
+                  selectTextOnFocus
+                />
+                <TouchableOpacity
+                  style={styles.qtyBtn}
+                  onPress={() => handleQuantityChange(product.id, 1)}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={16} color={Colors.text} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.lineTotal}>{formatAmount(sp.price * sp.orderQuantity)}</Text>
             </View>
-            <Text style={styles.lineTotal}>{formatAmount(sp.price * sp.orderQuantity)}</Text>
           </View>
         )}
       </View>

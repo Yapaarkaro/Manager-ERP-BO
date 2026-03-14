@@ -12,10 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { formatQty } from '@/utils/formatters';
+import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { supabase } from '@/lib/supabase';
 import { getReturnById } from '@/services/backendApi';
 
@@ -48,10 +49,11 @@ interface ReturnItem {
 }
 
 export default function ReturnDetailsScreen() {
-  const { returnId, returnData } = useLocalSearchParams();
+  const { returnId, returnData: returnDataParam } = useLocalSearchParams();
   const { data: businessData } = useBusinessData();
+  const navReturnData = consumeNavData('returnData');
   let parsedReturn: any = {};
-  try { parsedReturn = returnData ? JSON.parse(returnData as string) : {}; } catch { parsedReturn = {}; }
+  try { parsedReturn = navReturnData || (returnDataParam ? JSON.parse(returnDataParam as string) : {}); } catch { parsedReturn = {}; }
 
   const [returnInvoice, setReturnInvoice] = useState<any>(parsedReturn);
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([]);
@@ -166,13 +168,7 @@ export default function ReturnDetailsScreen() {
   const totalTax = returnItems.reduce((sum, item) => sum + item.taxAmount, 0);
   const grandTotal = subtotal + totalTax || Number(returnInvoice.totalAmount) || subtotal;
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -211,13 +207,15 @@ export default function ReturnDetailsScreen() {
 
   const buildReturnPDFData = (): InvoicePDFData => {
     const bizAddr = businessData?.addresses?.[0];
+    const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1 || bizAddr.address_line1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : '';
+    const bank = businessData?.bankAccounts?.[0];
     return {
       type: 'return',
       invoiceNumber: returnInvoice.returnNumber || returnInvoice.return_number || returnInvoice.id || '',
       invoiceDate: returnInvoice.date || returnInvoice.return_date || new Date().toISOString(),
       business: {
         name: businessData?.business?.legal_name || businessData?.business?.owner_name || '',
-        address: bizAddr ? [bizAddr.address_line1, bizAddr.city, bizAddr.state, bizAddr.pincode].filter(Boolean).join(', ') : '',
+        address: bizAddress,
         gstin: businessData?.business?.tax_id || '',
         phone: businessData?.business?.phone,
       },
@@ -230,10 +228,14 @@ export default function ReturnDetailsScreen() {
       } : undefined,
       items: returnItems.map(item => ({
         name: item.name,
+        hsnCode: item.hsnCode || item.hsn_code,
         quantity: item.quantity,
+        unit: item.unit,
         rate: item.rate,
+        discount: item.discount || 0,
         taxRate: item.taxRate,
         taxAmount: item.taxAmount,
+        cessAmount: item.cessAmount || 0,
         total: item.total,
         reason: item.reason,
       })),
@@ -245,6 +247,7 @@ export default function ReturnDetailsScreen() {
       staffName: returnInvoice.staffName || returnInvoice.staff_name,
       invoiceId: returnInvoice.id,
       businessId: businessData?.business?.id,
+      bankDetails: bank ? { bankName: bank.bank_name || bank.bankName || '', accountNo: bank.account_number || bank.accountNumber || '', ifsc: bank.ifsc_code || bank.ifscCode || '', branch: bank.branch || '' } : undefined,
     };
   };
 

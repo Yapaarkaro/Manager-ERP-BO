@@ -15,6 +15,7 @@ import { ListSkeleton } from '@/components/SkeletonLoader';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { invalidateApiCache } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -72,13 +73,7 @@ export default function BanksScreen() {
     setIsLoading(businessLoading);
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const handleBankAccountPress = (bankAccount: BankAccount) => {
     safeRouter.push({

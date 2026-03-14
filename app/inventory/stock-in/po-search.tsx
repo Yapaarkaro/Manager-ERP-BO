@@ -21,6 +21,7 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -227,7 +228,7 @@ export default function POSearchScreen() {
                     </View>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Total Amount:</Text>
-                      <Text style={styles.detailValue}>₹{po.totalAmount.toLocaleString()}</Text>
+                      <Text style={styles.detailValue}>{formatCurrencyINR(po.totalAmount)}</Text>
                     </View>
                   </View>
 

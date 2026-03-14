@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   Search,
@@ -62,7 +63,11 @@ interface PurchaseOrder {
 }
 
 export default function VerifyStockScreen() {
-  const { poData, invoiceNumber, invoiceDate, ewayBillNumber, vehicleNumber, vehicleType } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const { invoiceNumber, invoiceDate, vehicleType } = params;
+  const poData = consumeNavData('verifyStockPOData') || (params.poData as string) || null;
+  const ewayBillNumber = consumeNavData<string>('verifyStockEwayBill') || (params.ewayBillNumber as string) || '';
+  const vehicleNumber = consumeNavData<string>('verifyStockVehicleNumber') || (params.vehicleNumber as string) || '';
   const [po, setPo] = useState<PurchaseOrder | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showProductModal, setShowProductModal] = useState(false);
@@ -74,7 +79,7 @@ export default function VerifyStockScreen() {
   useEffect(() => {
     if (poData) {
       try {
-        const parsedPO = JSON.parse(poData as string);
+        const parsedPO = typeof poData === 'string' ? JSON.parse(poData) : poData;
         setPo(parsedPO);
         
         // Check for discrepancies

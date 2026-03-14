@@ -11,6 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { createPurchaseOrder, createInAppNotification, getOrCreateConversation, sendMessage, autoLinkSupplierToUser } from '@/services/backendApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -49,8 +51,7 @@ export default function POConfirmationScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [notes, setNotes] = useState('');
 
-  const formatAmount = (amount: number) =>
-    `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: amount % 1 !== 0 ? 2 : 0 })}`;
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const poNumber = useMemo(() => {
     const d = new Date();
@@ -197,10 +198,8 @@ export default function POConfirmationScreen() {
         status: 'sent',
       };
 
-      safeRouter.replace({
-        pathname: '/purchasing/po-success',
-        params: { poData: JSON.stringify(poData) },
-      } as any);
+      setNavData('poSuccessData', poData);
+      safeRouter.replace({ pathname: '/purchasing/po-success' } as any);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Something went wrong');
     } finally {

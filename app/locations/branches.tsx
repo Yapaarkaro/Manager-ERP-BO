@@ -20,6 +20,8 @@ import { getAddresses, invalidateApiCache } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 const Colors = {
   background: '#FFFFFF',
   text: '#1F2937',
@@ -161,26 +163,19 @@ export default function BranchesScreen() {
     return parts.join(', ');
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatCurrency = (amount: number) => formatCurrencyINR(amount, 0, 0);
 
   const handleAddBranch = () => {
     safeRouter.push('/locations/add-branch');
   };
 
   const handleEditBranch = (branch: Branch) => {
+    setNavData('editBranch', branch);
     safeRouter.push({
       pathname: '/locations/branch-details',
       params: {
         branchId: branch.id,
         editMode: 'true',
-        editBranch: JSON.stringify(branch)
       }
     });
   };
@@ -967,12 +962,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+    minHeight: 52,
   },
   searchInput: {
     flex: 1,

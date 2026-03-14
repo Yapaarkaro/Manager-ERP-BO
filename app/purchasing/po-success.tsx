@@ -20,6 +20,8 @@ import {
   FileText
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -38,8 +40,8 @@ const Colors = {
 };
 
 export default function POSuccessScreen() {
-  const { poData } = useLocalSearchParams();
-  const po = JSON.parse(poData as string);
+  const params = useLocalSearchParams();
+  const po = consumeNavData('poSuccessData') || (params.poData ? JSON.parse(params.poData as string) : {});
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -58,13 +60,7 @@ export default function POSuccessScreen() {
     return unsubscribe;
   }, [navigation]);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const handleDownloadPO = () => {
     console.log('Download PO:', po.poNumber);
@@ -128,12 +124,10 @@ export default function POSuccessScreen() {
       supplierId: po.supplier?.id || '',
     };
 
+    setNavData('poDetailData', detailData);
     safeRouter.push({
       pathname: '/purchasing/po-details',
-      params: {
-        poId: detailData.id,
-        poData: JSON.stringify(detailData),
-      },
+      params: { poId: detailData.id },
     });
   };
 

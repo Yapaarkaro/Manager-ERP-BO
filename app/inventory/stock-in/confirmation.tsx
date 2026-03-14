@@ -17,6 +17,7 @@ import { usePermissions } from '@/contexts/PermissionContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   FileText,
@@ -49,7 +50,8 @@ type PaymentMethod = 'cash' | 'upi' | 'cheque' | 'bank_transfer';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 
 export default function StockInConfirmationScreen() {
-  const { stockInData } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const stockInData = consumeNavData<string>('stockInData') || (params.stockInData as string) || null;
   const [isSaving, setIsSaving] = useState(false);
   const { isStaff, staffId, staffName, staffBusinessId } = usePermissions();
 
@@ -69,7 +71,7 @@ export default function StockInConfirmationScreen() {
 
   const data = (() => {
     if (stockInData) {
-      try { return JSON.parse(stockInData as string); } catch {}
+      try { return typeof stockInData === 'string' ? JSON.parse(stockInData) : stockInData; } catch {}
     }
     return { invoiceNumber: '', invoiceDate: '', hasEwayBill: false, ewayBillNumber: '', vehicleNumber: '', vehicleType: '', supplier: null, products: [], totalAmount: 0, discountType: 'amount', discountValue: 0, notes: '', locationId: null, locationName: '' };
   })();

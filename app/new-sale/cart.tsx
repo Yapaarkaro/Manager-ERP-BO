@@ -36,6 +36,7 @@ import {
   Package,
   FileText
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -143,6 +144,7 @@ interface CartProduct {
   selectedUoM?: 'primary' | 'secondary' | 'tertiary';
   currentStock?: number;
   openingStock?: number;
+  quantityDecimals?: number;
 }
 
 export default function CartScreen() {
@@ -162,6 +164,7 @@ export default function CartScreen() {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState('');
+  const [editingQtyText, setEditingQtyText] = useState<Record<string, string>>({});
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [expandedTaxSections, setExpandedTaxSections] = useState<Set<string>>(new Set());
   const [customAlert, setCustomAlert] = useState<{
@@ -438,26 +441,11 @@ export default function CartScreen() {
     setCartItems(prev => 
       prev.map(item => {
         if (item.id === productId) {
-          const unitPrices = calculateUnitPrices(item);
-          let newPrice = item.price;
-          
-          // Update price based on selected UoM
-          if (selectedUoM === 'primary') {
-            newPrice = unitPrices.primary.price;
-          } else if (selectedUoM === 'secondary' && unitPrices.secondary) {
-            newPrice = unitPrices.secondary.price;
-          } else if (selectedUoM === 'tertiary' && unitPrices.tertiary) {
-            newPrice = unitPrices.tertiary.price;
-          }
-          
-          // Check if new quantity exceeds stock limit for new UoM
           const stockLimits = calculateStockLimits({ ...item, selectedUoM });
           if (item.quantity > stockLimits.maxQuantityForSelectedUoM) {
-            // Reset quantity to maximum available for new UoM
-            return { ...item, selectedUoM, price: newPrice, quantity: stockLimits.maxQuantityForSelectedUoM };
+            return { ...item, selectedUoM, quantity: stockLimits.maxQuantityForSelectedUoM };
           }
-          
-          return { ...item, selectedUoM, price: newPrice };
+          return { ...item, selectedUoM };
         }
         return item;
       })
@@ -865,9 +853,9 @@ export default function CartScreen() {
       } else {
         return {
           totalInLowestUoM,
-          maxQuantityForSelectedUoM: Math.floor(totalInLowestUoM / secondaryRatio),
-          lowestUoM: item.secondaryUnit || 'Box',
-          selectedUoMUnit: item.secondaryUnit || 'Box'
+          maxQuantityForSelectedUoM: totalInLowestUoM,
+          lowestUoM: item.secondaryUnit || 'Piece',
+          selectedUoMUnit: item.secondaryUnit || 'Piece'
         };
       }
     }
@@ -1012,14 +1000,7 @@ export default function CartScreen() {
   const calculateRoundoffAmount = useCallback(() => cartTotals.roundoffAmount, [cartTotals]);
   const calculateFinalTotal = useCallback(() => applyRoundoff ? cartTotals.roundedTotal : cartTotals.exactTotal, [cartTotals, applyRoundoff]);
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(price);
-  };
+  const formatPrice = (price: number) => formatCurrencyINR(price, 3, 0);
 
   const formatGSTDisplay = (taxRate: number) => {
     if (!taxRate || taxRate === 0) return '0%';
@@ -1140,36 +1121,113 @@ export default function CartScreen() {
                   </View>
 
                   <View style={styles.collapsedQuantityControls}>
-                    <TouchableOpacity
-                      style={[styles.collapsedQuantityButton, item.quantity <= 1 && styles.deleteQuantityButton]}
-                      onPress={() => item.quantity <= 1 ? removeItem(item.id) : updateQuantity(item.id, item.quantity - 1)}
-                      activeOpacity={0.7}
-                    >
-                      {item.quantity <= 1 ? (
-                        <Trash2 size={13} color={Colors.error} />
-                      ) : (
-                        <Text style={styles.collapsedQuantityButtonText}>−</Text>
-                      )}
-                    </TouchableOpacity>
-                    <TextInput
-                      style={styles.collapsedQuantityInput}
-                      value={item.quantity.toString()}
-                      onChangeText={(text) => {
-                        const qty = parseInt(text) || 0;
-                        if (qty >= 0) updateQuantity(item.id, qty);
-                      }}
-                      keyboardType="numeric"
-                      textAlign="center"
-                    />
-                    <TouchableOpacity
-                      style={styles.collapsedQuantityButton}
-                      onPress={() => updateQuantity(item.id, item.quantity + 1)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.collapsedQuantityButtonText}>+</Text>
-                    </TouchableOpacity>
+                    {(() => {
+                      const qtyDec = item.quantityDecimals ?? 0;
+                      const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+                      const qtyTextValue = editingQtyText[item.id] ?? item.quantity.toString();
+                      const isEditing = editingQtyText[item.id] !== undefined;
+                      return (
+                        <>
+                          <TouchableOpacity
+                            style={[styles.collapsedQuantityButton, item.quantity <= step && !isEditing && styles.deleteQuantityButton]}
+                            onPress={() => item.quantity <= step && !isEditing ? removeItem(item.id) : updateQuantity(item.id, parseFloat(Math.max(step, item.quantity - step).toFixed(qtyDec)))}
+                            activeOpacity={0.7}
+                          >
+                            {item.quantity <= step && !isEditing ? (
+                              <Trash2 size={13} color={Colors.error} />
+                            ) : (
+                              <Text style={styles.collapsedQuantityButtonText}>−</Text>
+                            )}
+                          </TouchableOpacity>
+                          <TextInput
+                            style={styles.collapsedQuantityInput}
+                            value={qtyTextValue}
+                            onFocus={() => setEditingQtyText(prev => ({ ...prev, [item.id]: item.quantity.toString() }))}
+                            onChangeText={(text) => {
+                              if (text === '' || text === '.') {
+                                setEditingQtyText(prev => ({ ...prev, [item.id]: text }));
+                                return;
+                              }
+                              if (qtyDec > 0) {
+                                const regex = new RegExp(`^\\d*\\.?\\d{0,${qtyDec}}$`);
+                                if (regex.test(text)) {
+                                  setEditingQtyText(prev => ({ ...prev, [item.id]: text }));
+                                }
+                              } else {
+                                if (/^\d*$/.test(text)) {
+                                  setEditingQtyText(prev => ({ ...prev, [item.id]: text }));
+                                }
+                              }
+                            }}
+                            onBlur={() => {
+                              const raw = editingQtyText[item.id] || '';
+                              const parsed = parseFloat(raw);
+                              if (!isNaN(parsed) && parsed > 0) {
+                                updateQuantity(item.id, parseFloat(parsed.toFixed(qtyDec)));
+                              }
+                              setEditingQtyText(prev => {
+                                const next = { ...prev };
+                                delete next[item.id];
+                                return next;
+                              });
+                            }}
+                            onSubmitEditing={() => {
+                              const raw = editingQtyText[item.id] || '';
+                              const parsed = parseFloat(raw);
+                              if (!isNaN(parsed) && parsed > 0) {
+                                updateQuantity(item.id, parseFloat(parsed.toFixed(qtyDec)));
+                              }
+                              setEditingQtyText(prev => {
+                                const next = { ...prev };
+                                delete next[item.id];
+                                return next;
+                              });
+                            }}
+                            keyboardType={qtyDec > 0 ? 'decimal-pad' : 'numeric'}
+                            textAlign="center"
+                            selectTextOnFocus
+                          />
+                          <TouchableOpacity
+                            style={styles.collapsedQuantityButton}
+                            onPress={() => updateQuantity(item.id, parseFloat((item.quantity + step).toFixed(qtyDec)))}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={styles.collapsedQuantityButtonText}>+</Text>
+                          </TouchableOpacity>
+                        </>
+                      );
+                    })()}
                   </View>
                 </View>
+
+                {/* ─── UoM selector (inline below name row) ─── */}
+                {item.secondaryUnit && item.secondaryUnit !== 'None' && (
+                  <View style={styles.inlineUomRow}>
+                    {['primary', 'secondary', 'tertiary'].map(uom => {
+                      const unitName = uom === 'primary' ? item.primaryUnit :
+                        uom === 'secondary' ? item.secondaryUnit : item.tertiaryUnit;
+                      if (!unitName || unitName === 'None') return null;
+                      const isActive = item.selectedUoM === uom;
+                      return (
+                        <TouchableOpacity
+                          key={uom}
+                          style={[styles.inlineUomChip, isActive && styles.inlineUomChipActive]}
+                          onPress={() => updateItemUoM(item.id, uom as 'primary' | 'secondary' | 'tertiary')}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.inlineUomChipText, isActive && styles.inlineUomChipTextActive]}>
+                            {unitName}
+                          </Text>
+                          {isActive && (
+                            <Text style={styles.inlineUomChipPrice}>
+                              {formatPrice(getCurrentUoMPrice({ ...item, selectedUoM: uom as any }))}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                )}
 
                 {/* ─── Row 2: Price per unit (tap to edit) ─── */}
                 <TouchableOpacity
@@ -1263,35 +1321,10 @@ export default function CartScreen() {
                       );
                     })()}
 
-                    {item.secondaryUnit && item.secondaryUnit !== 'None' ? (
-                      <View style={styles.expandedPriceRow}>
-                        <Text style={styles.expandedLabel}>Unit:</Text>
-                        <View style={styles.uomSelectorWrapper}>
-                          {['primary', 'secondary', 'tertiary'].map(uom => {
-                            const unitName = uom === 'primary' ? item.primaryUnit :
-                              uom === 'secondary' ? item.secondaryUnit : item.tertiaryUnit;
-                            if (!unitName || unitName === 'None') return null;
-                            return (
-                              <TouchableOpacity
-                                key={uom}
-                                style={[styles.uomSelectorButton, item.selectedUoM === uom && styles.activeUomSelectorButton]}
-                                onPress={() => updateItemUoM(item.id, uom as 'primary' | 'secondary' | 'tertiary')}
-                                activeOpacity={0.7}
-                              >
-                                <Text style={[styles.uomSelectorButtonText, item.selectedUoM === uom && styles.activeUomSelectorButtonText]}>
-                                  {unitName}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    ) : (
-                      <View style={styles.expandedPriceRow}>
-                        <Text style={styles.expandedLabel}>Unit:</Text>
-                        <Text style={styles.expandedValue}>{item.primaryUnit || 'Piece'}</Text>
-                      </View>
-                    )}
+                    <View style={styles.expandedPriceRow}>
+                      <Text style={styles.expandedLabel}>Selling in:</Text>
+                      <Text style={styles.expandedValue}>{currentUnit}</Text>
+                    </View>
 
                     {itemGST > 0 && (
                       <View style={styles.expandedGstRow}>
@@ -5291,6 +5324,41 @@ const styles = StyleSheet.create({
     color: Colors.background,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  inlineUomRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    marginTop: -2,
+  } as any,
+  inlineUomChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: Colors.grey[100],
+    borderWidth: 1.5,
+    borderColor: Colors.grey[200],
+    gap: 4,
+  } as any,
+  inlineUomChipActive: {
+    backgroundColor: '#EBF0FA',
+    borderColor: Colors.primary,
+  },
+  inlineUomChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textLight,
+  },
+  inlineUomChipTextActive: {
+    color: Colors.primary,
+  },
+  inlineUomChipPrice: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.primary,
   },
   productPrice: {
     fontSize: 14,

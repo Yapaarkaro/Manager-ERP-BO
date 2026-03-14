@@ -37,6 +37,7 @@ import {
   Trash2,
 } from 'lucide-react-native';
 import DateInputWithPicker from '@/components/DateInputWithPicker';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -171,7 +172,7 @@ export default function AddPurchaseInvoiceScreen() {
       const deficit = paidAmt - availableBalance;
       Alert.alert(
         'Insufficient Balance',
-        `Your ${balanceType} balance (₹${availableBalance.toFixed(4).replace(/\.?0+$/, '')}) is less than the payment amount (₹${paidAmt.toFixed(4).replace(/\.?0+$/, '')}). This will result in a negative balance of ₹${deficit.toFixed(4).replace(/\.?0+$/, '')}.`,
+        `Your ${balanceType} balance (${formatCurrencyINR(availableBalance)}) is less than the payment amount (${formatCurrencyINR(paidAmt)}). This will result in a negative balance of ${formatCurrencyINR(deficit)}.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -246,7 +247,7 @@ export default function AddPurchaseInvoiceScreen() {
           businessId: staffBusinessId,
           recipientId: 'owner', recipientType: 'owner',
           title: `New Purchase by ${staffName || 'Staff'}`,
-          message: `Purchase Invoice #${invoiceNumber} - ₹${totals.total.toFixed(4).replace(/\.?0+$/, '')}`,
+          message: `Purchase Invoice #${invoiceNumber} - ${formatCurrencyINR(totals.total)}`,
           type: 'info', category: 'purchase',
           sourceStaffId: staffId, sourceStaffName: staffName || undefined,
           relatedEntityType: 'purchase_invoice', relatedEntityId: result.invoice?.id,
@@ -364,11 +365,11 @@ export default function AddPurchaseInvoiceScreen() {
                           <View style={st.listCenter}>
                             <Text style={st.listName} numberOfLines={1}>{p.name || 'Untitled Item'}</Text>
                             <Text style={st.listSub}>
-                              {p.quantity} {p.primaryUnit || 'pcs'}  ×  ₹{p.purchasePrice.toFixed(4).replace(/\.?0+$/, '')}
+                              {p.quantity} {p.primaryUnit || 'pcs'}  ×  {formatCurrencyINR(p.purchasePrice)}
                             </Text>
                           </View>
 
-                          <Text style={st.listAmt}>₹{lineTotal.toFixed(4).replace(/\.?0+$/, '')}</Text>
+                          <Text style={st.listAmt}>{formatCurrencyINR(lineTotal)}</Text>
 
                           {isExpanded
                             ? <ChevronUp size={16} color={Colors.primary} style={{ marginLeft: 10 }} />
@@ -414,13 +415,13 @@ export default function AddPurchaseInvoiceScreen() {
 
                             <View style={st.taxBreakdown}>
                               <Text style={st.taxBreakdownTitle}>Tax Breakdown</Text>
-                              <View style={st.taxRow}><Text style={st.taxLabel}>Taxable Amount</Text><Text style={st.taxVal}>₹{p.totalPrice.toFixed(4).replace(/\.?0+$/, '')}</Text></View>
-                              <View style={st.taxRow}><Text style={st.taxLabel}>CGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>₹{cgst.toFixed(4).replace(/\.?0+$/, '')}</Text></View>
-                              <View style={st.taxRow}><Text style={st.taxLabel}>SGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>₹{sgst.toFixed(4).replace(/\.?0+$/, '')}</Text></View>
-                              {p.cessAmount > 0 && <View style={st.taxRow}><Text style={st.taxLabel}>Cess</Text><Text style={st.taxVal}>₹{p.cessAmount.toFixed(4).replace(/\.?0+$/, '')}</Text></View>}
+                              <View style={st.taxRow}><Text style={st.taxLabel}>Taxable Amount</Text><Text style={st.taxVal}>{formatCurrencyINR(p.totalPrice)}</Text></View>
+                              <View style={st.taxRow}><Text style={st.taxLabel}>CGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(cgst)}</Text></View>
+                              <View style={st.taxRow}><Text style={st.taxLabel}>SGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(sgst)}</Text></View>
+                              {p.cessAmount > 0 && <View style={st.taxRow}><Text style={st.taxLabel}>Cess</Text><Text style={st.taxVal}>{formatCurrencyINR(p.cessAmount)}</Text></View>}
                               <View style={[st.taxRow, st.taxTotalRow]}>
                                 <Text style={st.taxTotalLabel}>Line Total</Text>
-                                <Text style={st.taxTotalVal}>₹{lineTotal.toFixed(4).replace(/\.?0+$/, '')}</Text>
+                                <Text style={st.taxTotalVal}>{formatCurrencyINR(lineTotal)}</Text>
                               </View>
                             </View>
 
@@ -449,12 +450,12 @@ export default function AddPurchaseInvoiceScreen() {
               <View style={st.section}>
                 <Text style={st.sectionTitle}>Invoice Summary</Text>
                 <View style={st.summaryCard}>
-                  <View style={st.summaryRow}><Text style={st.summaryLabel}>Subtotal</Text><Text style={st.summaryVal}>₹{totals.subtotal.toFixed(4).replace(/\.?0+$/, '')}</Text></View>
-                  <View style={st.summaryRow}><Text style={st.summaryLabel}>GST</Text><Text style={st.summaryVal}>₹{totals.totalGST.toFixed(4).replace(/\.?0+$/, '')}</Text></View>
-                  {totals.totalCess > 0 && <View style={st.summaryRow}><Text style={st.summaryLabel}>Cess</Text><Text style={st.summaryVal}>₹{totals.totalCess.toFixed(4).replace(/\.?0+$/, '')}</Text></View>}
+                  <View style={st.summaryRow}><Text style={st.summaryLabel}>Subtotal</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.subtotal)}</Text></View>
+                  <View style={st.summaryRow}><Text style={st.summaryLabel}>GST</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.totalGST)}</Text></View>
+                  {totals.totalCess > 0 && <View style={st.summaryRow}><Text style={st.summaryLabel}>Cess</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.totalCess)}</Text></View>}
                   <View style={[st.summaryRow, st.summaryTotal]}>
                     <Text style={st.summaryTotalLabel}>Grand Total</Text>
-                    <Text style={st.summaryTotalVal}>₹{totals.total.toFixed(4).replace(/\.?0+$/, '')}</Text>
+                    <Text style={st.summaryTotalVal}>{formatCurrencyINR(totals.total)}</Text>
                   </View>
                 </View>
               </View>
@@ -530,7 +531,7 @@ export default function AddPurchaseInvoiceScreen() {
                     <AlertTriangle size={18} color={Colors.warning} />
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={st.balanceLabel}>Balance Due</Text>
-                      <Text style={st.balanceVal}>₹{balanceDue.toFixed(4).replace(/\.?0+$/, '')}</Text>
+                      <Text style={st.balanceVal}>{formatCurrencyINR(balanceDue)}</Text>
                       <Text style={st.balanceNote}>This amount will be added to Payables for {selectedSupplier ? getSupplierDisplayName(selectedSupplier) : 'this supplier'}</Text>
                     </View>
                   </View>

@@ -33,6 +33,7 @@ import { indianBanks, IndianBank, validateAccountNumber, validateIFSC, allBanksW
 import { optimisticUpdateBankAccount, optimisticAddBankAccount } from '@/utils/optimisticSync';
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { updateBusinessPrimaryBankAccount } from '@/services/backendApi';
+import { consumeNavData } from '@/utils/navStore';
 
 const Colors = {
   primary: '#3F66AC',
@@ -62,8 +63,9 @@ const Colors = {
 export default function AddBankAccount() {
   const params = useLocalSearchParams();
   const { data: businessData } = useBusinessData();
-  const isEditMode = params.account ? true : false;
-  const existingAccount = params.account ? JSON.parse(params.account as string) : null;
+  const navAccount = consumeNavData('editBankAccount');
+  const existingAccount = navAccount || (params.account ? JSON.parse(params.account as string) : null);
+  const isEditMode = !!existingAccount;
 
   const [selectedBank, setSelectedBank] = useState<IndianBank | null>(null);
   const [customBankName, setCustomBankName] = useState('');

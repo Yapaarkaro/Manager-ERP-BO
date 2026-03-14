@@ -34,7 +34,7 @@ import {
   Info,
   Lock
 } from 'lucide-react-native';
-import { verifyGSTIN } from '@/services/gstinApi';
+import { verifyGSTIN } from '@/services/backendApi';
 import { Supplier } from '@/utils/dataStore';
 import { createSupplier } from '@/services/backendApi';
 import PlatformMapView from '@/components/PlatformMapView';
@@ -576,7 +576,7 @@ export default function AddSupplierScreen() {
       setIsLoadingGstin(true);
       try {
         const result = await verifyGSTIN(formatted);
-        if (!result.error && result.taxpayerInfo) {
+        if (result.success && result.taxpayerInfo) {
           const gstinData = result.taxpayerInfo;
           const address = gstinData.pradr?.addr;
           

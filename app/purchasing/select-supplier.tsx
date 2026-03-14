@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   Search,
@@ -103,18 +104,18 @@ export default function SelectSupplierScreen() {
         supplierBusinessId: mapped.business_id,
         products: autoPoItems,
       }];
+      setNavData('supplierGroups', supplierGroup);
       safeRouter.push({
         pathname: '/inventory/auto-po-review' as any,
-        params: { supplierGroups: JSON.stringify(supplierGroup) },
       });
       return;
     }
 
+    setNavData('createPoSupplier', mapped);
     safeRouter.push({
       pathname: '/purchasing/create-po',
       params: {
         supplierId: mapped.id,
-        supplierData: JSON.stringify(mapped),
       },
     });
   };

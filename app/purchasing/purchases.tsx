@@ -7,15 +7,18 @@ import {
   FlatList,
   TextInput,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import { getPurchaseInvoices, getPurchaseOrders, invalidateApiCache } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { ArrowLeft, Search, Filter, Download, Share, Eye, ShoppingCart, Plus, FileText, User, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, ChevronDown } from 'lucide-react-native';
 import { ListSkeleton } from '@/components/SkeletonLoader';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -459,9 +462,7 @@ export default function PurchasesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return `₹${amount.toLocaleString('en-IN')}`;
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -474,9 +475,10 @@ export default function PurchasesScreen() {
 
   const handleInvoicePress = (invoice: PurchaseInvoice) => {
     const raw = rawInvoices.find(r => r.id === invoice.id);
+    if (raw) setNavData('purchaseInvoiceData', raw);
     safeRouter.push({
       pathname: '/purchasing/invoice-details',
-      params: { invoiceId: invoice.id, invoiceData: raw ? JSON.stringify(raw) : undefined }
+      params: { invoiceId: invoice.id }
     });
   };
 
@@ -684,7 +686,7 @@ export default function PurchasesScreen() {
               onPress={() => console.log('Filter purchases')}
               activeOpacity={0.7}
             >
-              <Filter size={20} color={Colors.textLight} />
+              <Filter size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -1053,12 +1055,13 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[50],
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+    minHeight: 52,
   },
   searchInputWrap: {
     flex: 1,
@@ -1093,14 +1096,12 @@ const styles = StyleSheet.create({
     marginLeft: 1,
   },
   filterButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
   },
   emptyState: {
     alignItems: 'center',
@@ -1122,14 +1123,14 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: 'absolute',
-    bottom: 20,
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderRadius: 28,
+    borderRadius: 25,
     gap: 8,
     shadowColor: '#000',
     shadowOffset: {

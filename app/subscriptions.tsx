@@ -20,6 +20,8 @@ import {
   Receipt,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#ffffff',
@@ -73,12 +75,10 @@ export default function SubscriptionsScreen() {
       }
     };
 
+    setNavData('subscriptionInvoiceData', invoiceData);
     safeRouter.push({
       pathname: '/subscription-invoice-details',
-      params: {
-        invoiceId: invoiceData.id,
-        invoiceData: JSON.stringify(invoiceData)
-      }
+      params: { invoiceId: invoiceData.id }
     });
   };
 
@@ -197,7 +197,7 @@ export default function SubscriptionsScreen() {
               
               <View style={styles.currentPlanDetails}>
                 <Text style={styles.currentPlanAmount}>
-                  ₹{subscriptions.find(s => s.status === 'current')?.amount.toLocaleString()}
+                  {formatCurrencyINR(subscriptions.find(s => s.status === 'current')?.amount || 0)}
                 </Text>
                 <Text style={styles.currentPlanPeriod}>
                   {new Date(subscriptions.find(s => s.status === 'current')?.startDate || '').toLocaleDateString()} - {new Date(subscriptions.find(s => s.status === 'current')?.endDate || '').toLocaleDateString()}

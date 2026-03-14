@@ -334,10 +334,10 @@ export default function CustomerDetailsScreen() {
     }
     setIsLoadingGstin(true);
     try {
-      const { verifyGSTIN } = require('@/services/gstinApi');
+      const { verifyGSTIN } = require('@/services/backendApi');
       const result = await verifyGSTIN(gstinUpper);
-      if (result.error) {
-        Alert.alert('GSTIN Verification Failed', result.message || 'Invalid GSTIN number');
+      if (!result.success) {
+        Alert.alert('GSTIN Verification Failed', result.error || 'Invalid GSTIN number');
       } else if (result.taxpayerInfo) {
         const d = result.taxpayerInfo;
         const addr = d.pradr?.addr;

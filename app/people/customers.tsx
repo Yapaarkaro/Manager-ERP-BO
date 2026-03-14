@@ -20,9 +20,10 @@ import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 import { getCustomers, getAllCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
-import { getInitials as getNameInitials, getAvatarColor } from '@/utils/formatters';
+import { getInitials as getNameInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import { onTransactionChange } from '@/utils/transactionEvents';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -306,15 +307,16 @@ export default function CustomersScreen() {
   };
 
   const handleChatPress = (customer: Customer) => {
+    setNavData('customerChatMeta', {
+      customerId: customer.id,
+      customerName: customer.businessName || customer.name,
+      customerAvatar: customer.avatar || '',
+      customerPhone: customer.mobile || (customer as any).mobile_number || (customer as any).phone || '',
+      isOnManager: (customer as any).business_id ? 'true' : 'false',
+    });
     safeRouter.push({
       pathname: '/people/customer-chat',
-      params: {
-        customerId: customer.id,
-        customerName: customer.businessName || customer.name,
-        customerAvatar: customer.avatar || '',
-        customerPhone: customer.mobile || (customer as any).mobile_number || (customer as any).phone || '',
-        isOnManager: (customer as any).business_id ? 'true' : 'false',
-      }
+      params: { customerId: customer.id }
     });
   };
 
@@ -346,13 +348,7 @@ export default function CustomersScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
@@ -830,8 +826,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   activeFilterTab: {
-    backgroundColor: Colors.success,
-    borderColor: Colors.success,
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   filterTabText: {
     fontSize: 14,
@@ -858,7 +854,7 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
   },
   activeFilterTabCountText: {
-    color: Colors.success,
+    color: Colors.primary,
   },
   scrollView: {
     flex: 1,
@@ -1107,7 +1103,7 @@ const styles = StyleSheet.create({
   },
   addCustomerFAB: {
     position: 'absolute',
-    bottom: 24,
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',

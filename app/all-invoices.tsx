@@ -19,6 +19,8 @@ import { getInvoices, getReturns, getPurchaseInvoices, invalidateApiCache } from
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { setNavData } from '@/utils/navStore';
 
 import { 
   ArrowLeft, 
@@ -288,11 +290,11 @@ export default function AllInvoicesScreen() {
         }
       };
 
+      setNavData('returnData', returnData);
       router.push({
         pathname: '/return-details',
         params: {
           returnId: returnData.id,
-          returnData: JSON.stringify(returnData)
         }
       });
     } else if (invoice.status === 'purchase') {
@@ -323,11 +325,11 @@ export default function AllInvoicesScreen() {
         }
       };
 
+      setNavData('invoiceData', invoiceData);
       router.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
-          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }
@@ -363,13 +365,7 @@ export default function AllInvoicesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -819,7 +815,7 @@ export default function AllInvoicesScreen() {
             { key: 'status', header: 'Type', format: (v) => v === 'sale' ? 'Sale' : v === 'return' ? 'Return' : 'Purchase' },
             { key: 'customerName', header: 'Customer/Supplier', format: (v, row) => row.supplierName || v || '' },
             { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
-            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'paymentStatus', header: 'Payment Status', format: (v) => v === 'paid' ? 'Paid' : v === 'partially_paid' ? 'Partially Paid' : 'Pending' },
             { key: 'paymentMethod', header: 'Payment Method', format: (v) => v === 'cash' ? 'Cash' : v === 'upi' ? 'UPI' : v === 'card' ? 'Card' : 'Others' },
             { key: 'staffName', header: 'Processed By' },
@@ -827,7 +823,7 @@ export default function AllInvoicesScreen() {
           data: filteredInvoices,
           summaryRows: [
             { label: 'Total Invoices', value: String(filteredInvoices.length) },
-            { label: 'Total Amount', value: `₹${filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Amount', value: formatCurrencyINR(filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0)) },
           ],
         }}
       />

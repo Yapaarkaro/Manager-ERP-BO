@@ -23,7 +23,7 @@ import {
   Plus,
   CheckCircle
 } from 'lucide-react-native';
-import { autoFormatDateInput, parseDDMMYYYY, validateDateDDMMYYYY } from '@/utils/formatters';
+import { autoFormatDateInput, parseDDMMYYYY, validateDateDDMMYYYY, formatCurrencyINR } from '@/utils/formatters';
 import { safeRouter } from '@/utils/safeRouter';
 
 
@@ -268,7 +268,7 @@ export default function AddCampaignScreen() {
                 </TouchableOpacity>
                 {formData.platform && (
                   <Text style={styles.minBudgetText}>
-                    Minimum budget: ₹{getMinBudget().toLocaleString()}
+                    Minimum budget: {formatCurrencyINR(getMinBudget(), 0, 0)}
                   </Text>
                 )}
               </View>
@@ -324,7 +324,7 @@ export default function AddCampaignScreen() {
                 </View>
                 {formData.budget && parseInt(formData.budget) < getMinBudget() && (
                   <Text style={styles.errorText}>
-                    Budget must be at least ₹{getMinBudget().toLocaleString()}
+                    Budget must be at least {formatCurrencyINR(getMinBudget(), 0, 0)}
                   </Text>
                 )}
               </View>
@@ -439,7 +439,7 @@ export default function AddCampaignScreen() {
                       {platform.name}
                     </Text>
                     <Text style={styles.minBudgetLabel}>
-                      Min: ₹{platform.minBudget.toLocaleString()}
+                      Min: {formatCurrencyINR(platform.minBudget, 0, 0)}
                     </Text>
                   </View>
                   {formData.platform === platform.name && (

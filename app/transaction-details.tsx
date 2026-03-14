@@ -14,6 +14,8 @@ import { ArrowLeft, Building, FileText, CreditCard, Smartphone, Banknote, Receip
 import { BankTransaction } from '@/utils/dataStore';
 import { getCashTransactionById, getBankTransactionById, invalidateApiCache } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { consumeNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -32,7 +34,9 @@ const Colors = {
 };
 
 export default function TransactionDetailsScreen() {
-  const { transactionId, bankAccountId, transactionType, transactionData } = useLocalSearchParams();
+  const { transactionId, bankAccountId, transactionType, transactionData: paramTxData } = useLocalSearchParams();
+  const navTxData = consumeNavData('transactionData');
+  const transactionData = navTxData ? JSON.stringify(navTxData) : paramTxData;
   const [transaction, setTransaction] = useState<BankTransaction | null>(null);
   const [relatedInvoice, setRelatedInvoice] = useState<any>(null);
   const [relatedCustomer, setRelatedCustomer] = useState<any>(null);
@@ -151,13 +155,7 @@ export default function TransactionDetailsScreen() {
     setTimeout(() => setRefreshing(false), 600);
   }, [transactionId]);
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

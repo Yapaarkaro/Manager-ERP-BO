@@ -27,6 +27,7 @@ import {
 } from 'lucide-react-native';
 import { createPurchaseOrder, createInAppNotification } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -81,8 +82,7 @@ export default function AutoPOReviewScreen() {
     0
   );
 
-  const formatAmount = (n: number) =>
-    `₹${n.toLocaleString('en-IN', { minimumFractionDigits: n % 1 !== 0 ? 2 : 0 })}`;
+  const formatAmount = (n: number) => formatCurrencyINR(n);
 
   const handleQtyChange = (groupIdx: number, productId: string, delta: number) => {
     setGroups((prev) =>

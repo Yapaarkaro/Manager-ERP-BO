@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { CreditCard, Plus, Edit3, Trash2, Check, ArrowRight, Building2, IndianRupee, ChevronDown, ChevronUp, Star, ArrowLeft } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useColorScheme';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
@@ -20,6 +21,7 @@ import { ListSkeleton } from '@/components/SkeletonLoader';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 interface BankAccount {
   id: string;
@@ -37,24 +39,24 @@ interface BankAccount {
 }
 
 export default function BankAccountsScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    mobile,
-    allAddresses,
-    allBankAccounts = '[]',
-    // Invoice configuration (for returning users from business summary)
-    initialCashBalance,
-    invoicePrefix,
-    invoicePattern,
-    startingInvoiceNumber,
-    fiscalYear,
-  } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const stored = getSignupData();
+
+  const type = params.type || stored.type;
+  const value = params.value || stored.value;
+  const gstinData = params.gstinData || stored.gstinData;
+  const name = params.name || stored.name;
+  const businessName = params.businessName || stored.businessName;
+  const businessType = params.businessType || stored.businessType;
+  const customBusinessType = params.customBusinessType || stored.customBusinessType;
+  const mobile = params.mobile || stored.mobile;
+  const allAddresses = params.allAddresses || stored.allAddresses;
+  const allBankAccounts = params.allBankAccounts || stored.allBankAccounts || '[]';
+  const initialCashBalance = params.initialCashBalance || stored.initialCashBalance;
+  const invoicePrefix = params.invoicePrefix || stored.invoicePrefix;
+  const invoicePattern = params.invoicePattern || stored.invoicePattern;
+  const startingInvoiceNumber = params.startingInvoiceNumber || stored.startingInvoiceNumber;
+  const fiscalYear = params.fiscalYear || stored.fiscalYear;
 
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
@@ -108,57 +110,49 @@ export default function BankAccountsScreen() {
   };
 
   const formatBalance = (balance: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(balance);
+    return formatCurrencyINR(balance);
   };
 
   const handleAddBankAccount = () => {
-    router.push({
-      pathname: '/auth/banking-details',
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses,
-        allBankAccounts: JSON.stringify(bankAccounts),
-        isAddingSecondary: 'true',
-      }
+    setSignupData({
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      allAddresses,
+      allBankAccounts: JSON.stringify(bankAccounts),
+      isAddingSecondary: 'true',
     });
+    router.push('/auth/banking-details' as any);
   };
 
   const handleEditAccount = (account: BankAccount) => {
-    router.push({
-      pathname: '/auth/banking-details',
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses,
-        allBankAccounts: JSON.stringify(bankAccounts),
-        fromSummary: 'false', // Explicitly set to false when editing from bank-accounts screen
-        editMode: 'true',
-        editAccountId: account.id,
-        prefilledBankId: account.bankId,
-        prefilledAccountHolderName: account.accountHolderName,
-        prefilledAccountNumber: account.accountNumber,
-        prefilledIFSC: account.ifscCode,
-        prefilledAccountType: account.accountType,
-        prefilledInitialBalance: account.initialBalance.toString(),
-        prefilledUpiId: account.upiId || '',
-        prefilledIsPrimary: account.isPrimary.toString(),
-      }
+    setSignupData({
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      allAddresses,
+      allBankAccounts: JSON.stringify(bankAccounts),
+      fromSummary: 'false',
+      editMode: 'true',
+      editAccountId: account.id,
+      prefilledBankId: account.bankId,
+      prefilledAccountHolderName: account.accountHolderName,
+      prefilledAccountNumber: account.accountNumber,
+      prefilledIFSC: account.ifscCode,
+      prefilledAccountType: account.accountType,
+      prefilledInitialBalance: account.initialBalance.toString(),
+      prefilledUpiId: account.upiId || '',
+      prefilledIsPrimary: account.isPrimary.toString(),
     });
+    router.push('/auth/banking-details' as any);
   };
 
   const handleDeleteAccount = (accountId: string) => {
@@ -260,26 +254,23 @@ export default function BankAccountsScreen() {
 
     // Navigate to final setup screen immediately (no delay)
     // Use replace to prevent going back to bank accounts list after continuing
-    router.replace({
-      pathname: '/auth/final-setup',
-      params: {
-        type,
-        value,
-        gstinData,
-        name,
-        businessName,
-        businessType,
-        customBusinessType,
-        allAddresses,
-        allBankAccounts: JSON.stringify(latestBankAccounts),
-        // Pass invoice configuration for returning users
-        initialCashBalance,
-        invoicePrefix,
-        invoicePattern,
-        startingInvoiceNumber,
-        fiscalYear,
-      }
+    setSignupData({
+      type,
+      value,
+      gstinData,
+      name,
+      businessName,
+      businessType,
+      customBusinessType,
+      allAddresses,
+      allBankAccounts: JSON.stringify(latestBankAccounts),
+      initialCashBalance,
+      invoicePrefix,
+      invoicePattern,
+      startingInvoiceNumber,
+      fiscalYear,
     });
+    router.replace('/auth/final-setup' as any);
     
     // Reset navigation flag immediately
     setIsNavigating(false);
@@ -499,26 +490,23 @@ export default function BankAccountsScreen() {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
-              router.replace({
-                pathname: '/auth/address-confirmation',
-                params: {
-                  type,
-                  value,
-                  gstinData,
-                  name,
-                  businessName,
-                  businessType,
-                  customBusinessType,
-                  allAddresses,
-                  allBankAccounts: JSON.stringify(bankAccounts),
-                  // Pass invoice configuration for returning users
-                  initialCashBalance,
-                  invoicePrefix,
-                  invoicePattern,
-                  startingInvoiceNumber,
-                  fiscalYear,
-                }
+              setSignupData({
+                type,
+                value,
+                gstinData,
+                name,
+                businessName,
+                businessType,
+                customBusinessType,
+                allAddresses,
+                allBankAccounts: JSON.stringify(bankAccounts),
+                initialCashBalance,
+                invoicePrefix,
+                invoicePattern,
+                startingInvoiceNumber,
+                fiscalYear,
               });
+              router.replace('/auth/address-confirmation' as any);
             }}
             activeOpacity={0.7}
           >

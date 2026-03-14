@@ -44,6 +44,8 @@ import DateInputWithPicker from '@/components/DateInputWithPicker';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 import ExportModal from '@/components/ExportModal';
 import { ExportConfig } from '@/utils/exportUtils';
+import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { setNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -312,11 +314,11 @@ export default function SalesInvoicesScreen() {
       }
     };
 
+    setNavData('invoiceData', invoiceData);
     debouncedNavigate({
       pathname: '/invoice-details',
       params: {
         invoiceId: invoiceData.id,
-        invoiceData: JSON.stringify(invoiceData)
       }
     });
     
@@ -371,13 +373,7 @@ export default function SalesInvoicesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -883,7 +879,7 @@ export default function SalesInvoicesScreen() {
             { key: 'date', header: 'Date' },
             { key: 'customerName', header: 'Customer' },
             { key: 'itemCount', header: 'Items', format: (v) => String(v || 0) },
-            { key: 'amount', header: 'Amount (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'amount', header: 'Amount (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'paymentStatus', header: 'Payment Status', format: (v) => v === 'paid' ? 'Paid' : v === 'partially_paid' ? 'Partially Paid' : 'Pending' },
             { key: 'paymentMethod', header: 'Payment Method', format: (v) => v === 'cash' ? 'Cash' : v === 'upi' ? 'UPI' : v === 'card' ? 'Card' : 'Others' },
             { key: 'staffName', header: 'Processed By' },
@@ -891,7 +887,7 @@ export default function SalesInvoicesScreen() {
           data: filteredInvoices,
           summaryRows: [
             { label: 'Total Invoices', value: String(filteredInvoices.length) },
-            { label: 'Total Amount', value: `₹${filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Amount', value: formatCurrencyINR(filteredInvoices.reduce((s, i) => s + (i.amount || 0), 0)) },
           ],
         }}
       />

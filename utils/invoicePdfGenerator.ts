@@ -2,7 +2,7 @@ import * as Print from 'expo-print';
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { generateInvoiceLinkURL, generateQRCodeImageTag, InvoiceQRData } from './invoiceQRGenerator';
-import { formatQty } from './formatters';
+import { formatQty, formatCurrencyINR, numberToWords } from './formatters';
 import { EDGE_FUNCTIONS_URL } from '@/lib/supabase';
 
 export interface InvoiceExtrasData {
@@ -26,6 +26,7 @@ export interface InvoiceItemData {
   quantity: number;
   unit?: string;
   rate: number;
+  mrp?: number;
   discount?: number;
   taxRate: number;
   taxAmount: number;
@@ -38,6 +39,7 @@ export interface BusinessInfo {
   name: string;
   address?: string;
   gstin?: string;
+  pan?: string;
   phone?: string;
   email?: string;
 }
@@ -52,14 +54,20 @@ export interface CustomerInfo {
 }
 
 export interface InvoicePDFData {
-  type: 'sale' | 'purchase' | 'return' | 'stock_discrepancy';
+  type: 'sale' | 'purchase' | 'return' | 'stock_discrepancy' | 'purchase_order';
   invoiceNumber: string;
   invoiceDate: string;
   dueDate?: string;
 
   business: BusinessInfo;
+  businessLogo?: string;
   customer?: CustomerInfo;
   supplierName?: string;
+  supplierAddress?: string;
+  supplierGstin?: string;
+
+  shipToName?: string;
+  shipToAddress?: string;
 
   items: InvoiceItemData[];
   subtotal: number;
@@ -70,6 +78,9 @@ export interface InvoicePDFData {
   paidAmount?: number;
   balanceDue?: number;
 
+  additionalCharges?: Array<{ label: string; amount: number }>;
+  bankDetails?: { bankName: string; accountNo: string; ifsc: string; branch?: string };
+
   paymentMethod?: string;
   paymentStatus?: string;
   notes?: string;
@@ -77,14 +88,11 @@ export interface InvoicePDFData {
 
   invoiceExtras?: InvoiceExtrasData;
 
-  // For QR code generation
   invoiceId?: string;
   businessId?: string;
 
-  // For review/rating
   ratingUrl?: string;
 
-  // Stock discrepancy fields
   discrepancyDetails?: {
     productName: string;
     expectedStock: number;
@@ -96,20 +104,12 @@ export interface InvoicePDFData {
   };
 }
 
-function formatCurrency(amount: number): string {
-  const n = amount || 0;
-  const fixed = n.toFixed(4).replace(/\.?0+$/, '');
-  const hasDecimals = fixed.includes('.');
-  return `₹${parseFloat(fixed).toLocaleString('en-IN', { minimumFractionDigits: hasDecimals ? 2 : 0, maximumFractionDigits: 4 })}`;
-}
+const fmt = (amount: number) => formatCurrencyINR(amount);
 
-function formatDate(dateStr: string): string {
+function fmtDate(dateStr: string): string {
   if (!dateStr) return '-';
-  try {
-    return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  } catch {
-    return dateStr;
-  }
+  try { return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
+  catch { return dateStr; }
 }
 
 function getInvoiceTitle(type: string): string {
@@ -117,281 +117,293 @@ function getInvoiceTitle(type: string): string {
     case 'sale': return 'TAX INVOICE';
     case 'purchase': return 'PURCHASE INVOICE';
     case 'return': return 'CREDIT NOTE / RETURN INVOICE';
+    case 'purchase_order': return 'PURCHASE ORDER';
     case 'stock_discrepancy': return 'STOCK DISCREPANCY REPORT';
     default: return 'INVOICE';
   }
 }
 
 function getPaymentMethodLabel(method: string): string {
-  switch (method) {
-    case 'cash': return 'Cash';
-    case 'upi': return 'UPI';
-    case 'card': return 'Card';
-    case 'cheque': return 'Cheque';
-    case 'bank_transfer': return 'Bank Transfer';
-    case 'none': return 'Unpaid';
-    default: return method || '-';
-  }
+  const map: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', cheque: 'Cheque', bank_transfer: 'Bank Transfer', none: 'Unpaid' };
+  return map[method] || method || '-';
 }
 
-function generateExtrasHTML(extras?: InvoiceExtrasData): string {
+function buildExtrasRows(extras?: InvoiceExtrasData): string {
   if (!extras) return '';
-  const fields: string[] = [];
-  if (extras.deliveryNote) fields.push(`<div class="extra-item"><span class="extra-label">Delivery Note</span><span class="extra-value">${extras.deliveryNote}</span></div>`);
-  if (extras.paymentTermsMode) fields.push(`<div class="extra-item"><span class="extra-label">Mode/Terms of Payment</span><span class="extra-value">${extras.paymentTermsMode}</span></div>`);
-  if (extras.referenceNo) fields.push(`<div class="extra-item"><span class="extra-label">Reference No.</span><span class="extra-value">${extras.referenceNo}</span></div>`);
-  if (extras.referenceDate) fields.push(`<div class="extra-item"><span class="extra-label">Date (Ref. No.)</span><span class="extra-value">${extras.referenceDate}</span></div>`);
-  if (extras.buyerOrderNumber) fields.push(`<div class="extra-item"><span class="extra-label">Buyer's Order No.</span><span class="extra-value">${extras.buyerOrderNumber}</span></div>`);
-  if (extras.buyerOrderDate) fields.push(`<div class="extra-item"><span class="extra-label">Date (Buyer's Order)</span><span class="extra-value">${extras.buyerOrderDate}</span></div>`);
-  if (extras.dispatchDocNo) fields.push(`<div class="extra-item"><span class="extra-label">Dispatch Doc No.</span><span class="extra-value">${extras.dispatchDocNo}</span></div>`);
-  if (extras.deliveryNoteDate) fields.push(`<div class="extra-item"><span class="extra-label">Delivery Note Date</span><span class="extra-value">${extras.deliveryNoteDate}</span></div>`);
-  if (extras.dispatchedVia) fields.push(`<div class="extra-item"><span class="extra-label">Dispatched Through</span><span class="extra-value">${extras.dispatchedVia}</span></div>`);
-  if (extras.destination) fields.push(`<div class="extra-item"><span class="extra-label">Destination</span><span class="extra-value">${extras.destination}</span></div>`);
-  if (extras.termsOfDelivery) fields.push(`<div class="extra-item"><span class="extra-label">Terms of Delivery</span><span class="extra-value">${extras.termsOfDelivery}</span></div>`);
-  if (extras.customFields) {
-    for (const cf of extras.customFields) {
-      if (cf.label && cf.value) {
-        fields.push(`<div class="extra-item"><span class="extra-label">${cf.label}</span><span class="extra-value">${cf.value}</span></div>`);
-      }
-    }
+  const pairs: [string, string | undefined][] = [
+    ['Delivery Note', extras.deliveryNote], ['Mode/Terms of Payment', extras.paymentTermsMode],
+    ['Reference No.', extras.referenceNo], ['Ref. Date', extras.referenceDate],
+    ["Buyer's Order No.", extras.buyerOrderNumber], ["Buyer's Order Date", extras.buyerOrderDate],
+    ['Dispatch Doc No.', extras.dispatchDocNo], ['Delivery Note Date', extras.deliveryNoteDate],
+    ['Dispatched Through', extras.dispatchedVia], ['Destination', extras.destination],
+    ['Terms of Delivery', extras.termsOfDelivery],
+  ];
+  if (extras.customFields) extras.customFields.forEach(cf => { if (cf.label && cf.value) pairs.push([cf.label, cf.value]); });
+  const filled = pairs.filter(([, v]) => v);
+  if (filled.length === 0) return '';
+  const rows: string[] = [];
+  for (let i = 0; i < filled.length; i += 2) {
+    const [l1, v1] = filled[i];
+    const [l2, v2] = filled[i + 1] || ['', ''];
+    rows.push(`<tr><td class="lbl">${l1}</td><td>${v1}</td>${l2 ? `<td class="lbl">${l2}</td><td>${v2}</td>` : '<td class="lbl"></td><td></td>'}</tr>`);
   }
-  if (fields.length === 0) return '';
-  return `<div class="extras-section"><div class="extras-grid">${fields.join('')}</div></div>`;
+  return `<table class="mt">${rows.join('')}</table>`;
 }
 
-function generateRatingHTML(data: InvoicePDFData): string {
-  if (data.type === 'stock_discrepancy') return '';
-  
-  const ratingUrl = data.ratingUrl || (data.invoiceId && data.businessId
-    ? `${EDGE_FUNCTIONS_URL}/invoice-link?invoice_id=${data.invoiceId}&business_id=${data.businessId}&type=${data.type}&action=rate`
-    : '');
-  
-  if (!ratingUrl) return '';
-
-  return `
-    <div class="rating-section">
-      <p class="rating-title">How was your experience?</p>
-      <div class="rating-stars">
-        <a href="${ratingUrl}&rating=1" class="star">★</a>
-        <a href="${ratingUrl}&rating=2" class="star">★</a>
-        <a href="${ratingUrl}&rating=3" class="star">★</a>
-        <a href="${ratingUrl}&rating=4" class="star">★</a>
-        <a href="${ratingUrl}&rating=5" class="star">★</a>
-      </div>
-      <p class="rating-label">Tap a star to rate this ${data.type === 'sale' ? 'purchase' : data.type === 'purchase' ? 'supplier' : 'return'}</p>
-    </div>`;
+function buildTaxBreakdown(items: InvoiceItemData[]): string {
+  const hsnMap = new Map<string, { taxableValue: number; cgst: number; sgst: number; cess: number; totalTax: number; rate: number }>();
+  for (const item of items) {
+    const key = item.hsnCode || '-';
+    const existing = hsnMap.get(key) || { taxableValue: 0, cgst: 0, sgst: 0, cess: 0, totalTax: 0, rate: item.taxRate };
+    const lineBase = item.rate * item.quantity * (1 - (item.discount || 0) / 100);
+    const halfGst = lineBase * (item.taxRate / 100) / 2;
+    existing.taxableValue += lineBase;
+    existing.cgst += halfGst;
+    existing.sgst += halfGst;
+    existing.cess += item.cessAmount || 0;
+    existing.totalTax += halfGst * 2 + (item.cessAmount || 0);
+    hsnMap.set(key, existing);
+  }
+  if (hsnMap.size === 0) return '';
+  let rows = '';
+  let totTaxable = 0, totCgst = 0, totSgst = 0, totCess = 0, totAll = 0;
+  hsnMap.forEach((v, hsn) => {
+    totTaxable += v.taxableValue; totCgst += v.cgst; totSgst += v.sgst; totCess += v.cess; totAll += v.totalTax;
+    rows += `<tr><td>${hsn}</td><td class="r">${fmt(v.taxableValue)}</td><td class="r">${v.rate / 2}%</td><td class="r">${fmt(v.cgst)}</td><td class="r">${v.rate / 2}%</td><td class="r">${fmt(v.sgst)}</td><td class="r">${fmt(v.cess)}</td><td class="r">${fmt(v.totalTax)}</td></tr>`;
+  });
+  rows += `<tr class="totrow"><td><b>Total</b></td><td class="r"><b>${fmt(totTaxable)}</b></td><td></td><td class="r"><b>${fmt(totCgst)}</b></td><td></td><td class="r"><b>${fmt(totSgst)}</b></td><td class="r"><b>${fmt(totCess)}</b></td><td class="r"><b>${fmt(totAll)}</b></td></tr>`;
+  return `<table class="tax-tbl"><thead><tr><th>HSN/SAC</th><th class="r">Taxable Value</th><th class="r">CGST Rate</th><th class="r">CGST Amt</th><th class="r">SGST Rate</th><th class="r">SGST Amt</th><th class="r">CESS Amt</th><th class="r">Total Tax</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function generateInvoiceHTML(data: InvoicePDFData): string {
   const title = getInvoiceTitle(data.type);
   const isDiscrepancy = data.type === 'stock_discrepancy';
+  const isPO = data.type === 'purchase_order';
+  const hasMrp = data.items.some(i => (i.mrp || 0) > 0);
+  const hasDisc = data.items.some(i => (i.discount || 0) > 0);
 
   let qrCodeHTML = '';
   if (data.invoiceId && data.businessId && !isDiscrepancy) {
-    const qrData: InvoiceQRData = {
-      invoiceId: data.invoiceId,
-      businessId: data.businessId,
-      type: data.type as 'sale' | 'purchase' | 'return',
-    };
+    const qrData: InvoiceQRData = { invoiceId: data.invoiceId, businessId: data.businessId, type: data.type as any };
     const linkUrl = generateInvoiceLinkURL(qrData);
-    qrCodeHTML = `
-      <div class="qr-section">
-        ${generateQRCodeImageTag(linkUrl, 100)}
-        <p class="qr-label">Scan to view on Manager</p>
-      </div>`;
+    qrCodeHTML = generateQRCodeImageTag(linkUrl, 80);
   }
 
-  const ratingHTML = generateRatingHTML(data);
+  const logoHTML = data.businessLogo ? `<img src="${data.businessLogo}" style="max-height:50px;max-width:120px;object-fit:contain;" />` : '';
 
   const itemRows = data.items.map((item, idx) => {
     const lineBase = item.rate * item.quantity * (1 - (item.discount || 0) / 100);
     const gst = lineBase * (item.taxRate / 100);
     const total = lineBase + gst + (item.cessAmount || 0);
-    return `
-      <tr>
-        <td class="center">${idx + 1}</td>
-        <td>
-          <strong>${item.name}</strong>
-          ${item.hsnCode ? `<br><span class="muted">HSN: ${item.hsnCode}</span>` : ''}
-          ${item.reason ? `<br><span class="muted">Reason: ${item.reason}</span>` : ''}
-        </td>
-        <td class="center">${formatQty(item.quantity)}${item.unit ? ` ${item.unit}` : ''}</td>
-        <td class="right">${formatCurrency(item.rate)}</td>
-        ${(item.discount || 0) > 0 ? `<td class="center">${item.discount}%</td>` : `<td class="center">-</td>`}
-        <td class="center">${item.taxRate}%</td>
-        <td class="right"><strong>${formatCurrency(total)}</strong></td>
-      </tr>`;
+    return `<tr>
+      <td class="c">${idx + 1}</td>
+      <td>${item.name}${item.hsnCode ? `<br><span class="sm">HSN: ${item.hsnCode}</span>` : ''}${item.reason ? `<br><span class="sm">Reason: ${item.reason}</span>` : ''}</td>
+      <td class="c">${formatQty(item.quantity)}${item.unit ? ' ' + item.unit : ''}</td>
+      <td class="r">${fmt(item.rate)}</td>
+      ${hasMrp ? `<td class="r">${item.mrp ? fmt(item.mrp) : '-'}</td>` : ''}
+      ${hasDisc ? `<td class="c">${(item.discount || 0) > 0 ? item.discount + '%' : '-'}</td>` : ''}
+      <td class="c">${item.taxRate}%</td>
+      <td class="r"><b>${fmt(total)}</b></td>
+    </tr>`;
   }).join('');
 
-  const hasDiscount = data.items.some(i => (i.discount || 0) > 0);
+  const addlChargesHTML = (data.additionalCharges || []).filter(c => c.amount !== 0).map(c =>
+    `<tr><td class="lbl">${c.label}</td><td class="r">${fmt(c.amount)}</td></tr>`
+  ).join('');
+
+  const bankHTML = data.bankDetails ? `
+    <div class="bank-box">
+      <div class="bank-title">Bank Details</div>
+      <div>Bank: <b>${data.bankDetails.bankName}</b></div>
+      <div>A/C No: <b>${data.bankDetails.accountNo}</b></div>
+      <div>IFSC: <b>${data.bankDetails.ifsc}</b></div>
+      ${data.bankDetails.branch ? `<div>Branch: <b>${data.bankDetails.branch}</b></div>` : ''}
+    </div>` : '';
 
   let discrepancyHTML = '';
   if (isDiscrepancy && data.discrepancyDetails) {
     const d = data.discrepancyDetails;
-    discrepancyHTML = `
-      <div class="discrepancy-section">
-        <h3>Discrepancy Details</h3>
-        <table class="details-table">
-          <tr><td class="detail-label">Product</td><td>${d.productName}</td></tr>
-          <tr><td class="detail-label">Expected Stock</td><td>${d.expectedStock}</td></tr>
-          <tr><td class="detail-label">Actual Stock</td><td>${d.actualStock}</td></tr>
-          <tr><td class="detail-label">Discrepancy</td><td style="color:#DC2626;font-weight:700">${d.discrepancyQty}</td></tr>
-          <tr><td class="detail-label">Value Impact</td><td>${formatCurrency(d.value)}</td></tr>
-          ${d.reason ? `<tr><td class="detail-label">Reason</td><td>${d.reason}</td></tr>` : ''}
-          ${d.investigationNotes ? `<tr><td class="detail-label">Investigation Notes</td><td>${d.investigationNotes}</td></tr>` : ''}
-        </table>
-      </div>`;
+    discrepancyHTML = `<table class="mt"><tr><td class="lbl">Product</td><td>${d.productName}</td><td class="lbl">Expected</td><td>${d.expectedStock}</td></tr>
+      <tr><td class="lbl">Actual</td><td>${d.actualStock}</td><td class="lbl">Discrepancy</td><td style="color:#DC2626;font-weight:700">${d.discrepancyQty}</td></tr>
+      <tr><td class="lbl">Value Impact</td><td>${fmt(d.value)}</td><td class="lbl">Reason</td><td>${d.reason || '-'}</td></tr>
+      ${d.investigationNotes ? `<tr><td class="lbl">Investigation Notes</td><td colspan="3">${d.investigationNotes}</td></tr>` : ''}</table>`;
   }
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Helvetica Neue', Arial, sans-serif; color: #1F2937; font-size: 12px; line-height: 1.5; padding: 30px; }
-  .invoice { max-width: 800px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; border-bottom: 3px solid #3F66AC; padding-bottom: 16px; }
-  .header-left h1 { font-size: 22px; color: #3F66AC; margin-bottom: 4px; letter-spacing: 1px; }
-  .header-left .invoice-num { font-size: 16px; font-weight: 700; color: #1F2937; }
-  .header-right { text-align: right; }
-  .header-right .date-label { font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; }
-  .header-right .date-value { font-size: 14px; font-weight: 600; }
-  .parties { display: flex; gap: 40px; margin-bottom: 20px; }
-  .party { flex: 1; }
-  .party-label { font-size: 10px; color: #6B7280; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; margin-bottom: 6px; }
-  .party-name { font-size: 14px; font-weight: 700; margin-bottom: 2px; }
-  .party-detail { font-size: 11px; color: #6B7280; line-height: 1.6; }
-  .extras-section { margin-bottom: 16px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 6px; padding: 12px 16px; }
-  .extras-grid { display: flex; flex-wrap: wrap; gap: 8px 24px; }
-  .extra-item { display: flex; gap: 6px; }
-  .extra-label { font-size: 10px; color: #6B7280; text-transform: uppercase; font-weight: 600; min-width: 100px; }
-  .extra-value { font-size: 11px; font-weight: 500; color: #1F2937; }
-  .items-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-  .items-table th { background: #F3F4F6; padding: 10px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6B7280; font-weight: 700; border-bottom: 2px solid #E5E7EB; }
-  .items-table td { padding: 10px 8px; border-bottom: 1px solid #F3F4F6; font-size: 11px; vertical-align: top; }
-  .items-table tr:nth-child(even) td { background: #FAFBFC; }
-  .center { text-align: center; }
-  .right { text-align: right; }
-  .muted { color: #9CA3AF; font-size: 10px; }
-  .totals { margin-left: auto; width: 280px; margin-bottom: 20px; }
-  .total-row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 12px; }
-  .total-row.grand { border-top: 2px solid #3F66AC; margin-top: 8px; padding-top: 10px; font-size: 14px; font-weight: 700; color: #3F66AC; }
-  .total-row.due { background: #FEF2F2; padding: 8px 12px; border-radius: 4px; color: #DC2626; font-weight: 700; margin-top: 4px; }
-  .footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 24px; padding-top: 16px; border-top: 1px solid #E5E7EB; }
-  .footer-meta { font-size: 10px; color: #6B7280; }
-  .footer-meta span { display: block; margin-bottom: 2px; }
-  .qr-section { text-align: center; }
-  .qr-label { font-size: 9px; color: #6B7280; margin-top: 4px; }
-  .notes { background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 11px; color: #92400E; font-style: italic; }
-  .discrepancy-section { margin-bottom: 20px; }
-  .discrepancy-section h3 { font-size: 14px; margin-bottom: 10px; color: #3F66AC; }
-  .details-table { width: 100%; border-collapse: collapse; }
-  .details-table td { padding: 8px 12px; border: 1px solid #E5E7EB; font-size: 12px; }
-  .detail-label { font-weight: 600; background: #F9FAFB; width: 200px; color: #6B7280; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-  .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-  .status-paid { background: #ECFDF5; color: #059669; }
-  .status-pending { background: #FFFBEB; color: #D97706; }
-  .status-partial { background: #FEF2F2; color: #DC2626; }
-  .rating-section { text-align: center; margin-top: 20px; padding: 16px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; }
-  .rating-title { font-size: 13px; font-weight: 700; color: #1F2937; margin-bottom: 8px; }
-  .rating-stars { display: flex; justify-content: center; gap: 8px; margin-bottom: 6px; }
-  .rating-stars .star { font-size: 28px; color: #D1D5DB; text-decoration: none; cursor: pointer; transition: color 0.2s; }
-  .rating-stars .star:hover { color: #F59E0B; }
-  .rating-label { font-size: 10px; color: #6B7280; }
-</style>
-</head>
-<body>
-<div class="invoice">
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <h1>${title}</h1>
-      <div class="invoice-num">#${data.invoiceNumber}</div>
-      ${data.paymentStatus ? `<span class="status-badge status-${data.paymentStatus === 'paid' ? 'paid' : data.paymentStatus === 'partial' ? 'partial' : 'pending'}">${data.paymentStatus.toUpperCase()}</span>` : ''}
-    </div>
-    <div class="header-right">
-      <div class="date-label">Invoice Date</div>
-      <div class="date-value">${formatDate(data.invoiceDate)}</div>
-      ${data.dueDate ? `<div class="date-label" style="margin-top:8px">Due Date</div><div class="date-value">${formatDate(data.dueDate)}</div>` : ''}
-    </div>
-  </div>
-
-  <!-- Parties -->
-  <div class="parties">
-    <div class="party">
-      <div class="party-label">${data.type === 'purchase' ? 'BILL TO' : 'FROM'}</div>
-      <div class="party-name">${data.business.name}</div>
-      ${data.business.address ? `<div class="party-detail">${data.business.address}</div>` : ''}
-      ${data.business.gstin ? `<div class="party-detail">GSTIN: ${data.business.gstin}</div>` : ''}
-      ${data.business.phone ? `<div class="party-detail">Phone: ${data.business.phone}</div>` : ''}
-    </div>
-    ${data.type === 'purchase' && data.supplierName ? `
-    <div class="party">
-      <div class="party-label">FROM (SUPPLIER)</div>
+  const supplierBlock = (data.type === 'purchase' || isPO) && data.supplierName ? `
+    <td style="width:50%;vertical-align:top;padding:8px;">
+      <div class="sec-title">${isPO ? 'TO (SUPPLIER)' : 'FROM (SUPPLIER)'}</div>
       <div class="party-name">${data.supplierName}</div>
-    </div>` : ''}
-    ${data.customer ? `
-    <div class="party">
-      <div class="party-label">${data.type === 'purchase' ? '' : 'BILL TO'}</div>
+      ${data.supplierAddress ? `<div class="party-det">${data.supplierAddress}</div>` : ''}
+      ${data.supplierGstin ? `<div class="party-det">GSTIN: ${data.supplierGstin}</div>` : ''}
+    </td>` : '';
+
+  const customerBlock = data.customer ? `
+    <td style="width:50%;vertical-align:top;padding:8px;">
+      <div class="sec-title">BILL TO</div>
       <div class="party-name">${data.customer.businessName || data.customer.name}</div>
-      ${data.customer.address ? `<div class="party-detail">${data.customer.address}</div>` : ''}
-      ${data.customer.gstin ? `<div class="party-detail">GSTIN: ${data.customer.gstin}</div>` : ''}
-      ${data.customer.phone ? `<div class="party-detail">Phone: ${data.customer.phone}</div>` : ''}
-    </div>` : ''}
+      ${data.customer.address ? `<div class="party-det">${data.customer.address}</div>` : ''}
+      ${data.customer.gstin ? `<div class="party-det">GSTIN: ${data.customer.gstin}</div>` : ''}
+      ${data.customer.phone ? `<div class="party-det">Phone: ${data.customer.phone}</div>` : ''}
+    </td>` : '';
+
+  const shipToBlock = data.shipToName ? `
+    <td style="width:50%;vertical-align:top;padding:8px;">
+      <div class="sec-title">SHIP TO</div>
+      <div class="party-name">${data.shipToName}</div>
+      ${data.shipToAddress ? `<div class="party-det">${data.shipToAddress}</div>` : ''}
+    </td>` : '';
+
+  const amountWords = numberToWords(data.totalAmount);
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;color:#000;font-size:10px;line-height:1.4;background:#fff}
+@page{size:A4;margin:5mm}
+@media print{html,body{margin:0;padding:0;width:100%}.page{box-shadow:none;padding:12px}}
+.page{max-width:210mm;margin:0 auto;padding:16px}
+table{border-collapse:collapse;width:100%}
+.mt td,.mt th{border:1px solid #000;padding:5px 6px;font-size:9px;vertical-align:top}
+.mt .lbl{font-weight:700;background:#f5f5f5;width:22%;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;color:#333}
+.hdr{text-align:center;padding:10px 0 6px;border-bottom:2px solid #000}
+.hdr h1{font-size:18px;color:#3f66ac;margin:0;letter-spacing:1px}
+.hdr .sub{font-size:9px;color:#555;margin-top:2px}
+.logo-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding:0 4px}
+.sec-title{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#555;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px}
+.party-name{font-size:11px;font-weight:700;margin-bottom:2px}
+.party-det{font-size:9px;color:#444;line-height:1.5}
+.items-tbl th{background:#f5f5f5;padding:6px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;color:#333;font-weight:700;border:1px solid #000}
+.items-tbl td{padding:5px;border:1px solid #000;font-size:9px}
+.c{text-align:center}.r{text-align:right}
+.sm{color:#888;font-size:8px}
+.tax-tbl th{background:#f5f5f5;padding:5px;font-size:8px;text-transform:uppercase;border:1px solid #000;font-weight:700}
+.tax-tbl td{padding:5px;border:1px solid #000;font-size:8px}
+.tax-tbl .totrow td{background:#e8e8e8;font-weight:700}
+.amt-words{background:#f5f5f5;border:1px solid #000;padding:6px 8px;font-size:9px;font-weight:700;margin:8px 0}
+.totals-box{width:240px;margin-left:auto}
+.totals-box td{padding:4px 6px;font-size:10px;border:none}
+.totals-box .grand td{border-top:2px solid #000;font-size:12px;font-weight:700;padding-top:8px}
+.totals-box .due td{color:#DC2626;font-weight:700}
+.bank-box{border:1px solid #000;padding:8px;font-size:9px;margin-top:8px;max-width:300px}
+.bank-title{font-weight:700;font-size:8px;text-transform:uppercase;margin-bottom:4px;color:#555}
+.decl{border:1px solid #000;padding:6px 8px;font-size:8px;margin-top:10px;color:#444}
+.sig-area{display:flex;justify-content:space-between;margin-top:20px;padding-top:10px}
+.sig-block{text-align:center;width:200px}
+.sig-line{border-top:1px solid #000;margin-top:40px;padding-top:4px;font-size:8px;font-weight:700}
+.qr-footer{display:flex;justify-content:center;gap:16px;margin-top:10px;align-items:flex-start}
+.qr-item{text-align:center}
+.qr-item .qr-lbl{font-size:7px;color:#888;margin-top:2px}
+.foot-text{text-align:center;font-size:7px;color:#888;margin-top:8px;border-top:1px solid #ddd;padding-top:6px}
+.notes-box{background:#FFFBEB;border:1px solid #FDE68A;padding:6px 8px;font-size:9px;color:#92400E;font-style:italic;margin:8px 0}
+</style></head><body><div class="page">
+
+  <div class="logo-row">${logoHTML}<div></div></div>
+
+  <div class="hdr">
+    <h1>${title}</h1>
+    ${data.paymentStatus && !isPO ? `<div class="sub">${data.paymentStatus.toUpperCase()}</div>` : ''}
   </div>
 
-  ${generateExtrasHTML(data.invoiceExtras)}
+  <!-- Business & Invoice Details -->
+  <table class="mt" style="margin-top:8px">
+    <tr>
+      <td style="width:50%;vertical-align:top;padding:8px;">
+        <div class="sec-title">${data.type === 'purchase' || isPO ? 'FROM' : 'INVOICED BY'}</div>
+        <div class="party-name">${data.business.name}</div>
+        ${data.business.address ? `<div class="party-det">${data.business.address}</div>` : ''}
+        ${data.business.gstin ? `<div class="party-det">GSTIN: ${data.business.gstin}</div>` : ''}
+        ${data.business.pan ? `<div class="party-det">PAN: ${data.business.pan}</div>` : ''}
+        ${data.business.phone ? `<div class="party-det">Phone: ${data.business.phone}</div>` : ''}
+        ${data.business.email ? `<div class="party-det">Email: ${data.business.email}</div>` : ''}
+      </td>
+      <td style="width:50%;padding:0;vertical-align:top;">
+        <table class="mt" style="margin:0">
+          <tr><td class="lbl">Invoice No.</td><td>${data.invoiceNumber}</td></tr>
+          <tr><td class="lbl">Date</td><td>${fmtDate(data.invoiceDate)}</td></tr>
+          ${data.dueDate ? `<tr><td class="lbl">Due Date</td><td>${fmtDate(data.dueDate)}</td></tr>` : ''}
+          ${data.paymentMethod ? `<tr><td class="lbl">Payment</td><td>${getPaymentMethodLabel(data.paymentMethod)}</td></tr>` : ''}
+          ${data.staffName ? `<tr><td class="lbl">Handled By</td><td>${data.staffName}</td></tr>` : ''}
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Buyer / Supplier / Ship To -->
+  <table class="mt" style="margin-top:0">
+    <tr>
+      ${supplierBlock || customerBlock || '<td></td>'}
+      ${supplierBlock ? (customerBlock || '<td></td>') : (shipToBlock || '<td></td>')}
+    </tr>
+    ${supplierBlock && shipToBlock ? `<tr>${shipToBlock}<td></td></tr>` : ''}
+  </table>
+
+  ${buildExtrasRows(data.invoiceExtras)}
 
   ${discrepancyHTML}
 
   ${!isDiscrepancy ? `
-  <!-- Items Table -->
-  <table class="items-table">
-    <thead>
-      <tr>
-        <th class="center" style="width:30px">#</th>
-        <th style="min-width:150px">Item Description</th>
-        <th class="center" style="width:60px">Qty</th>
-        <th class="right" style="width:80px">Rate</th>
-        <th class="center" style="width:50px">Disc.</th>
-        <th class="center" style="width:50px">GST</th>
-        <th class="right" style="width:90px">Amount</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemRows}
-    </tbody>
+  <!-- Items -->
+  <table class="items-tbl" style="margin-top:8px">
+    <thead><tr>
+      <th class="c" style="width:25px">Sl</th>
+      <th>Description of Goods / Services</th>
+      <th class="c" style="width:55px">Qty</th>
+      <th class="r" style="width:65px">Rate</th>
+      ${hasMrp ? '<th class="r" style="width:60px">MRP</th>' : ''}
+      ${hasDisc ? '<th class="c" style="width:45px">Disc.</th>' : ''}
+      <th class="c" style="width:40px">GST%</th>
+      <th class="r" style="width:75px">Amount</th>
+    </tr></thead>
+    <tbody>${itemRows}</tbody>
   </table>
 
-  <!-- Totals -->
-  <div class="totals">
-    <div class="total-row"><span>Subtotal</span><span>${formatCurrency(data.subtotal)}</span></div>
-    ${(data.discount || 0) > 0 ? `<div class="total-row"><span>Discount</span><span>-${formatCurrency(data.discount || 0)}</span></div>` : ''}
-    <div class="total-row"><span>GST</span><span>${formatCurrency(data.taxAmount)}</span></div>
-    ${(data.cessAmount || 0) > 0 ? `<div class="total-row"><span>Cess</span><span>${formatCurrency(data.cessAmount || 0)}</span></div>` : ''}
-    <div class="total-row grand"><span>Total</span><span>${formatCurrency(data.totalAmount)}</span></div>
-    ${(data.paidAmount ?? 0) > 0 ? `<div class="total-row"><span>Paid</span><span>${formatCurrency(data.paidAmount || 0)}</span></div>` : ''}
-    ${(data.balanceDue ?? 0) > 0 ? `<div class="total-row due"><span>Balance Due</span><span>${formatCurrency(data.balanceDue || 0)}</span></div>` : ''}
+  <div class="amt-words">${amountWords}</div>
+
+  <!-- Tax Breakdown -->
+  ${buildTaxBreakdown(data.items)}
+
+  <!-- Additional Charges + Totals -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px">
+    <div style="flex:1">${bankHTML}</div>
+    <table class="totals-box">
+      <tr><td>Subtotal</td><td class="r">${fmt(data.subtotal)}</td></tr>
+      ${(data.discount || 0) > 0 ? `<tr><td>Discount</td><td class="r">-${fmt(data.discount || 0)}</td></tr>` : ''}
+      <tr><td>Tax (GST)</td><td class="r">${fmt(data.taxAmount)}</td></tr>
+      ${(data.cessAmount || 0) > 0 ? `<tr><td>Cess</td><td class="r">${fmt(data.cessAmount || 0)}</td></tr>` : ''}
+      ${addlChargesHTML}
+      <tr class="grand"><td>Grand Total</td><td class="r">${fmt(data.totalAmount)}</td></tr>
+      ${(data.paidAmount ?? 0) > 0 ? `<tr><td>Paid</td><td class="r">${fmt(data.paidAmount || 0)}</td></tr>` : ''}
+      ${(data.balanceDue ?? 0) > 0 ? `<tr class="due"><td>Balance Due</td><td class="r">${fmt(data.balanceDue || 0)}</td></tr>` : ''}
+    </table>
   </div>` : ''}
 
-  ${data.notes ? `<div class="notes"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+  ${data.notes ? `<div class="notes-box"><b>Notes:</b> ${data.notes}</div>` : ''}
 
-  ${ratingHTML}
-
-  <!-- Footer -->
-  <div class="footer">
-    <div class="footer-meta">
-      ${data.paymentMethod ? `<span>Payment: ${getPaymentMethodLabel(data.paymentMethod)}</span>` : ''}
-      ${data.staffName ? `<span>Recorded by: ${data.staffName}</span>` : ''}
-      <span>Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-    </div>
-    ${qrCodeHTML}
+  <div class="decl">
+    <b>Declaration:</b> We declare that this invoice shows the actual price of the goods/services described and that all particulars are true and correct.
+    ${isPO ? '<br><b>Terms & Conditions:</b> Goods to be delivered as per agreed schedule. Quality must meet specified standards. Payment as per agreed terms.' : ''}
   </div>
-</div>
-</body>
-</html>`;
+
+  <div class="sig-area">
+    <div class="sig-block">
+      <div class="sig-line">Receiver's Signature</div>
+    </div>
+    <div class="sig-block">
+      <div class="sig-line">for ${data.business.name}<br>Authorised Signatory</div>
+    </div>
+  </div>
+
+  <div class="qr-footer">
+    ${qrCodeHTML ? `<div class="qr-item">${qrCodeHTML}<div class="qr-lbl">Scan to view digitally</div></div>` : ''}
+    <div class="qr-item" style="font-size:8px;color:#888;padding-top:10px">
+      Generated on ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+    </div>
+  </div>
+
+  <div class="foot-text">Computer Generated Invoice &mdash; Powered by Manager &bull; getmanager.in</div>
+
+</div></body></html>`;
 }
 
 export async function generateInvoicePDF(data: InvoicePDFData): Promise<string> {

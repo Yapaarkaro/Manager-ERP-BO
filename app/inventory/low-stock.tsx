@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   Search,
@@ -32,6 +33,7 @@ import {
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { getLowStockProducts, getSuppliers, invalidateApiCache } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -177,8 +179,8 @@ export default function LowStockScreen() {
           item.name.toLowerCase().includes(q) ||
           item.category.toLowerCase().includes(q) ||
           item.supplierName.toLowerCase().includes(q) ||
-          item.hsnCode.includes(query) ||
-          item.barcode.includes(query)
+          (item.hsnCode || '').toLowerCase().includes(q) ||
+          (item.barcode || '').toLowerCase().includes(q)
       );
     }
     if (activeFilters.urgencyLevel.length > 0)
@@ -345,9 +347,9 @@ export default function LowStockScreen() {
       supplierId: i.supplierId,
       supplierName: i.supplierName,
     }));
+    setNavData('autoPoItems', poItems);
     safeRouter.push({
       pathname: '/purchasing/select-supplier',
-      params: { autoPoItems: JSON.stringify(poItems) },
     });
   };
 
@@ -383,9 +385,9 @@ export default function LowStockScreen() {
       };
     });
 
+    setNavData('supplierGroups', supplierGroups);
     safeRouter.push({
       pathname: '/inventory/auto-po-review' as any,
-      params: { supplierGroups: JSON.stringify(supplierGroups) },
     });
   };
 
@@ -408,8 +410,7 @@ export default function LowStockScreen() {
   };
   const getUrgencyText = (u: string) => u.toUpperCase();
 
-  const formatPrice = (p: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 3 }).format(p);
+  const formatPrice = (p: number) => formatCurrencyINR(p, 3, 0);
 
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });

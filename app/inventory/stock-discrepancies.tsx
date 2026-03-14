@@ -31,9 +31,11 @@ import {
   Download
 } from 'lucide-react-native';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
+import { setNavData } from '@/utils/navStore';
 import { invalidateApiCache } from '@/services/backendApi';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
+import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -247,23 +249,9 @@ export default function StockDiscrepanciesScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 3, 0);
 
-  const formatPrice = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
-  };
+  const formatPrice = (amount: number) => formatCurrencyINR(amount, 3, 0);
 
   const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
     setActiveFilters(prev => {
@@ -397,11 +385,11 @@ export default function StockDiscrepanciesScreen() {
         }
       };
 
+      setNavData('invoiceData', invoiceData);
       debouncedNavigate({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
-          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }
@@ -1071,7 +1059,7 @@ export default function StockDiscrepanciesScreen() {
             { key: 'expectedStock', header: 'Expected Stock', format: (v) => String(v || 0) },
             { key: 'actualStock', header: 'Actual Stock', format: (v) => String(v || 0) },
             { key: 'discrepancyQuantity', header: 'Discrepancy Qty', format: (v) => String(v || 0) },
-            { key: 'discrepancyValue', header: 'Value (₹)', format: (v) => Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }) },
+            { key: 'discrepancyValue', header: 'Value (₹)', format: (v) => formatIndianNumber(v || 0) },
             { key: 'status', header: 'Status', format: (v) => v ? v.charAt(0).toUpperCase() + v.slice(1) : '' },
             { key: 'priority', header: 'Priority', format: (v) => v ? v.charAt(0).toUpperCase() + v.slice(1) : '' },
             { key: 'reportedDate', header: 'Reported Date' },
@@ -1081,7 +1069,7 @@ export default function StockDiscrepanciesScreen() {
           data: filteredDiscrepancies,
           summaryRows: [
             { label: 'Total Discrepancies', value: String(filteredDiscrepancies.length) },
-            { label: 'Total Value', value: `₹${filteredDiscrepancies.reduce((s, d) => s + (d.discrepancyValue || 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
+            { label: 'Total Value', value: formatCurrencyINR(filteredDiscrepancies.reduce((s, d) => s + (d.discrepancyValue || 0), 0)) },
           ],
         }}
       />

@@ -7,12 +7,15 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { AuthCheckSkeleton } from '@/components/SkeletonLoader';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { mapLocationsToAddresses } from '@/utils/dataStore';
+import { setSignupData, clearSignupData } from '@/utils/signupStore';
+import { WEBSITE_URL } from '@/lib/config';
 import { 
   FileText, 
   Smartphone, 
@@ -102,6 +105,10 @@ export default function OnboardingScreen() {
         }
         if (cancelled) return;
         if (!session?.user) {
+          if (Platform.OS === 'web') {
+            window.location.href = WEBSITE_URL;
+            return;
+          }
           return;
         }
 
@@ -120,14 +127,29 @@ export default function OnboardingScreen() {
         if (cancelled) return;
 
         const { data: userData } = await withTimeout(
-          Promise.resolve(supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle()),
+          Promise.resolve(supabase.from('users').select('business_id, role').eq('id', session.user.id).maybeSingle()),
           5000,
           'Index: check user business'
-        ) as { data: { business_id: string } | null };
+        ) as { data: { business_id: string; role: string } | null };
         if (cancelled) return;
 
         if (userData?.business_id) {
-          // Check if onboarding is complete
+          const isStaffUser = userData.role === 'Staff';
+
+          // Staff members skip the onboarding check — they don't go through onboarding
+          if (isStaffUser) {
+            try {
+              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+              await Promise.race([
+                prefetchBusinessData(),
+                new Promise(r => setTimeout(r, 3000)),
+              ]);
+            } catch {}
+            router.replace('/dashboard');
+            return;
+          }
+
+          // Check if onboarding is complete (owners only)
           const { data: bizData } = await withTimeout(
             Promise.resolve(
               supabase.from('businesses').select('is_onboarding_complete').eq('id', userData.business_id).single()
@@ -167,7 +189,6 @@ export default function OnboardingScreen() {
         if (progress?.current_step && progress.current_step !== 'complete') {
           const step = progress.current_step;
 
-          // Early steps: sign out and restart from mobile so user re-authenticates
           const earlySteps = ['mobile', 'mobileOtp', 'otp'];
           if (earlySteps.includes(step)) {
             await supabase.auth.signOut();
@@ -175,7 +196,8 @@ export default function OnboardingScreen() {
             return;
           }
 
-          const resumeParams: Record<string, string> = {
+          clearSignupData();
+          setSignupData({
             mobile: progress.phone || '',
             type: progress.tax_id_type || '',
             value: progress.tax_id_value || '',
@@ -183,21 +205,21 @@ export default function OnboardingScreen() {
             businessName: progress.business_name || '',
             businessType: progress.business_type || '',
             gstinData: progress.gstin_data ? JSON.stringify(progress.gstin_data) : '',
-          };
+          });
 
           const needsAddresses = ['primaryAddress', 'address', 'addressManagement', 'primaryBank', 'banking', 'bankManagement', 'finalSetup', 'businessSummary'];
           if (needsAddresses.includes(step) && progress.business_id) {
             try {
               const { data: locations } = await supabase.from('locations').select('*').eq('business_id', progress.business_id).eq('is_deleted', false);
-              resumeParams.allAddresses = JSON.stringify(mapLocationsToAddresses(locations || []));
-            } catch { resumeParams.allAddresses = '[]'; }
+              setSignupData({ allAddresses: JSON.stringify(mapLocationsToAddresses(locations || [])) });
+            } catch { setSignupData({ allAddresses: '[]' }); }
           }
           const needsBanks = ['bankManagement', 'finalSetup', 'businessSummary'];
           if (needsBanks.includes(step) && progress.business_id) {
             try {
               const { data: banks } = await supabase.from('bank_accounts').select('*').eq('business_id', progress.business_id);
-              resumeParams.allBankAccounts = JSON.stringify(banks || []);
-            } catch { resumeParams.allBankAccounts = '[]'; }
+              setSignupData({ allBankAccounts: JSON.stringify(banks || []) });
+            } catch { setSignupData({ allBankAccounts: '[]' }); }
           }
 
           const stepToRoute: Record<string, string> = {
@@ -218,13 +240,16 @@ export default function OnboardingScreen() {
           };
           const route = stepToRoute[step];
           if (route) {
-            router.replace({ pathname: route as any, params: resumeParams });
+            router.replace(route as any);
             return;
           }
         }
         // Session exists but no business and no progress - show onboarding
       } catch {
-        // Auth/backend check failed - show onboarding
+        if (Platform.OS === 'web') {
+          window.location.href = WEBSITE_URL;
+          return;
+        }
       } finally {
         if (!cancelled) setIsCheckingAuth(false);
       }

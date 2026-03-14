@@ -8,9 +8,11 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Building2, User, Phone, Mail, MapPin, Calendar, Clock, IndianRupee, FileText, CreditCard, TriangleAlert as AlertTriangle, TrendingUp, TrendingDown, Eye, Download, Share } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData } from '@/utils/navStore';
 import { getInitials, getAvatarColor } from '@/utils/formatters';
 
 const Colors = {
@@ -45,16 +47,13 @@ interface TransactionLog {
 const transactionLogs: TransactionLog[] = [];
 
 export default function SupplierDetailsScreen() {
-  const { supplierId, supplierData } = useLocalSearchParams();
-  const supplier = JSON.parse(supplierData as string);
+  const { supplierId, supplierData: paramSupplierData } = useLocalSearchParams();
+  const navSupplier = consumeNavData('payableSupplierData');
+  const supplier = navSupplier || JSON.parse(paramSupplierData as string);
   const [selectedTab, setSelectedTab] = useState<'summary' | 'transactions'>('summary');
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {

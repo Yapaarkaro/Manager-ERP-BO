@@ -45,6 +45,7 @@ import {
 import { getStaff as getStaffFromBackend, invalidateApiCache, getStaffSessions, getStaffMetrics } from '@/services/backendApi';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -308,13 +309,7 @@ export default function StaffDetailsScreen() {
     );
   }
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -509,7 +504,7 @@ export default function StaffDetailsScreen() {
               <Text style={{ fontSize: 18, fontWeight: '700' as const, color: '#1F2937' }}>No Login Code</Text>
             </View>
             <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 19, marginBottom: 16 }}>
-              {staff.name.split(' ')[0]} doesn't have a first-login verification code yet. Generate one so they can log in via the Manager Staff App.
+              {staff.name.split(' ')[0]} doesn't have a first-login verification code yet. Generate one so they can log in using the Staff Login option in the app.
             </Text>
             <TouchableOpacity
               style={{
@@ -610,7 +605,7 @@ export default function StaffDetailsScreen() {
                   }}
                   activeOpacity={0.7}
                   onPress={async () => {
-                    const msg = `Hi ${staff.name}, your Manager ERP first-login code is: ${staff.verificationCode}\n\nOpen the Manager app, enter your mobile number (${staff.mobile}), verify the OTP, then enter this code to complete setup.`;
+                    const msg = `Hi ${staff.name}, your Manager ERP first-login code is: ${staff.verificationCode}\n\nOpen the Manager app, tap "Staff Login", enter your mobile number (${staff.mobile}), verify the OTP, then enter this code to complete setup.`;
                     try { await Share.share({ message: msg }); } catch {}
                   }}
                 >
@@ -637,7 +632,7 @@ export default function StaffDetailsScreen() {
                 <Text style={styles.kpiLabel}>Sales Created</Text>
                 <Text style={styles.kpiValue}>{metrics?.invoiceCount || 0}</Text>
                 <Text style={styles.kpiSubtext}>
-                  {`\u20B9${(metrics?.invoiceAmount || 0).toLocaleString()}`}
+                  {formatCurrencyINR(metrics?.invoiceAmount || 0)}
                 </Text>
               </View>
 

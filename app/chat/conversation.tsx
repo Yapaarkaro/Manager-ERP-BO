@@ -46,9 +46,10 @@ import { supabase } from '@/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-audio';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { getInitials } from '@/utils/formatters';
+import { getInitials, formatCurrencyINR } from '@/utils/formatters';
 import { generateInvoiceHTML } from '@/utils/invoicePdfGenerator';
 import { WebView } from 'react-native-webview';
+import { consumeNavData } from '@/utils/navStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -83,15 +84,19 @@ interface Message {
 }
 
 export default function ConversationScreen() {
-  const { conversationId, name: routeName, type, otherPartyId, crossBusiness } = useLocalSearchParams<{
+  const params = useLocalSearchParams<{
     conversationId: string;
     name: string;
     type: 'staff' | 'customer' | 'supplier' | 'owner';
     otherPartyId: string;
     crossBusiness: string;
   }>();
-
-  const isCrossBusiness = crossBusiness === 'true';
+  const chatMeta = consumeNavData<{name: string; type: string; crossBusiness?: boolean}>('chatMeta');
+  const conversationId = params.conversationId;
+  const routeName = chatMeta?.name || params.name || '';
+  const type = (chatMeta?.type || params.type) as 'staff' | 'customer' | 'supplier' | 'owner';
+  const otherPartyId = params.otherPartyId;
+  const isCrossBusiness = chatMeta?.crossBusiness || params.crossBusiness === 'true';
   const { isStaff, isOwner, staffId, staffName } = usePermissions();
   const { data: bizData } = useBusinessData();
 
@@ -149,7 +154,8 @@ export default function ConversationScreen() {
   useEffect(() => {
     if (!conversationId) return;
     const genericNames = ['staff', 'Staff', 'owner', 'Owner', 'customer', 'Customer', 'supplier', 'Supplier', 'Unknown', 'unknown', '', 'Business', 'Business Partner', 'Partner'];
-    if (routeName && !genericNames.includes(routeName)) {
+    const needsDbLookup = isStaff && (type === 'owner' || type === 'staff');
+    if (!needsDbLookup && routeName && !genericNames.includes(routeName)) {
       setResolvedName(routeName);
       return;
     }
@@ -168,7 +174,7 @@ export default function ConversationScreen() {
           .eq('id', convo.business_id)
           .maybeSingle();
         setResolvedName(biz?.legal_name || biz?.owner_name || 'Business Partner');
-      } else if (isStaff && convo.participant_other_type === 'staff') {
+      } else if (isStaff && (convo.participant_other_type === 'staff' || type === 'owner')) {
         const { data: ownerRow } = await supabase
           .from('users')
           .select('name')
@@ -320,7 +326,7 @@ export default function ConversationScreen() {
     setSending(true);
     setInputText('');
 
-    await sendMessage({
+    const result = await sendMessage({
       conversationId,
       senderId,
       senderType,
@@ -328,6 +334,11 @@ export default function ConversationScreen() {
       content: text,
       messageType: 'text',
     });
+
+    if (!result.success) {
+      setInputText(text);
+      Alert.alert('Message Failed', result.error || 'Could not send message. Please try again.');
+    }
 
     setSending(false);
   }, [inputText, sending, conversationId, senderId, senderType, senderName]);
@@ -765,7 +776,7 @@ export default function ConversationScreen() {
             date: p.oldestBillDate || new Date().toISOString(),
             amount: p.totalPayable || 0,
             type: 'payable_reminder',
-            label: `Payable: ₹${parseFloat(p.totalPayable || 0).toLocaleString('en-IN')} (${p.billCount || 0} bills)`,
+            label: `Payable: ${formatCurrencyINR(p.totalPayable || 0)} (${p.billCount || 0} bills)`,
           })));
         } else if (type === 'customer') {
           const res = await getReceivables();
@@ -778,7 +789,7 @@ export default function ConversationScreen() {
             date: r.oldestInvoiceDate || new Date().toISOString(),
             amount: r.totalReceivable || 0,
             type: 'receivable_reminder',
-            label: `Receivable: ₹${parseFloat(r.totalReceivable || 0).toLocaleString('en-IN')} (${r.invoiceCount || 0} invoices)`,
+            label: `Receivable: ${formatCurrencyINR(r.totalReceivable || 0)} (${r.invoiceCount || 0} invoices)`,
           })));
         }
       }
@@ -800,8 +811,8 @@ export default function ConversationScreen() {
 
     const isReminder = doc.type === 'payable_reminder' || doc.type === 'receivable_reminder';
     const content = isReminder
-      ? `🔔 ${doc.type === 'receivable_reminder' ? 'Payment Reminder' : 'Payment Update'}: ${doc.number}\nOutstanding: ₹${parseFloat(doc.amount || 0).toLocaleString('en-IN')}`
-      : `📄 ${typeLabels[doc.type] || 'Document'}: ${doc.number}\nAmount: ₹${parseFloat(doc.amount || 0).toLocaleString('en-IN')}`;
+      ? `🔔 ${doc.type === 'receivable_reminder' ? 'Payment Reminder' : 'Payment Update'}: ${doc.number}\nOutstanding: ${formatCurrencyINR(doc.amount || 0)}`
+      : `📄 ${typeLabels[doc.type] || 'Document'}: ${doc.number}\nAmount: ${formatCurrencyINR(doc.amount || 0)}`;
 
     await sendMessage({
       conversationId,
@@ -1412,7 +1423,7 @@ export default function ConversationScreen() {
                       <View style={docPickerStyles.docInfo}>
                         <Text style={docPickerStyles.docLabel}>{doc.label}</Text>
                         <Text style={docPickerStyles.docSub}>
-                          ₹{parseFloat(doc.amount || 0).toLocaleString('en-IN')} · {new Date(doc.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {formatCurrencyINR(doc.amount || 0)} · {new Date(doc.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </Text>
                       </View>
                       <Send size={16} color={Colors.primary} />

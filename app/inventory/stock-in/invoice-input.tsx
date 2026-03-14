@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
 import {
   ArrowLeft,
   FileText,
@@ -21,6 +22,7 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react-native';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -116,33 +118,25 @@ export default function InvoiceInputScreen() {
       return;
     }
 
-    // Navigate to verify stock with invoice details
-    const params: any = {
-      poData: JSON.stringify(po),
+    setNavData('verifyStockPOData', po);
+    const navParams: any = {
       invoiceNumber: invoiceNumber.trim(),
       invoiceDate: invoiceDate.trim(),
     };
 
     if (hasEwayBill) {
-      params.ewayBillNumber = ewayBillNumber.trim();
-      params.vehicleNumber = vehicleNumber.trim();
-      params.vehicleType = vehicleType.trim();
+      setNavData('verifyStockEwayBill', ewayBillNumber.trim());
+      setNavData('verifyStockVehicleNumber', vehicleNumber.trim());
+      navParams.vehicleType = vehicleType.trim();
     }
 
     safeRouter.push({
       pathname: '/inventory/stock-in/verify-stock',
-      params
+      params: navParams
     });
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 3,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 3, 0);
 
   if (!po) {
     return (

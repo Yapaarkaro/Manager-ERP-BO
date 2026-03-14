@@ -26,6 +26,7 @@ import PlatformMapView from '@/components/PlatformMapView';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { createStaff } from '@/services/backendApi';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 // Import web-specific API for better CORS handling on web
 const getPlacePredictions = Platform.OS === 'web' 
@@ -80,21 +81,20 @@ export default function EditAddressSimpleScreen() {
   console.log('🔧 EditAddressSimpleScreen - Component rendering');
   
   const { setStatusBarStyle } = useStatusBar();
-  const { 
-    editAddressId,
-    addressType = 'primary',
-    // Signup flow parameters
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    existingAddresses = '[]',
-    fromSummary = 'false',
-    fromSettings = 'false', // ✅ Flag for navigation from settings screen
-  } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const stored = getSignupData();
+  const editAddressId = params.editAddressId || stored.editAddressId;
+  const addressType = params.addressType || stored.addressType || 'primary';
+  const type = params.type || stored.type;
+  const value = params.value || stored.value;
+  const gstinData = params.gstinData || stored.gstinData;
+  const name = params.name || stored.name;
+  const businessName = params.businessName || stored.businessName;
+  const businessType = params.businessType || stored.businessType;
+  const customBusinessType = params.customBusinessType || stored.customBusinessType;
+  const existingAddresses = params.existingAddresses || stored.existingAddresses || '[]';
+  const fromSummary = params.fromSummary || stored.fromSummary || 'false';
+  const fromSettings = params.fromSettings || stored.fromSettings || 'false';
 
   console.log('🔧 EditAddressSimpleScreen - Parameters:', { editAddressId, addressType, type, value });
 
@@ -601,44 +601,22 @@ export default function EditAddressSimpleScreen() {
   };
 
   const handleCancel = () => {
-    // ✅ Navigate back based on source screen
     if (fromSettings === 'true') {
-      // Navigate back to settings screen
       router.back();
     } else if (fromSummary === 'true') {
-      safeRouter.replace({
-        pathname: '/auth/business-summary',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses: JSON.stringify(parsedExistingAddresses),
-          allBankAccounts: '[]',
-          initialCashBalance: '0',
-          invoicePrefix: 'INV',
-          invoicePattern: '',
-          startingInvoiceNumber: '1',
-          fiscalYear: 'APR-MAR',
-        }
+      setSignupData({
+        type, value, gstinData, name, businessName, businessType, customBusinessType,
+        allAddresses: JSON.stringify(parsedExistingAddresses),
+        allBankAccounts: '[]', initialCashBalance: '0',
+        invoicePrefix: 'INV', invoicePattern: '', startingInvoiceNumber: '1', fiscalYear: 'APR-MAR',
       });
+      safeRouter.replace('/auth/business-summary');
     } else if (type && value) {
-      safeRouter.replace({
-        pathname: '/auth/address-confirmation',
-        params: {
-          type,
-          value,
-          gstinData,
-          name,
-          businessName,
-          businessType,
-          customBusinessType,
-          allAddresses: JSON.stringify(parsedExistingAddresses),
-        }
+      setSignupData({
+        type, value, gstinData, name, businessName, businessType, customBusinessType,
+        allAddresses: JSON.stringify(parsedExistingAddresses),
       });
+      safeRouter.replace('/auth/address-confirmation');
     } else {
       router.back();
     }
@@ -813,22 +791,18 @@ export default function EditAddressSimpleScreen() {
         if (fromSettings === 'true') {
           router.back();
         } else if (fromSummary === 'true') {
-          safeRouter.replace({
-            pathname: '/auth/business-summary',
-            params: {
-              type, value, gstinData, name, businessName, businessType, customBusinessType,
-              allBankAccounts: '[]', initialCashBalance: '0',
-              invoicePrefix: 'INV', invoicePattern: '', startingInvoiceNumber: '1', fiscalYear: 'APR-MAR',
-            }
+          setSignupData({
+            type, value, gstinData, name, businessName, businessType, customBusinessType,
+            allBankAccounts: '[]', initialCashBalance: '0',
+            invoicePrefix: 'INV', invoicePattern: '', startingInvoiceNumber: '1', fiscalYear: 'APR-MAR',
           });
+          safeRouter.replace('/auth/business-summary');
         } else if (type && value) {
-          safeRouter.replace({
-            pathname: '/auth/address-confirmation',
-            params: {
-              type, value, gstinData, name, businessName, businessType, customBusinessType,
-              allAddresses: JSON.stringify(parsedExistingAddresses),
-            }
+          setSignupData({
+            type, value, gstinData, name, businessName, businessType, customBusinessType,
+            allAddresses: JSON.stringify(parsedExistingAddresses),
           });
+          safeRouter.replace('/auth/address-confirmation');
         } else {
           router.back();
         }
@@ -1419,7 +1393,7 @@ export default function EditAddressSimpleScreen() {
                 <Text style={styles.otpCodeText} selectable>{staffOtpCode}</Text>
               </View>
               <Text style={styles.otpModalHint}>
-                The staff member will enter this code after verifying their mobile number to link their account.
+                The staff member can use the Staff Login option in the Manager app, verify their mobile number, and enter this code to join your business.
               </Text>
               <TouchableOpacity style={styles.otpModalButton} onPress={handleDismissStaffOtpModal} activeOpacity={0.8}>
                 <Text style={styles.otpModalButtonText}>Done</Text>

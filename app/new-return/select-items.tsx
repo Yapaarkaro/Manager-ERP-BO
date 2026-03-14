@@ -10,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { ArrowLeft, Check, Square, SquareCheck as CheckSquare, Package, FileText, User, Building2 } from 'lucide-react-native';
 
 const Colors = {
@@ -37,6 +39,7 @@ interface InvoiceItem {
   taxRate: number;
   taxAmount: number;
   total: number;
+  quantityDecimals?: number;
 }
 
 interface SelectedItem extends InvoiceItem {
@@ -44,8 +47,8 @@ interface SelectedItem extends InvoiceItem {
 }
 
 export default function SelectItemsScreen() {
-  const { invoiceData } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
+  const params = useLocalSearchParams();
+  const invoice = consumeNavData('returnFlowInvoice') || (params.invoiceData ? JSON.parse(params.invoiceData as string) : {});
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
 
   const handleItemToggle = (item: InvoiceItem) => {
@@ -55,16 +58,20 @@ export default function SelectItemsScreen() {
       // Remove item
       setSelectedItems(prev => prev.filter(selected => selected.id !== item.id));
     } else {
-      // Add item with quantity 1
-      setSelectedItems(prev => [...prev, { ...item, returnQuantity: 1 }]);
+      const qtyDec = item.quantityDecimals ?? 0;
+      const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+      setSelectedItems(prev => [...prev, { ...item, returnQuantity: step }]);
     }
   };
 
   const handleQuantityChange = (itemId: string, change: number) => {
-    setSelectedItems(prev => 
+    setSelectedItems(prev =>
       prev.map(item => {
         if (item.id === itemId) {
-          const newQuantity = Math.max(1, Math.min(item.quantity, item.returnQuantity + change));
+          const qtyDec = item.quantityDecimals ?? 0;
+          const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+          const rawNew = item.returnQuantity + (change > 0 ? step : -step);
+          const newQuantity = parseFloat(Math.max(step, Math.min(item.quantity, rawNew)).toFixed(qtyDec));
           return { ...item, returnQuantity: newQuantity };
         }
         return item;
@@ -89,11 +96,7 @@ export default function SelectItemsScreen() {
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const formatDate = (dateString: string) => {
@@ -111,14 +114,10 @@ export default function SelectItemsScreen() {
       return;
     }
 
-    safeRouter.push({
-      pathname: '/new-return/return-reasons',
-      params: {
-        invoiceData: JSON.stringify(invoice),
-        selectedItems: JSON.stringify(selectedItems),
-        returnAmount: calculateReturnAmount().toString()
-      }
-    });
+    setNavData('returnFlowInvoice', invoice);
+    setNavData('returnFlowItems', selectedItems);
+    setNavData('returnFlowAmount', calculateReturnAmount().toString());
+    safeRouter.push({ pathname: '/new-return/return-reasons' });
   };
 
   return (
@@ -213,41 +212,44 @@ export default function SelectItemsScreen() {
                 </TouchableOpacity>
 
                 {/* Quantity Selector for Selected Items */}
-                {isSelected && selectedItem && (
-                  <View style={styles.quantitySelector}>
-                    <Text style={styles.quantityLabel}>Return Quantity:</Text>
-                    <View style={styles.quantityControls}>
-                      <TouchableOpacity
-                        style={styles.quantityButton}
-                        onPress={() => handleQuantityChange(item.id, -1)}
-                        disabled={selectedItem.returnQuantity <= 1}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[
-                          styles.quantityButtonText,
-                          selectedItem.returnQuantity <= 1 && styles.disabledButtonText
-                        ]}>-</Text>
-                      </TouchableOpacity>
-                      
-                      <Text style={styles.quantityValue}>
-                        {selectedItem.returnQuantity}
-                      </Text>
-                      
-                      <TouchableOpacity
-                        style={styles.quantityButton}
-                        onPress={() => handleQuantityChange(item.id, 1)}
-                        disabled={selectedItem.returnQuantity >= item.quantity}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[
-                          styles.quantityButtonText,
-                          selectedItem.returnQuantity >= item.quantity && styles.disabledButtonText
-                        ]}>+</Text>
-                      </TouchableOpacity>
+                {isSelected && selectedItem && (() => {
+                  const qtyDec = item.quantityDecimals ?? 0;
+                  const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+                  return (
+                    <View style={styles.quantitySelector}>
+                      <Text style={styles.quantityLabel}>Return Quantity:</Text>
+                      <View style={styles.quantityControls}>
+                        <TouchableOpacity
+                          style={styles.quantityButton}
+                          onPress={() => handleQuantityChange(item.id, -1)}
+                          disabled={selectedItem.returnQuantity <= step}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.quantityButtonText,
+                            selectedItem.returnQuantity <= step && styles.disabledButtonText
+                          ]}>-</Text>
+                        </TouchableOpacity>
+
+                        <Text style={styles.quantityValue}>
+                          {qtyDec > 0 ? selectedItem.returnQuantity.toFixed(qtyDec) : selectedItem.returnQuantity}
+                        </Text>
+
+                        <TouchableOpacity
+                          style={styles.quantityButton}
+                          onPress={() => handleQuantityChange(item.id, 1)}
+                          disabled={selectedItem.returnQuantity >= item.quantity}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.quantityButtonText,
+                            selectedItem.returnQuantity >= item.quantity && styles.disabledButtonText
+                          ]}>+</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    
-                  </View>
-                )}
+                  );
+                })()}
               </View>
             );
           })}

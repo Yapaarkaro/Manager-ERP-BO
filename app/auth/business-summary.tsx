@@ -49,25 +49,28 @@ import { supabase } from '@/lib/supabase';
 
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { getPlatformShadow } from '@/utils/shadowUtils';
+import { formatCurrencyINR } from '@/utils/formatters';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 export default function BusinessSummaryScreen() {
-  const { 
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    allAddresses,
-    allBankAccounts,
-    initialCashBalance,
-    invoicePrefix,
-    invoicePattern,
-    startingInvoiceNumber,
-    fiscalYear,
-    mobile,
-  } = useLocalSearchParams();
+  const _params = useLocalSearchParams();
+  const _store = getSignupData();
+
+  const type = (_params.type as string) ?? _store.type ?? '';
+  const value = (_params.value as string) ?? _store.value ?? '';
+  const gstinData = (_params.gstinData as string) ?? _store.gstinData ?? '';
+  const name = (_params.name as string) ?? _store.name ?? '';
+  const businessName = (_params.businessName as string) ?? _store.businessName ?? '';
+  const businessType = (_params.businessType as string) ?? _store.businessType ?? '';
+  const customBusinessType = (_params.customBusinessType as string) ?? _store.customBusinessType ?? '';
+  const allAddresses = (_params.allAddresses as string) ?? _store.allAddresses ?? '[]';
+  const allBankAccounts = (_params.allBankAccounts as string) ?? _store.allBankAccounts ?? '[]';
+  const initialCashBalance = (_params.initialCashBalance as string) ?? _store.initialCashBalance ?? '0';
+  const invoicePrefix = (_params.invoicePrefix as string) ?? _store.invoicePrefix ?? '';
+  const invoicePattern = (_params.invoicePattern as string) ?? _store.invoicePattern ?? '';
+  const startingInvoiceNumber = (_params.startingInvoiceNumber as string) ?? _store.startingInvoiceNumber ?? '';
+  const fiscalYear = (_params.fiscalYear as string) ?? _store.fiscalYear ?? 'APR-MAR';
+  const mobile = (_params.mobile as string) ?? _store.mobile ?? '';
 
   // Editable states
   const [editableName, setEditableName] = useState(name as string);
@@ -207,15 +210,8 @@ export default function BusinessSummaryScreen() {
     }, [refetch])
   );
 
-  const formatBalance = (balance: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'decimal',
-      minimumFractionDigits: 2,
-    }).format(balance);
-  };
-
   const formatBalanceWithSymbol = (balance: number) => {
-    return `₹${formatBalance(balance)}`;
+    return formatCurrencyINR(balance);
   };
 
   const formatAccountNumber = (accountNumber: string) => {
@@ -533,26 +529,24 @@ export default function BusinessSummaryScreen() {
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
-              router.replace({
-                pathname: '/auth/final-setup',
-                params: {
-                  type,
-                  value,
-                  gstinData,
-                  name: editableName,
-                  businessName: editableBusinessName,
-                  businessType: editableBusinessType,
-                  customBusinessType: businessType === 'Others' ? editableBusinessType : '',
-                  allAddresses: JSON.stringify(editableAddresses),
-                  allBankAccounts: JSON.stringify(editableBankAccounts),
-                  // Pass invoice configuration back
-                  initialCashBalance: editableCashBalance,
-                  invoicePrefix: editableInvoicePrefix,
-                  invoicePattern: editableInvoicePattern,
-                  startingInvoiceNumber: editableStartingNumber,
-                  fiscalYear: editableFiscalYear,
-                }
+              setSignupData({
+                type,
+                value,
+                gstinData,
+                name: editableName,
+                businessName: editableBusinessName,
+                businessType: editableBusinessType,
+                customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                allAddresses: JSON.stringify(editableAddresses),
+                allBankAccounts: JSON.stringify(editableBankAccounts),
+                initialCashBalance: editableCashBalance,
+                invoicePrefix: editableInvoicePrefix,
+                invoicePattern: editableInvoicePattern,
+                startingInvoiceNumber: editableStartingNumber,
+                fiscalYear: editableFiscalYear,
+                mobile,
               });
+              router.replace('/auth/final-setup' as any);
             }}
             activeOpacity={0.7}
           >
@@ -748,21 +742,19 @@ export default function BusinessSummaryScreen() {
                           </View>
                           <View style={styles.addressActions}>
                             <EditButton onPress={() => {
-                              // Navigate to edit-address-simple with the actual address data
-                              router.push({
-                                pathname: '/edit-address-simple',
-                                params: { 
-                                  editAddressId: address.id,
-                                  addressType: address.type,
-                                  type: type,
-                                  value: value,
-                                  name: editableName,
-                                  businessName: editableBusinessName,
-                                  businessType: editableBusinessType,
-                                  existingAddresses: JSON.stringify(editableAddresses),
-                                  fromSummary: 'true',
-                                }
+                              setSignupData({
+                                editAddressId: address.id,
+                                addressType: address.type,
+                                type,
+                                value,
+                                name: editableName,
+                                businessName: editableBusinessName,
+                                businessType: editableBusinessType,
+                                existingAddresses: JSON.stringify(editableAddresses),
+                                fromSummary: 'true',
+                                mobile,
                               });
+                              router.push('/edit-address-simple' as any);
                             }} />
                             {!address.isPrimary && (
                               <TouchableOpacity
@@ -812,29 +804,26 @@ export default function BusinessSummaryScreen() {
                       <TouchableOpacity
                         style={[styles.addAddressButton, styles.addBranchButton]}
                         onPress={() => {
-                          // Navigate to business address screen with branch type
-                          router.push({
-                            pathname: '/auth/business-address',
-                            params: {
-                              type,
-                              value,
-                              gstinData,
-                              name: editableName,
-                              businessName: editableBusinessName,
-                              businessType: editableBusinessType,
-                              customBusinessType: businessType === 'Others' ? editableBusinessType : '',
-                              mobile: '', // Not needed for branch/warehouse, but prevent error
-                              addressType: 'branch',
-                              existingAddresses: JSON.stringify(editableAddresses),
-                              fromSummary: 'true',
-                              allBankAccounts: JSON.stringify(editableBankAccounts),
-                              initialCashBalance: editableCashBalance,
-                              invoicePrefix: editableInvoicePrefix,
-                              invoicePattern: editableInvoicePattern,
-                              startingInvoiceNumber: editableStartingNumber,
-                              fiscalYear: editableFiscalYear,
-                            }
+                          setSignupData({
+                            type,
+                            value,
+                            gstinData,
+                            name: editableName,
+                            businessName: editableBusinessName,
+                            businessType: editableBusinessType,
+                            customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                            mobile,
+                            addressType: 'branch',
+                            existingAddresses: JSON.stringify(editableAddresses),
+                            fromSummary: 'true',
+                            allBankAccounts: JSON.stringify(editableBankAccounts),
+                            initialCashBalance: editableCashBalance,
+                            invoicePrefix: editableInvoicePrefix,
+                            invoicePattern: editableInvoicePattern,
+                            startingInvoiceNumber: editableStartingNumber,
+                            fiscalYear: editableFiscalYear,
                           });
+                          router.push('/auth/business-address' as any);
                         }}
                         activeOpacity={0.7}
                       >
@@ -845,29 +834,26 @@ export default function BusinessSummaryScreen() {
                       <TouchableOpacity
                         style={[styles.addAddressButton, styles.addWarehouseButton]}
                         onPress={() => {
-                          // Navigate to business address screen with warehouse type
-                          router.push({
-                            pathname: '/auth/business-address',
-                            params: {
-                              type,
-                              value,
-                              gstinData,
-                              name: editableName,
-                              businessName: editableBusinessName,
-                              businessType: editableBusinessType,
-                              customBusinessType: businessType === 'Others' ? editableBusinessType : '',
-                              mobile: '', // Not needed for branch/warehouse, but prevent error
-                              addressType: 'warehouse',
-                              existingAddresses: JSON.stringify(editableAddresses),
-                              fromSummary: 'true',
-                              allBankAccounts: JSON.stringify(editableBankAccounts),
-                              initialCashBalance: editableCashBalance,
-                              invoicePrefix: editableInvoicePrefix,
-                              invoicePattern: editableInvoicePattern,
-                              startingInvoiceNumber: editableStartingNumber,
-                              fiscalYear: editableFiscalYear,
-                            }
+                          setSignupData({
+                            type,
+                            value,
+                            gstinData,
+                            name: editableName,
+                            businessName: editableBusinessName,
+                            businessType: editableBusinessType,
+                            customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                            mobile,
+                            addressType: 'warehouse',
+                            existingAddresses: JSON.stringify(editableAddresses),
+                            fromSummary: 'true',
+                            allBankAccounts: JSON.stringify(editableBankAccounts),
+                            initialCashBalance: editableCashBalance,
+                            invoicePrefix: editableInvoicePrefix,
+                            invoicePattern: editableInvoicePattern,
+                            startingInvoiceNumber: editableStartingNumber,
+                            fiscalYear: editableFiscalYear,
                           });
+                          router.push('/auth/business-address' as any);
                         }}
                         activeOpacity={0.7}
                       >
@@ -920,36 +906,35 @@ export default function BusinessSummaryScreen() {
                               <Eye size={16} color="#3f66ac" />
                             </TouchableOpacity>
                             <EditButton onPress={() => {
-                              router.push({
-                                pathname: '/auth/banking-details',
-                                params: {
-                                  fromSummary: 'true',
-                                  editMode: 'true',
-                                  editAccountId: account.id,
-                                  type,
-                                  value,
-                                  gstinData,
-                                  name: editableName,
-                                  businessName: editableBusinessName,
-                                  businessType: editableBusinessType,
-                                  customBusinessType: businessType === 'Others' ? editableBusinessType : '',
-                                  allAddresses: JSON.stringify(editableAddresses),
-                                  allBankAccounts: JSON.stringify(editableBankAccounts),
-                                  prefilledBankId: account.bankId,
-                                  prefilledAccountHolderName: account.accountHolderName,
-                                  prefilledAccountNumber: account.accountNumber,
-                                  prefilledIFSC: account.ifscCode,
-                                  prefilledAccountType: account.accountType,
-                                  prefilledInitialBalance: account.initialBalance.toString(),
-                                  prefilledUpiId: account.upiId || '',
-                                  prefilledIsPrimary: account.isPrimary.toString(),
-                                  currentCashBalance: editableCashBalance,
-                                  currentInvoicePrefix: editableInvoicePrefix,
-                                  currentInvoicePattern: editableInvoicePattern,
-                                  currentStartingNumber: editableStartingNumber,
-                                  currentFiscalYear: editableFiscalYear,
-                                }
+                              setSignupData({
+                                fromSummary: 'true',
+                                editMode: 'true',
+                                editAccountId: account.id,
+                                type,
+                                value,
+                                gstinData,
+                                name: editableName,
+                                businessName: editableBusinessName,
+                                businessType: editableBusinessType,
+                                customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                                allAddresses: JSON.stringify(editableAddresses),
+                                allBankAccounts: JSON.stringify(editableBankAccounts),
+                                mobile,
+                                prefilledBankId: account.bankId,
+                                prefilledAccountHolderName: account.accountHolderName,
+                                prefilledAccountNumber: account.accountNumber,
+                                prefilledIFSC: account.ifscCode,
+                                prefilledAccountType: account.accountType,
+                                prefilledInitialBalance: account.initialBalance.toString(),
+                                prefilledUpiId: account.upiId || '',
+                                prefilledIsPrimary: account.isPrimary.toString(),
+                                currentCashBalance: editableCashBalance,
+                                currentInvoicePrefix: editableInvoicePrefix,
+                                currentInvoicePattern: editableInvoicePattern,
+                                currentStartingNumber: editableStartingNumber,
+                                currentFiscalYear: editableFiscalYear,
                               });
+                              router.push('/auth/banking-details' as any);
                             }} />
                             {!account.isPrimary && (
                               <TouchableOpacity
@@ -979,28 +964,26 @@ export default function BusinessSummaryScreen() {
                     <TouchableOpacity
                       style={[styles.addAddressButton, styles.addBankAccountButton]}
                       onPress={() => {
-                        // Navigate to banking-details with fromSummary and isAddingSecondary flags
-                        router.push({
-                          pathname: '/auth/banking-details',
-                          params: {
-                            fromSummary: 'true',
-                            isAddingSecondary: 'true', // ✅ Important: Adding additional bank, not primary
-                            type,
-                            value,
-                            gstinData,
-                            name: editableName,
-                            businessName: editableBusinessName,
-                            businessType: editableBusinessType,
-                            customBusinessType: businessType === 'Others' ? editableBusinessType : '',
-                            allAddresses: JSON.stringify(editableAddresses),
-                            allBankAccounts: JSON.stringify(editableBankAccounts),
-                            currentCashBalance: editableCashBalance,
-                            currentInvoicePrefix: editableInvoicePrefix,
-                            currentInvoicePattern: editableInvoicePattern,
-                            currentStartingNumber: editableStartingNumber,
-                            currentFiscalYear: editableFiscalYear,
-                          }
+                        setSignupData({
+                          fromSummary: 'true',
+                          isAddingSecondary: 'true',
+                          type,
+                          value,
+                          gstinData,
+                          name: editableName,
+                          businessName: editableBusinessName,
+                          businessType: editableBusinessType,
+                          customBusinessType: businessType === 'Others' ? editableBusinessType : '',
+                          allAddresses: JSON.stringify(editableAddresses),
+                          allBankAccounts: JSON.stringify(editableBankAccounts),
+                          mobile,
+                          currentCashBalance: editableCashBalance,
+                          currentInvoicePrefix: editableInvoicePrefix,
+                          currentInvoicePattern: editableInvoicePattern,
+                          currentStartingNumber: editableStartingNumber,
+                          currentFiscalYear: editableFiscalYear,
                         });
+                        router.push('/auth/banking-details' as any);
                       }}
                       activeOpacity={0.7}
                     >

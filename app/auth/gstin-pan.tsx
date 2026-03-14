@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -64,7 +65,9 @@ const getKeyboardType = (type: 'GSTIN' | 'PAN', position: number): 'default' | '
 export default function GstinPanScreen() {
   const { setStatusBarStyle } = useStatusBar();
   const insets = useSafeAreaInsets();
-  const { mobile } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const signupData = getSignupData();
+  const mobile = (params.mobile as string) || signupData.mobile || '';
   const inputRef = React.useRef<TextInput>(null);
   const [selectedType, setSelectedType] = useState<'GSTIN' | 'PAN'>('GSTIN');
   const [inputValue, setInputValue] = useState('');
@@ -271,25 +274,20 @@ export default function GstinPanScreen() {
     })();
 
     if (selectedType === 'GSTIN') {
-      router.replace({
-        pathname: '/auth/gstin-pan-otp',
-        params: { 
-          type: selectedType,
-          value: gstinValue,
-          gstinData: JSON.stringify(gstinDataObj),
-          mobile: mobile
-        }
+      setSignupData({
+        type: selectedType,
+        value: gstinValue,
+        gstinData: JSON.stringify(gstinDataObj),
+        mobile,
       });
     } else {
-      router.replace({
-        pathname: '/auth/gstin-pan-otp',
-        params: { 
-          type: selectedType,
-          value: gstinValue,
-          mobile: mobile
-        }
+      setSignupData({
+        type: selectedType,
+        value: gstinValue,
+        mobile,
       });
     }
+    router.replace('/auth/gstin-pan-otp');
   };
 
   const switchToOtherType = () => {

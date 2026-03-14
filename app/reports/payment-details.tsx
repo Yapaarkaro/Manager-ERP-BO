@@ -12,6 +12,8 @@ import { invalidateApiCache } from '@/services/backendApi';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { 
   ArrowLeft, 
   Banknote,
@@ -47,8 +49,10 @@ const Colors = {
 
 export default function PaymentDetailsScreen() {
   const { date, paymentMethod, invoices, paymentData } = useLocalSearchParams();
-  const invoicesList = JSON.parse(invoices as string);
-  const paymentBreakdown = JSON.parse(paymentData as string);
+  const navInvoices = consumeNavData('paymentInvoices');
+  const navPaymentData = consumeNavData('paymentData');
+  const invoicesList = navInvoices || JSON.parse(invoices as string);
+  const paymentBreakdown = navPaymentData || JSON.parse(paymentData as string);
   const [refreshing, setRefreshing] = useState(false);
 
   const onRefresh = useCallback(() => {
@@ -87,13 +91,7 @@ export default function PaymentDetailsScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -128,11 +126,11 @@ export default function PaymentDetailsScreen() {
         }
       };
 
+      setNavData('returnData', returnData);
       safeRouter.push({
         pathname: '/return-details',
         params: {
           returnId: returnData.id,
-          returnData: JSON.stringify(returnData)
         }
       });
     } else {
@@ -155,11 +153,11 @@ export default function PaymentDetailsScreen() {
         }
       };
 
+      setNavData('invoiceData', invoiceData);
       safeRouter.push({
         pathname: '/invoice-details',
         params: {
           invoiceId: invoiceData.id,
-          invoiceData: JSON.stringify(invoiceData)
         }
       });
     }

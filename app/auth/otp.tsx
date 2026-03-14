@@ -19,6 +19,7 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 import { getSignupProgress, saveSignupProgress, deleteSignupProgress, saveDeviceSnapshot } from '@/services/backendApi';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { mapLocationsToAddresses } from '@/utils/dataStore';
+import { getSignupField, setSignupData } from '@/utils/signupStore';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -42,7 +43,8 @@ const maskMobileNumber = (mobile: string | string[] | undefined): string => {
 export default function OTPScreen() {
   const { setStatusBarStyle } = useStatusBar();
   const insets = useSafeAreaInsets();
-  const { mobile } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const mobile = (params.mobile as string) || getSignupField('mobile', '');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [countdown, setCountdown] = useState(30);
 
@@ -169,16 +171,13 @@ export default function OTPScreen() {
         return;
       }
 
-      // Proceed to next step - await to avoid race and handle routing errors
       setIsVerifying(false);
       try {
         await handleSuccessfulVerification(mobileNumber);
-      } catch (navError: any) {
-        // Fallback: if post-verification routing fails, still navigate to gstin-pan
-        router.replace({
-          pathname: '/auth/gstin-pan',
-          params: { mobile: mobileNumber },
-        });
+      } catch (postVerifyErr: any) {
+        console.warn('OTP: post-verification routing error:', postVerifyErr?.message);
+        Alert.alert('Error', 'Something went wrong after verification. Please try logging in again.');
+        router.replace('/auth/mobile');
       }
     } catch (error: any) {
       setOtp(['', '', '', '', '', '']);
@@ -193,214 +192,181 @@ export default function OTPScreen() {
   };
 
   const handleSuccessfulVerification = async (mobileNumber: string) => {
+    const cleanPhone = mobileNumber.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10);
+
+    // Step 1: Get session
+    let session: any = null;
     try {
-      const { data: { session }, error: sessionError } = await withTimeout(
-        supabase.auth.getSession(),
-        10000,
-        'Get session'
-      );
-      
-      if (sessionError || !session?.user) {
-        // No session -- fall through to fresh signup
-      } else {
-        try {
-          const { verifySuperadmin } = await import('@/services/superadminApi');
-          const isSA = await verifySuperadmin();
-          if (isSA) {
-            console.log('🛡️ Superadmin detected, routing to email verification');
-            router.replace('/admin/email-verify');
-            return;
-          }
-        } catch {
-          // Not a superadmin or check failed -- continue normal flow
-        }
+      const { data, error } = await withTimeout(supabase.auth.getSession(), 10000, 'Get session');
+      if (!error && data?.session?.user) session = data.session;
+    } catch (e) {
+      console.warn('OTP: getSession failed:', e);
+    }
 
-        // Device snapshot (fire-and-forget, doesn't affect flow)
-        setTimeout(() => {
-          import('@/utils/deviceInfo').then(({ collectDeviceSnapshot }) => {
-            collectDeviceSnapshot().then(ds => {
-              if (ds.deviceId) {
-                saveDeviceSnapshot({
-                  deviceId: ds.deviceId, deviceName: ds.deviceName,
-                  deviceBrand: ds.deviceBrand, deviceModel: ds.deviceModel,
-                  deviceType: ds.deviceType, deviceYearClass: ds.deviceYearClass,
-                  osName: ds.osName, osVersion: ds.osVersion,
-                  platformApiLevel: ds.platformApiLevel,
-                  networkServiceProvider: ds.networkServiceProvider,
-                  internetServiceProvider: ds.internetServiceProvider,
-                  networkType: ds.networkType, ipAddress: ds.ipAddress,
-                  wifiName: ds.wifiName, bluetoothName: ds.bluetoothName,
-                  manufacturer: ds.manufacturer, totalMemory: ds.totalMemory,
-                  isDevice: ds.isDevice, isEmulator: ds.isEmulator, isTablet: ds.isTablet,
-                  screenWidth: ds.screenWidth, screenHeight: ds.screenHeight,
-                  screenScale: ds.screenScale, pixelDensity: ds.pixelDensity,
-                  totalStorage: ds.totalStorage, freeStorage: ds.freeStorage,
-                  batteryLevel: ds.batteryLevel, batteryState: ds.batteryState,
-                  carrierName: ds.carrierName, mobileCountryCode: ds.mobileCountryCode,
-                  mobileNetworkCode: ds.mobileNetworkCode,
-                  appVersion: ds.appVersion, appBuildNumber: ds.appBuildNumber,
-                  expoSdkVersion: ds.expoSdkVersion,
-                  locale: ds.locale, timezone: ds.timezone,
-                }).catch(() => {});
-              }
+    if (!session) {
+      setSignupData({ mobile: mobileNumber });
+      router.replace('/auth/gstin-pan');
+      return;
+    }
+
+    // Device snapshot (fire-and-forget)
+    setTimeout(() => {
+      import('@/utils/deviceInfo').then(({ collectDeviceSnapshot }) => {
+        collectDeviceSnapshot().then(ds => {
+          if (ds.deviceId) {
+            saveDeviceSnapshot({
+              deviceId: ds.deviceId, deviceName: ds.deviceName,
+              deviceBrand: ds.deviceBrand, deviceModel: ds.deviceModel,
+              deviceType: ds.deviceType, deviceYearClass: ds.deviceYearClass,
+              osName: ds.osName, osVersion: ds.osVersion,
+              platformApiLevel: ds.platformApiLevel,
+              networkServiceProvider: ds.networkServiceProvider,
+              internetServiceProvider: ds.internetServiceProvider,
+              networkType: ds.networkType, ipAddress: ds.ipAddress,
+              wifiName: ds.wifiName, bluetoothName: ds.bluetoothName,
+              manufacturer: ds.manufacturer, totalMemory: ds.totalMemory,
+              isDevice: ds.isDevice, isEmulator: ds.isEmulator, isTablet: ds.isTablet,
+              screenWidth: ds.screenWidth, screenHeight: ds.screenHeight,
+              screenScale: ds.screenScale, pixelDensity: ds.pixelDensity,
+              totalStorage: ds.totalStorage, freeStorage: ds.freeStorage,
+              batteryLevel: ds.batteryLevel, batteryState: ds.batteryState,
+              carrierName: ds.carrierName, mobileCountryCode: ds.mobileCountryCode,
+              mobileNetworkCode: ds.mobileNetworkCode,
+              appVersion: ds.appVersion, appBuildNumber: ds.appBuildNumber,
+              expoSdkVersion: ds.expoSdkVersion,
+              locale: ds.locale, timezone: ds.timezone,
             }).catch(() => {});
-          }).catch(() => {});
-        }, 1500);
+          }
+        }).catch(() => {});
+      }).catch(() => {});
+    }, 1500);
 
-        const { data: userProfile, error: userError } = await withTimeout(
-          supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle(),
-          10000,
-          'Fetch user profile'
-        );
-        
-        if (!userError && userProfile?.business_id) {
-          const { clearBusinessContext } = await import('@/services/backendApi');
-          clearBusinessContext();
+    // Step 2: Superadmin check
+    try {
+      const { verifySuperadmin } = await import('@/services/superadminApi');
+      const isSA = await verifySuperadmin();
+      if (isSA) {
+        router.replace('/admin/email-verify');
+        return;
+      }
+    } catch {}
+
+    // Step 3: STAFF-FIRST — check if this phone belongs to a staff member (bypasses RLS)
+    let staffRow: any = null;
+    try {
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('lookup_staff_by_phone', { phone_number: cleanPhone });
+      if (rpcError) console.warn('OTP: Staff RPC error:', rpcError.message);
+      const staffList = Array.isArray(rpcResult) ? rpcResult : [];
+      staffRow = staffList[0] || null;
+    } catch (e: any) {
+      console.warn('OTP: Staff RPC failed:', e?.message);
+    }
+
+    if (!staffRow) {
+      try {
+        const { data: staffRows } = await supabase.from('staff').select('*').eq('mobile', cleanPhone);
+        staffRow = (staffRows || []).filter((s: any) => !s.is_deleted)[0] || null;
+      } catch {}
+    }
+
+    // If this phone is a staff member, handle it immediately — never fall through
+    if (staffRow) {
+    
+      deleteSignupProgress(mobileNumber).catch(() => {});
+
+      if (!staffRow.user_id) {
+        if (!staffRow.verification_code) {
           try {
-            const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-            await Promise.race([
-              prefetchBusinessData(),
-              new Promise(r => setTimeout(r, 3000)),
-            ]);
+            const { createInAppNotification } = await import('@/services/backendApi');
+            await createInAppNotification({
+              businessId: staffRow.business_id,
+              title: `${staffRow.name} is trying to log in`,
+              message: `${staffRow.name} (${cleanPhone}) needs a login code. Please generate one from the Staff section.`,
+              type: 'staff_login_attempt',
+              recipientId: staffRow.business_id,
+              recipientType: 'owner',
+              category: 'staff_login_attempt',
+              relatedEntityId: staffRow.id,
+              relatedEntityType: 'staff',
+              sourceStaffName: staffRow.name,
+            });
           } catch {}
-          
-          router.replace('/dashboard');
+
+          Alert.alert(
+            'Login Code Required',
+            'Your business owner has been notified. They will generate a login code for you. Please try again once you receive it.',
+            [{ text: 'OK', onPress: () => router.replace('/auth/mobile') }]
+          );
           return;
         }
 
-        // No users row — check if this phone belongs to a staff member
-        const cleanPhone = mobileNumber.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10);
-        try {
-          const { data: staffRows, error: staffQueryErr } = await supabase
-            .from('staff')
-            .select('*')
-            .eq('mobile', cleanPhone);
-
-          const activeStaff = (staffRows || []).filter((s: any) => !s.is_deleted);
-          const staffRow = activeStaff[0];
-
-          if (staffQueryErr) {
-            console.warn('Staff query error:', staffQueryErr.message);
-          }
-
-          if (staffRow) {
-            // Staff member found — clear any stale signup progress
-            deleteSignupProgress(mobileNumber).catch(() => {});
-
-            const hasVerificationCode = !!staffRow.verification_code;
-            const hasUserId = !!staffRow.user_id;
-
-            if (hasVerificationCode && !hasUserId) {
-              router.replace({
-                pathname: '/auth/staff-verify',
-                params: {
-                  staffId: staffRow.id,
-                  staffName: staffRow.name,
-                  businessId: staffRow.business_id,
-                  mobile: cleanPhone,
-                },
-              });
-              return;
-            }
-
-            // Staff already verified or no code was set — link and go to dashboard
-            try {
-              const { error: insertErr } = await supabase
-                .from('users')
-                .insert({
-                  id: session.user.id,
-                  business_id: staffRow.business_id,
-                  name: staffRow.name,
-                  role: 'Staff',
-                });
-
-              if (insertErr) {
-                // Row might already exist — try update
-                await supabase
-                  .from('users')
-                  .update({
-                    business_id: staffRow.business_id,
-                    name: staffRow.name,
-                    role: 'Staff',
-                  })
-                  .eq('id', session.user.id);
-              }
-
-              if (!hasUserId) {
-                await supabase
-                  .from('staff')
-                  .update({ user_id: session.user.id })
-                  .eq('id', staffRow.id)
-                  .catch(() => {});
-              }
-            } catch (linkErr) {
-              console.warn('Failed to link staff user:', linkErr);
-            }
-
-            const { clearBusinessContext } = await import('@/services/backendApi');
-            clearBusinessContext();
-            try {
-              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-              await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
-            } catch {}
-
-            router.replace('/dashboard');
-            return;
-          }
-        } catch (staffCheckErr: any) {
-          console.warn('Staff lookup failed, continuing to onboarding:', staffCheckErr?.message || staffCheckErr);
-        }
-
-        // Not a staff member — save signup progress for owner onboarding
-        saveSignupProgress({
-          mobile: mobileNumber,
-          mobileVerified: true,
-          currentStep: 'mobileOtp',
-        }).catch(() => {});
-
-        // No business_id -- check signup progress
-        try {
-          const progressResult = await withTimeout(
-            getSignupProgress(),
-            10000,
-            'Get signup progress'
-          );
-          
-          if (progressResult.success && progressResult.progress) {
-            const progress = progressResult.progress;
-            
-            if (progress.business_id || progress.current_step === 'signupComplete' || progress.current_step === 'completed' || progress.current_step === 'complete') {
-              try {
-                const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
-                await Promise.race([
-                  prefetchBusinessData(),
-                  new Promise(r => setTimeout(r, 3000)),
-                ]);
-              } catch {}
-              
-              router.replace('/dashboard');
-              return;
-            }
-            
-            await continueFromSignupProgress(progress, mobileNumber);
-            return;
-          }
-        } catch {
-          // Signup progress fetch failed -- start fresh
-        }
+        setSignupData({ staffId: staffRow.id, staffName: staffRow.name, businessId: staffRow.business_id, mobile: cleanPhone });
+        router.replace('/auth/staff-verify');
+        return;
       }
-    } catch {
-      // Session/profile check failed -- start fresh
+
+      // Staff already has user_id — ensure users row exists via RPC (bypasses RLS)
+      try {
+        await supabase.rpc('create_staff_user_row', { p_staff_mobile: cleanPhone });
+      } catch {}
+
+      const { clearBusinessContext } = await import('@/services/backendApi');
+      clearBusinessContext();
+      try {
+        const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+        await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
+      } catch {}
+
+      router.replace('/dashboard');
+      return;
     }
-    
-    router.replace({
-      pathname: '/auth/gstin-pan',
-      params: { mobile: mobileNumber },
-    });
+
+    // Step 4: Not a staff member — check if existing user with business
+    try {
+      const { data: userProfile } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (userProfile?.business_id) {
+        const { clearBusinessContext } = await import('@/services/backendApi');
+        clearBusinessContext();
+        try {
+          const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+          await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
+        } catch {}
+        router.replace('/dashboard');
+        return;
+      }
+    } catch {}
+
+    // Step 5: Not staff, no existing user — owner signup flow
+    saveSignupProgress({
+      mobile: mobileNumber,
+      mobileVerified: true,
+      currentStep: 'mobileOtp',
+    }).catch(() => {});
+
+    try {
+      const progressResult = await withTimeout(getSignupProgress(), 10000, 'Get signup progress');
+      if (progressResult.success && progressResult.progress) {
+        const progress = progressResult.progress;
+        if (progress.business_id || progress.current_step === 'signupComplete' || progress.current_step === 'completed' || progress.current_step === 'complete') {
+          try {
+            const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+            await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
+          } catch {}
+          router.replace('/dashboard');
+          return;
+        }
+        await continueFromSignupProgress(progress, mobileNumber);
+        return;
+      }
+    } catch {}
+
+    setSignupData({ mobile: mobileNumber });
+    router.replace('/auth/gstin-pan');
   };
 
   const continueFromSignupProgress = async (progress: any, mobileNumber: string) => {
@@ -468,9 +434,11 @@ export default function OTPScreen() {
       if (['addressManagement', 'address'].includes(currentStep)) {
         baseParams.addressType = 'primary';
       }
-      router.replace({ pathname: route as any, params: baseParams });
+      setSignupData(baseParams);
+      router.replace(route as any);
     } else {
-      router.replace({ pathname: '/auth/gstin-pan' as any, params: { mobile: mobileNumber } });
+      setSignupData({ mobile: mobileNumber });
+      router.replace('/auth/gstin-pan' as any);
     }
   };
 

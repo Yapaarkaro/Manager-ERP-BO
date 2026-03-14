@@ -23,6 +23,7 @@ import { extractAddressComponents } from '@/services/googleMapsApi';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { updateAddress, createStaff } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { getSignupData, setSignupData } from '@/utils/signupStore';
 
 const indianStates = [
   { name: 'Andhra Pradesh', code: '37' },
@@ -68,19 +69,18 @@ export default function EditAddressScreen() {
   console.log('🔧 EditAddressScreen - Component rendering');
   
   const { setStatusBarStyle } = useStatusBar();
-  const { 
-    editAddressId,
-    addressType = 'primary',
-    // Signup flow parameters
-    type,
-    value,
-    gstinData,
-    name,
-    businessName,
-    businessType,
-    customBusinessType,
-    existingAddresses = '[]',
-  } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const stored = getSignupData();
+  const editAddressId = params.editAddressId || stored.editAddressId;
+  const addressType = params.addressType || stored.addressType || 'primary';
+  const type = params.type || stored.type;
+  const value = params.value || stored.value;
+  const gstinData = params.gstinData || stored.gstinData;
+  const name = params.name || stored.name;
+  const businessName = params.businessName || stored.businessName;
+  const businessType = params.businessType || stored.businessType;
+  const customBusinessType = params.customBusinessType || stored.customBusinessType;
+  const existingAddresses = params.existingAddresses || stored.existingAddresses || '[]';
 
   console.log('🔧 EditAddressScreen - Parameters:', { editAddressId, addressType, type, value });
 
@@ -424,19 +424,11 @@ export default function EditAddressScreen() {
       
       setIsLoading(false);
       if (type && value) {
-        safeRouter.push({
-          pathname: '/auth/address-confirmation',
-          params: {
-            type,
-            value,
-            gstinData,
-            name,
-            businessName,
-            businessType,
-            customBusinessType,
-            allAddresses: JSON.stringify(parsedExistingAddresses),
-          }
+        setSignupData({
+          type, value, gstinData, name, businessName, businessType, customBusinessType,
+          allAddresses: JSON.stringify(parsedExistingAddresses),
         });
+        safeRouter.push('/auth/address-confirmation');
       } else {
         safeRouter.push('/settings');
       }

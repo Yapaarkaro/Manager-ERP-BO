@@ -23,6 +23,8 @@ import { Supplier } from '@/utils/dataStore';
 import { getSuppliers, getAllSupplierMetrics, getProducts, getPurchaseInvoices, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import { onTransactionChange } from '@/utils/transactionEvents';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -218,12 +220,10 @@ export default function SuppliersScreen() {
   };
 
   const handleSupplierPress = (supplier: Supplier) => {
+    setNavData('supplierData', supplier);
     safeRouter.push({
       pathname: '/purchasing/supplier-details',
-      params: {
-        supplierId: supplier.id,
-        supplierData: JSON.stringify(supplier)
-      }
+      params: { supplierId: supplier.id }
     });
   };
 
@@ -261,13 +261,7 @@ export default function SuppliersScreen() {
     }
   };
 
-  const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
+  const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -952,7 +946,7 @@ const styles = StyleSheet.create({
   },
   addSupplierFAB: {
     position: 'absolute',
-    bottom: 24,
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
     backgroundColor: Colors.primary,
     flexDirection: 'row',

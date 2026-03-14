@@ -16,6 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { onTransactionChange } from '@/utils/transactionEvents';
 import { invalidateApiCache, getCashTransactions } from '@/services/backendApi';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 
 const C = {
   bg: '#FFFFFF',
@@ -31,8 +32,7 @@ const C = {
   divider: '#F3F4F6',
 };
 
-const fmt = (n: number) =>
-  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(n);
+const fmt = (n: number) => formatCurrencyINR(n, 2, 0);
 
 export default function CashAccountsScreen() {
   const { data: businessData, refetch } = useBusinessData();

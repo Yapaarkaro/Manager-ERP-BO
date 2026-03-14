@@ -19,6 +19,9 @@ import {
   Keyboard,
   X,
 } from 'lucide-react-native';
+import { setScannedData } from '@/utils/scannedDataStore';
+import { safeRouter } from '@/utils/safeRouter';
+import { productStore } from '@/utils/productStore';
 
 const Colors = {
   background: '#FFFFFF',
@@ -36,30 +39,22 @@ const Colors = {
   },
 };
 
-// OpenFoodFacts API integration
-const fetchProductDetails = async (barcode: string) => {
+const fetchProductDetailsFromOpenFoodFacts = async (barcode: string) => {
   try {
-    if (!barcode || typeof barcode !== 'string') {
-      console.error('Invalid barcode:', barcode);
-      return { found: false, error: true };
-    }
+    if (!barcode || typeof barcode !== 'string') return { found: false, error: true };
 
     const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, {
-      headers: {
-        'User-Agent': 'ManagerApp (getmanager.in) - support@getmanager.in'
-      }
+      headers: { 'User-Agent': 'ManagerApp (getmanager.in) - support@getmanager.in' }
     });
     
-    if (!response.ok) {
-      console.error('API response not ok:', response.status);
-      return { found: false, error: true };
-    }
+    if (!response.ok) return { found: false, error: true };
     
     const data = await response.json();
     
     if (data && data.status === 1 && data.product) {
       return {
         found: true,
+        source: 'openfoodfacts' as const,
         product: {
           name: data.product.product_name || '',
           brand: data.product.brands || '',
@@ -71,17 +66,13 @@ const fetchProductDetails = async (barcode: string) => {
             : 'Others',
         }
       };
-    } else {
-      return { found: false };
     }
+    return { found: false };
   } catch (error) {
-    console.error('Error fetching product details:', error);
+    console.error('Error fetching from OpenFoodFacts:', error);
     return { found: false, error: true };
   }
 };
-
-import { setScannedData } from '@/utils/scannedDataStore';
-import { safeRouter } from '@/utils/safeRouter';
 
 export default function BarcodeScannerScreen() {
   const params = useLocalSearchParams();
@@ -138,82 +129,40 @@ export default function BarcodeScannerScreen() {
     setIsLoading(true);
     
     try {
-      console.log('Fetching product details for barcode:', barcode);
-      const result = await fetchProductDetails(barcode);
-      console.log('API result:', result);
-      setIsLoading(false);
-      
-      if (result && result.found && result.product) {
-        // Product found in OpenFoodFacts
-        const productData = {
-          id: barcode,
-          name: result.product.name || 'Unknown Product',
-          price: 999, // Default price, can be updated later
-          barcode: barcode,
-          image: result.product.image || '',
-          category: result.product.category || 'Others',
-          brand: result.product.brand || '',
-          quantity: result.product.quantity || '',
-        };
+      console.log('Looking up barcode:', barcode);
+
+      // Step 1: Check local product store first (includes Manager-generated barcodes)
+      const localProduct = productStore.findByBarcode(barcode);
+
+      if (localProduct) {
+        console.log('Product found in local store:', localProduct.name);
+        setIsLoading(false);
 
         if (returnTo === 'manual-product') {
-          // Show custom alert with product details and continue button
           Alert.alert(
-            '🎉 Product Found!',
-            `Here's what we found:\n\n📦 Product: ${result.product.name}\n🏷️ Brand: ${result.product.brand || 'Unknown'}\n📊 Quantity: ${result.product.quantity || 'N/A'}\n\nClick Continue to auto-fill the product form with these details.`,
-            [
-              {
-                text: 'Continue',
-                onPress: () => {
-                  try {
-                    const navigationParams = {
-                      returnTo: returnTo,
-                      preSelectedCustomer: preSelectedCustomer,
-                      scannedData: JSON.stringify({
-                        barcode: barcode,
-                        name: result.product.name || 'Unknown Product',
-                        brand: result.product.brand || '',
-                        category: result.product.category || 'Others',
-                        isScanned: 'true'
-                      })
-                    };
-                    
-                    console.log('🚀 Returning to existing manual product form');
-                    
-                    // Set scanned data before going back
-                    const dataToSet = JSON.stringify({
-                      barcode: barcode,
-                      name: result.product.name || 'Unknown Product',
-                      brand: result.product.brand || '',
-                      category: result.product.category || 'Others',
-                      isScanned: 'true'
-                    });
-                    console.log('🔍 Setting scanned data in store:', dataToSet);
-                    setScannedData(dataToSet);
-                    
-                    console.log('🚀 Returning to existing manual product form');
-                    
-                    // Go back to the existing form with scanned data
-                    router.back();
-                  } catch (error) {
-                    console.error('Error navigating to manual product form:', error);
-                    Alert.alert('Error', 'Failed to open product form. Please try again.');
-                  }
-                },
+            'Product Found in Inventory',
+            `📦 ${localProduct.name}\n🏷️ Barcode: ${localProduct.barcode}\n📂 Category: ${localProduct.category}\n💰 Price: ₹${localProduct.salesPrice || localProduct.unitPrice}\n📦 Stock: ${localProduct.currentStock} ${localProduct.primaryUnit || 'units'}`,
+            [{
+              text: 'Continue',
+              onPress: () => {
+                setScannedData(JSON.stringify({
+                  barcode: localProduct.barcode,
+                  name: localProduct.name,
+                  brand: localProduct.brand || '',
+                  category: localProduct.category || 'Others',
+                  isScanned: 'true',
+                  existingProduct: 'true',
+                }));
+                router.back();
               },
-            ]
+            }]
           );
         } else {
-          // Default behavior - add to cart
           Alert.alert(
             'Product Found',
-            `Barcode: ${barcode}\nProduct: ${result.product.name}\nBrand: ${result.product.brand || 'Unknown'}\nQuantity: ${result.product.quantity || 'N/A'}`,
+            `📦 ${localProduct.name}\n🏷️ Barcode: ${localProduct.barcode}\n📂 Category: ${localProduct.category}\n💰 Price: ₹${localProduct.salesPrice || localProduct.unitPrice}\n📦 Stock: ${localProduct.currentStock} ${localProduct.primaryUnit || 'units'}`,
             [
-              {
-                text: 'Scan Again',
-                onPress: () => setScanned(false),
-                style: 'cancel',
-              },
+              { text: 'Scan Again', onPress: () => setScanned(false), style: 'cancel' },
               {
                 text: 'Add to Cart',
                 onPress: () => {
@@ -222,8 +171,18 @@ export default function BarcodeScannerScreen() {
                       pathname: '/new-sale/cart',
                       params: {
                         selectedProducts: JSON.stringify([{
-                          ...productData,
-                          quantity: 1
+                          id: localProduct.id,
+                          name: localProduct.name,
+                          price: localProduct.salesPrice || localProduct.unitPrice,
+                          barcode: localProduct.barcode,
+                          image: localProduct.image || '',
+                          category: localProduct.category,
+                          brand: localProduct.brand || '',
+                          quantity: 1,
+                          hsnCode: localProduct.hsnCode || '',
+                          taxRate: localProduct.taxRate || 0,
+                          taxInclusive: localProduct.taxInclusive || false,
+                          primaryUnit: localProduct.primaryUnit || 'PCS',
                         }]),
                         preSelectedCustomer: preSelectedCustomer || ''
                       }
@@ -237,84 +196,111 @@ export default function BarcodeScannerScreen() {
             ]
           );
         }
-      } else {
+        return;
+      }
+
+      // Step 2: Not in local store - try OpenFoodFacts for manufacturer barcodes
+      console.log('Not in local store, checking OpenFoodFacts...');
+      const result = await fetchProductDetailsFromOpenFoodFacts(barcode);
+      console.log('OpenFoodFacts result:', result);
+      setIsLoading(false);
+      
+      if (result && result.found && result.product) {
         if (returnTo === 'manual-product') {
-          // Show custom alert for product not found
           Alert.alert(
-            '🔍 Product Not Found',
-            `Barcode: ${barcode}\n\nThis product wasn't found in our database. We'll open the product form so you can add it manually.`,
+            'Product Found Online',
+            `📦 Product: ${result.product.name}\n🏷️ Brand: ${result.product.brand || 'Unknown'}\n📊 Quantity: ${result.product.quantity || 'N/A'}\n\nClick Continue to auto-fill the product form.`,
+            [{
+              text: 'Continue',
+              onPress: () => {
+                setScannedData(JSON.stringify({
+                  barcode: barcode,
+                  name: result.product.name || 'Unknown Product',
+                  brand: result.product.brand || '',
+                  category: result.product.category || 'Others',
+                  isScanned: 'true'
+                }));
+                router.back();
+              },
+            }]
+          );
+        } else {
+          const productData = {
+            id: barcode,
+            name: result.product.name || 'Unknown Product',
+            price: 999,
+            barcode: barcode,
+            image: result.product.image || '',
+            category: result.product.category || 'Others',
+            brand: result.product.brand || '',
+            quantity: result.product.quantity || '',
+          };
+          Alert.alert(
+            'Product Found Online',
+            `📦 Product: ${result.product.name}\n🏷️ Brand: ${result.product.brand || 'Unknown'}\n📊 Quantity: ${result.product.quantity || 'N/A'}`,
             [
+              { text: 'Scan Again', onPress: () => setScanned(false), style: 'cancel' },
               {
-                text: 'Continue',
+                text: 'Add to Cart',
                 onPress: () => {
                   try {
-                    const navigationParams = {
-                      returnTo: returnTo,
-                      preSelectedCustomer: preSelectedCustomer,
-                      scannedData: JSON.stringify({
-                        barcode: barcode,
-                        name: '',
-                        brand: '',
-                        category: 'Others',
-                        isScanned: 'true'
-                      })
-                    };
-                    
-                    console.log('🚀 Returning to existing manual product form (not found)');
-                    
-                    // Set scanned data before going back
-                    const dataToSet = JSON.stringify({
-                      barcode: barcode,
-                      name: '',
-                      brand: '',
-                      category: 'Others',
-                      isScanned: 'true'
+                    safeRouter.push({
+                      pathname: '/new-sale/cart',
+                      params: {
+                        selectedProducts: JSON.stringify([{ ...productData, quantity: 1 }]),
+                        preSelectedCustomer: preSelectedCustomer || ''
+                      }
                     });
-                    console.log('🔍 Setting scanned data in store (not found):', dataToSet);
-                    setScannedData(dataToSet);
-                    
-                    console.log('🚀 Returning to existing manual product form (not found)');
-                    
-                    // Go back to the existing form with scanned data
-                    router.back();
                   } catch (error) {
-                    console.error('Error navigating to manual product form:', error);
-                    Alert.alert('Error', 'Failed to open product form. Please try again.');
+                    console.error('Error navigating to cart:', error);
+                    Alert.alert('Error', 'Failed to add product to cart. Please try again.');
                   }
                 },
               },
             ]
           );
-        } else {
-          // Default behavior - add manually to cart
+        }
+      } else {
+        // Not found anywhere
+        if (returnTo === 'manual-product') {
           Alert.alert(
             'Product Not Found',
-            `Barcode: ${barcode}\n\nThis product was not found in our database. You can still add it manually to your cart.`,
-            [
-              {
-                text: 'Scan Again',
-                onPress: () => setScanned(false),
-                style: 'cancel',
+            `Barcode: ${barcode}\n\nThis product wasn't found in your inventory or online databases. You can add it manually.`,
+            [{
+              text: 'Continue',
+              onPress: () => {
+                setScannedData(JSON.stringify({
+                  barcode: barcode,
+                  name: '',
+                  brand: '',
+                  category: 'Others',
+                  isScanned: 'true'
+                }));
+                router.back();
               },
+            }]
+          );
+        } else {
+          Alert.alert(
+            'Product Not Found',
+            `Barcode: ${barcode}\n\nThis product was not found in your inventory or online databases. You can still add it manually.`,
+            [
+              { text: 'Scan Again', onPress: () => setScanned(false), style: 'cancel' },
               {
                 text: 'Add Manually',
                 onPress: () => {
-                  const manualProduct = {
-                    id: barcode,
-                    name: 'Manual Product',
-                    price: 999,
-                    barcode: barcode,
-                    image: '',
-                    category: 'Others',
-                  };
-                  
                   try {
                     safeRouter.push({
                       pathname: '/new-sale/cart',
                       params: {
                         selectedProducts: JSON.stringify([{
-                          ...manualProduct,
-                          quantity: 1
+                          id: barcode,
+                          name: 'Manual Product',
+                          price: 999,
+                          barcode: barcode,
+                          image: '',
+                          category: 'Others',
+                          quantity: 1,
                         }]),
                         preSelectedCustomer: preSelectedCustomer || ''
                       }
@@ -333,7 +319,7 @@ export default function BarcodeScannerScreen() {
       console.error('Error processing barcode:', error);
       setIsLoading(false);
       setScanned(false);
-      Alert.alert('Error', 'Failed to fetch product details. Please try again.');
+      Alert.alert('Error', 'Failed to process barcode. Please try again.');
     }
   };
 
@@ -381,14 +367,14 @@ export default function BarcodeScannerScreen() {
 
         {/* Camera */}
         {!cameraError ? (
-          <CameraView
-            style={styles.camera}
-            facing="back"
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-            flash={flashOn ? 'on' : 'off'}
-          >
-            <View style={styles.overlay}>
-              {/* Top Controls */}
+          <View style={styles.cameraContainer}>
+            <CameraView
+              style={StyleSheet.absoluteFillObject}
+              facing="back"
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+              flash={flashOn ? 'on' : 'off'}
+            />
+            <View style={[StyleSheet.absoluteFillObject, styles.overlay]} pointerEvents="box-none">
               <View style={styles.topControls}>
                 <TouchableOpacity
                   style={styles.flashlightButton}
@@ -403,34 +389,29 @@ export default function BarcodeScannerScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Scan Area */}
               <View style={styles.scanArea}>
-                {/* Corner Guides */}
                 <View style={[styles.cornerGuide, styles.topLeft]} />
                 <View style={[styles.cornerGuide, styles.topRight]} />
                 <View style={[styles.cornerGuide, styles.bottomLeft]} />
                 <View style={[styles.cornerGuide, styles.bottomRight]} />
                 
-                {/* Scan Frame */}
                 <View style={styles.scanFrame}>
                   <View style={styles.scanFrameInner} />
                 </View>
                 
-                {/* Scan Instructions */}
                 <Text style={styles.scanText}>
                   Position the barcode within the frame
                 </Text>
                 
-                {/* Loading Indicator */}
                 {isLoading && (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#ffffff" />
-                    <Text style={styles.loadingText}>Fetching product details...</Text>
+                    <Text style={styles.loadingText}>Looking up product...</Text>
                   </View>
                 )}
               </View>
             </View>
-          </CameraView>
+          </View>
         ) : (
           <View style={styles.cameraErrorContainer}>
             <Text style={styles.cameraErrorTitle}>Camera Error</Text>
@@ -494,11 +475,11 @@ export default function BarcodeScannerScreen() {
                       onChangeText={setManualBarcode}
                       placeholder="Enter barcode number"
                       placeholderTextColor={Colors.textLight}
-                      keyboardType="numeric"
+                      keyboardType="default"
                       autoFocus={true}
                       maxLength={20}
                       selectionColor={Colors.primary}
-                      autoCapitalize="none"
+                      autoCapitalize="characters"
                       autoCorrect={false}
                     />
                   </View>
@@ -573,6 +554,10 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  cameraContainer: {
+    flex: 1,
+    position: 'relative',
   },
   camera: {
     flex: 1,

@@ -14,6 +14,7 @@ import { ArrowLeft, FileText, User, Building2, Calendar, Hash, Package, MessageS
 import { createReturn, createInAppNotification, autoLinkSupplierToUser } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
 import { safeRouter } from '@/utils/safeRouter';
+import { consumeNavData, setNavData } from '@/utils/navStore';
 import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
@@ -37,22 +38,18 @@ const Colors = {
 };
 
 export default function ReturnConfirmationScreen() {
-  const { invoiceData, selectedItems, itemReasons, returnAmount, refundMethod } = useLocalSearchParams();
-  const invoice = JSON.parse(invoiceData as string);
-  const items = JSON.parse(selectedItems as string);
-  const reasons = JSON.parse(itemReasons as string);
+  const params = useLocalSearchParams();
+  const invoice = consumeNavData('returnFlowInvoice') || (params.invoiceData ? JSON.parse(params.invoiceData as string) : {});
+  const items = consumeNavData('returnFlowItems') || (params.selectedItems ? JSON.parse(params.selectedItems as string) : []);
+  const reasons = consumeNavData('returnFlowReasons') || (params.itemReasons ? JSON.parse(params.itemReasons as string) : []);
+  const returnAmount = consumeNavData<string>('returnFlowAmount') || (params.returnAmount as string) || '0';
+  const refundMethod = consumeNavData<string>('returnFlowRefundMethod') || (params.refundMethod as string) || 'cash';
   
   const [isProcessing, setIsProcessing] = useState(false);
   const { isStaff, staffId, staffName, staffBusinessId } = usePermissions();
   const { data: bizData } = useBusinessData();
 
-  const formatAmount = (amount: string) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).format(parseFloat(amount));
-  };
+  const formatAmount = (amount: string | number) => formatCurrencyINR(amount);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -235,7 +232,8 @@ export default function ReturnConfirmationScreen() {
         customerMobile: !isSupplierReturn ? invoice.customerMobile : undefined,
       };
 
-      safeRouter.replace({ pathname: '/new-return/success', params: { returnData: JSON.stringify(returnData) } } as any);
+      setNavData('returnSuccessData', returnData);
+      safeRouter.replace({ pathname: '/new-return/success' } as any);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to process return');
     }
@@ -261,7 +259,7 @@ export default function ReturnConfirmationScreen() {
           
           <View style={styles.headerRight}>
             <Text style={styles.returnAmountHeader}>
-              {formatAmount(returnAmount as string)}
+              {formatAmount(returnAmount)}
             </Text>
           </View>
         </View>
@@ -347,7 +345,7 @@ export default function ReturnConfirmationScreen() {
                 {getRefundMethodText()}
               </Text>
               <Text style={styles.refundAmountText}>
-                {formatAmount(returnAmount as string)}
+                {formatAmount(returnAmount)}
               </Text>
             </View>
           </View>
@@ -374,7 +372,7 @@ export default function ReturnConfirmationScreen() {
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total Refund:</Text>
               <Text style={styles.totalValue}>
-                {formatAmount(returnAmount as string)}
+                {formatAmount(returnAmount)}
               </Text>
             </View>
           </View>

@@ -12,6 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { setNavData } from '@/utils/navStore';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { getReceivables } from '@/services/backendApi';
 import { 
   ArrowLeft, 
@@ -81,21 +83,12 @@ export default function ReceivePaymentScreen() {
   };
 
   const handleCustomerSelect = (customer: any) => {
-    // Clear the navigation stack and go to collect payment
-    safeRouter.push({
-      pathname: '/receivables/collect-payment',
-      params: {
-        customerData: JSON.stringify(customer)
-      }
-    });
+    setNavData('collectPaymentCustomer', customer);
+    safeRouter.push({ pathname: '/receivables/collect-payment' });
   };
 
   const formatAmount = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 0,
-    }).format(amount);
+    return formatCurrencyINR(amount);
   };
 
   const handleFilter = () => {

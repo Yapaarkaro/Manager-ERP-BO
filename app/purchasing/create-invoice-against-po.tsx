@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
+import { formatCurrencyINR } from '@/utils/formatters';
 import { createInvoice, getNextInvoiceNumber, getOrCreateConversation, sendMessage, createInAppNotification } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
@@ -138,7 +139,7 @@ export default function CreateInvoiceAgainstPOScreen() {
   const subtotal = includedItems.reduce((sum, i) => sum + i.billedQty * i.price, 0);
   const grandTotal = subtotal;
 
-  const formatAmount = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatAmount = (n: number) => formatCurrencyINR(n);
 
   const PAYMENT_METHODS = [
     { key: 'none', label: 'Unpaid' },

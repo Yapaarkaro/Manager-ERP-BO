@@ -4,12 +4,25 @@
  */
 
 /**
+ * Apply Indian-style comma grouping to the integer part of a number string.
+ * Last 3 digits stay together, then groups of 2 from the right.
+ * Examples: "10000" → "10,000", "100000" → "1,00,000", "1000000" → "10,00,000"
+ */
+function applyIndianCommas(intStr: string): string {
+  if (intStr.length <= 3) return intStr;
+  const lastThree = intStr.slice(-3);
+  const remaining = intStr.slice(0, -3);
+  return remaining.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree;
+}
+
+/**
  * Format a number using the Indian numbering system (lakhs/crores).
  * Examples: 10000 → "10,000", 100000 → "1,00,000", 1000000 → "10,00,000"
  * @param num - number or string to format
  * @param decimals - max decimal places to show (default 2, max 4)
+ * @param minDecimals - minimum decimal places to always show (default 0). Use 2 to always show paisa.
  */
-export function formatIndianNumber(num: number | string, decimals: number = 2): string {
+export function formatIndianNumber(num: number | string, decimals: number = 2, minDecimals: number = 0): string {
   if (num === null || num === undefined || num === '') return '0';
 
   const n = typeof num === 'string' ? parseFloat(num.toString().replace(/[^0-9.-]/g, '')) : num;
@@ -19,20 +32,15 @@ export function formatIndianNumber(num: number | string, decimals: number = 2): 
   const absNum = Math.abs(n);
 
   const parts = absNum.toFixed(decimals).split('.');
-  let integerPart = parts[0];
+  const integerPart = applyIndianCommas(parts[0]);
   const decimalPart = parts[1];
-
-  // Indian grouping: last 3 digits, then groups of 2
-  if (integerPart.length > 3) {
-    const lastThree = integerPart.slice(-3);
-    const remaining = integerPart.slice(0, -3);
-    integerPart = remaining.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree;
-  }
 
   let result = integerPart;
   if (decimalPart !== undefined) {
-    // Trim trailing zeros but keep at least minDecimals
-    const trimmed = decimalPart.replace(/0+$/, '');
+    let trimmed = decimalPart.replace(/0+$/, '');
+    if (trimmed.length < minDecimals) {
+      trimmed = decimalPart.substring(0, Math.max(trimmed.length, minDecimals));
+    }
     if (trimmed.length > 0) {
       result += '.' + trimmed;
     }
@@ -45,12 +53,13 @@ export function formatIndianNumber(num: number | string, decimals: number = 2): 
  * Format currency with ₹ symbol using Indian number formatting.
  * @param amount - the amount to format
  * @param decimals - max decimal places (default 2, up to 4)
+ * @param minDecimals - minimum decimal places to always show (default 2 for currency)
  */
-export function formatCurrencyINR(amount: number | string, decimals: number = 2): string {
+export function formatCurrencyINR(amount: number | string, decimals: number = 2, minDecimals: number = 2): string {
   const n = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(n)) return '₹0';
   const prefix = n < 0 ? '-₹' : '₹';
-  return prefix + formatIndianNumber(Math.abs(n), decimals);
+  return prefix + formatIndianNumber(Math.abs(n), decimals, minDecimals);
 }
 
 /**
@@ -68,8 +77,8 @@ export function formatPrice(price: number): string {
 /**
  * Format a price with Indian commas, preserving up to 4 decimal places.
  */
-export function formatPriceINR(price: number): string {
-  return '₹' + formatIndianNumber(price, 4);
+export function formatPriceINR(price: number, minDecimals: number = 2): string {
+  return '₹' + formatIndianNumber(price, 4, minDecimals);
 }
 
 /**
@@ -160,6 +169,48 @@ export function getInitials(name: string | null | undefined): string {
   if (words.length === 0) return '?';
   if (words.length === 1) return words[0][0].toUpperCase();
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+  'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function convertChunk(n: number): string {
+  if (n === 0) return '';
+  if (n < 20) return ONES[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : '');
+  return ONES[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' and ' + convertChunk(n % 100) : '');
+}
+
+/**
+ * Convert a number to Indian English words for invoices.
+ * e.g. 1234.56 → "Rupees One Thousand Two Hundred and Thirty-Four and Fifty-Six Paise Only"
+ * Uses Indian numbering: Lakh (1,00,000), Crore (1,00,00,000).
+ */
+export function numberToWords(amount: number): string {
+  if (amount === 0) return 'Rupees Zero Only';
+  const isNeg = amount < 0;
+  const abs = Math.abs(amount);
+  const rupees = Math.floor(abs);
+  const paise = Math.round((abs - rupees) * 100);
+
+  const parts: string[] = [];
+  let rem = rupees;
+
+  if (rem >= 1_00_00_000) { parts.push(convertChunk(Math.floor(rem / 1_00_00_000)) + ' Crore'); rem %= 1_00_00_000; }
+  if (rem >= 1_00_000) { parts.push(convertChunk(Math.floor(rem / 1_00_000)) + ' Lakh'); rem %= 1_00_000; }
+  if (rem >= 1_000) { parts.push(convertChunk(Math.floor(rem / 1_000)) + ' Thousand'); rem %= 1_000; }
+  if (rem >= 100) { parts.push(convertChunk(Math.floor(rem / 100)) + ' Hundred'); rem %= 100; }
+  if (rem > 0) {
+    if (parts.length > 0) parts.push('and');
+    parts.push(convertChunk(rem));
+  }
+
+  let result = (isNeg ? 'Minus ' : '') + 'Rupees ' + (parts.length > 0 ? parts.join(' ') : 'Zero');
+  if (paise > 0) {
+    result += ' and ' + convertChunk(paise) + ' Paise';
+  }
+  return result + ' Only';
 }
 
 const AVATAR_COLORS = [
