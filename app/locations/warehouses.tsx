@@ -16,7 +16,7 @@ import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Warehouse, MapPin, Plus, Edit3, Trash2, Search, Package, TrendingUp, TrendingDown, X } from 'lucide-react-native';
 import { mapLocationsToAddresses } from '../../utils/dataStore';
-import { getAddresses, invalidateApiCache } from '@/services/backendApi';
+import { getAddresses, invalidateApiCache, deleteAddress } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { safeRouter } from '@/utils/safeRouter';
@@ -173,12 +173,12 @@ export default function WarehousesScreen() {
   };
 
   const handleEditWarehouse = (warehouse: WarehouseData) => {
-    setNavData('editWarehouse', warehouse);
     safeRouter.push({
-      pathname: '/locations/warehouse-details',
+      pathname: '/edit-address-simple',
       params: {
-        warehouseId: warehouse.id,
-        editMode: 'true',
+        editAddressId: warehouse.backendId || warehouse.id,
+        addressType: 'warehouse',
+        fromSettings: 'true',
       }
     });
   };
@@ -188,12 +188,21 @@ export default function WarehousesScreen() {
     setShowDeleteModal(true);
   };
 
-  const confirmDeleteWarehouse = () => {
+  const confirmDeleteWarehouse = async () => {
     if (warehouseToDelete) {
-      setWarehouses(prev => prev.filter(warehouse => warehouse.id !== warehouseToDelete));
+      const warehouse = warehouses.find(w => w.id === warehouseToDelete);
+      const backendId = warehouse?.backendId || warehouseToDelete;
+      setWarehouses(prev => prev.filter(w => w.id !== warehouseToDelete));
       setWarehouseToDelete(null);
       setShowDeleteModal(false);
-      Alert.alert('Success', 'Warehouse deleted successfully');
+      const res = await deleteAddress(backendId);
+      if (res.success) {
+        invalidateApiCache('addresses');
+        Alert.alert('Success', 'Warehouse deleted successfully');
+      } else {
+        Alert.alert('Error', res.error || 'Failed to delete warehouse from server');
+        loadWarehouses();
+      }
     }
   };
 
@@ -275,41 +284,6 @@ export default function WarehousesScreen() {
         <View style={styles.addressSection}>
           <MapPin size={16} color={Colors.textLight} />
           <Text style={styles.addressText}>{formatAddress(warehouse)}</Text>
-        </View>
-
-        {/* Warehouse Stats */}
-        <View style={styles.statsSection}>
-          <View style={styles.statItem}>
-            <Package size={16} color={Colors.primary} />
-              <View style={styles.statContent}>
-              <Text style={styles.statLabel}>Current Stock</Text>
-              <View style={styles.statValueContainer}>
-                <Text style={styles.statValue}>{warehouse.currentStock || 0} items</Text>
-                <View style={styles.trendContainer}>
-                  {stockTrend.trend === 'up' && <TrendingUp size={12} color={Colors.success} />}
-                  {stockTrend.trend === 'down' && <TrendingDown size={12} color={Colors.error} />}
-                  <Text style={[
-                    styles.trendText,
-                    { color: stockTrend.trend === 'neutral' ? Colors.textLight : stockTrend.trend === 'up' ? Colors.success : Colors.error }
-                  ]}>
-                    {stockTrend.value}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.statItem}>
-            <Text style={styles.capacityLabel}>Capacity:</Text>
-            <Text style={styles.capacityValue}>{warehouse.capacity || 'N/A'}</Text>
-          </View>
-
-          <View style={styles.statItem}>
-            <Text style={styles.valueLabel}>Stock Value:</Text>
-            <Text style={styles.valueAmount}>
-              {formatCurrency(warehouse.stockValue || 0)}
-            </Text>
-          </View>
         </View>
 
         {/* Manager & Contact */}

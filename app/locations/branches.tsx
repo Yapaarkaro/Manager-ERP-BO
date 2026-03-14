@@ -16,7 +16,7 @@ import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { ArrowLeft, Building2, MapPin, Plus, Edit3, Trash2, Search, X } from 'lucide-react-native';
 import { mapLocationsToAddresses } from '../../utils/dataStore';
-import { getAddresses, invalidateApiCache } from '@/services/backendApi';
+import { getAddresses, invalidateApiCache, deleteAddress } from '@/services/backendApi';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { safeRouter } from '@/utils/safeRouter';
@@ -170,12 +170,12 @@ export default function BranchesScreen() {
   };
 
   const handleEditBranch = (branch: Branch) => {
-    setNavData('editBranch', branch);
     safeRouter.push({
-      pathname: '/locations/branch-details',
+      pathname: '/edit-address-simple',
       params: {
-        branchId: branch.id,
-        editMode: 'true',
+        editAddressId: branch.backendId || branch.id,
+        addressType: 'branch',
+        fromSettings: 'true',
       }
     });
   };
@@ -185,12 +185,21 @@ export default function BranchesScreen() {
     setShowDeleteModal(true);
   };
 
-  const confirmDeleteBranch = () => {
+  const confirmDeleteBranch = async () => {
     if (branchToDelete) {
-      setBranches(prev => prev.filter(branch => branch.id !== branchToDelete));
+      const branch = branches.find(b => b.id === branchToDelete);
+      const backendId = branch?.backendId || branchToDelete;
+      setBranches(prev => prev.filter(b => b.id !== branchToDelete));
       setBranchToDelete(null);
       setShowDeleteModal(false);
-      Alert.alert('Success', 'Branch deleted successfully');
+      const res = await deleteAddress(backendId);
+      if (res.success) {
+        invalidateApiCache('addresses');
+        Alert.alert('Success', 'Branch deleted successfully');
+      } else {
+        Alert.alert('Error', res.error || 'Failed to delete branch from server');
+        loadBranches();
+      }
     }
   };
 

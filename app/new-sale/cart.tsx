@@ -944,33 +944,28 @@ export default function CartScreen() {
       ? (originalSubtotal * discountValue) / 100
       : discountValue;
     
-    const totalDiscounts = totalItemDiscounts + invoiceDiscount;
-    const discountedSubtotal = originalSubtotal - totalDiscounts;
-    
-    const tax = cartItems.reduce((total, item) => {
-      const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
-      const { adjustedAmount } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
-      const taxableAmount = getBasePriceForTax(item, adjustedAmount);
-      return total + taxableAmount * ((item.taxRate || 0) / 100);
-    }, 0);
-    
-    const cess = cartItems.reduce((total, item) => {
+    let taxableSubtotal = 0;
+    let tax = 0;
+    let cess = 0;
+
+    cartItems.forEach(item => {
       const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
       const { adjustedAmount, cessPer } = calculateUoMAdjustedAmounts(item, finalDiscountedAmount);
       const taxableAmount = getBasePriceForTax(item, adjustedAmount);
-      let cessAmt = 0;
+      taxableSubtotal += taxableAmount;
+      tax += taxableAmount * ((item.taxRate || 0) / 100);
+
       if (item.cessType && item.cessType !== 'none') {
-        if (item.cessType === 'value') cessAmt = taxableAmount * ((item.cessRate || 0) / 100);
-        else if (item.cessType === 'quantity') cessAmt = cessPer * item.quantity;
-        else if (item.cessType === 'value_and_quantity') cessAmt = taxableAmount * ((item.cessRate || 0) / 100) + cessPer * item.quantity;
+        if (item.cessType === 'value') cess += taxableAmount * ((item.cessRate || 0) / 100);
+        else if (item.cessType === 'quantity') cess += cessPer * item.quantity;
+        else if (item.cessType === 'value_and_quantity') cess += taxableAmount * ((item.cessRate || 0) / 100) + cessPer * item.quantity;
         else if (item.cessType === 'mrp') {
           const mrpPrice = parseFloat(item.mrp || '0') || 0;
           const { adjustedAmount: adjustedMRP } = calculateUoMAdjustedAmounts(item, mrpPrice);
-          cessAmt = adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
+          cess += adjustedMRP * item.quantity * ((item.cessRate || 0) / 100);
         }
       }
-      return total + cessAmt;
-    }, 0);
+    });
     
     const otherChargesTotal = otherCharges.reduce((total, charge) => {
       const amount = parseFloat(charge.amount) || 0;
@@ -978,7 +973,9 @@ export default function CartScreen() {
       return total + amount + amount * (taxRate / 100);
     }, 0);
     
-    const exactTotal = discountedSubtotal + tax + cess + otherChargesTotal;
+    const discountedSubtotal = taxableSubtotal;
+    const totalDiscounts = totalItemDiscounts + invoiceDiscount;
+    const exactTotal = taxableSubtotal + tax + cess + otherChargesTotal;
     const roundedTotal = Math.round(exactTotal);
     
     return {

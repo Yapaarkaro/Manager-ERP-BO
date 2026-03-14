@@ -15,7 +15,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { ArrowLeft, Building2, Plus, Search, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileText, Check, Receipt } from 'lucide-react-native';
+import { ArrowLeft, Building2, Plus, Search, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileText, Check, Receipt, Edit3, Trash2 } from 'lucide-react-native';
 import { BankAccount } from '@/utils/dataStore';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { getBankTransactions, addBankTransaction, invalidateApiCache, clearBankTransaction, deleteBankTransaction } from '@/services/backendApi';
@@ -350,6 +350,33 @@ export default function BankDetailsScreen() {
     </View>
   );
 
+  const handleEditBank = () => {
+    if (!bankAccount) return;
+    setNavData('editBankAccount', {
+      ...bankAccount,
+      bankCode: bankAccount.bankShortName || bankAccount.bankId,
+    });
+    safeRouter.push('/add-bank-account');
+  };
+
+  const handleDeleteBank = () => {
+    if (!bankAccount) return;
+    Alert.alert('Delete Bank Account', 'Are you sure? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        const { supabase } = await import('@/lib/supabase');
+        const { error } = await supabase.from('bank_accounts').delete().eq('id', bankAccount.id);
+        if (!error) {
+          invalidateApiCache('bankAccounts');
+          Alert.alert('Deleted', 'Bank account deleted');
+          router.back();
+        } else {
+          Alert.alert('Error', error.message);
+        }
+      }},
+    ]);
+  };
+
   if (isLoading) return (
     <View style={s.container}>
       <SafeAreaView style={s.headerArea}><View style={s.header}>
@@ -376,6 +403,8 @@ export default function BankDetailsScreen() {
         <View style={s.header}>
           <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}><ArrowLeft size={22} color={C.text} /></TouchableOpacity>
           <Text style={s.headerTitle}>Account Statement</Text>
+          <TouchableOpacity onPress={handleEditBank} style={s.headerBtn}><Edit3 size={18} color={C.primary} /></TouchableOpacity>
+          <TouchableOpacity onPress={handleDeleteBank} style={s.headerBtn}><Trash2 size={18} color="#DC2626" /></TouchableOpacity>
           <TouchableOpacity onPress={() => setShowExportModal(true)} style={s.headerBtn}><FileText size={20} color={C.primary} /></TouchableOpacity>
           <TouchableOpacity onPress={() => setShowSearch(!showSearch)} style={s.headerBtn}><Search size={20} color={C.primary} /></TouchableOpacity>
         </View>

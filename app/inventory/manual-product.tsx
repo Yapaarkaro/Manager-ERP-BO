@@ -1181,6 +1181,18 @@ export default function ManualProductScreen() {
   const proceedWithProductCreation = async () => {
     setIsSubmitting(true);
 
+    // Auto-generate barcode if none exists
+    if (!formData.barcode || formData.barcode.trim().length === 0) {
+      try {
+        const barcodeResult = await assignBarcode({ locationId: formData.locationId });
+        if (barcodeResult.success && barcodeResult.barcode) {
+          formData.barcode = barcodeResult.barcode;
+          setBarcodeGenerated(true);
+          generatedBarcodeRef.current = barcodeResult.barcode;
+        }
+      } catch {}
+    }
+
     let finalProductImages = [...formData.productImages];
     let barcodeDataUri: string | null = null;
     

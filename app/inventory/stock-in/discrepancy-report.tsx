@@ -23,11 +23,10 @@ import {
   Building2,
   MessageSquare,
 } from 'lucide-react-native';
-import { autoLinkSupplierToUser } from '@/services/backendApi';
+import { autoLinkSupplierToUser, getBusinessPreferences } from '@/services/backendApi';
 import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatCurrencyINR } from '@/utils/formatters';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -222,25 +221,30 @@ export default function DiscrepancyReportScreen() {
 
     try {
       if (supplierOnManager && businessId && po.supplierId) {
-        const savedSettings = await AsyncStorage.getItem('autoSendSettings');
-        const autoSend = savedSettings ? JSON.parse(savedSettings) : { autoSendDiscrepancy: false };
+        const prefs = await getBusinessPreferences(businessId);
+        const shouldAutoSend = prefs?.auto_send_discrepancy === true;
 
-        await autoSendDocumentToChat({
-          businessId,
-          contactId: po.supplierId,
-          contactType: 'supplier',
-          contactName: po.supplierName,
-          documentType: 'discrepancy_report',
-          documentNumber: discrepancyReport.poNumber,
-          totalAmount: discrepancyReport.totalDiscrepancyValue,
-        });
+        if (shouldAutoSend) {
+          await autoSendDocumentToChat({
+            businessId,
+            contactId: po.supplierId,
+            contactType: 'supplier',
+            contactName: po.supplierName,
+            documentType: 'discrepancy_report',
+            documentNumber: discrepancyReport.poNumber,
+            totalAmount: discrepancyReport.totalDiscrepancyValue,
+          });
 
-        setIsSubmitting(false);
-        Alert.alert(
-          'Report Sent',
-          'Discrepancy report has been sent to the supplier via chat.',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+          setIsSubmitting(false);
+          Alert.alert(
+            'Report Sent',
+            'Discrepancy report has been sent to the supplier via chat.',
+            [{ text: 'OK', onPress: () => router.back() }]
+          );
+        } else {
+          setIsSubmitting(false);
+          handleSendViaWhatsApp();
+        }
       } else {
         setIsSubmitting(false);
         handleSendViaWhatsApp();

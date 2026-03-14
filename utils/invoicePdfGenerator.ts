@@ -68,6 +68,8 @@ export interface InvoicePDFData {
 
   shipToName?: string;
   shipToAddress?: string;
+  shipFromName?: string;
+  shipFromAddress?: string;
 
   items: InvoiceItemData[];
   subtotal: number;
@@ -246,6 +248,13 @@ function generateInvoiceHTML(data: InvoicePDFData): string {
       ${data.customer.phone ? `<div class="party-det">Phone: ${data.customer.phone}</div>` : ''}
     </td>` : '';
 
+  const shipFromBlock = data.shipFromName ? `
+    <td style="width:50%;vertical-align:top;padding:8px;">
+      <div class="sec-title">SHIPPED FROM</div>
+      <div class="party-name">${data.shipFromName}</div>
+      ${data.shipFromAddress ? `<div class="party-det">${data.shipFromAddress}</div>` : ''}
+    </td>` : '';
+
   const shipToBlock = data.shipToName ? `
     <td style="width:50%;vertical-align:top;padding:8px;">
       <div class="sec-title">SHIP TO</div>
@@ -259,45 +268,48 @@ function generateInvoiceHTML(data: InvoicePDFData): string {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Arial,sans-serif;color:#000;font-size:10px;line-height:1.4;background:#fff}
-@page{size:A4;margin:5mm}
-@media print{html,body{margin:0;padding:0;width:100%}.page{box-shadow:none;padding:12px}}
-.page{max-width:210mm;margin:0 auto;padding:16px}
+body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#1a1a1a;font-size:10px;line-height:1.5;background:#fff}
+@page{size:A4;margin:8mm}
+@media print{html,body{margin:0;padding:0;width:100%}.page{box-shadow:none;padding:14px}}
+.page{max-width:210mm;margin:0 auto;padding:18px}
 table{border-collapse:collapse;width:100%}
-.mt td,.mt th{border:1px solid #000;padding:5px 6px;font-size:9px;vertical-align:top}
-.mt .lbl{font-weight:700;background:#f5f5f5;width:22%;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;color:#333}
-.hdr{text-align:center;padding:10px 0 6px;border-bottom:2px solid #000}
-.hdr h1{font-size:18px;color:#3f66ac;margin:0;letter-spacing:1px}
-.hdr .sub{font-size:9px;color:#555;margin-top:2px}
-.logo-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding:0 4px}
-.sec-title{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#555;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px}
-.party-name{font-size:11px;font-weight:700;margin-bottom:2px}
-.party-det{font-size:9px;color:#444;line-height:1.5}
-.items-tbl th{background:#f5f5f5;padding:6px 5px;font-size:8px;text-transform:uppercase;letter-spacing:0.3px;color:#333;font-weight:700;border:1px solid #000}
-.items-tbl td{padding:5px;border:1px solid #000;font-size:9px}
+.accent-bar{height:4px;background:linear-gradient(90deg,#2c5282,#3f66ac,#5a8dcc);margin-bottom:12px;border-radius:2px}
+.mt td,.mt th{border:1px solid #d0d0d0;padding:6px 8px;font-size:9px;vertical-align:top}
+.mt .lbl{font-weight:700;background:#f0f4f8;width:22%;font-size:8px;text-transform:uppercase;letter-spacing:0.4px;color:#2c5282}
+.hdr{text-align:center;padding:12px 0 8px;border-bottom:3px solid #2c5282}
+.hdr h1{font-size:20px;color:#2c5282;margin:0;letter-spacing:1.5px;font-weight:800}
+.hdr .sub{font-size:9px;color:#666;margin-top:3px;letter-spacing:0.5px}
+.logo-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:0 4px}
+.sec-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:#2c5282;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:6px}
+.party-name{font-size:12px;font-weight:700;margin-bottom:3px;color:#1a1a1a}
+.party-det{font-size:9px;color:#444;line-height:1.6}
+.items-tbl th{background:#2c5282;color:#fff;padding:7px 6px;font-size:8px;text-transform:uppercase;letter-spacing:0.4px;font-weight:700;border:1px solid #2c5282}
+.items-tbl td{padding:6px;border:1px solid #d0d0d0;font-size:9px}
+.items-tbl tbody tr:nth-child(even){background:#f7fafc}
 .c{text-align:center}.r{text-align:right}
-.sm{color:#888;font-size:8px}
-.tax-tbl th{background:#f5f5f5;padding:5px;font-size:8px;text-transform:uppercase;border:1px solid #000;font-weight:700}
-.tax-tbl td{padding:5px;border:1px solid #000;font-size:8px}
-.tax-tbl .totrow td{background:#e8e8e8;font-weight:700}
-.amt-words{background:#f5f5f5;border:1px solid #000;padding:6px 8px;font-size:9px;font-weight:700;margin:8px 0}
-.totals-box{width:240px;margin-left:auto}
-.totals-box td{padding:4px 6px;font-size:10px;border:none}
-.totals-box .grand td{border-top:2px solid #000;font-size:12px;font-weight:700;padding-top:8px}
+.sm{color:#718096;font-size:8px}
+.tax-tbl th{background:#f0f4f8;padding:5px;font-size:8px;text-transform:uppercase;border:1px solid #d0d0d0;font-weight:700;color:#2c5282}
+.tax-tbl td{padding:5px;border:1px solid #d0d0d0;font-size:8px}
+.tax-tbl .totrow td{background:#e2e8f0;font-weight:700}
+.amt-words{background:#f0f4f8;border:1px solid #d0d0d0;border-left:4px solid #2c5282;padding:8px 10px;font-size:9px;font-weight:700;margin:10px 0}
+.totals-box{width:250px;margin-left:auto}
+.totals-box td{padding:5px 8px;font-size:10px;border:none}
+.totals-box .grand td{border-top:3px solid #2c5282;font-size:13px;font-weight:800;padding-top:10px;color:#2c5282}
 .totals-box .due td{color:#DC2626;font-weight:700}
-.bank-box{border:1px solid #000;padding:8px;font-size:9px;margin-top:8px;max-width:300px}
-.bank-title{font-weight:700;font-size:8px;text-transform:uppercase;margin-bottom:4px;color:#555}
-.decl{border:1px solid #000;padding:6px 8px;font-size:8px;margin-top:10px;color:#444}
-.sig-area{display:flex;justify-content:space-between;margin-top:20px;padding-top:10px}
+.bank-box{border:1px solid #d0d0d0;border-left:4px solid #2c5282;padding:10px;font-size:9px;margin-top:10px;max-width:300px;background:#f7fafc}
+.bank-title{font-weight:700;font-size:9px;text-transform:uppercase;margin-bottom:5px;color:#2c5282}
+.decl{border:1px solid #d0d0d0;padding:8px 10px;font-size:8px;margin-top:12px;color:#555;background:#f7fafc}
+.sig-area{display:flex;justify-content:space-between;margin-top:24px;padding-top:12px}
 .sig-block{text-align:center;width:200px}
-.sig-line{border-top:1px solid #000;margin-top:40px;padding-top:4px;font-size:8px;font-weight:700}
-.qr-footer{display:flex;justify-content:center;gap:16px;margin-top:10px;align-items:flex-start}
+.sig-line{border-top:1px solid #1a1a1a;margin-top:45px;padding-top:5px;font-size:8px;font-weight:700}
+.qr-footer{display:flex;justify-content:center;gap:16px;margin-top:12px;align-items:flex-start}
 .qr-item{text-align:center}
 .qr-item .qr-lbl{font-size:7px;color:#888;margin-top:2px}
-.foot-text{text-align:center;font-size:7px;color:#888;margin-top:8px;border-top:1px solid #ddd;padding-top:6px}
-.notes-box{background:#FFFBEB;border:1px solid #FDE68A;padding:6px 8px;font-size:9px;color:#92400E;font-style:italic;margin:8px 0}
+.foot-text{text-align:center;font-size:7px;color:#999;margin-top:10px;border-top:1px solid #e2e8f0;padding-top:8px}
+.notes-box{background:#FFFBEB;border:1px solid #FDE68A;border-left:4px solid #D97706;padding:8px 10px;font-size:9px;color:#92400E;font-style:italic;margin:10px 0}
 </style></head><body><div class="page">
 
+  <div class="accent-bar"></div>
   <div class="logo-row">${logoHTML}<div></div></div>
 
   <div class="hdr">
@@ -336,6 +348,7 @@ table{border-collapse:collapse;width:100%}
       ${supplierBlock ? (customerBlock || '<td></td>') : (shipToBlock || '<td></td>')}
     </tr>
     ${supplierBlock && shipToBlock ? `<tr>${shipToBlock}<td></td></tr>` : ''}
+    ${shipFromBlock ? `<tr>${shipFromBlock}<td></td></tr>` : ''}
   </table>
 
   ${buildExtrasRows(data.invoiceExtras)}

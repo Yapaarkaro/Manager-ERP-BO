@@ -33,7 +33,12 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Manager",
+      "shortName": "Manager",
+      "description": "Complete business management for Indian businesses",
+      "themeColor": "#2c5282",
+      "backgroundColor": "#FFFFFF"
     },
     "plugins": [
       "expo-router",

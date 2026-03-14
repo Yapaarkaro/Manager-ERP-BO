@@ -156,6 +156,33 @@ function shouldShowSidebar(pathname: string): boolean {
   return !AUTH_ROUTES.some(r => pathname.startsWith(r));
 }
 
+function useWebPWA() {
+  useEffect(() => {
+    if (!isWeb || typeof document === 'undefined') return;
+    if (document.getElementById('pwa-manifest')) return;
+    const manifestLink = document.createElement('link');
+    manifestLink.id = 'pwa-manifest';
+    manifestLink.rel = 'manifest';
+    manifestLink.href = '/manifest.json';
+    document.head.appendChild(manifestLink);
+    const themeColor = document.createElement('meta');
+    themeColor.name = 'theme-color';
+    themeColor.content = '#2c5282';
+    document.head.appendChild(themeColor);
+    const appleMeta = document.createElement('meta');
+    appleMeta.name = 'apple-mobile-web-app-capable';
+    appleMeta.content = 'yes';
+    document.head.appendChild(appleMeta);
+    const appleStatus = document.createElement('meta');
+    appleStatus.name = 'apple-mobile-web-app-status-bar-style';
+    appleStatus.content = 'default';
+    document.head.appendChild(appleStatus);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  }, []);
+}
+
 function useWebGlobalStyles() {
   useEffect(() => {
     if (!isWeb || typeof document === 'undefined') return;
@@ -204,6 +231,7 @@ function usePreventBackspaceNavigation() {
 export default function RootLayout() {
   useFrameworkReady();
   useWebGlobalStyles();
+  useWebPWA();
   usePreventBackspaceNavigation();
   const pathname = usePathname();
   const [sidebarWidth, setSidebarWidth] = useState(280);

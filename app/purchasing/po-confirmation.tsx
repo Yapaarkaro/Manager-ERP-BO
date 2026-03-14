@@ -13,8 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
 import { setNavData } from '@/utils/navStore';
 import { formatCurrencyINR } from '@/utils/formatters';
-import { createPurchaseOrder, createInAppNotification, getOrCreateConversation, sendMessage, autoLinkSupplierToUser } from '@/services/backendApi';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createPurchaseOrder, createInAppNotification, getOrCreateConversation, sendMessage, autoLinkSupplierToUser, getBusinessPreferences } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
 import {
@@ -149,11 +148,11 @@ export default function POConfirmationScreen() {
         } catch {}
 
         try {
-          const savedSettings = await AsyncStorage.getItem('autoSendSettings');
-          const autoSend = savedSettings ? JSON.parse(savedSettings) : { autoSendPO: true };
+          const businessId = bizData?.business?.id;
+          const prefs = businessId ? await getBusinessPreferences(businessId) : null;
+          const shouldAutoSend = prefs?.auto_send_po !== false;
 
-          if (autoSend.autoSendPO) {
-            const businessId = bizData?.business?.id;
+          if (shouldAutoSend) {
             if (businessId && supplierId) {
               const convResult = await getOrCreateConversation({
                 businessId,

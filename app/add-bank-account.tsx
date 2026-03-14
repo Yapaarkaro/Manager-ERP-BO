@@ -96,7 +96,9 @@ export default function AddBankAccount() {
       setUpiId(existingAccount.upiId || '');
       setAccountType(existingAccount.accountType === 'Savings' ? 'Savings' : 'Current');
       setIsPrimary(existingAccount.isPrimary || false);
-      
+      const bal = existingAccount.balance ?? existingAccount.current_balance ?? existingAccount.initialBalance ?? '';
+      setInitialBalance(bal !== '' ? String(bal) : '0');
+
       // Find and set the bank
       const bank = allBanksWithOthers.find(b => b.id === existingAccount.bankCode || b.shortName === existingAccount.bankCode);
       if (bank) {
@@ -233,9 +235,7 @@ export default function AddBankAccount() {
       ifscCode.length === 11 &&
       validateIFSC(ifscCode) &&
       (accountType === 'Savings' || accountType === 'Current') &&
-      initialBalance.length > 0 &&
-      !isNaN(parseFloat(initialBalance)) &&
-      parseFloat(initialBalance) >= 0 &&
+      (isEditMode || (initialBalance.length > 0 && !isNaN(parseFloat(initialBalance)) && parseFloat(initialBalance) >= 0)) &&
       validateUPI(upiId)
     );
   };

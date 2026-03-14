@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { getPurchaseInvoices, getCachedPurchaseInvoiceItems, updatePurchaseInvoicePayment, getBankAccounts, invalidateApiCache, getSuppliers, cancelPurchaseInvoice } from '@/services/backendApi';
+import { getPurchaseInvoices, getCachedPurchaseInvoiceItems, updatePurchaseInvoicePayment, getBankAccounts, invalidateApiCache, getSuppliers, cancelPurchaseInvoice, updatePurchaseInvoiceItems } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import {
@@ -43,6 +43,7 @@ import {
     Phone,
     ExternalLink,
     XCircle,
+    Edit3,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
@@ -254,6 +255,35 @@ export default function InvoiceDetailsScreen() {
   };
 
   const isCancelled = invoice.status === 'cancelled';
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditModal = () => {
+    setEditItems(invoiceItems.map((item: any) => ({ ...item })));
+    setEditNotes(invoice.notes || '');
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditSaving(true);
+    const sub = editItems.reduce((s: number, i: any) => s + (parseFloat(i.unit_price || i.rate) || 0) * (parseFloat(i.quantity) || 0), 0);
+    const taxAmt = editItems.reduce((s: number, i: any) => s + (parseFloat(i.unit_price || i.rate) || 0) * (parseFloat(i.quantity) || 0) * ((parseFloat(i.tax_rate || i.taxRate) || 0) / 100), 0);
+    const total = sub + taxAmt;
+    const res = await updatePurchaseInvoiceItems(invoice.id, editItems.map((i: any) => ({
+      name: i.product_name || i.name, quantity: parseFloat(i.quantity) || 0, rate: parseFloat(i.unit_price || i.rate) || 0,
+      taxRate: parseFloat(i.tax_rate || i.taxRate) || 0, unit: i.unit, hsnCode: i.hsn_code || i.hsnCode,
+    })), { subtotal: sub, taxAmount: taxAmt, totalAmount: Math.round(total), notes: editNotes });
+    if (res.success) {
+      setShowEditModal(false);
+      showAlert('Updated', 'Purchase invoice updated');
+      loadInvoice();
+    } else {
+      showAlert('Error', res.error || 'Failed to update');
+    }
+    setEditSaving(false);
+  };
 
   const handleCancelPurchaseInvoice = () => {
     showConfirm(
@@ -312,6 +342,7 @@ export default function InvoiceDetailsScreen() {
             <TouchableOpacity style={{ padding: 8 }} onPress={handleShareInvoice} activeOpacity={0.7}><Share size={20} color={Colors.primary} /></TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={handlePrintInvoice} activeOpacity={0.7}><Printer size={20} color={Colors.primary} /></TouchableOpacity>
             {!isCancelled && (
+              {!isCancelled && <TouchableOpacity style={{ padding: 8 }} onPress={openEditModal} activeOpacity={0.7}><Edit3 size={20} color={Colors.primary} /></TouchableOpacity>}
               <TouchableOpacity style={{ padding: 8 }} onPress={handleCancelPurchaseInvoice} activeOpacity={0.7}><XCircle size={20} color={Colors.error} /></TouchableOpacity>
             )}
           </View>
@@ -672,6 +703,46 @@ export default function InvoiceDetailsScreen() {
           </View>
         </Modal>
       </SafeAreaView>
+
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: '80%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700' }}>Edit Purchase Invoice Items</Text>
+              <TouchableOpacity onPress={() => setShowEditModal(false)}><X size={22} color="#666" /></TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {editItems.map((item: any, idx: number) => (
+                <View key={idx} style={{ marginBottom: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 10 }}>
+                  <Text style={{ fontWeight: '600', marginBottom: 6 }}>{item.product_name || item.name}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#666' }}>Qty</Text>
+                      <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14 }}
+                        value={String(item.quantity)} keyboardType="numeric"
+                        onChangeText={v => { const items = [...editItems]; items[idx].quantity = v; setEditItems(items); }} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#666' }}>Rate</Text>
+                      <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14 }}
+                        value={String(item.unit_price || item.rate)} keyboardType="numeric"
+                        onChangeText={v => { const items = [...editItems]; items[idx].unit_price = v; items[idx].rate = v; setEditItems(items); }} />
+                    </View>
+                  </View>
+                </View>
+              ))}
+              <View style={{ marginTop: 10 }}>
+                <Text style={{ fontSize: 11, color: '#666' }}>Notes</Text>
+                <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14, minHeight: 50 }}
+                  value={editNotes} onChangeText={setEditNotes} multiline />
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={{ backgroundColor: Colors.primary, padding: 14, borderRadius: 8, marginTop: 16, alignItems: 'center' }} onPress={handleSaveEdit} disabled={editSaving}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{editSaving ? 'Saving...' : 'Save Changes'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

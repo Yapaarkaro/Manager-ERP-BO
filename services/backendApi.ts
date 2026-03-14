@@ -2101,6 +2101,27 @@ export async function getProductLocationStock(productId: string): Promise<{ succ
   }
 }
 
+export async function getProductStockAcrossLocations(productId: string): Promise<{ success: boolean; data?: Array<{ locationId: string; locationName: string; locationType: string; currentStock: number; lastUpdated: string }>; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { data, error } = await supabase
+      .from('location_stock')
+      .select('id, location_id, current_stock, last_updated, locations(id, address_name, location_type)')
+      .eq('product_id', productId);
+    if (error) return { success: false, error: error.message };
+    const mapped = (data || []).map((row: any) => ({
+      locationId: row.location_id,
+      locationName: row.locations?.address_name || 'Unknown',
+      locationType: row.locations?.location_type || 'unknown',
+      currentStock: row.current_stock || 0,
+      lastUpdated: row.last_updated || '',
+    }));
+    return { success: true, data: mapped };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch stock across locations' };
+  }
+}
+
 export async function getProductInventoryLogsByLocation(
   productId: string, 
   locationId?: string
@@ -2717,6 +2738,123 @@ export async function cancelPurchaseInvoice(invoiceId: string): Promise<{ succes
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to cancel purchase invoice' };
+  }
+}
+
+export async function updateInvoiceItems(
+  invoiceId: string,
+  items: Array<{ id?: string; name: string; quantity: number; rate: number; taxRate: number; discount?: number; unit?: string; hsnCode?: string }>,
+  totals: { subtotal: number; taxAmount: number; totalAmount: number; notes?: string }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId);
+    const newItems = items.map(item => ({
+      invoice_id: invoiceId,
+      product_name: item.name,
+      quantity: item.quantity,
+      unit_price: item.rate,
+      tax_rate: item.taxRate,
+      discount: item.discount || 0,
+      unit: item.unit || 'Piece',
+      hsn_code: item.hsnCode || null,
+      total: item.rate * item.quantity * (1 - (item.discount || 0) / 100),
+      tax_amount: item.rate * item.quantity * (1 - (item.discount || 0) / 100) * (item.taxRate / 100),
+    }));
+    if (newItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('invoice_items').insert(newItems);
+      if (itemsErr) return { success: false, error: itemsErr.message };
+    }
+    const { error } = await supabase.from('invoices').update({
+      subtotal: totals.subtotal,
+      tax_amount: totals.taxAmount,
+      total_amount: totals.totalAmount,
+      total: totals.totalAmount,
+      notes: totals.notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', invoiceId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('invoices');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update invoice' };
+  }
+}
+
+export async function updateReturnItems(
+  returnId: string,
+  items: Array<{ name: string; quantity: number; rate: number; taxRate: number; reason?: string }>,
+  totals: { totalAmount: number; notes?: string }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    await supabase.from('return_items').delete().eq('return_id', returnId);
+    const newItems = items.map(item => ({
+      return_id: returnId,
+      product_name: item.name,
+      quantity: item.quantity,
+      unit_price: item.rate,
+      tax_rate: item.taxRate,
+      reason: item.reason || null,
+      total: item.rate * item.quantity,
+      tax_amount: item.rate * item.quantity * (item.taxRate / 100),
+    }));
+    if (newItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('return_items').insert(newItems);
+      if (itemsErr) return { success: false, error: itemsErr.message };
+    }
+    const { error } = await supabase.from('returns').update({
+      refund_amount: totals.totalAmount,
+      total_amount: totals.totalAmount,
+      notes: totals.notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', returnId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('returns');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update return' };
+  }
+}
+
+export async function updatePurchaseInvoiceItems(
+  invoiceId: string,
+  items: Array<{ name: string; quantity: number; rate: number; taxRate: number; unit?: string; hsnCode?: string }>,
+  totals: { subtotal: number; taxAmount: number; totalAmount: number; notes?: string }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', invoiceId);
+    const newItems = items.map(item => ({
+      purchase_invoice_id: invoiceId,
+      product_name: item.name,
+      quantity: item.quantity,
+      unit_price: item.rate,
+      tax_rate: item.taxRate,
+      unit: item.unit || 'Piece',
+      hsn_code: item.hsnCode || null,
+      total: item.rate * item.quantity,
+      tax_amount: item.rate * item.quantity * (item.taxRate / 100),
+    }));
+    if (newItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('purchase_invoice_items').insert(newItems);
+      if (itemsErr) return { success: false, error: itemsErr.message };
+    }
+    const { error } = await supabase.from('purchase_invoices').update({
+      subtotal: totals.subtotal,
+      tax_amount: totals.taxAmount,
+      total_amount: totals.totalAmount,
+      notes: totals.notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', invoiceId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('purchaseInvoices');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update purchase invoice' };
   }
 }
 

@@ -19,7 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect } from 'react';
 import { productStore } from '@/utils/productStore';
-import { getProductInventoryLogs, getProductInventoryLogsByLocation, getProductLocationStock, getSuppliers, getReturns, invalidateApiCache } from '@/services/backendApi';
+import { getProductInventoryLogs, getProductInventoryLogsByLocation, getProductLocationStock, getSuppliers, getReturns, invalidateApiCache, getProductStockAcrossLocations } from '@/services/backendApi';
 import { ArrowLeft, Package, ChartBar as BarChart3, Hash, Scan, Building2, MapPin, Calendar, TrendingUp, TrendingDown, ShoppingCart, FileText, Eye, Plus, Minus, Trash2, Percent, IndianRupee, Edit3, Phone, ChevronDown, Filter, X, Printer, GripHorizontal, Download } from 'lucide-react-native';
 import { generateBarcodeImage } from '@/utils/barcodeGenerator';
 import { useBusinessData } from '@/hooks/useBusinessData';
@@ -105,7 +105,9 @@ export default function ProductDetailsScreen() {
   
   const insets = useSafeAreaInsets();
 
-  const [selectedTab, setSelectedTab] = useState<'details' | 'inventory'>('details');
+  const [selectedTab, setSelectedTab] = useState<'details' | 'inventory' | 'locations'>('details');
+  const [locationStock, setLocationStock] = useState<Array<{ locationId: string; locationName: string; locationType: string; currentStock: number; lastUpdated: string }>>([]);
+  const [loadingLocationStock, setLoadingLocationStock] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -1070,6 +1072,23 @@ This action cannot be undone.`;
               Inventory Logs
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, selectedTab === 'locations' && styles.activeTab]}
+            onPress={async () => {
+              setSelectedTab('locations');
+              if (locationStock.length === 0 && product?.id) {
+                setLoadingLocationStock(true);
+                const res = await getProductStockAcrossLocations(product.id);
+                if (res.success && res.data) setLocationStock(res.data);
+                setLoadingLocationStock(false);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tabText, selectedTab === 'locations' && styles.activeTabText]}>
+              All Locations
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Tab Content */}
@@ -1080,7 +1099,29 @@ This action cannot be undone.`;
           nestedScrollEnabled={true}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-        {selectedTab === 'details' ? (
+        {selectedTab === 'locations' ? (
+          <View style={{ padding: 16 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 12 }}>Stock Across All Locations</Text>
+            {loadingLocationStock ? (
+              <Text style={{ color: '#888', textAlign: 'center', marginTop: 20 }}>Loading...</Text>
+            ) : locationStock.length === 0 ? (
+              <Text style={{ color: '#888', textAlign: 'center', marginTop: 20 }}>No stock data across locations</Text>
+            ) : (
+              locationStock.map((loc, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: idx % 2 === 0 ? '#f9fafb' : '#fff', borderRadius: 8, marginBottom: 4 }}>
+                  <View>
+                    <Text style={{ fontSize: 14, fontWeight: '600' }}>{loc.locationName}</Text>
+                    <Text style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{loc.locationType}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: loc.currentStock > 0 ? '#16a34a' : '#dc2626' }}>{loc.currentStock}</Text>
+                    <Text style={{ fontSize: 10, color: '#aaa' }}>{loc.lastUpdated ? new Date(loc.lastUpdated).toLocaleDateString() : ''}</Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        ) : selectedTab === 'details' ? (
           <View style={styles.detailsContainer}>
             {/* Product Information */}
             <View style={styles.section}>

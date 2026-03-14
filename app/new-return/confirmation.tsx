@@ -11,14 +11,13 @@ import { formatCurrencyINR } from '@/utils/formatters';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, FileText, User, Building2, Calendar, Hash, Package, MessageSquare, CreditCard, Banknote, Smartphone, TriangleAlert as AlertTriangle, Check } from 'lucide-react-native';
-import { createReturn, createInAppNotification, autoLinkSupplierToUser } from '@/services/backendApi';
+import { createReturn, createInAppNotification, autoLinkSupplierToUser, getBusinessPreferences } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData, setNavData } from '@/utils/navStore';
 import { autoSendDocumentToChat, openWhatsApp } from '@/utils/invoiceShareUtils';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { supabase } from '@/lib/supabase';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Colors = {
   background: '#FFFFFF',
@@ -176,10 +175,10 @@ export default function ReturnConfirmationScreen() {
       const businessId = staffBusinessId || bizData?.business?.id;
       if (result.success && businessId) {
         try {
-          const savedSettings = await AsyncStorage.getItem('autoSendSettings');
-          const autoSend = savedSettings ? JSON.parse(savedSettings) : { autoSendReturnInvoice: true };
+          const prefs = businessId ? await getBusinessPreferences(businessId) : null;
+          const shouldAutoSend = prefs?.auto_send_return_invoice !== false;
 
-          if (autoSend.autoSendReturnInvoice) {
+          if (shouldAutoSend) {
             if (isSupplierReturn && invoice.supplierId) {
               const linked = await autoLinkSupplierToUser(invoice.supplierId);
               if (linked) {

@@ -7,10 +7,12 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink, XCircle } from 'lucide-react-native';
+import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink, XCircle, Edit3, X } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
@@ -18,7 +20,7 @@ import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
 import { supabase } from '@/lib/supabase';
-import { getReturnById, cancelReturn } from '@/services/backendApi';
+import { getReturnById, cancelReturn, updateReturnItems } from '@/services/backendApi';
 import { showAlert, showConfirm } from '@/utils/webAlert';
 
 const Colors = {
@@ -253,6 +255,32 @@ export default function ReturnDetailsScreen() {
   };
 
   const isCancelled = returnInvoice.status === 'cancelled';
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditModal = () => {
+    setEditItems(returnItems.map(item => ({ ...item })));
+    setEditNotes(returnInvoice.notes || '');
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditSaving(true);
+    const total = editItems.reduce((s: number, i: any) => s + i.rate * i.quantity + i.rate * i.quantity * ((i.taxRate || 0) / 100), 0);
+    const res = await updateReturnItems(returnInvoice.id, editItems.map((i: any) => ({
+      name: i.name, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate || 0, reason: i.reason,
+    })), { totalAmount: Math.round(total), notes: editNotes });
+    if (res.success) {
+      setShowEditModal(false);
+      showAlert('Updated', 'Return updated');
+      loadReturn();
+    } else {
+      showAlert('Error', res.error || 'Failed to update');
+    }
+    setEditSaving(false);
+  };
 
   const handleCancelReturn = () => {
     showConfirm(
@@ -353,6 +381,11 @@ export default function ReturnDetailsScreen() {
             >
               <Printer size={20} color={Colors.error} />
             </TouchableOpacity>
+            {!isCancelled && (
+              <TouchableOpacity style={styles.headerActionButton} onPress={openEditModal} activeOpacity={0.7}>
+                <Edit3 size={20} color={Colors.primary} />
+              </TouchableOpacity>
+            )}
             {!isCancelled && (
               <TouchableOpacity
                 style={styles.headerActionButton}
@@ -650,6 +683,46 @@ export default function ReturnDetailsScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: '80%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700' }}>Edit Return Items</Text>
+              <TouchableOpacity onPress={() => setShowEditModal(false)}><X size={22} color="#666" /></TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {editItems.map((item: any, idx: number) => (
+                <View key={idx} style={{ marginBottom: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb', paddingBottom: 10 }}>
+                  <Text style={{ fontWeight: '600', marginBottom: 6 }}>{item.name}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#666' }}>Qty</Text>
+                      <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14 }}
+                        value={String(item.quantity)} keyboardType="numeric"
+                        onChangeText={v => { const items = [...editItems]; items[idx].quantity = parseFloat(v) || 0; setEditItems(items); }} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#666' }}>Rate</Text>
+                      <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14 }}
+                        value={String(item.rate)} keyboardType="numeric"
+                        onChangeText={v => { const items = [...editItems]; items[idx].rate = parseFloat(v) || 0; setEditItems(items); }} />
+                    </View>
+                  </View>
+                </View>
+              ))}
+              <View style={{ marginTop: 10 }}>
+                <Text style={{ fontSize: 11, color: '#666' }}>Notes</Text>
+                <TextInput style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 6, padding: 8, fontSize: 14, minHeight: 50 }}
+                  value={editNotes} onChangeText={setEditNotes} multiline />
+              </View>
+            </ScrollView>
+            <TouchableOpacity style={{ backgroundColor: Colors.primary, padding: 14, borderRadius: 8, marginTop: 16, alignItems: 'center' }} onPress={handleSaveEdit} disabled={editSaving}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{editSaving ? 'Saving...' : 'Save Changes'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
