@@ -106,7 +106,6 @@ export default function ProductDetailsScreen() {
   const insets = useSafeAreaInsets();
 
   const [selectedTab, setSelectedTab] = useState<'details' | 'inventory' | 'locations'>('details');
-  const [locationStock, setLocationStock] = useState<Array<{ locationId: string; locationName: string; locationType: string; currentStock: number; lastUpdated: string }>>([]);
   const [loadingLocationStock, setLoadingLocationStock] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
@@ -1079,7 +1078,15 @@ This action cannot be undone.`;
               if (locationStock.length === 0 && product?.id) {
                 setLoadingLocationStock(true);
                 const res = await getProductStockAcrossLocations(product.id);
-                if (res.success && res.data) setLocationStock(res.data);
+                if (res.success && res.data) {
+                  setLocationStock(res.data.map(d => ({
+                    locationId: d.locationId,
+                    locationName: d.locationName,
+                    locationType: d.locationType,
+                    quantity: d.currentStock,
+                    lastUpdated: d.lastUpdated,
+                  })));
+                }
                 setLoadingLocationStock(false);
               }
             }}
@@ -1114,7 +1121,7 @@ This action cannot be undone.`;
                     <Text style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{loc.locationType}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ fontSize: 16, fontWeight: '700', color: loc.currentStock > 0 ? '#16a34a' : '#dc2626' }}>{loc.currentStock}</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: loc.quantity > 0 ? '#16a34a' : '#dc2626' }}>{loc.quantity}</Text>
                     <Text style={{ fontSize: 10, color: '#aaa' }}>{loc.lastUpdated ? new Date(loc.lastUpdated).toLocaleDateString() : ''}</Text>
                   </View>
                 </View>
