@@ -341,10 +341,8 @@ export default function InvoiceDetailsScreen() {
             <TouchableOpacity style={{ padding: 8 }} onPress={handleDownloadPDF} activeOpacity={0.7}><Download size={20} color={Colors.primary} /></TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={handleShareInvoice} activeOpacity={0.7}><Share size={20} color={Colors.primary} /></TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={handlePrintInvoice} activeOpacity={0.7}><Printer size={20} color={Colors.primary} /></TouchableOpacity>
-            {!isCancelled && (
-              {!isCancelled && <TouchableOpacity style={{ padding: 8 }} onPress={openEditModal} activeOpacity={0.7}><Edit3 size={20} color={Colors.primary} /></TouchableOpacity>}
-              <TouchableOpacity style={{ padding: 8 }} onPress={handleCancelPurchaseInvoice} activeOpacity={0.7}><XCircle size={20} color={Colors.error} /></TouchableOpacity>
-            )}
+            {!isCancelled && <TouchableOpacity style={{ padding: 8 }} onPress={openEditModal} activeOpacity={0.7}><Edit3 size={20} color={Colors.primary} /></TouchableOpacity>}
+            {!isCancelled && <TouchableOpacity style={{ padding: 8 }} onPress={handleCancelPurchaseInvoice} activeOpacity={0.7}><XCircle size={20} color={Colors.error} /></TouchableOpacity>}
           </View>
         </View>
 
