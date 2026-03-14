@@ -347,7 +347,7 @@ export default function GstinPanOTPScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}

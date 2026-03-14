@@ -140,7 +140,7 @@ export default function ConversationScreen() {
 
   const senderType: 'owner' | 'staff' | 'supplier' = isCrossBusiness ? 'supplier' : (isStaff ? 'staff' : 'owner');
   const senderId = isStaff ? (staffId || '') : (userId || '');
-  const senderName = isStaff ? (staffName || 'Staff') : (bizData?.business?.legal_name || bizData?.business?.owner_name || 'Owner');
+  const senderName = isStaff ? (staffName || 'Staff') : (bizData?.business?.owner_name || bizData?.business?.legal_name || 'Owner');
 
   const name = resolvedName || routeName;
 
@@ -154,7 +154,7 @@ export default function ConversationScreen() {
   useEffect(() => {
     if (!conversationId) return;
     const genericNames = ['staff', 'Staff', 'owner', 'Owner', 'customer', 'Customer', 'supplier', 'Supplier', 'Unknown', 'unknown', '', 'Business', 'Business Partner', 'Partner'];
-    const needsDbLookup = isStaff && (type === 'owner' || type === 'staff');
+    const needsDbLookup = isStaff || type === 'owner' || type === 'staff';
     if (!needsDbLookup && routeName && !genericNames.includes(routeName)) {
       setResolvedName(routeName);
       return;
@@ -1016,10 +1016,13 @@ export default function ConversationScreen() {
 
   const isFromMe = useCallback(
     (msg: Message) => {
-      if (msg.sender_id === senderId) return true;
+      if (senderId && msg.sender_id === senderId) return true;
+      if (isStaff && staffId && msg.sender_id === staffId) return true;
+      if (isStaff && userId && msg.sender_id === userId && msg.sender_type === 'staff') return true;
+      if (!isStaff && userId && msg.sender_id === userId) return true;
       return false;
     },
-    [senderId],
+    [senderId, isStaff, staffId, userId],
   );
 
   const formatTime = (iso: string) => {

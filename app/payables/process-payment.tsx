@@ -27,8 +27,9 @@ import {
   ChevronDown,
 } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { recordTransactionForModule, updatePurchaseInvoicePayment } from '@/services/backendApi';
+import { recordTransactionForModule, updatePurchaseInvoicePayment, getBusinessPreferences } from '@/services/backendApi';
 import { formatCurrencyINR } from '@/utils/formatters';
+import { Wallet } from 'lucide-react-native';
 
 const C = {
   bg: '#FFFFFF',
@@ -43,13 +44,15 @@ const C = {
   surfaceAlt: '#F3F4F6',
 };
 
-type PaymentMethod = 'cash' | 'upi' | 'card' | 'bank_transfer' | 'cheque';
+type PaymentMethod = 'cash' | 'upi' | 'card' | 'bank_transfer' | 'cheque' | 'digital_wallet';
 
-const METHODS: { method: PaymentMethod; icon: any; title: string; desc: string }[] = [
+const ALL_METHODS: { method: PaymentMethod; icon: any; title: string; desc: string }[] = [
   { method: 'cash', icon: Banknote, title: 'Cash', desc: 'Make cash payment' },
   { method: 'upi', icon: Smartphone, title: 'UPI', desc: 'Make UPI payment' },
   { method: 'card', icon: CreditCard, title: 'Card', desc: 'Make card payment' },
   { method: 'bank_transfer', icon: Building2, title: 'Bank Transfer', desc: 'Make bank transfer' },
+  { method: 'cheque', icon: CreditCard, title: 'Cheque', desc: 'Make cheque payment' },
+  { method: 'digital_wallet', icon: Wallet, title: 'Digital Wallet', desc: 'Pay via digital wallet' },
 ];
 
 export default function ProcessPaymentScreen() {
@@ -65,6 +68,10 @@ export default function ProcessPaymentScreen() {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [enabledMethods, setEnabledMethods] = useState<Record<string, boolean>>({ cash: true, upi: true, card: true, bankTransfer: true, cheque: false, digitalWallet: true });
+  const [digitalWallets, setDigitalWallets] = useState<string[]>([]);
+  const [selectedWallet, setSelectedWallet] = useState('');
+  const [showWalletPicker, setShowWalletPicker] = useState(false);
 
   useEffect(() => {
     const accts = (businessData.bankAccounts || []).filter((a: any) => (a.type || a.account_type) !== 'cash');
@@ -75,8 +82,28 @@ export default function ProcessPaymentScreen() {
     }
   }, [businessData]);
 
+  useEffect(() => {
+    if (!businessData?.business?.id) return;
+    getBusinessPreferences(businessData.business.id).then(res => {
+      if (res.success && res.preferences) {
+        setEnabledMethods(res.preferences.payment_methods || {});
+        setDigitalWallets(res.preferences.digital_wallets || []);
+      }
+    });
+  }, [businessData?.business?.id]);
+
+  const methods = ALL_METHODS.filter(m => {
+    if (m.method === 'cash') return enabledMethods.cash !== false;
+    if (m.method === 'upi') return enabledMethods.upi !== false;
+    if (m.method === 'card') return enabledMethods.card !== false;
+    if (m.method === 'bank_transfer') return enabledMethods.bankTransfer !== false;
+    if (m.method === 'cheque') return enabledMethods.cheque === true;
+    if (m.method === 'digital_wallet') return enabledMethods.digitalWallet !== false;
+    return true;
+  });
+
   const isCash = selectedMethod === 'cash';
-  const needsBank = selectedMethod && !isCash;
+  const needsBank = selectedMethod && selectedMethod !== 'cash' && selectedMethod !== 'digital_wallet';
   const selectedBank = bankAccounts.find(a => a.id === selectedBankId);
   const getBankLabel = (a: any) => `${a.bank_name || a.bankName || 'Bank'} ••••${(a.account_number || a.accountNumber || '').slice(-4)}`;
 
@@ -227,7 +254,7 @@ export default function ProcessPaymentScreen() {
 
         {/* Payment Methods */}
         <Text style={s.sectionTitle}>Payment Method</Text>
-        {METHODS.map(m => {
+        {methods.map(m => {
           const Icon = m.icon;
           const sel = selectedMethod === m.method;
           return (
@@ -254,6 +281,18 @@ export default function ProcessPaymentScreen() {
           </>
         )}
 
+        {/* Digital Wallet Picker */}
+        {selectedMethod === 'digital_wallet' && digitalWallets.length > 0 && (
+          <>
+            <Text style={s.sectionTitle}>Select Wallet</Text>
+            <TouchableOpacity style={s.pickerBtn} onPress={() => setShowWalletPicker(true)}>
+              <Wallet size={18} color={C.primary} />
+              <Text style={{ flex: 1, fontSize: 14, color: C.text, marginLeft: 10 }}>{selectedWallet || 'Select digital wallet'}</Text>
+              <ChevronDown size={16} color={C.textMuted} />
+            </TouchableOpacity>
+          </>
+        )}
+
         {/* Reference */}
         {selectedMethod && selectedMethod !== 'cash' && (
           <>
@@ -267,7 +306,7 @@ export default function ProcessPaymentScreen() {
           <Text style={{ fontSize: 16, fontWeight: '600', color: C.text, marginBottom: 12 }}>Payment Summary</Text>
           <View style={s.sumRow}><Text style={s.sumLabel}>Supplier:</Text><Text style={s.sumVal}>{supplier.supplierType === 'business' ? supplier.businessName : supplier.supplierName}</Text></View>
           <View style={s.sumRow}><Text style={s.sumLabel}>Amount:</Text><Text style={[s.sumVal, { color: C.error }]}>{fmt(parseFloat(paymentAmount) || 0)}</Text></View>
-          <View style={s.sumRow}><Text style={s.sumLabel}>Method:</Text><Text style={s.sumVal}>{selectedMethod ? METHODS.find(m => m.method === selectedMethod)?.title || selectedMethod : 'Not selected'}</Text></View>
+          <View style={s.sumRow}><Text style={s.sumLabel}>Method:</Text><Text style={s.sumVal}>{selectedMethod ? ALL_METHODS.find(m => m.method === selectedMethod)?.title || selectedMethod : 'Not selected'}</Text></View>
           {parseFloat(paymentAmount) < supplier.totalPayable && (
             <View style={[s.sumRow, { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 8, marginTop: 8 }]}>
               <Text style={[s.sumLabel, { fontWeight: '600' }]}>Remaining:</Text>
@@ -298,6 +337,25 @@ export default function ProcessPaymentScreen() {
                 </TouchableOpacity>
               ))}
               {bankAccounts.length === 0 && <Text style={{ padding: 20, color: C.textMuted, textAlign: 'center' }}>No bank accounts found</Text>}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Wallet Picker Modal */}
+      <Modal visible={showWalletPicker} transparent animationType="fade" onRequestClose={() => setShowWalletPicker(false)}>
+        <View style={s.overlay}>
+          <View style={s.modal}>
+            <View style={s.modalHead}><Text style={s.modalTitle}>Select Digital Wallet</Text><TouchableOpacity onPress={() => setShowWalletPicker(false)}><X size={22} color={C.textMuted} /></TouchableOpacity></View>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {digitalWallets.map(w => (
+                <TouchableOpacity key={w} style={[s.modalItem, selectedWallet === w && s.modalItemActive]}
+                  onPress={() => { setSelectedWallet(w); setShowWalletPicker(false); }}>
+                  <Wallet size={20} color={C.primary} />
+                  <View style={{ flex: 1 }}><Text style={s.modalItemText}>{w}</Text></View>
+                  {selectedWallet === w && <Check size={18} color={C.error} />}
+                </TouchableOpacity>
+              ))}
             </ScrollView>
           </View>
         </View>

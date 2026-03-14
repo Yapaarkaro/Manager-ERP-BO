@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink } from 'lucide-react-native';
+import { ArrowLeft, Download, Share, Printer, FileText, Calendar, Hash, Building2, Phone, MapPin, CreditCard, Package, IndianRupee, RotateCcw, Eye, TriangleAlert as AlertTriangle, User, ExternalLink, XCircle } from 'lucide-react-native';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
@@ -18,7 +18,8 @@ import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
 import { supabase } from '@/lib/supabase';
-import { getReturnById } from '@/services/backendApi';
+import { getReturnById, cancelReturn } from '@/services/backendApi';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 
 const Colors = {
   background: '#FFFFFF',
@@ -251,6 +252,24 @@ export default function ReturnDetailsScreen() {
     };
   };
 
+  const isCancelled = returnInvoice.status === 'cancelled';
+
+  const handleCancelReturn = () => {
+    showConfirm(
+      'Cancel Return',
+      'Are you sure you want to cancel this return? This will mark it as cancelled.',
+      async () => {
+        const res = await cancelReturn(returnInvoice.id);
+        if (res.success) {
+          showAlert('Cancelled', 'Return has been cancelled');
+          setReturnInvoice((prev: any) => ({ ...prev, status: 'cancelled' }));
+        } else {
+          showAlert('Error', res.error || 'Failed to cancel return');
+        }
+      }
+    );
+  };
+
   const handleDownload = async () => {
     try {
       const pdfData = buildReturnPDFData();
@@ -334,6 +353,15 @@ export default function ReturnDetailsScreen() {
             >
               <Printer size={20} color={Colors.error} />
             </TouchableOpacity>
+            {!isCancelled && (
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={handleCancelReturn}
+                activeOpacity={0.7}
+              >
+                <XCircle size={20} color={Colors.error} />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </SafeAreaView>

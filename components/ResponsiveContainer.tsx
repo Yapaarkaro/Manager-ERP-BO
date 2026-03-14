@@ -5,25 +5,26 @@ import { getWebContainerStyles } from '@/utils/platformUtils';
 interface ResponsiveContainerProps {
   children: React.ReactNode;
   style?: any;
-  fullWidth?: boolean; // Option to disable max-width constraint
+  fullWidth?: boolean;
+  narrow?: boolean;
+  maxWidth?: number;
 }
 
-function ResponsiveContainer({ children, style, fullWidth = false }: ResponsiveContainerProps) {
+function ResponsiveContainer({ children, style, fullWidth = false, narrow = false, maxWidth }: ResponsiveContainerProps) {
   const webStyles = getWebContainerStyles();
   const { width } = Dimensions.get('window');
   
-  // On web, apply responsive container only if screen is wide enough
   if (Platform.OS === 'web' && !fullWidth && width > 768) {
+    const effectiveMaxWidth = maxWidth || (narrow ? 520 : 1400);
     return (
       <View style={[webStyles.webContainer, style]}>
-        <View style={webStyles.webContentWrapper}>
+        <View style={[webStyles.webContentWrapper, { maxWidth: effectiveMaxWidth }]}>
           {children}
         </View>
       </View>
     );
   }
   
-  // On mobile or small screens, just return children
   return <View style={[{ flex: 1 }, style]}>{children}</View>;
 }
 

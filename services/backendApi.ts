@@ -479,43 +479,45 @@ export async function updateAddress(params: {
     requestBody.longitude = params.longitude;
   }
   
-  // Use POST instead of PUT to avoid CORS issues on web
-  // The Edge Function now accepts POST requests with addressId for updates
-  // This allows us to use supabase.functions.invoke() which handles CORS automatically
-  const result = await callEdgeFunction(
-    'manage-addresses',
-    'POST',
-    requestBody,
-    true
-  );
-
-  if (result.success && result.data?.address) {
-    // ✅ Update businesses table if isPrimary status changed
-    if (params.isPrimary !== undefined) {
-      if (params.isPrimary) {
-        // Set as primary
-        await updateBusinessPrimaryAddress(params.addressId);
-      } else {
-        // Unset primary - find new primary or set to null
-        // The Edge Function should handle setting another address as primary
-        // For now, we'll just update if explicitly set to false
-        // In practice, when unsetting primary, another address should be set as primary first
-      }
-    }
-    
-    // Clear cache so data refreshes
-    getClearCache()?.();
-    invalidateApiCache('addresses');
-    return {
-      success: true,
-      address: result.data.address,
-    };
+  const { supabase } = await import('@/lib/supabase');
+  const updateData: any = { updated_at: new Date().toISOString() };
+  if (params.name !== undefined) updateData.name = params.name;
+  if (params.type !== undefined) updateData.type = params.type;
+  if (params.managerName !== undefined) updateData.manager_name = params.managerName;
+  if (params.managerMobileNumber !== undefined) updateData.manager_mobile_number = params.managerMobileNumber;
+  if (params.isPrimary !== undefined) updateData.is_primary = params.isPrimary;
+  if (params.latitude !== undefined) updateData.latitude = params.latitude;
+  if (params.longitude !== undefined) updateData.longitude = params.longitude;
+  if (params.addressJson !== undefined) {
+    const addrObj = typeof params.addressJson === 'string' ? JSON.parse(params.addressJson) : params.addressJson;
+    if (addrObj.doorNumber !== undefined) updateData.door_number = addrObj.doorNumber;
+    if (addrObj.addressLine1 !== undefined) updateData.address_line1 = addrObj.addressLine1;
+    if (addrObj.addressLine2 !== undefined) updateData.address_line2 = addrObj.addressLine2;
+    if (addrObj.city !== undefined) updateData.city = addrObj.city;
+    if (addrObj.pincode !== undefined) updateData.pincode = addrObj.pincode;
+    if (addrObj.state !== undefined) updateData.state = addrObj.state;
+    if (addrObj.stateCode !== undefined) updateData.state_code = addrObj.stateCode;
+    if (addrObj.additionalLines !== undefined) updateData.additional_lines = addrObj.additionalLines;
   }
 
-  return {
-    success: false,
-    error: result.error || 'Failed to update address',
-  };
+  const { data, error } = await supabase
+    .from('locations')
+    .update(updateData)
+    .eq('id', params.addressId)
+    .select()
+    .single();
+
+  if (error) {
+    return { success: false, error: error.message || 'Failed to update address' };
+  }
+
+  if (params.isPrimary) {
+    await updateBusinessPrimaryAddress(params.addressId);
+  }
+
+  getClearCache()?.();
+  invalidateApiCache('addresses');
+  return { success: true, address: data };
 }
 
 /**
@@ -666,41 +668,43 @@ export async function updateBankAccount(params: {
     requestBody.isPrimary = params.isPrimary;
   }
   
-  // Use POST with action: 'update' to avoid CORS issues on web
-  const result = await callEdgeFunction(
-    'manage-bank-accounts',
-    'POST',
-    requestBody,
-    true
-  );
+  // Direct Supabase update for reliability
+  const { supabase } = await import('@/lib/supabase');
+  const updateData: any = {};
+  if (params.bankName !== undefined) updateData.bank_name = params.bankName;
+  if (params.bankShortName !== undefined) updateData.bank_short_name = params.bankShortName;
+  if (params.bankId !== undefined) updateData.bank_id = params.bankId;
+  if (params.accountHolderName !== undefined) updateData.account_holder_name = params.accountHolderName;
+  if (params.accountNumber !== undefined) updateData.account_number = params.accountNumber;
+  if (params.ifscCode !== undefined) updateData.ifsc_code = params.ifscCode;
+  if (params.upiId !== undefined) updateData.upi_id = params.upiId;
+  if (params.accountType !== undefined) updateData.account_type = params.accountType;
+  if (params.isPrimary !== undefined) updateData.is_primary = params.isPrimary;
+  updateData.updated_at = new Date().toISOString();
 
-  if (result.success && result.data?.account) {
-    // ✅ Update businesses table if isPrimary status changed
-    if (params.isPrimary !== undefined) {
-      if (params.isPrimary) {
-        // Set as primary
-        await updateBusinessPrimaryBankAccount(params.accountId);
-      } else {
-        // Unset primary - find new primary or set to null
-        // The Edge Function should handle setting another account as primary
-        // For now, we'll just update if explicitly set to false
-        // In practice, when unsetting primary, another account should be set as primary first
-      }
-    }
-    
-    // Clear cache so data refreshes
-    getClearCache()?.();
-    invalidateApiCache('bankAccounts');
-    return {
-      success: true,
-      account: result.data.account,
-    };
+  const { data, error } = await supabase
+    .from('bank_accounts')
+    .update(updateData)
+    .eq('id', params.accountId)
+    .select()
+    .single();
+
+  if (error) {
+    return { success: false, error: error.message || 'Failed to update bank account' };
   }
 
-  return {
-    success: false,
-    error: result.error || 'Failed to update bank account',
-  };
+  if (params.isPrimary) {
+    await updateBusinessPrimaryBankAccount(params.accountId);
+    await supabase
+      .from('bank_accounts')
+      .update({ is_primary: false })
+      .eq('business_id', data.business_id)
+      .neq('id', params.accountId);
+  }
+
+  getClearCache()?.();
+  invalidateApiCache('bankAccounts');
+  return { success: true, account: data };
 }
 
 /**
@@ -2653,6 +2657,69 @@ export async function updateInvoicePayment(
   }
 }
 
+export async function cancelInvoice(invoiceId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { error } = await supabase
+      .from('invoices')
+      .update({ status: 'cancelled', is_cancelled: true, updated_at: new Date().toISOString() })
+      .eq('id', invoiceId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('invoices');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to cancel invoice' };
+  }
+}
+
+export async function deletePurchaseOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { error: itemsErr } = await supabase.from('purchase_order_items').delete().eq('purchase_order_id', orderId);
+    if (itemsErr) return { success: false, error: itemsErr.message };
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', orderId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('purchaseOrders');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to delete purchase order' };
+  }
+}
+
+export async function cancelReturn(returnId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { error } = await supabase
+      .from('returns')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', returnId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('returns');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to cancel return' };
+  }
+}
+
+export async function cancelPurchaseInvoice(invoiceId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { error } = await supabase
+      .from('purchase_invoices')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', invoiceId);
+    if (error) return { success: false, error: error.message };
+    getClearCache()?.();
+    invalidateApiCache('purchaseInvoices');
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to cancel purchase invoice' };
+  }
+}
+
 // ============================================
 // Returns APIs (Direct Supabase)
 // ============================================
@@ -4254,5 +4321,95 @@ export async function updateLeaveRequest(
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to update leave request' };
+  }
+}
+
+// ============================================
+// BUSINESS PREFERENCES
+// ============================================
+
+export interface BusinessPreferences {
+  business_id: string;
+  push_notifications: boolean;
+  email_notifications: boolean;
+  whatsapp_notifications: boolean;
+  weekly_reports: boolean;
+  low_stock_alerts: boolean;
+  overdue_receivables: boolean;
+  overdue_payables: boolean;
+  auto_send_po: boolean;
+  auto_send_return_invoice: boolean;
+  auto_send_discrepancy: boolean;
+  auto_send_payment: boolean;
+  payment_methods: Record<string, boolean>;
+  active_bank_accounts: string[];
+  digital_wallets: string[];
+  updated_at: string;
+}
+
+export async function getBusinessPreferences(businessId: string): Promise<{ success: boolean; preferences?: BusinessPreferences; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const { data, error } = await supabase
+      .from('business_preferences')
+      .select('*')
+      .eq('business_id', businessId)
+      .maybeSingle();
+
+    if (error) return { success: false, error: error.message };
+    if (!data) {
+      // No preferences yet, return defaults
+      return {
+        success: true,
+        preferences: {
+          business_id: businessId,
+          push_notifications: true,
+          email_notifications: true,
+          whatsapp_notifications: false,
+          weekly_reports: false,
+          low_stock_alerts: true,
+          overdue_receivables: true,
+          overdue_payables: true,
+          auto_send_po: true,
+          auto_send_return_invoice: true,
+          auto_send_discrepancy: false,
+          auto_send_payment: false,
+          payment_methods: { cash: true, upi: true, card: true, bankTransfer: true, cheque: false, digitalWallet: true },
+          active_bank_accounts: [],
+          digital_wallets: ['Paytm', 'PhonePe', 'Google Pay', 'Amazon Pay', 'Freecharge', 'MobiKwik'],
+          updated_at: new Date().toISOString(),
+        },
+      };
+    }
+    return { success: true, preferences: data as BusinessPreferences };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to fetch business preferences' };
+  }
+}
+
+export async function updateBusinessPreferences(
+  businessId: string,
+  updates: Partial<Omit<BusinessPreferences, 'business_id'>>
+): Promise<{ success: boolean; preferences?: BusinessPreferences; error?: string }> {
+  try {
+    const { supabase } = await import('@/lib/supabase');
+    const updateData = {
+      ...updates,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('business_preferences')
+      .upsert({
+        business_id: businessId,
+        ...updateData,
+      }, { onConflict: 'business_id' })
+      .select()
+      .single();
+
+    if (error) return { success: false, error: error.message };
+    return { success: true, preferences: data as BusinessPreferences };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update business preferences' };
   }
 }

@@ -7,13 +7,16 @@ import {
   ScrollView,
   RefreshControl,
   Image,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw } from 'lucide-react-native';
+import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, ShoppingCart, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Download, Share, RotateCcw, Edit3, Trash2, X } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
 import { getInitials as getNameInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
-import { getCustomers, getCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
+import { getCustomers, getCustomerMetrics, getInvoices, getReturns, invalidateApiCache, updateCustomer, deleteCustomer } from '@/services/backendApi';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { setNavData } from '@/utils/navStore';
 
@@ -51,6 +54,9 @@ export default function CustomerDetailsScreen() {
   const [selectedTab, setSelectedTab] = useState<'overview' | 'transactions'>('overview');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', businessName: '', phone: '', email: '', gstin: '', address: '' });
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     loadCustomerData();
@@ -277,6 +283,59 @@ export default function CustomerDetailsScreen() {
     );
   }
 
+  const openEditModal = () => {
+    setEditForm({
+      name: customer.contactPerson || customer.name || '',
+      businessName: customer.businessName || customer.business_name || '',
+      phone: customer.mobile || '',
+      email: customer.email || '',
+      gstin: customer.gstin || '',
+      address: customer.address || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditSaving(true);
+    try {
+      const res = await updateCustomer(customer.id, {
+        name: editForm.name,
+        businessName: editForm.businessName,
+        mobile: editForm.phone,
+        email: editForm.email,
+        gstin: editForm.gstin,
+        address: editForm.address,
+      });
+      if (res.success) {
+        setShowEditModal(false);
+        loadCustomerData();
+        showAlert('Success', 'Customer updated successfully');
+      } else {
+        showAlert('Error', res.error || 'Failed to update customer');
+      }
+    } catch {
+      showAlert('Error', 'Failed to update customer');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteCustomer = () => {
+    showConfirm(
+      'Delete Customer',
+      'Are you sure you want to delete this customer? This action cannot be undone.',
+      async () => {
+        const res = await deleteCustomer(customer.id);
+        if (res.success) {
+          showAlert('Deleted', 'Customer has been deleted');
+          router.back();
+        } else {
+          showAlert('Error', res.error || 'Failed to delete customer');
+        }
+      }
+    );
+  };
+
   const handleCreateSale = () => {
     // Clean mobile number to remove +91 and spaces
     const cleanMobile = customer.mobile.replace(/^\+91\s*/, '').replace(/\s/g, '');
@@ -357,6 +416,12 @@ export default function CustomerDetailsScreen() {
           <Text style={styles.headerTitle}>Customer Details</Text>
           
           <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerActionButton} onPress={openEditModal} activeOpacity={0.7}>
+              <Edit3 size={20} color={Colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionButton} onPress={handleDeleteCustomer} activeOpacity={0.7}>
+              <Trash2 size={20} color={Colors.error} />
+            </TouchableOpacity>
             {customer.customerType === 'business' && (
               <TouchableOpacity
                 style={styles.chatHeaderButton}
@@ -366,20 +431,6 @@ export default function CustomerDetailsScreen() {
                 <MessageSquare size={22} color={Colors.primary} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={() => console.log('Download customer statement')}
-              activeOpacity={0.7}
-            >
-              <Download size={20} color={Colors.success} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerActionButton}
-              onPress={() => console.log('Share customer details')}
-              activeOpacity={0.7}
-            >
-              <Share size={20} color={Colors.success} />
-            </TouchableOpacity>
           </View>
         </View>
       </SafeAreaView>
@@ -690,6 +741,47 @@ export default function CustomerDetailsScreen() {
           <Text style={styles.createSaleButtonText}>Create Sale</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Edit Customer Modal */}
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '80%' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Edit Customer</Text>
+              <TouchableOpacity onPress={() => setShowEditModal(false)}><X size={24} color={Colors.textLight} /></TouchableOpacity>
+            </View>
+            <ScrollView style={{ maxHeight: 400 }}>
+              {[
+                { label: 'Name', key: 'name' },
+                { label: 'Business Name', key: 'businessName' },
+                { label: 'Phone', key: 'phone', keyboard: 'phone-pad' },
+                { label: 'Email', key: 'email', keyboard: 'email-address' },
+                { label: 'GSTIN', key: 'gstin' },
+                { label: 'Address', key: 'address', multiline: true },
+              ].map((field) => (
+                <View key={field.key} style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textLight, marginBottom: 4 }}>{field.label}</Text>
+                  <TextInput
+                    value={(editForm as any)[field.key]}
+                    onChangeText={(t) => setEditForm(prev => ({ ...prev, [field.key]: t }))}
+                    style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 10, fontSize: 15, color: Colors.text, minHeight: field.multiline ? 60 : 44 }}
+                    keyboardType={(field as any).keyboard || 'default'}
+                    multiline={field.multiline}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={handleSaveEdit}
+              disabled={editSaving}
+              style={{ backgroundColor: Colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 12, opacity: editSaving ? 0.6 : 1 }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{editSaving ? 'Saving...' : 'Save Changes'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

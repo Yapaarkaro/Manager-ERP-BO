@@ -8,17 +8,19 @@ import {
   RefreshControl,
   Modal,
   Alert,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share, Banknote, Truck } from 'lucide-react-native';
-import { getSuppliers, getPurchaseInvoices, getCachedPurchaseInvoiceItems, getSupplierMetrics, getProducts, invalidateApiCache, getOrCreateConversation, autoLinkSupplierToUser } from '@/services/backendApi';
+import { ArrowLeft, MessageSquare, Phone, Mail, MapPin, Building2, User, Star, Award, Clock, Package, TrendingUp, TrendingDown, FileText, Eye, Calendar, IndianRupee, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, X, Download, Share, Banknote, Truck, Edit3, Trash2 } from 'lucide-react-native';
+import { getSuppliers, getPurchaseInvoices, getCachedPurchaseInvoiceItems, getSupplierMetrics, getProducts, invalidateApiCache, getOrCreateConversation, autoLinkSupplierToUser, updateSupplier, deleteSupplier } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { safeRouter } from '@/utils/safeRouter';
 import { formatCurrencyINR } from '@/utils/formatters';
 import { setNavData } from '@/utils/navStore';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 
 // Helper function to get initials from name
 const getInitials = (name: string): string => {
@@ -82,6 +84,9 @@ export default function SupplierDetailsScreen() {
   const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
   const [supplierProducts, setSupplierProducts] = useState<SupplierProduct[]>([]);
   const [metrics, setMetrics] = useState<any>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({ businessName: '', contactPerson: '', phone: '', email: '', gstin: '', address: '' });
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     loadSupplierData();
@@ -334,6 +339,59 @@ export default function SupplierDetailsScreen() {
     );
   }
 
+  const openEditModal = () => {
+    setEditForm({
+      businessName: supplier.businessName || supplier.business_name || '',
+      contactPerson: supplier.contactPerson || supplier.contact_person || '',
+      phone: supplier.mobile || supplier.phone || '',
+      email: supplier.email || '',
+      gstin: supplier.gstin || '',
+      address: supplier.address || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditSaving(true);
+    try {
+      const res = await updateSupplier(supplier.id, {
+        businessName: editForm.businessName,
+        contactPerson: editForm.contactPerson,
+        mobileNumber: editForm.phone,
+        email: editForm.email,
+        gstinPan: editForm.gstin,
+        addressLine1: editForm.address,
+      });
+      if (res.success) {
+        setShowEditModal(false);
+        loadSupplierData();
+        showAlert('Success', 'Supplier updated successfully');
+      } else {
+        showAlert('Error', res.error || 'Failed to update supplier');
+      }
+    } catch {
+      showAlert('Error', 'Failed to update supplier');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDelete = () => {
+    showConfirm(
+      'Delete Supplier',
+      'Are you sure you want to delete this supplier? This action cannot be undone.',
+      async () => {
+        const res = await deleteSupplier(supplier.id);
+        if (res.success) {
+          showAlert('Deleted', 'Supplier has been deleted');
+          router.back();
+        } else {
+          showAlert('Error', res.error || 'Failed to delete supplier');
+        }
+      }
+    );
+  };
+
   const handleCreatePO = () => {
     safeRouter.push({
       pathname: '/purchasing/create-po',
@@ -442,13 +500,17 @@ export default function SupplierDetailsScreen() {
                 
                 <Text style={styles.headerTitle}>Supplier Details</Text>
                 
-                <TouchableOpacity
-                  style={styles.chatButton}
-                  onPress={handleChatPress}
-                  activeOpacity={0.7}
-                >
-                  <MessageSquare size={22} color={Colors.primary} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TouchableOpacity onPress={openEditModal} activeOpacity={0.7} style={styles.chatButton}>
+                    <Edit3 size={20} color={Colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleDelete} activeOpacity={0.7} style={styles.chatButton}>
+                    <Trash2 size={20} color={Colors.error} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleChatPress} activeOpacity={0.7} style={styles.chatButton}>
+                    <MessageSquare size={22} color={Colors.primary} />
+                  </TouchableOpacity>
+                </View>
               </View>
             </SafeAreaView>
 
@@ -925,6 +987,48 @@ export default function SupplierDetailsScreen() {
                 <Text style={styles.createPOButtonText}>Create Purchase Order</Text>
               </TouchableOpacity>
             </View>
+
+          {/* Edit Supplier Modal */}
+          <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+              <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '80%' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Edit Supplier</Text>
+                  <TouchableOpacity onPress={() => setShowEditModal(false)}><X size={24} color={Colors.textLight} /></TouchableOpacity>
+                </View>
+                <ScrollView style={{ maxHeight: 400 }}>
+                  {[
+                    { label: 'Business Name', key: 'businessName' },
+                    { label: 'Contact Person', key: 'contactPerson' },
+                    { label: 'Phone', key: 'phone', keyboard: 'phone-pad' },
+                    { label: 'Email', key: 'email', keyboard: 'email-address' },
+                    { label: 'GSTIN', key: 'gstin' },
+                    { label: 'Address', key: 'address', multiline: true },
+                  ].map((field) => (
+                    <View key={field.key} style={{ marginBottom: 12 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textLight, marginBottom: 4 }}>{field.label}</Text>
+                      <TextInput
+                        value={(editForm as any)[field.key]}
+                        onChangeText={(t) => setEditForm(prev => ({ ...prev, [field.key]: t }))}
+                        style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 8, padding: 10, fontSize: 15, color: Colors.text, minHeight: field.multiline ? 60 : 44 }}
+                        keyboardType={(field as any).keyboard || 'default'}
+                        multiline={field.multiline}
+                      />
+                    </View>
+                  ))}
+                </ScrollView>
+                <TouchableOpacity
+                  onPress={handleSaveEdit}
+                  disabled={editSaving}
+                  style={{ backgroundColor: Colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 12, opacity: editSaving ? 0.6 : 1 }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{editSaving ? 'Saving...' : 'Save Changes'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
           </View>
         </ResponsiveContainer>
   );

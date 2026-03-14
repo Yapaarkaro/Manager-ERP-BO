@@ -51,6 +51,7 @@ import {
   Check,
   Send,
   MessageSquare,
+  Smartphone,
 } from 'lucide-react-native';
 import { getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
@@ -64,7 +65,8 @@ import { SettingsSkeleton } from '@/components/SkeletonLoader';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { usePermissions } from '@/contexts/PermissionContext';
-import { getStaffAttendance, getStaffSessions } from '@/services/backendApi';
+import { getStaffAttendance, getStaffSessions, getBusinessPreferences, updateBusinessPreferences } from '@/services/backendApi';
+import type { BusinessPreferences } from '@/services/backendApi';
 
 // Temporary interfaces until they're added to dataStore
 interface BusinessAddress {
@@ -202,12 +204,11 @@ export default function SettingsScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
+  // Cleanup debounce timer on unmount
   useEffect(() => {
-    AsyncStorage.getItem('autoSendSettings').then(saved => {
-      if (saved) {
-        try { setAutoSendSettings(JSON.parse(saved)); } catch {}
-      }
-    }).catch(() => {});
+    return () => {
+      if (preferenceSaveTimeoutRef.current) clearTimeout(preferenceSaveTimeoutRef.current);
+    };
   }, []);
 
   // Subscribe to alert state changes
@@ -369,6 +370,7 @@ export default function SettingsScreen() {
   const [notificationSettings, setNotificationSettings] = useState({
     pushNotifications: true,
     emailNotifications: true,
+    whatsappNotifications: false,
     weeklyReports: false,
     lowStockAlerts: true,
     overdueReceivables: true,
@@ -379,6 +381,7 @@ export default function SettingsScreen() {
     autoSendPO: true,
     autoSendReturnInvoice: true,
     autoSendDiscrepancy: false,
+    autoSendPayment: false,
   });
 
   // Payment settings state
@@ -392,6 +395,11 @@ export default function SettingsScreen() {
   });
 
   const [activeBankAccounts, setActiveBankAccounts] = useState<Set<string>>(new Set());
+  const [digitalWallets, setDigitalWallets] = useState<string[]>(['Paytm', 'PhonePe', 'Google Pay', 'Amazon Pay', 'Freecharge', 'MobiKwik']);
+  const [showDigitalWalletsModal, setShowDigitalWalletsModal] = useState(false);
+  const [customWalletName, setCustomWalletName] = useState('');
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const preferenceSaveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Subscription state
   const [subscriptions, setSubscriptions] = useState([]);
@@ -429,25 +437,83 @@ export default function SettingsScreen() {
     setBankAccounts(formattedBankAccounts);
   }, [formattedBankAccounts]);
 
-  // ✅ Only refetch if cache is stale (optimized for instant loading)
   useFocusEffect(
     React.useCallback(() => {
-      const { __getGlobalCache } = require('@/hooks/useBusinessData');
-      const cache = __getGlobalCache();
-      const now = Date.now();
-      const CACHE_DURATION = 30000; // 30 seconds - longer cache for better UX
-      
-      // Only refetch if cache is stale or missing (data loads instantly from cache)
-      if (!cache.data || (now - cache.timestamp) > CACHE_DURATION) {
-        console.log('🔄 Settings: Cache stale, refetching in background');
-        refetch().catch((error) => {
-          console.error('❌ Error refetching settings data:', error);
-        });
-      } else {
-        console.log('✅ Settings: Using cached data (instant display)');
-      }
+      refetch().catch((error) => {
+        console.error('Error refetching settings data:', error);
+      });
     }, [refetch])
   );
+
+  // Load business preferences from Supabase
+  useEffect(() => {
+    if (!businessData?.business?.id || preferencesLoaded) return;
+    (async () => {
+      const result = await getBusinessPreferences(businessData.business.id);
+      if (result.success && result.preferences) {
+        const p = result.preferences;
+        setNotificationSettings({
+          pushNotifications: p.push_notifications,
+          emailNotifications: p.email_notifications,
+          whatsappNotifications: p.whatsapp_notifications,
+          weeklyReports: p.weekly_reports,
+          lowStockAlerts: p.low_stock_alerts,
+          overdueReceivables: p.overdue_receivables,
+          overduePayables: p.overdue_payables,
+        });
+        setAutoSendSettings({
+          autoSendPO: p.auto_send_po,
+          autoSendReturnInvoice: p.auto_send_return_invoice,
+          autoSendDiscrepancy: p.auto_send_discrepancy,
+          autoSendPayment: p.auto_send_payment,
+        });
+        if (p.payment_methods && typeof p.payment_methods === 'object') {
+          setPaymentMethods(prev => ({ ...prev, ...p.payment_methods }));
+        }
+        if (Array.isArray(p.active_bank_accounts)) {
+          setActiveBankAccounts(new Set(p.active_bank_accounts));
+        }
+        if (Array.isArray(p.digital_wallets) && p.digital_wallets.length > 0) {
+          setDigitalWallets(p.digital_wallets);
+        }
+        setPreferencesLoaded(true);
+      }
+    })();
+  }, [businessData?.business?.id, preferencesLoaded]);
+
+  // Debounced save to Supabase when any preference changes
+  const savePreferencesToBackend = React.useCallback(() => {
+    if (!businessData?.business?.id || !preferencesLoaded) return;
+    if (preferenceSaveTimeoutRef.current) clearTimeout(preferenceSaveTimeoutRef.current);
+    preferenceSaveTimeoutRef.current = setTimeout(async () => {
+      await updateBusinessPreferences(businessData.business.id, {
+        push_notifications: notificationSettings.pushNotifications,
+        email_notifications: notificationSettings.emailNotifications,
+        whatsapp_notifications: notificationSettings.whatsappNotifications,
+        weekly_reports: notificationSettings.weeklyReports,
+        low_stock_alerts: notificationSettings.lowStockAlerts,
+        overdue_receivables: notificationSettings.overdueReceivables,
+        overdue_payables: notificationSettings.overduePayables,
+        auto_send_po: autoSendSettings.autoSendPO,
+        auto_send_return_invoice: autoSendSettings.autoSendReturnInvoice,
+        auto_send_discrepancy: autoSendSettings.autoSendDiscrepancy,
+        auto_send_payment: autoSendSettings.autoSendPayment,
+        payment_methods: paymentMethods,
+        active_bank_accounts: Array.from(activeBankAccounts),
+        digital_wallets: digitalWallets,
+      });
+    }, 800);
+  }, [businessData?.business?.id, preferencesLoaded, notificationSettings, autoSendSettings, paymentMethods, activeBankAccounts, digitalWallets]);
+
+  const prefsChangedAfterLoad = React.useRef(false);
+  useEffect(() => {
+    if (!preferencesLoaded) return;
+    if (!prefsChangedAfterLoad.current) {
+      prefsChangedAfterLoad.current = true;
+      return;
+    }
+    savePreferencesToBackend();
+  }, [notificationSettings, autoSendSettings, paymentMethods, activeBankAccounts, digitalWallets]);
 
   const getAddressesByType = (type: 'branch' | 'warehouse') => {
     return addresses.filter(addr => addr.type === type);
@@ -608,44 +674,39 @@ export default function SettingsScreen() {
   };
 
   const handleNotificationToggle = (key: keyof typeof notificationSettings) => {
-    setNotificationSettings(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-    // TODO: Implement notification setting save logic
-    console.log(`${key} toggled to:`, !notificationSettings[key]);
+    setNotificationSettings(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleAutoSendToggle = (key: keyof typeof autoSendSettings) => {
-    setAutoSendSettings(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-    AsyncStorage.setItem('autoSendSettings', JSON.stringify({
-      ...autoSendSettings,
-      [key]: !autoSendSettings[key],
-    })).catch(() => {});
+    setAutoSendSettings(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handlePaymentMethodToggle = (method: keyof typeof paymentMethods) => {
-    setPaymentMethods(prev => ({
-      ...prev,
-      [method]: !prev[method]
-    }));
-    // TODO: Implement payment method save logic
-    console.log(`${method} toggled to:`, !paymentMethods[method]);
+    setPaymentMethods(prev => ({ ...prev, [method]: !prev[method] }));
   };
 
   const handleBankAccountToggle = (accountId: string) => {
-    const newActiveAccounts = new Set(activeBankAccounts);
-    if (newActiveAccounts.has(accountId)) {
-      newActiveAccounts.delete(accountId);
-    } else {
-      newActiveAccounts.add(accountId);
+    setActiveBankAccounts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(accountId)) newSet.delete(accountId);
+      else newSet.add(accountId);
+      return newSet;
+    });
+  };
+
+  const handleAddCustomWallet = () => {
+    const name = customWalletName.trim();
+    if (!name) return;
+    if (digitalWallets.includes(name)) {
+      showAlert('Already Added', `"${name}" is already in your wallet list.`);
+      return;
     }
-    setActiveBankAccounts(newActiveAccounts);
-    // TODO: Implement bank account activation/deactivation logic
-    console.log('Bank account toggled:', accountId);
+    setDigitalWallets(prev => [...prev, name]);
+    setCustomWalletName('');
+  };
+
+  const handleRemoveWallet = (walletName: string) => {
+    setDigitalWallets(prev => prev.filter(w => w !== walletName));
   };
 
   const confirmDeleteAddress = async () => {
@@ -1806,6 +1867,33 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* WhatsApp Notifications */}
+            <View style={styles.notificationItem}>
+              <View style={styles.notificationInfo}>
+                <MessageSquare size={20} color="#25D366" />
+                <View style={styles.notificationText}>
+                  <Text style={styles.notificationTitle}>WhatsApp Notifications</Text>
+                  <Text style={styles.notificationDescription}>Receive notifications via WhatsApp</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.toggleSwitch,
+                  { backgroundColor: notificationSettings.whatsappNotifications ? Colors.primary : Colors.grey[300] }
+                ]}
+                onPress={() => handleNotificationToggle('whatsappNotifications')}
+                activeOpacity={0.7}
+              >
+                <View style={[
+                  styles.toggleThumb,
+                  { 
+                    transform: [{ translateX: notificationSettings.whatsappNotifications ? 20 : 0 }],
+                    backgroundColor: Colors.background
+                  }
+                ]} />
+              </TouchableOpacity>
+            </View>
+
             {/* Weekly Reports */}
             <View style={styles.notificationItem}>
               <View style={styles.notificationInfo}>
@@ -1977,6 +2065,22 @@ export default function SettingsScreen() {
                 <View style={[styles.toggleThumb, { transform: [{ translateX: autoSendSettings.autoSendDiscrepancy ? 20 : 0 }], backgroundColor: Colors.background }]} />
               </TouchableOpacity>
             </View>
+            <View style={styles.notificationItem}>
+              <View style={styles.notificationInfo}>
+                <Receipt size={20} color={Colors.error} />
+                <View style={styles.notificationText}>
+                  <Text style={styles.notificationTitle}>Payment Receipts</Text>
+                  <Text style={styles.notificationDescription}>Auto-send payment receipts to customers/suppliers via chat</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleSwitch, { backgroundColor: autoSendSettings.autoSendPayment ? Colors.primary : Colors.grey[300] }]}
+                onPress={() => handleAutoSendToggle('autoSendPayment')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.toggleThumb, { transform: [{ translateX: autoSendSettings.autoSendPayment ? 20 : 0 }], backgroundColor: Colors.background }]} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
         )}
@@ -2019,6 +2123,22 @@ export default function SettingsScreen() {
                 <View style={styles.paymentOptionText}>
                   <Text style={styles.paymentOptionTitle}>Bank Accounts</Text>
                   <Text style={styles.paymentOptionDescription}>Manage active bank accounts for receiving payments</Text>
+                </View>
+              </View>
+              <ChevronRight size={16} color={Colors.textLight} />
+            </TouchableOpacity>
+
+            {/* Digital Wallets */}
+            <TouchableOpacity 
+              style={styles.paymentOption}
+              onPress={() => setShowDigitalWalletsModal(true)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.paymentOptionInfo}>
+                <Smartphone size={20} color="#6366f1" />
+                <View style={styles.paymentOptionText}>
+                  <Text style={styles.paymentOptionTitle}>Digital Wallets</Text>
+                  <Text style={styles.paymentOptionDescription}>Configure accepted digital wallet options ({digitalWallets.length} active)</Text>
                 </View>
               </View>
               <ChevronRight size={16} color={Colors.textLight} />
@@ -2309,6 +2429,70 @@ export default function SettingsScreen() {
                   </TouchableOpacity>
                 </View>
               ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Digital Wallets Modal */}
+      <Modal
+        visible={showDigitalWalletsModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDigitalWalletsModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.paymentModal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Digital Wallets</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowDigitalWalletsModal(false)}
+                activeOpacity={0.7}
+              >
+                <X size={20} color={Colors.textLight} />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={{ maxHeight: 350 }}>
+              {digitalWallets.map((wallet) => (
+                <View key={wallet} style={styles.bankAccountModalItem}>
+                  <View style={styles.bankAccountModalInfo}>
+                    <Text style={styles.bankAccountModalName}>{wallet}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleRemoveWallet(wallet)}
+                    activeOpacity={0.7}
+                    style={{ padding: 6 }}
+                  >
+                    <X size={16} color={Colors.error} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8, paddingHorizontal: 4 }}>
+              <TextInput
+                style={{ flex: 1, borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.text, backgroundColor: Colors.grey[50] }}
+                value={customWalletName}
+                onChangeText={setCustomWalletName}
+                placeholder="Add custom wallet name..."
+                placeholderTextColor={Colors.textLight}
+                returnKeyType="done"
+                onSubmitEditing={handleAddCustomWallet}
+              />
+              <TouchableOpacity
+                style={{
+                  backgroundColor: Colors.primary,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 8,
+                }}
+                onPress={handleAddCustomWallet}
+                activeOpacity={0.7}
+              >
+                <Plus size={18} color="#fff" />
+              </TouchableOpacity>
             </View>
           </View>
         </View>

@@ -10,7 +10,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
-import { invalidateApiCache, getCustomers, getInvoiceWithItems } from '@/services/backendApi';
+import { invalidateApiCache, getCustomers, getInvoiceWithItems, cancelInvoice } from '@/services/backendApi';
 import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,9 +32,11 @@ import {
   User,
   Eye,
   ExternalLink,
+  XCircle,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 import { DetailSkeleton } from '@/components/SkeletonLoader';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
@@ -347,6 +349,24 @@ export default function InvoiceDetailsScreen() {
     });
   };
 
+  const isCancelled = invoice.status === 'cancelled' || invoice.is_cancelled;
+
+  const handleCancelInvoice = () => {
+    showConfirm(
+      'Cancel Invoice',
+      'Are you sure you want to cancel this invoice? This will mark it as cancelled for audit purposes.',
+      async () => {
+        const res = await cancelInvoice(invoice.id);
+        if (res.success) {
+          showAlert('Cancelled', 'Invoice has been cancelled');
+          setInvoice((prev: any) => ({ ...prev, status: 'cancelled', is_cancelled: true }));
+        } else {
+          showAlert('Error', res.error || 'Failed to cancel invoice');
+        }
+      }
+    );
+  };
+
   const buildPDFData = (): InvoicePDFData => {
     const bizAddr = businessData?.addresses?.[0];
     const bizAddress = bizAddr ? [bizAddr.door_number || bizAddr.doorNumber, bizAddr.address_line_1 || bizAddr.addressLine1, bizAddr.address_line_2 || bizAddr.addressLine2, bizAddr.city, bizAddr.state || bizAddr.stateName, bizAddr.pincode].filter(Boolean).join(', ') : invoice.businessAddress;
@@ -467,6 +487,15 @@ export default function InvoiceDetailsScreen() {
             >
               <Printer size={20} color={Colors.primary} />
             </TouchableOpacity>
+            {!isCancelled && (
+              <TouchableOpacity
+                style={styles.headerActionButton}
+                onPress={handleCancelInvoice}
+                activeOpacity={0.7}
+              >
+                <XCircle size={20} color={Colors.error} />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </SafeAreaView>

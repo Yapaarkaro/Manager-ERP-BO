@@ -470,14 +470,14 @@ export default function BankAccountsScreen() {
 
   if (isLoadingAccounts) {
     return (
-      <ResponsiveContainer>
+      <ResponsiveContainer narrow>
         <ListSkeleton itemCount={4} showSearch={false} showFilter={false} />
       </ResponsiveContainer>
     );
   }
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 

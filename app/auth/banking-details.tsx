@@ -679,7 +679,7 @@ export default function BankingDetailsScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView

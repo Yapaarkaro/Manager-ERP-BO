@@ -21,7 +21,7 @@ import { useBusinessData } from '@/hooks/useBusinessData';
 import { paymentDataBridge, saleFlowBridge, productStore, InvoiceExtras } from '@/utils/productStore';
 import { generateInvoiceUPIURL, formatUPIAmountDisplay } from '@/utils/upiQRGenerator';
 import { autoFormatDateInput, validateDateDDMMYYYY, formatCurrencyINR } from '@/utils/formatters';
-import { peekNextInvoiceNumber } from '@/services/backendApi';
+import { peekNextInvoiceNumber, getBusinessPreferences } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -34,7 +34,8 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
-  Trash2
+  Trash2,
+  Wallet,
 } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { safeRouter } from '@/utils/safeRouter';
@@ -55,7 +56,7 @@ const Colors = {
   }
 };
 
-type PaymentMethod = 'cash' | 'upi' | 'card' | 'others';
+type PaymentMethod = 'cash' | 'upi' | 'card' | 'others' | 'bank_transfer' | 'cheque' | 'digital_wallet';
 type OthersMethod = 'bank_transfer' | 'cheque';
 type PaymentType = 'full_payment' | 'part_payment' | 'add_to_receivables';
 
@@ -115,6 +116,12 @@ export default function PaymentScreen() {
 
   // Invoice number preview
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState<string>('');
+
+  // Settings-driven payment preferences
+  const [enabledMethods, setEnabledMethods] = useState<Record<string, boolean>>({ cash: true, upi: true, card: true, bankTransfer: true, cheque: false, digitalWallet: true });
+  const [digitalWallets, setDigitalWallets] = useState<string[]>([]);
+  const [selectedWallet, setSelectedWallet] = useState('');
+  const [showWalletPicker, setShowWalletPicker] = useState(false);
 
   // Advanced invoice fields
   const [extraFieldsEnabled, setExtraFieldsEnabled] = useState(false);
@@ -220,6 +227,24 @@ export default function PaymentScreen() {
       }
     }, [businessData.bankAccounts])
   );
+
+  useEffect(() => {
+    if (!businessData?.business?.id) return;
+    getBusinessPreferences(businessData.business.id).then(res => {
+      if (res.success && res.preferences) {
+        setEnabledMethods(res.preferences.payment_methods || {});
+        setDigitalWallets(res.preferences.digital_wallets || []);
+      }
+    });
+  }, [businessData?.business?.id]);
+
+  const showCash = enabledMethods.cash !== false;
+  const showUpi = enabledMethods.upi !== false;
+  const showCard = enabledMethods.card !== false;
+  const showBankTransfer = enabledMethods.bankTransfer !== false;
+  const showCheque = enabledMethods.cheque === true;
+  const showDigitalWallet = enabledMethods.digitalWallet !== false;
+  const showOthers = showBankTransfer || showCheque;
 
   const formatAmount = (amount: number) => {
     return formatCurrencyINR(amount);
@@ -519,6 +544,14 @@ export default function PaymentScreen() {
           paymentData.bankTransferReference = bankTransferReference;
         }
         break;
+
+      case 'digital_wallet':
+        if (!selectedWallet) {
+          showError('Please select a digital wallet', 'Wallet Required');
+          return;
+        }
+        paymentData.digitalWallet = selectedWallet;
+        break;
     }
 
     // Add part payment details if applicable
@@ -731,8 +764,8 @@ export default function PaymentScreen() {
         <View style={styles.paymentMethodsContainer}>
           <Text style={styles.sectionTitle}>Select Payment Method</Text>
           
-                    {/* 1. Cash Payment - Always First */}
-          {renderPaymentMethodCard(
+                    {/* 1. Cash Payment */}
+          {showCash && renderPaymentMethodCard(
             'cash',
             Banknote,
             'Cash',
@@ -839,7 +872,7 @@ export default function PaymentScreen() {
               )}
               
               {/* 3. UPI Payment */}
-              {renderPaymentMethodCard(
+              {showUpi && renderPaymentMethodCard(
                 'upi',
                 Smartphone,
                 'UPI',
@@ -849,7 +882,7 @@ export default function PaymentScreen() {
               )}
               
               {/* 4. Card Payment */}
-              {renderPaymentMethodCard(
+              {showCard && renderPaymentMethodCard(
                 'card',
                 CreditCard,
                 'Card',
@@ -858,14 +891,34 @@ export default function PaymentScreen() {
                   : 'Receive card payment'
               )}
               
-              {/* 5. Other Payment Methods */}
-              {renderPaymentMethodCard(
+              {/* 5. Bank Transfer */}
+              {showBankTransfer && renderPaymentMethodCard(
                 'others',
                 Building2,
-                'Others',
+                'Bank Transfer',
                 showPartPaymentOptions 
                   ? `Pay remaining amount: ${formatAmount(Math.abs(calculateBalance()))}`
-                  : 'Bank transfer or Cheque payment'
+                  : 'Receive bank transfer payment'
+              )}
+
+              {/* 6. Cheque */}
+              {showCheque && renderPaymentMethodCard(
+                'others',
+                CreditCard,
+                'Cheque',
+                showPartPaymentOptions 
+                  ? `Pay remaining amount: ${formatAmount(Math.abs(calculateBalance()))}`
+                  : 'Receive cheque payment'
+              )}
+
+              {/* 7. Digital Wallet */}
+              {showDigitalWallet && renderPaymentMethodCard(
+                'digital_wallet',
+                Wallet,
+                'Digital Wallet',
+                showPartPaymentOptions 
+                  ? `Pay remaining amount: ${formatAmount(Math.abs(calculateBalance()))}`
+                  : 'Receive digital wallet payment'
               )}
             </>
           )}
@@ -1076,8 +1129,35 @@ export default function PaymentScreen() {
           </View>
         )}
 
-
-
+        {/* Digital Wallet Section */}
+        {((balanceUpdated || !showContinueButton) && !showContinueButton) && selectedPaymentMethod === 'digital_wallet' && (
+          <View style={styles.paymentDetailsContainer}>
+            <Text style={styles.sectionTitle}>Select Digital Wallet</Text>
+            {digitalWallets.length > 0 ? (
+              <View style={{ gap: 8 }}>
+                {digitalWallets.map(w => (
+                  <TouchableOpacity
+                    key={w}
+                    style={[
+                      styles.othersMethodButton,
+                      selectedWallet === w && styles.selectedOthersMethod,
+                      { paddingVertical: 14 }
+                    ]}
+                    onPress={() => setSelectedWallet(w)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.othersMethodText,
+                      selectedWallet === w && styles.selectedOthersMethodText,
+                    ]}>{w}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={{ color: Colors.textLight, fontSize: 13, paddingVertical: 12 }}>No digital wallets configured. Add wallets in Settings &gt; Payments.</Text>
+            )}
+          </View>
+        )}
 
 
         {/* Payment Action Buttons */}

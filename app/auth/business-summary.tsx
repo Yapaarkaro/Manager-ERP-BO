@@ -510,14 +510,14 @@ export default function BusinessSummaryScreen() {
   const hasLocalData = editableAddresses.length > 0 || editableBankAccounts.length > 0 || editableName;
   if (isBusinessDataLoading && !hasLocalData) {
     return (
-      <ResponsiveContainer>
+      <ResponsiveContainer narrow>
         <DetailSkeleton />
       </ResponsiveContainer>
     );
   }
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView

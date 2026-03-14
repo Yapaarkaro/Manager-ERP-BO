@@ -352,7 +352,8 @@ export default function OTPScreen() {
       const progressResult = await withTimeout(getSignupProgress(), 10000, 'Get signup progress');
       if (progressResult.success && progressResult.progress) {
         const progress = progressResult.progress;
-        if (progress.business_id || progress.current_step === 'signupComplete' || progress.current_step === 'completed' || progress.current_step === 'complete') {
+        const completedSteps = ['signupComplete', 'completed', 'complete'];
+        if (completedSteps.includes(progress.current_step)) {
           try {
             const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
             await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
@@ -474,7 +475,7 @@ export default function OTPScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView 
         style={styles.keyboardAvoidingView}

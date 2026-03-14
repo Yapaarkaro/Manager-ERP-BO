@@ -111,27 +111,43 @@ export default function EditAddressScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // Auto-focus on state search input when modal opens
+  // Immediately prefill from route params so fields are never blank
+  useEffect(() => {
+    if (!editAddressId) return;
+    try {
+      const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
+      const mapped = mapLocationsToAddresses(paramAddrs);
+      const addr = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId);
+      if (addr) {
+        setAddressName(addr.name);
+        setAddressLine1(addr.addressLine1);
+        setAddressLine2(addr.addressLine2);
+        setAdditionalLines(addr.additionalLines || []);
+        setCity(addr.city);
+        setPincode(addr.pincode);
+        setManagerName(addr.manager || '');
+        setManagerPhone(addr.phone || '');
+        const matchingState = indianStates.find(s => s.code === addr.stateCode);
+        if (matchingState) setSelectedState(matchingState);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     if (showStates) {
-      // Longer delay to ensure modal slide animation completes fully
       const timer = setTimeout(() => {
-        console.log('🔍 Attempting to focus state search input');
         stateSearchInputRef.current?.focus();
-      }, 800); // Increased from 500ms to 800ms for slide animation
+      }, 800);
       return () => clearTimeout(timer);
     } else {
-      // Clear search when modal closes
       setStateSearch('');
     }
   }, [showStates]);
 
-  // Load existing address data from backend
   useEffect(() => {
     const loadAddress = async () => {
       if (!editAddressId) return;
 
-      // Try route params first
       let address: BusinessAddress | null = null;
       try {
         const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
@@ -139,7 +155,6 @@ export default function EditAddressScreen() {
         address = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId) || null;
       } catch { /* ignore parse error */ }
 
-      // Fallback: query backend directly
       if (!address) {
         try {
           const { data: loc } = await supabase

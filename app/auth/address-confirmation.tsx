@@ -119,6 +119,31 @@ export default function AddressConfirmationScreen() {
     setIsLoadingAddresses(false);
   }, [allAddresses]);
 
+  // Update signup progress on mount so refreshes don't redirect to stale steps
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) return;
+        const mobileNumber = (mobile as string) || session?.user?.phone || session?.user?.user_metadata?.phone;
+        if (mobileNumber) {
+          saveSignupProgress({
+            mobile: mobileNumber,
+            mobileVerified: true,
+            taxIdType: taxIdType as 'GSTIN' | 'PAN',
+            taxIdValue: taxIdValue as string,
+            taxIdVerified: true,
+            ownerName: name as string,
+            businessName: businessName as string,
+            businessType: businessType as string,
+            gstinData: gstinData ? (typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData) : undefined,
+            currentStep: 'addressManagement',
+          });
+        }
+      } catch {}
+    })();
+  }, []);
+
   // Query staff verification codes for branch/warehouse managers
   useEffect(() => {
     const fetchStaffCodes = async () => {
@@ -796,14 +821,14 @@ export default function AddressConfirmationScreen() {
 
   if (isLoadingAddresses) {
     return (
-      <ResponsiveContainer>
+      <ResponsiveContainer narrow>
         <ListSkeleton itemCount={4} showSearch={false} showFilter={false} />
       </ResponsiveContainer>
     );
   }
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView 

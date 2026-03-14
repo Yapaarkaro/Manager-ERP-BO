@@ -672,7 +672,7 @@ export default function BusinessAddressScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer maxWidth={680}>
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
@@ -685,7 +685,10 @@ export default function BusinessAddressScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/mobile')}
+            onPress={() => {
+              setSignupData({ type, value, gstinData, name, businessName, businessType, customBusinessType, mobile });
+              router.replace('/auth/business-details');
+            }}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color="#ffffff" />

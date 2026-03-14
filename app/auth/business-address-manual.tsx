@@ -100,6 +100,7 @@ export default function BusinessAddressManualScreen() {
   const insets = useSafeAreaInsets();
   const isPrimaryAddress = addressType === 'primary';
   const [addressName, setAddressName] = useState(isPrimaryAddress ? (prefilledAddressName as string) : '');
+  const [doorNumber, setDoorNumber] = useState(prefilledDoorNumber as string);
   const [addressLine1, setAddressLine1] = useState(prefilledStreet as string);
   const [addressLine2, setAddressLine2] = useState(prefilledArea as string);
   const [additionalLines, setAdditionalLines] = useState<string[]>([]);
@@ -377,17 +378,11 @@ export default function BusinessAddressManualScreen() {
           setCity(addressFromStore.city || '');
           setPincode(addressFromStore.pincode || '');
           
-          // Load additional lines: doorNumber is first, then additionalLines array
-          const loadedAdditionalLines: string[] = [];
-          if (addressFromStore.doorNumber) {
-            loadedAdditionalLines.push(addressFromStore.doorNumber);
-          }
+          setDoorNumber(addressFromStore.doorNumber || '');
           if (addressFromStore.additionalLines && Array.isArray(addressFromStore.additionalLines)) {
-            loadedAdditionalLines.push(...addressFromStore.additionalLines);
+            setAdditionalLines([...addressFromStore.additionalLines]);
           }
-          setAdditionalLines(loadedAdditionalLines);
           
-          // Load state
           if (addressFromStore.stateCode) {
             const matchingState = indianStates.find(state => state.code === addressFromStore.stateCode);
             if (matchingState) {
@@ -426,17 +421,11 @@ export default function BusinessAddressManualScreen() {
         setCity(currentAddress.city || '');
         setPincode(currentAddress.pincode || '');
         
-        // Load additional lines: doorNumber is first, then additionalLines array
-        const loadedAdditionalLines: string[] = [];
-        if (currentAddress.doorNumber) {
-          loadedAdditionalLines.push(currentAddress.doorNumber);
-        }
+        setDoorNumber(currentAddress.doorNumber || '');
         if (currentAddress.additionalLines && Array.isArray(currentAddress.additionalLines)) {
-          loadedAdditionalLines.push(...currentAddress.additionalLines);
+          setAdditionalLines([...currentAddress.additionalLines]);
         }
-        setAdditionalLines(loadedAdditionalLines);
         
-        // Load state
         if (currentAddress.stateCode) {
           const matchingState = indianStates.find(state => state.code === currentAddress.stateCode);
           if (matchingState) {
@@ -776,6 +765,7 @@ export default function BusinessAddressManualScreen() {
   const isFormValid = () => {
     return (
       addressName.trim().length > 0 &&
+      doorNumber.trim().length > 0 &&
       addressLine1.trim().length > 0 &&
       city.trim().length > 0 &&
       pincode.trim().length === 6 &&
@@ -802,8 +792,8 @@ export default function BusinessAddressManualScreen() {
       try { allAddresses = JSON.parse(existingAddresses as string || '[]'); } catch {}
       const trimmedContactName = contactPersonName.trim();
       const sanitizedContactPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
-      const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
-      
+      const newDoorNumber = doorNumber.trim();
+
       console.log('🔍 Checking for duplicates among', allAddresses.length, 'existing addresses');
       console.log('📍 New address to check:', {
         addressLine1: addressLine1.trim(),
@@ -885,13 +875,11 @@ export default function BusinessAddressManualScreen() {
     try {
       const addressTypeValue = (Array.isArray(addressType) ? addressType[0] : addressType) || 'primary';
       
-      // Prepare address JSON for backend
-      // Include all additional lines (not just the first one as doorNumber)
       const addressJson = {
-        doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+        doorNumber: doorNumber.trim(),
         addressLine1: addressLine1.trim(),
         addressLine2: addressLine2.trim(),
-        additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // All lines after the first
+        additionalLines: additionalLines.filter(l => l.trim().length > 0),
         city: city.trim(),
         pincode: pincode,
         stateName: selectedState?.name || '',
@@ -925,13 +913,12 @@ export default function BusinessAddressManualScreen() {
           const { optimisticUpdateAddress } = await import('@/utils/optimisticSync');
           const { clearBusinessDataCache } = await import('@/hooks/useBusinessData');
           
-          // Prepare address updates with all fields including additionalLines
           const addressUpdates: Partial<BusinessAddress> = {
             name: addressName.trim(),
-            doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+            doorNumber: doorNumber.trim(),
             addressLine1: addressLine1.trim(),
             addressLine2: addressLine2.trim(),
-            additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [],
+            additionalLines: additionalLines.filter(l => l.trim().length > 0),
             city: city.trim(),
             pincode: pincode,
             stateName: selectedState?.name || '',
@@ -990,10 +977,10 @@ export default function BusinessAddressManualScreen() {
             ? {
                 ...addr,
                 name: addressName.trim(),
-                doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+                doorNumber: doorNumber.trim(),
                 addressLine1: addressLine1.trim(),
                 addressLine2: addressLine2.trim(),
-                additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [], // Store all additional lines
+                additionalLines: additionalLines.filter(l => l.trim().length > 0),
                 city: city.trim(),
                 pincode: pincode,
                 stateName: selectedState?.name || '',
@@ -1010,10 +997,10 @@ export default function BusinessAddressManualScreen() {
           id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           name: addressName.trim(),
           type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
-          doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+          doorNumber: doorNumber.trim(),
           addressLine1: addressLine1.trim(),
           addressLine2: addressLine2.trim(),
-          additionalLines: additionalLines.length > 1 ? additionalLines.slice(1) : [],
+          additionalLines: additionalLines.filter(l => l.trim().length > 0),
           city: city.trim(),
           pincode: pincode,
           stateName: selectedState?.name || '',
@@ -1110,7 +1097,7 @@ export default function BusinessAddressManualScreen() {
   const webContainerStyles = getWebContainerStyles();
 
   return (
-    <ResponsiveContainer>
+    <ResponsiveContainer narrow>
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
@@ -1121,7 +1108,10 @@ export default function BusinessAddressManualScreen() {
         >
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.canGoBack() ? router.back() : router.replace('/auth/mobile')}
+            onPress={() => {
+              setSignupData({ type, value, gstinData, name, businessName, businessType, customBusinessType, mobile });
+              router.replace('/auth/business-details');
+            }}
             activeOpacity={0.7}
           >
             <ArrowLeft size={24} color="#3f66ac" />
@@ -1236,6 +1226,33 @@ export default function BusinessAddressManualScreen() {
                   <Text style={styles.fieldHint}>
                     Give a name to identify this business location
                   </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Door Number / Building Name *</Text>
+                  <View
+                    ref={(ref) => {
+                      inputContainerRefs.current['doorNumber'] = ref;
+                    }}
+                    style={styles.inputContainer}
+                    onLayout={(e) => handleInputLayout('doorNumber', e)}
+                  >
+                    <CapitalizedTextInput
+                      ref={(ref) => {
+                        inputRefs.current['doorNumber'] = ref;
+                      }}
+                      style={styles.input}
+                      value={doorNumber}
+                      onChangeText={setDoorNumber}
+                      placeholder="e.g., Flat 101, Shop No. 5, Building A"
+                      placeholderTextColor="#999999"
+                      autoCapitalize="words"
+                      editable={true}
+                      returnKeyType="next"
+                      onFocus={() => handleInputFocus('doorNumber')}
+                      onBlur={handleInputBlur}
+                    />
+                  </View>
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -1625,7 +1642,7 @@ export default function BusinessAddressManualScreen() {
                   const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
                   const existingManager = duplicateAddressInfo.manager || '';
                   const existingPhone = duplicateAddressInfo.phone || '';
-                  const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
+                  const newDoorNumber = doorNumber.trim();
                   const newManager = contactPersonName.trim();
                   const newPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
                   
@@ -1706,7 +1723,7 @@ export default function BusinessAddressManualScreen() {
                     const existingDoorNumber = duplicateAddressInfo.doorNumber || '';
                     const existingManager = duplicateAddressInfo.manager || '';
                     const existingPhone = duplicateAddressInfo.phone || '';
-                    const newDoorNumber = additionalLines.length > 0 ? additionalLines[0] : '';
+                    const newDoorNumber = doorNumber.trim();
                     const newManager = contactPersonName.trim();
                     const newPhone = contactPhone.replace(/\D/g, '').slice(0, 10);
                     
@@ -1742,7 +1759,7 @@ export default function BusinessAddressManualScreen() {
                               id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                               name: addressName.trim(),
                               type: addressTypeValue as 'primary' | 'branch' | 'warehouse',
-                              doorNumber: additionalLines.length > 0 ? additionalLines[0] : '',
+                              doorNumber: doorNumber.trim(),
                               addressLine1: addressLine1.trim(),
                               addressLine2: addressLine2.trim(),
                               city: city.trim(),

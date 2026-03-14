@@ -131,12 +131,38 @@ export default function EditAddressSimpleScreen() {
   const [staffOtpCode, setStaffOtpCode] = useState('');
   const [staffOtpName, setStaffOtpName] = useState('');
   const pendingNavigateRef = useRef<(() => void) | null>(null);
+  const [isLoadingAddress, setIsLoadingAddress] = useState(!!editAddressId);
+
+  // Immediately prefill from route params (synchronous) so fields are never blank
+  useEffect(() => {
+    if (!editAddressId) return;
+    try {
+      const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
+      const mapped = mapLocationsToAddresses(paramAddrs);
+      const addr = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId);
+      if (addr) {
+        setAddressName(addr.name);
+        setDoorNumber(addr.doorNumber || '');
+        setAddressLine1(addr.addressLine1);
+        setAddressLine2(addr.addressLine2);
+        setCity(addr.city);
+        setPincode(addr.pincode);
+        setManagerName(addr.manager || '');
+        setManagerPhone(addr.phone || '');
+        setOriginalPhone(addr.phone || '');
+        if (addr.additionalLines && Array.isArray(addr.additionalLines)) {
+          setAdditionalLines([...addr.additionalLines]);
+        }
+        const matchingState = indianStates.find(s => s.code === addr.stateCode);
+        if (matchingState) setSelectedState(matchingState);
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // Start slide animation
   useEffect(() => {
     Animated.timing(slideAnimation, {
       toValue: 1,
@@ -145,15 +171,10 @@ export default function EditAddressSimpleScreen() {
     }).start();
   }, [slideAnimation]);
 
-  // Load existing address data
   useEffect(() => {
     const loadAddress = async () => {
       if (!editAddressId) return;
 
-      console.log('🔍 Loading address with editAddressId:', editAddressId);
-      console.log('🔍 From settings:', fromSettings === 'true', 'From summary:', fromSummary === 'true');
-      
-      // Try to find address from route params first (passed between screens)
       let existingAddress: any = null;
       try {
         const paramAddrs = JSON.parse((existingAddresses || '[]') as string);
@@ -161,7 +182,6 @@ export default function EditAddressSimpleScreen() {
         existingAddress = mapped.find(a => a.id === editAddressId || a.backendId === editAddressId);
       } catch { /* ignore parse error */ }
 
-      // Fallback: query backend directly
       if (!existingAddress) {
         try {
           const { data: loc } = await supabase
@@ -176,6 +196,7 @@ export default function EditAddressSimpleScreen() {
       }
 
       if (!existingAddress) {
+        setIsLoadingAddress(false);
         Alert.alert('Error', 'Address not found. Please go back and try again.');
         return;
       }
@@ -281,6 +302,7 @@ export default function EditAddressSimpleScreen() {
           console.log('⚠️ Failed to resolve map location for existing address:', error);
         }
       }
+      setIsLoadingAddress(false);
     };
 
     loadAddress();

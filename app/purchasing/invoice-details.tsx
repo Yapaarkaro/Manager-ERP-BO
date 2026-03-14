@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { getPurchaseInvoices, getCachedPurchaseInvoiceItems, updatePurchaseInvoicePayment, getBankAccounts, invalidateApiCache, getSuppliers } from '@/services/backendApi';
+import { getPurchaseInvoices, getCachedPurchaseInvoiceItems, updatePurchaseInvoicePayment, getBankAccounts, invalidateApiCache, getSuppliers, cancelPurchaseInvoice } from '@/services/backendApi';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { formatQty, formatCurrencyINR } from '@/utils/formatters';
 import {
@@ -42,11 +42,13 @@ import {
     Printer,
     Phone,
     ExternalLink,
+    XCircle,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 
 const Colors = {
   background: '#FFFFFF',
@@ -251,6 +253,24 @@ export default function InvoiceDetailsScreen() {
     };
   };
 
+  const isCancelled = invoice.status === 'cancelled';
+
+  const handleCancelPurchaseInvoice = () => {
+    showConfirm(
+      'Cancel Purchase Invoice',
+      'Are you sure you want to cancel this purchase invoice?',
+      async () => {
+        const res = await cancelPurchaseInvoice(invoice.id);
+        if (res.success) {
+          showAlert('Cancelled', 'Purchase invoice has been cancelled');
+          setInvoice((prev: any) => ({ ...prev, status: 'cancelled' }));
+        } else {
+          showAlert('Error', res.error || 'Failed to cancel purchase invoice');
+        }
+      }
+    );
+  };
+
   const handleDownloadPDF = async () => {
     try {
       const pdfData = buildPurchasePDFData();
@@ -291,6 +311,9 @@ export default function InvoiceDetailsScreen() {
             <TouchableOpacity style={{ padding: 8 }} onPress={handleDownloadPDF} activeOpacity={0.7}><Download size={20} color={Colors.primary} /></TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={handleShareInvoice} activeOpacity={0.7}><Share size={20} color={Colors.primary} /></TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={handlePrintInvoice} activeOpacity={0.7}><Printer size={20} color={Colors.primary} /></TouchableOpacity>
+            {!isCancelled && (
+              <TouchableOpacity style={{ padding: 8 }} onPress={handleCancelPurchaseInvoice} activeOpacity={0.7}><XCircle size={20} color={Colors.error} /></TouchableOpacity>
+            )}
           </View>
         </View>
 

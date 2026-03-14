@@ -13,15 +13,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, Download, Share, Eye, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Edit3, Send, X, User, MessageCircle, FileText, ActivityIndicator as ActivityIcon } from 'lucide-react-native';
+import { ArrowLeft, Download, Share, Eye, Building2, Calendar, Banknote, Smartphone, CreditCard, IndianRupee, Package, Truck, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Edit3, Send, X, User, MessageCircle, FileText, ActivityIndicator as ActivityIcon, Trash2 } from 'lucide-react-native';
 import { ActivityIndicator } from 'react-native';
 import { Supplier } from '@/utils/dataStore';
-import { getSuppliers, invalidateApiCache, getOrCreateConversation, sendMessage, autoLinkSupplierToUser, acknowledgePurchaseOrder, createInAppNotification } from '@/services/backendApi';
+import { getSuppliers, invalidateApiCache, getOrCreateConversation, sendMessage, autoLinkSupplierToUser, acknowledgePurchaseOrder, createInAppNotification, deletePurchaseOrder } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { safeRouter } from '@/utils/safeRouter';
 import { setNavData } from '@/utils/navStore';
 import { getInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
+import { showAlert, showConfirm } from '@/utils/webAlert';
 import { InvoicePDFData, generateInvoicePDF } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF } from '@/utils/invoiceShareUtils';
 
@@ -281,6 +282,22 @@ export default function PODetailsScreen() {
   const handleEditPO = () => {
     setEditForm(po);
     setShowEditModal(true);
+  };
+
+  const handleDeletePO = () => {
+    showConfirm(
+      'Delete Purchase Order',
+      'Are you sure you want to delete this purchase order? This action cannot be undone.',
+      async () => {
+        const res = await deletePurchaseOrder(po.id);
+        if (res.success) {
+          showAlert('Deleted', 'Purchase order has been deleted');
+          router.back();
+        } else {
+          showAlert('Error', res.error || 'Failed to delete purchase order');
+        }
+      }
+    );
   };
 
   const handleSaveEdits = async () => {
@@ -857,10 +874,16 @@ export default function PODetailsScreen() {
           <View style={styles.section}>
             <View style={styles.actionButtons}>
               {po.type === 'created' && !isAcknowledged && (
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleEditPO} activeOpacity={0.7}>
-                  <Edit3 size={16} color={Colors.text} />
-                  <Text style={styles.secondaryButtonText}>Edit PO</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={handleEditPO} activeOpacity={0.7}>
+                    <Edit3 size={16} color={Colors.text} />
+                    <Text style={styles.secondaryButtonText}>Edit PO</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.secondaryButton, { borderColor: Colors.error }]} onPress={handleDeletePO} activeOpacity={0.7}>
+                    <Trash2 size={16} color={Colors.error} />
+                    <Text style={[styles.secondaryButtonText, { color: Colors.error }]}>Delete PO</Text>
+                  </TouchableOpacity>
+                </>
               )}
 
               {po.type === 'created' ? (
