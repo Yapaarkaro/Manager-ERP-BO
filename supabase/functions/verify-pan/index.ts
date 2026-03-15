@@ -115,13 +115,13 @@ serve(async (req: Request) => {
     const panStatusLower = (sourceOutput.pan_status || '').toLowerCase();
     const panActive = idStatus === 'id_found' || panStatusLower.includes('existing and valid') || panStatusLower.includes('operative');
 
-    const panVerified = panActive && nameMatch;
+    const panVerified = panActive && nameMatch && dobMatch;
 
     if (!panVerified) {
       let errorMsg = 'PAN verification failed.';
       if (!panActive) errorMsg = 'PAN is not active or not found.';
       else if (!nameMatch) errorMsg = 'Name does not match PAN records. Please check spelling.';
-      else if (!dobMatch) errorMsg = 'Date of birth does not match PAN records.';
+      else if (!dobMatch) errorMsg = 'Date of birth does not match PAN records. Please check and try again.';
       return new Response(JSON.stringify({ panVerified: false, error: errorMsg }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 

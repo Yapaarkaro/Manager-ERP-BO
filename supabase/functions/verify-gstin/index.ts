@@ -266,32 +266,54 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
   const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
   const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
 
-  if (twilioSid && twilioToken && twilioFrom) {
-    try {
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-      const credentials = btoa(`${twilioSid}:${twilioToken}`);
-      const smsBody = new URLSearchParams({
-        To: `+91${cleanRegisteredMobile}`,
-        From: twilioFrom,
-        Body: `Your GSTIN verification code for Manager is ${otp}. Valid for 10 minutes. Do not share this code.`,
-      });
+  if (!twilioSid || !twilioToken || !twilioFrom) {
+    console.error('Twilio credentials not configured:', { hasSid: !!twilioSid, hasToken: !!twilioToken, hasFrom: !!twilioFrom });
+    return new Response(JSON.stringify({
+      error: 'SMS service not configured. Please contact support.',
+      taxpayerInfo,
+      mobileMatch: false,
+      registeredMobile: maskMobile(cleanRegisteredMobile),
+      smsFailed: true,
+    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
 
-      const smsResp = await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${credentials}`,
-        },
-        body: smsBody.toString(),
-      });
+  let smsSent = false;
+  try {
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+    const credentials = btoa(`${twilioSid}:${twilioToken}`);
+    const smsBody = new URLSearchParams({
+      To: `+91${cleanRegisteredMobile}`,
+      From: twilioFrom,
+      Body: `Your GSTIN verification code for Manager is ${otp}. Valid for 10 minutes. Do not share this code.`,
+    });
 
-      if (!smsResp.ok) {
-        const smsErr = await smsResp.text();
-        console.error('Twilio SMS error:', smsErr);
-      }
-    } catch (smsError) {
-      console.error('Twilio SMS send failed:', smsError);
+    const smsResp = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${credentials}`,
+      },
+      body: smsBody.toString(),
+    });
+
+    if (smsResp.ok) {
+      smsSent = true;
+    } else {
+      const smsErr = await smsResp.text();
+      console.error('Twilio SMS error:', smsResp.status, smsErr);
     }
+  } catch (smsError) {
+    console.error('Twilio SMS send failed:', smsError);
+  }
+
+  if (!smsSent) {
+    return new Response(JSON.stringify({
+      error: 'Failed to send verification SMS. Please try again.',
+      taxpayerInfo,
+      mobileMatch: false,
+      registeredMobile: maskMobile(cleanRegisteredMobile),
+      smsFailed: true,
+    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   return new Response(JSON.stringify({

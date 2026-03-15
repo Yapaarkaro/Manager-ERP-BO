@@ -129,7 +129,8 @@ export async function callEdgeFunction(
   functionName: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST',
   body?: any,
-  requireAuth: boolean = false
+  requireAuth: boolean = false,
+  timeoutMs: number = 15000
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   const attempt = async (token: string | null): Promise<{ response: Response; data: any } | { error: string }> => {
     const headers: HeadersInit = {
@@ -141,7 +142,7 @@ export async function callEdgeFunction(
     if (body && method !== 'GET') options.body = JSON.stringify(body);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     options.signal = controller.signal;
 
     const response = await fetch(`${EDGE_FUNCTIONS_URL}/${functionName}`, options);
@@ -256,9 +257,17 @@ export async function verifyGSTIN(
   if (purpose) body.purpose = purpose;
   if (userMobile) body.userMobile = userMobile;
 
-  const result = await callEdgeFunction('verify-gstin', 'POST', body, true);
+  const timeout = purpose === 'signup' ? 45000 : 15000;
+  const result = await callEdgeFunction('verify-gstin', 'POST', body, true, timeout);
 
   if (result.success && result.data?.taxpayerInfo) {
+    if (result.data.smsFailed) {
+      return {
+        success: false,
+        taxpayerInfo: result.data.taxpayerInfo,
+        error: result.data.error || 'Failed to send verification SMS. Please try again.',
+      };
+    }
     return {
       success: true,
       taxpayerInfo: result.data.taxpayerInfo,
