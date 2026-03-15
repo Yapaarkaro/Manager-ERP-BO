@@ -13,13 +13,14 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Phone } from 'lucide-react-native';
+import { Phone, Download, X } from 'lucide-react-native';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { useStatusBar } from '@/contexts/StatusBarContext';
 import { supabase } from '@/lib/supabase';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 import { setSignupData, clearSignupData } from '@/utils/signupStore';
+import { isPwaInstallable, onPwaInstallChange, triggerPwaInstall } from '@/app/_layout';
 
 const COLORS = {
   primary: '#3F66AC',
@@ -41,6 +42,19 @@ export default function MobileScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
   const otpRetryCount = useRef(0);
   const mobileInputRef = useRef<TextInput>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const dismissed = typeof localStorage !== 'undefined' && localStorage.getItem('pwa-install-dismissed');
+    if (dismissed) return;
+    if (isPwaInstallable()) setShowInstallBanner(true);
+    const unsub = onPwaInstallChange((installable) => {
+      if (installable && !localStorage.getItem('pwa-install-dismissed')) setShowInstallBanner(true);
+      else setShowInstallBanner(false);
+    });
+    return unsub;
+  }, []);
 
   // Reset any previous signup state when the login flow starts
   useEffect(() => {
@@ -163,6 +177,38 @@ export default function MobileScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+        {showInstallBanner && Platform.OS === 'web' && (
+          <View style={pwaStyles.banner}>
+            <View style={pwaStyles.bannerContent}>
+              <Download size={20} color={COLORS.primary} />
+              <View style={pwaStyles.bannerText}>
+                <Text style={pwaStyles.bannerTitle}>Install Manager App</Text>
+                <Text style={pwaStyles.bannerDesc}>Get a native app experience on your device</Text>
+              </View>
+            </View>
+            <View style={pwaStyles.bannerActions}>
+              <TouchableOpacity
+                style={pwaStyles.installBtn}
+                onPress={async () => {
+                  const accepted = await triggerPwaInstall();
+                  if (accepted) setShowInstallBanner(false);
+                }}
+              >
+                <Text style={pwaStyles.installBtnText}>Install</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={pwaStyles.dismissBtn}
+                onPress={() => {
+                  setShowInstallBanner(false);
+                  if (typeof localStorage !== 'undefined') localStorage.setItem('pwa-install-dismissed', '1');
+                }}
+              >
+                <X size={16} color={COLORS.gray} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
             <Phone size={32} color={COLORS.primary} />
@@ -448,5 +494,57 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     textDecorationLine: 'underline',
     fontWeight: '500',
+  },
+});
+
+const pwaStyles = StyleSheet.create({
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  bannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+  },
+  bannerText: {
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  bannerDesc: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 1,
+  },
+  bannerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  installBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  installBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dismissBtn: {
+    padding: 4,
   },
 });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform, Dimensions } from 'react-native';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 
@@ -12,8 +12,15 @@ interface ResponsiveContainerProps {
 
 function ResponsiveContainer({ children, style, fullWidth = false, narrow = false, maxWidth }: ResponsiveContainerProps) {
   const webStyles = getWebContainerStyles();
-  const { width } = Dimensions.get('window');
-  
+  const [width, setWidth] = useState(() => Dimensions.get('window').width);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = ({ window: w }: { window: { width: number } }) => setWidth(w.width);
+    const sub = Dimensions.addEventListener('change', handler);
+    return () => sub?.remove();
+  }, []);
+
   if (Platform.OS === 'web' && !fullWidth && width > 768) {
     const effectiveMaxWidth = maxWidth || (narrow ? 680 : 1400);
     return (

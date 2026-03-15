@@ -66,8 +66,8 @@ serve(async (req: Request) => {
       group_id: groupId,
       data: {
         id_number: pan.toUpperCase(),
-        name_as_per_id: name.trim(),
-        date_of_birth: dateOfBirth,
+        full_name: name.trim(),
+        dob: dateOfBirth,
       },
     };
     console.log('IDfy PAN request:', idfyUrl, JSON.stringify(requestBody));
@@ -84,8 +84,8 @@ serve(async (req: Request) => {
 
     if (!idfyResponse.ok) {
       const errText = await idfyResponse.text();
-      console.error('IDfy PAN API error:', idfyResponse.status, errText);
-      return new Response(JSON.stringify({ error: 'PAN verification service unavailable. Please try again.' }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      console.error('IDfy PAN API error:', idfyResponse.status, errText, 'accountId:', accountId.substring(0, 12));
+      return new Response(JSON.stringify({ error: `PAN service error: ${idfyResponse.status} - ${errText.substring(0, 200)}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const idfyData = await idfyResponse.json();

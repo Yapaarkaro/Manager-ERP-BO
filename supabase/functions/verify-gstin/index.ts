@@ -113,11 +113,11 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
   const taskId = crypto.randomUUID();
   const groupId = crypto.randomUUID();
 
-  const idfyUrl = 'https://eve.idfy.com/v3/tasks/sync/retrieve_gst_info';
+  const idfyUrl = 'https://eve.idfy.com/v3/tasks/async/retrieve/gst_info';
   const requestBody = {
     task_id: taskId,
     group_id: groupId,
-    data: { id_number: gstin },
+    data: { gstnumber: gstin, isdetails: true },
   };
   console.log('IDfy GSTIN request:', idfyUrl, JSON.stringify(requestBody));
 
@@ -134,18 +134,59 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
   if (!idfyResponse.ok) {
     const errText = await idfyResponse.text();
     console.error('IDfy API error:', idfyResponse.status, errText);
-    return new Response(JSON.stringify({ error: 'GSTIN verification service unavailable. Please try again.' }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: `GSTIN service error: ${idfyResponse.status} - ${errText.substring(0, 200)}` }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  const idfyData = await idfyResponse.json();
+  const postData = await idfyResponse.json();
+  const requestId = postData.request_id;
 
-  let result: any;
-  if (Array.isArray(idfyData) && idfyData.length > 0) {
-    result = idfyData[0].result;
-  } else if (idfyData.result) {
-    result = idfyData.result;
-  } else {
-    result = idfyData;
+  if (!requestId) {
+    console.error('IDfy returned no request_id:', JSON.stringify(postData));
+    return new Response(JSON.stringify({ error: 'GSTIN verification service returned an unexpected response.' }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
+  let result: any = null;
+  const maxWaitMs = 30000;
+  const startTime = Date.now();
+  let pollInterval = 3000;
+
+  while (Date.now() - startTime < maxWaitMs) {
+    await new Promise(r => setTimeout(r, pollInterval));
+
+    const pollResp = await fetch(
+      `https://eve.idfy.com/v3/tasks?request_id=${requestId}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'account-id': accountId,
+          'api-key': apiKey,
+        },
+      }
+    );
+
+    if (!pollResp.ok) {
+      console.error('IDfy poll error:', pollResp.status);
+      continue;
+    }
+
+    const pollData = await pollResp.json();
+    const task = Array.isArray(pollData) ? pollData[0] : pollData;
+
+    if (task?.status === 'completed' && task?.result) {
+      result = task.result;
+      break;
+    }
+    if (task?.status === 'failed') {
+      console.error('IDfy task failed:', task.error, task.message);
+      return new Response(JSON.stringify({ error: task.message || 'GSTIN verification failed at source.' }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    pollInterval = Math.min(pollInterval + 1000, 5000);
+  }
+
+  if (!result) {
+    return new Response(JSON.stringify({ error: 'GSTIN verification timed out. Please try again.' }), { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   if (!result || result.status !== 'id_found' || !result.details) {

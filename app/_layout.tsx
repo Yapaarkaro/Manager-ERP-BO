@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { LogBox, Alert, Platform, View, StyleSheet } from 'react-native';
+import { LogBox, Alert, Platform, View, StyleSheet, Dimensions, TouchableOpacity, Text } from 'react-native';
 import { Stack, usePathname, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -14,6 +14,7 @@ import { prefetchBusinessData } from '@/hooks/useBusinessData';
 import { supabase, withTimeout } from '@/lib/supabase';
 import InvoiceReceivedPopup from '@/components/InvoiceReceivedPopup';
 import Sidebar from '@/components/Sidebar';
+import HamburgerMenu from '@/components/HamburgerMenu';
 
 LogBox.ignoreLogs([
   'Codegen didn\'t run for',
@@ -156,6 +157,26 @@ function shouldShowSidebar(pathname: string): boolean {
   return !AUTH_ROUTES.some(r => pathname.startsWith(r));
 }
 
+let _deferredInstallPrompt: any = null;
+let _pwaInstallListeners: Array<(installable: boolean) => void> = [];
+
+export function getPwaInstallPrompt() { return _deferredInstallPrompt; }
+export function isPwaInstallable() { return _deferredInstallPrompt !== null; }
+export function onPwaInstallChange(cb: (installable: boolean) => void) {
+  _pwaInstallListeners.push(cb);
+  return () => { _pwaInstallListeners = _pwaInstallListeners.filter(l => l !== cb); };
+}
+export async function triggerPwaInstall(): Promise<boolean> {
+  if (!_deferredInstallPrompt) return false;
+  _deferredInstallPrompt.prompt();
+  const { outcome } = await _deferredInstallPrompt.userChoice;
+  if (outcome === 'accepted') {
+    _deferredInstallPrompt = null;
+    _pwaInstallListeners.forEach(cb => cb(false));
+  }
+  return outcome === 'accepted';
+}
+
 function useWebPWA() {
   useEffect(() => {
     if (!isWeb || typeof document === 'undefined') return;
@@ -169,10 +190,10 @@ function useWebPWA() {
     themeColor.name = 'theme-color';
     themeColor.content = '#2c5282';
     document.head.appendChild(themeColor);
-    const appleMeta = document.createElement('meta');
-    appleMeta.name = 'apple-mobile-web-app-capable';
-    appleMeta.content = 'yes';
-    document.head.appendChild(appleMeta);
+    const webAppMeta = document.createElement('meta');
+    webAppMeta.name = 'mobile-web-app-capable';
+    webAppMeta.content = 'yes';
+    document.head.appendChild(webAppMeta);
     const appleStatus = document.createElement('meta');
     appleStatus.name = 'apple-mobile-web-app-status-bar-style';
     appleStatus.content = 'default';
@@ -180,6 +201,22 @@ function useWebPWA() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      _deferredInstallPrompt = e;
+      _pwaInstallListeners.forEach(cb => cb(true));
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+    window.addEventListener('appinstalled', () => {
+      _deferredInstallPrompt = null;
+      _pwaInstallListeners.forEach(cb => cb(false));
+    });
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
   }, []);
 }
 
@@ -212,6 +249,19 @@ function useWebGlobalStyles() {
   }, []);
 }
 
+const SIDEBAR_BREAKPOINT = 768;
+
+function useWindowWidth(): number {
+  const [width, setWidth] = useState(() => Dimensions.get('window').width);
+  useEffect(() => {
+    if (!isWeb) return;
+    const handler = ({ window: w }: { window: { width: number } }) => setWidth(w.width);
+    const sub = Dimensions.addEventListener('change', handler);
+    return () => sub?.remove();
+  }, []);
+  return width;
+}
+
 function usePreventBackspaceNavigation() {
   useEffect(() => {
     if (!isWeb || typeof document === 'undefined') return;
@@ -234,13 +284,17 @@ export default function RootLayout() {
   useWebPWA();
   usePreventBackspaceNavigation();
   const pathname = usePathname();
+  const windowWidth = useWindowWidth();
   const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const handleSidebarCollapseChange = useCallback((collapsed: boolean, width: number) => {
     setSidebarWidth(width);
   }, []);
 
-  const showSidebar = isWeb && shouldShowSidebar(pathname);
+  const isWideScreen = windowWidth > SIDEBAR_BREAKPOINT;
+  const showSidebar = isWeb && shouldShowSidebar(pathname) && isWideScreen;
+  const showHamburgerBar = isWeb && shouldShowSidebar(pathname) && !isWideScreen;
 
   const [invoiceLinkData, setInvoiceLinkData] = useState<{
     invoiceId: string;
@@ -464,6 +518,33 @@ export default function RootLayout() {
               {stackElement}
             </View>
           </View>
+        ) : showHamburgerBar ? (
+          <View style={webStyles.mobileShell}>
+            <View style={webStyles.mobileTopBar}>
+              <TouchableOpacity
+                style={webStyles.hamburgerBtn}
+                onPress={() => setShowMobileMenu(true)}
+                activeOpacity={0.7}
+              >
+                <View style={webStyles.hamburgerLine} />
+                <View style={webStyles.hamburgerLine} />
+                <View style={webStyles.hamburgerLine} />
+              </TouchableOpacity>
+              <Text style={webStyles.topBarTitle}>Manager</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            <View style={webStyles.mobileContent}>
+              {stackElement}
+            </View>
+            <HamburgerMenu
+              visible={showMobileMenu}
+              onClose={() => setShowMobileMenu(false)}
+              onNavigate={(route: string) => {
+                setShowMobileMenu(false);
+                router.push(route as any);
+              }}
+            />
+          </View>
         ) : (
           stackElement
         )}
@@ -508,5 +589,44 @@ const webStyles = StyleSheet.create({
   content: {
     flex: 1,
     ...(isWeb ? { transition: 'margin-left 0.3s ease' as any, minWidth: 0 } : {}),
+  },
+  mobileShell: {
+    flex: 1,
+    ...(isWeb ? { height: '100vh' as any } : {}),
+  },
+  mobileTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    ...(isWeb ? { position: 'sticky' as any, top: 0, zIndex: 100 } : {}),
+  },
+  hamburgerBtn: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+  },
+  hamburgerLine: {
+    width: 20,
+    height: 2,
+    backgroundColor: '#374151',
+    marginVertical: 2,
+    borderRadius: 1,
+  },
+  topBarTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  mobileContent: {
+    flex: 1,
+    ...(isWeb ? { overflow: 'auto' as any } : {}),
   },
 });
