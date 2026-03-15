@@ -44,9 +44,14 @@ export default function GstinPanOTPScreen() {
   const value = (params.value as string) || signupData.value || '';
   const gstinData = params.gstinData || signupData.gstinData || '';
   const mobile = (params.mobile as string) || signupData.mobile || '';
+  const gstinMobileMatch = (params.mobileMatch as string) || signupData.mobileMatch || '';
+  const gstinRegisteredMobile = (params.registeredMobile as string) || signupData.registeredMobile || '';
+  const gstinOtpRequestId = (params.otpRequestId as string) || signupData.otpRequestId || '';
+  const isMobileMatch = gstinMobileMatch === 'true';
   const insets = useSafeAreaInsets();
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [countdown, setCountdown] = useState(30);
+  const [autoSkipped, setAutoSkipped] = useState(false);
 
   // Set status bar to dark for white background
   useEffect(() => {
@@ -71,11 +76,39 @@ export default function GstinPanOTPScreen() {
   const panNumberInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    // Auto-focus first input on mount for GSTIN
-    // For PAN, auto-focus on the Full Name field
+    if (type === 'GSTIN' && isMobileMatch && !autoSkipped) {
+      setAutoSkipped(true);
+      (async () => {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            saveSignupProgress({
+              mobile: mobile as string,
+              mobileVerified: true,
+              taxIdType: 'GSTIN',
+              taxIdValue: value as string,
+              taxIdVerified: true,
+              gstinData: typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData,
+              currentStep: 'gstinOtp',
+            }).catch(() => {});
+          }
+        } catch {}
+      })();
+
+      setSignupData({
+        type,
+        value,
+        gstinData,
+        mobile,
+        selectedPromoter: signupData.selectedPromoter || '',
+      });
+      router.replace('/auth/business-details');
+      return;
+    }
+
     setTimeout(() => {
       if (type === 'GSTIN') {
-      inputRefs.current[0]?.focus();
+        inputRefs.current[0]?.focus();
       } else if (type === 'PAN') {
         panNameInputRef.current?.focus();
       }
@@ -216,8 +249,7 @@ export default function GstinPanOTPScreen() {
     const gstinValue = value as string;
     
     if (type === 'GSTIN') {
-      // Optimize: Navigate immediately, handle verification in background
-      const verifyPromise = verifyGSTINOTP(gstinValue, otpCode);
+      const verifyPromise = verifyGSTINOTP(gstinValue, otpCode, gstinOtpRequestId);
       
       verifyPromise.then(async (result) => {
         if (result.success && result.gstinVerified) {
@@ -381,7 +413,9 @@ export default function GstinPanOTPScreen() {
         <Text style={styles.subtitle}>
           {type === 'PAN' 
             ? `Enter your details for PAN verification` 
-            : `Enter the 6-digit OTP for GSTIN verification`}
+            : gstinRegisteredMobile
+              ? `OTP sent to ${gstinRegisteredMobile} (GSTIN registered mobile)`
+              : `Enter the 6-digit OTP for GSTIN verification`}
         </Text>
 
         {/* PAN-specific fields */}

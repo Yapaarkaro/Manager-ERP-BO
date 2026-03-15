@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, FileText, CreditCard } from 'lucide-react-native';
+import { ArrowLeft, FileText, CreditCard, Check } from 'lucide-react-native';
 import { verifyGSTIN as verifyGSTINBackend, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
 import { useStatusBar } from '@/contexts/StatusBarContext';
@@ -32,35 +32,6 @@ const COLORS = {
   success: '#10B981',
 };
 
-// Helper function to get keyboard type based on GSTIN/PAN position
-const getKeyboardType = (type: 'GSTIN' | 'PAN', position: number): 'default' | 'number-pad' => {
-  if (type === 'GSTIN') {
-    // GSTIN Format: 33ALHPL7224K1Z0
-    // Position 0-1: Numbers (33)
-    // Position 2-6: Letters (ALHPL)
-    // Position 7-10: Numbers (7224)
-    // Position 11: Letter (K)
-    // Position 12: Number (1)
-    // Position 13: Letter (Z)
-    // Position 14: Number/Letter (0-9 or A-Z) - use default
-    if (position < 2) return 'number-pad'; // 0-1: Numbers
-    if (position >= 2 && position < 7) return 'default'; // 2-6: Letters
-    if (position >= 7 && position < 11) return 'number-pad'; // 7-10: Numbers
-    if (position === 11) return 'default'; // 11: Letter
-    if (position === 12) return 'number-pad'; // 12: Number
-    if (position === 13) return 'default'; // 13: Letter
-    if (position === 14) return 'default'; // 14: Can be number or letter
-  } else {
-    // PAN Format: AAAAA0000A
-    // Position 0-4: Letters (AAAAA)
-    // Position 5-8: Numbers (0000)
-    // Position 9: Letter (A)
-    if (position < 5) return 'default'; // 0-4: Letters
-    if (position >= 5 && position < 9) return 'number-pad'; // 5-8: Numbers
-    if (position === 9) return 'default'; // 9: Letter
-  }
-  return 'default';
-};
 
 export default function GstinPanScreen() {
   const { setStatusBarStyle } = useStatusBar();
@@ -71,19 +42,10 @@ export default function GstinPanScreen() {
   const inputRef = React.useRef<TextInput>(null);
   const [selectedType, setSelectedType] = useState<'GSTIN' | 'PAN'>('GSTIN');
   const [inputValue, setInputValue] = useState('');
-  const [keyboardType, setKeyboardType] = useState<'default' | 'number-pad'>('number-pad');
-
   // Set status bar to dark for white background
   React.useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
-  
-  // Initialize keyboard type based on selected type and input value
-  React.useEffect(() => {
-    const currentPosition = inputValue.length;
-    const currentKeyboardType = getKeyboardType(selectedType, currentPosition);
-    setKeyboardType(currentKeyboardType);
-  }, [selectedType]);
   
   const [isValid, setIsValid] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -91,6 +53,11 @@ export default function GstinPanScreen() {
   const [verifiedGstinData, setVerifiedGstinData] = useState<any>(null);
   const [hasAutoVerified, setHasAutoVerified] = useState(false);
   const [lastVerifiedGstin, setLastVerifiedGstin] = useState<string>('');
+  const [mobileMatch, setMobileMatch] = useState<boolean | undefined>(undefined);
+  const [registeredMobile, setRegisteredMobile] = useState<string>('');
+  const [otpRequestId, setOtpRequestId] = useState<string>('');
+  const [promoters, setPromoters] = useState<string[]>([]);
+  const [selectedPromoter, setSelectedPromoter] = useState<string>('');
 
   const validateInput = (text: string, type: 'GSTIN' | 'PAN') => {
     if (type === 'GSTIN') {
@@ -120,29 +87,12 @@ export default function GstinPanScreen() {
     setIsValid(isFormatValid);
     setVerificationError(null);
 
-    // If user erased or changed text so it no longer matches the previously verified GSTIN, clear stale data
     if (verifiedGstinData && formatted !== lastVerifiedGstin) {
       setVerifiedGstinData(null);
       setHasAutoVerified(false);
       setIsValid(false);
     }
-    
-    // Update keyboard type based on the NEXT character position (current length is where next char will go)
-    const nextPosition = formatted.length;
-    const currentKeyboardType = keyboardType;
-    const nextKeyboardType = getKeyboardType(selectedType, nextPosition);
-    
-    // Only update keyboard if it needs to change, and blur/refocus to force keyboard change
-    if (nextKeyboardType !== currentKeyboardType) {
-      setKeyboardType(nextKeyboardType);
-      setTimeout(() => {
-        inputRef.current?.blur();
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 50);
-      }, 50);
-    }
-    
+
     // Auto-verify GSTIN when format is valid and it's a new value
     if (selectedType === 'GSTIN' && isFormatValid && formatted.length === 15 && formatted !== lastVerifiedGstin && !isVerifying) {
       setHasAutoVerified(true);
@@ -159,34 +109,34 @@ export default function GstinPanScreen() {
     setHasAutoVerified(false);
     setVerifiedGstinData(null);
     setLastVerifiedGstin('');
-    // Reset keyboard type based on the first character of the new type
-    const initialKeyboardType = getKeyboardType(type, 0);
-    setKeyboardType(initialKeyboardType);
-    
-    // Force keyboard type change by blurring and refocusing
-    setTimeout(() => {
-      inputRef.current?.blur();
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-    }, 50);
   };
 
   const verifyGSTINNumber = async (gstinNumber: string) => {
-    if (isVerifying) return; // Prevent multiple simultaneous calls
+    if (isVerifying) return;
     
     setIsVerifying(true);
     setVerificationError(null);
     
     try {
-      // Call backend API (user should be authenticated by now with JWT)
-      const result = await verifyGSTINBackend(gstinNumber);
+      const userMobile = (mobile || '').replace(/^\+91/, '').replace(/\D/g, '');
+      const result = await verifyGSTINBackend(gstinNumber, 'signup', userMobile);
       
       if (result.success && result.taxpayerInfo) {
         setVerifiedGstinData(result.taxpayerInfo);
         setLastVerifiedGstin(gstinNumber);
         setIsValid(true);
         setVerificationError(null);
+        setMobileMatch(result.mobileMatch);
+        setRegisteredMobile(result.registeredMobile || '');
+        setOtpRequestId(result.otpRequestId || '');
+
+        const proms = result.taxpayerInfo.promoters || [];
+        setPromoters(proms);
+        if (proms.length === 1) {
+          setSelectedPromoter(proms[0].trim());
+        } else if (proms.length > 1) {
+          setSelectedPromoter('');
+        }
       } else {
         setVerificationError(result.error || 'GSTIN verification failed');
         setIsValid(false);
@@ -194,6 +144,11 @@ export default function GstinPanScreen() {
         setHasAutoVerified(false);
         setVerifiedGstinData(null);
         setLastVerifiedGstin('');
+        setMobileMatch(undefined);
+        setRegisteredMobile('');
+        setOtpRequestId('');
+        setPromoters([]);
+        setSelectedPromoter('');
         setTimeout(() => {
           inputRef.current?.focus();
         }, 300);
@@ -206,6 +161,11 @@ export default function GstinPanScreen() {
       setHasAutoVerified(false);
       setVerifiedGstinData(null);
       setLastVerifiedGstin('');
+      setMobileMatch(undefined);
+      setRegisteredMobile('');
+      setOtpRequestId('');
+      setPromoters([]);
+      setSelectedPromoter('');
       setTimeout(() => {
         inputRef.current?.focus();
       }, 300);
@@ -226,11 +186,16 @@ export default function GstinPanScreen() {
 
     const currentGstin = inputValue;
 
-    // For GSTIN: ensure verified data matches the current input at the moment of pressing Continue
+    if (selectedType === 'GSTIN' && promoters.length > 1 && !selectedPromoter) {
+      Alert.alert('Select Promoter', 'Please select a business promoter/owner before continuing.');
+      return;
+    }
+
     if (selectedType === 'GSTIN' && (!verifiedGstinData || lastVerifiedGstin !== currentGstin)) {
       try {
         setIsVerifying(true);
-        const result = await verifyGSTINBackend(currentGstin);
+        const userMobile = (mobile || '').replace(/^\+91/, '').replace(/\D/g, '');
+        const result = await verifyGSTINBackend(currentGstin, 'signup', userMobile);
         if (!result.success || !result.taxpayerInfo) {
           setVerificationError(result.error || 'GSTIN verification failed');
           setIsValid(false);
@@ -242,8 +207,22 @@ export default function GstinPanScreen() {
         }
         setVerifiedGstinData(result.taxpayerInfo);
         setLastVerifiedGstin(currentGstin);
-        setIsVerifying(false);
+        setMobileMatch(result.mobileMatch);
+        setRegisteredMobile(result.registeredMobile || '');
+        setOtpRequestId(result.otpRequestId || '');
 
+        const proms = result.taxpayerInfo.promoters || [];
+        setPromoters(proms);
+        if (proms.length === 1) {
+          setSelectedPromoter(proms[0].trim());
+        } else if (proms.length > 1 && !selectedPromoter) {
+          setSelectedPromoter('');
+          setIsVerifying(false);
+          Alert.alert('Select Promoter', 'Please select a business promoter/owner before continuing.');
+          return;
+        }
+
+        setIsVerifying(false);
         navigateNext(currentGstin, result.taxpayerInfo);
       } catch (error: any) {
         setIsVerifying(false);
@@ -273,12 +252,21 @@ export default function GstinPanScreen() {
       } catch {}
     })();
 
+    const enrichedData = { ...gstinDataObj };
+    if (selectedPromoter) {
+      enrichedData.selectedPromoter = selectedPromoter;
+    }
+
     if (selectedType === 'GSTIN') {
       setSignupData({
         type: selectedType,
         value: gstinValue,
-        gstinData: JSON.stringify(gstinDataObj),
+        gstinData: JSON.stringify(enrichedData),
         mobile,
+        mobileMatch: mobileMatch === true ? 'true' : 'false',
+        registeredMobile: registeredMobile || '',
+        otpRequestId: otpRequestId || '',
+        selectedPromoter: selectedPromoter || '',
       });
     } else {
       setSignupData({
@@ -394,7 +382,7 @@ export default function GstinPanScreen() {
             autoCapitalize="characters"
             autoCorrect={false}
             maxLength={selectedType === 'GSTIN' ? 15 : 10}
-            keyboardType={keyboardType}
+            keyboardType="default"
             autoFocus
           />
         </View>
@@ -411,18 +399,40 @@ export default function GstinPanScreen() {
           </Text>
         )}
 
+        {verifiedGstinData && promoters.length > 1 && (
+          <View style={styles.promoterSection}>
+            <Text style={styles.promoterTitle}>Select Business Promoter / Owner</Text>
+            {promoters.map((name, idx) => {
+              const trimmed = name.trim();
+              const isSelected = selectedPromoter === trimmed;
+              return (
+                <TouchableOpacity
+                  key={idx}
+                  style={[styles.promoterCard, isSelected && styles.promoterCardSelected]}
+                  onPress={() => setSelectedPromoter(trimmed)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.promoterRadio, isSelected && styles.promoterRadioSelected]}>
+                    {isSelected && <Check size={14} color={COLORS.white} />}
+                  </View>
+                  <Text style={[styles.promoterName, isSelected && styles.promoterNameSelected]}>{trimmed}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
 
         <TouchableOpacity
           style={[
             styles.continueButton,
-            (isValid && !isVerifying) ? styles.enabledButton : styles.disabledButton,
+            (isValid && !isVerifying && !(promoters.length > 1 && !selectedPromoter)) ? styles.enabledButton : styles.disabledButton,
           ]}
           onPress={handleContinue}
-          disabled={!isValid || isVerifying}
+          disabled={!isValid || isVerifying || (promoters.length > 1 && !selectedPromoter)}
         >
           <Text style={[
             styles.continueButtonText,
-            (isValid && !isVerifying) ? styles.enabledButtonText : styles.disabledButtonText,
+            (isValid && !isVerifying && !(promoters.length > 1 && !selectedPromoter)) ? styles.enabledButtonText : styles.disabledButtonText,
           ]}>
             {isVerifying ? 'Verifying...' : 'Continue'}
           </Text>
@@ -612,5 +622,52 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontSize: 12,
     lineHeight: 16,
+  },
+  promoterSection: {
+    marginBottom: 20,
+  },
+  promoterTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.black,
+    marginBottom: 12,
+  },
+  promoterCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    backgroundColor: COLORS.white,
+    marginBottom: 8,
+  },
+  promoterCardSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#F0F4FF',
+  },
+  promoterRadio: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#D1D5DB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  promoterRadioSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  promoterName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: COLORS.black,
+    flex: 1,
+  },
+  promoterNameSelected: {
+    color: COLORS.primary,
+    fontWeight: '600',
   },
 });

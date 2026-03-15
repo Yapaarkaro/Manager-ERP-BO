@@ -182,8 +182,7 @@ export default function BusinessDetailsScreen() {
             setBusinessName(toTitleCase(businessNameFromGstin));
           }
           
-          // Auto-fill owner name from legal name (with title case)
-          const ownerNameFromGstin = parsedData.lgnm || '';
+          const ownerNameFromGstin = parsedData.selectedPromoter || (parsedData.promoters && parsedData.promoters[0]) || parsedData.lgnm || '';
           if (ownerNameFromGstin && !name) {
             setName(toTitleCase(ownerNameFromGstin));
           }

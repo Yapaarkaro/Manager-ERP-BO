@@ -248,12 +248,24 @@ export async function verifyMobileOTP(
  * @param gstin - 15-character GSTIN number
  */
 export async function verifyGSTIN(
-  gstin: string
-): Promise<{ success: boolean; taxpayerInfo?: any; error?: string }> {
-  const result = await callEdgeFunction('verify-gstin', 'POST', { gstin }, true);
+  gstin: string,
+  purpose?: 'signup' | 'lookup',
+  userMobile?: string
+): Promise<{ success: boolean; taxpayerInfo?: any; mobileMatch?: boolean; registeredMobile?: string; otpRequestId?: string; error?: string }> {
+  const body: any = { gstin };
+  if (purpose) body.purpose = purpose;
+  if (userMobile) body.userMobile = userMobile;
+
+  const result = await callEdgeFunction('verify-gstin', 'POST', body, true);
 
   if (result.success && result.data?.taxpayerInfo) {
-    return { success: true, taxpayerInfo: result.data.taxpayerInfo };
+    return {
+      success: true,
+      taxpayerInfo: result.data.taxpayerInfo,
+      mobileMatch: result.data.mobileMatch,
+      registeredMobile: result.data.registeredMobile,
+      otpRequestId: result.data.otpRequestId,
+    };
   }
 
   const errorMsg = (typeof result.error === 'string' ? result.error : null)
@@ -270,9 +282,13 @@ export async function verifyGSTIN(
  */
 export async function verifyGSTINOTP(
   gstin: string,
-  otp: string
+  otp: string,
+  otpRequestId?: string
 ): Promise<{ success: boolean; gstinVerified?: boolean; error?: string }> {
-  const result = await callEdgeFunction('verify-gstin-otp', 'POST', { gstin, otp }, true);
+  const body: any = { gstin, otp };
+  if (otpRequestId) body.otpRequestId = otpRequestId;
+
+  const result = await callEdgeFunction('verify-gstin-otp', 'POST', body, true);
 
   if (result.success && (result.data?.gstinVerified || result.data?.success)) {
     return { success: true, gstinVerified: true };

@@ -52,34 +52,24 @@ export default function MobileScreen() {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
 
-  // Check for returning user when mobile number changes
+  // Check for returning user only when 10 digits are entered (debounced)
   useEffect(() => {
-    const checkReturningUser = async () => {
-      if (mobileNumber.length === 10 && /^\d{10}$/.test(mobileNumber)) {
-        try {
-          console.log('🔍 Checking for returning user with mobile:', mobileNumber);
-          
-          // Check Supabase backend for signup progress (source of truth)
-          const { data: progress } = await supabase.from('signup_progress')
-            .select('id, owner_name')
-            .eq('phone', mobileNumber)
-            .maybeSingle();
-          
-          if (progress) {
-            setIsReturningUser(true);
-            console.log('👋 Welcome back! Found signup progress for:', mobileNumber);
-          } else {
-            setIsReturningUser(false);
-          }
-        } catch (error) {
-          console.error('Error checking returning user:', error);
-          setIsReturningUser(false);
-        }
-      } else {
+    if (mobileNumber.length !== 10 || !/^\d{10}$/.test(mobileNumber)) {
+      setIsReturningUser(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const { data: progress } = await supabase.from('signup_progress')
+          .select('id, owner_name')
+          .eq('phone', mobileNumber)
+          .maybeSingle();
+        setIsReturningUser(!!progress);
+      } catch {
         setIsReturningUser(false);
       }
-    };
-    checkReturningUser();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [mobileNumber]);
 
   useEffect(() => {
