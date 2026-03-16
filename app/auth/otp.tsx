@@ -173,7 +173,7 @@ export default function OTPScreen() {
 
       setIsVerifying(false);
       try {
-        await handleSuccessfulVerification(mobileNumber);
+        await handleSuccessfulVerification(mobileNumber, verifyData?.session ?? null);
       } catch (postVerifyErr: any) {
         console.warn('OTP: post-verification routing error:', postVerifyErr?.message);
         Alert.alert('Error', 'Something went wrong after verification. Please try logging in again.');
@@ -191,19 +191,22 @@ export default function OTPScreen() {
     }
   };
 
-  const handleSuccessfulVerification = async (mobileNumber: string) => {
+  const handleSuccessfulVerification = async (mobileNumber: string, verifiedSession?: any) => {
     const cleanPhone = mobileNumber.replace(/^\+91/, '').replace(/\D/g, '').slice(0, 10);
 
-    // Step 1: Get session
-    let session: any = null;
-    try {
-      const { data, error } = await withTimeout(supabase.auth.getSession(), 10000, 'Get session');
-      if (!error && data?.session?.user) session = data.session;
-    } catch (e) {
-      console.warn('OTP: getSession failed:', e);
+    // Step 1: Get session — prefer the session returned by verifyOtp to avoid race conditions
+    let session: any = verifiedSession || null;
+    if (!session?.user) {
+      try {
+        const { data, error } = await withTimeout(supabase.auth.getSession(), 10000, 'Get session');
+        if (!error && data?.session?.user) session = data.session;
+      } catch (e) {
+        console.warn('OTP: getSession failed:', e);
+      }
     }
 
-    if (!session) {
+    if (!session?.user) {
+      console.warn('OTP: No session after verification — cannot route');
       setSignupData({ mobile: mobileNumber });
       router.replace('/auth/gstin-pan');
       return;
@@ -254,19 +257,38 @@ export default function OTPScreen() {
     // Step 3: STAFF-FIRST — check if this phone belongs to a staff member (bypasses RLS)
     let staffRow: any = null;
     try {
+      console.log('OTP: Looking up staff by phone:', cleanPhone);
       const { data: rpcResult, error: rpcError } = await supabase.rpc('lookup_staff_by_phone', { phone_number: cleanPhone });
-      if (rpcError) console.warn('OTP: Staff RPC error:', rpcError.message);
-      const staffList = Array.isArray(rpcResult) ? rpcResult : [];
-      staffRow = staffList[0] || null;
+      console.log('OTP: Staff RPC result type:', typeof rpcResult, 'isArray:', Array.isArray(rpcResult), 'error:', rpcError?.message || 'none');
+      if (rpcError) {
+        console.warn('OTP: Staff RPC error:', rpcError.message);
+      } else if (rpcResult != null) {
+        let staffList: any[] = [];
+        if (Array.isArray(rpcResult)) {
+          staffList = rpcResult;
+        } else if (typeof rpcResult === 'string') {
+          try { staffList = JSON.parse(rpcResult); } catch {}
+        } else if (typeof rpcResult === 'object') {
+          const vals = Object.values(rpcResult);
+          if (vals.length === 1 && Array.isArray(vals[0])) {
+            staffList = vals[0] as any[];
+          }
+        }
+        console.log('OTP: Staff lookup found', staffList.length, 'records');
+        staffRow = staffList.filter((s: any) => !s.is_deleted)[0] || null;
+      }
     } catch (e: any) {
       console.warn('OTP: Staff RPC failed:', e?.message);
     }
 
     if (!staffRow) {
       try {
-        const { data: staffRows } = await supabase.from('staff').select('*').eq('mobile', cleanPhone);
+        const { data: staffRows, error: staffQueryError } = await supabase.from('staff').select('*').eq('mobile', cleanPhone);
+        if (staffQueryError) console.warn('OTP: Staff direct query error:', staffQueryError.message);
         staffRow = (staffRows || []).filter((s: any) => !s.is_deleted)[0] || null;
-      } catch {}
+      } catch (e: any) {
+        console.warn('OTP: Staff direct query failed:', e?.message);
+      }
     }
 
     // If this phone is a staff member, handle it immediately — never fall through
@@ -341,7 +363,64 @@ export default function OTPScreen() {
       }
     } catch {}
 
-    // Step 5: Not staff, no existing user — owner signup flow
+    // Step 5: Final staff safety check — re-verify via a fresh RPC call before routing to signup
+    // This catches edge cases where the initial lookup failed due to transient errors
+    try {
+      const { data: retryResult } = await supabase.rpc('lookup_staff_by_phone', { phone_number: cleanPhone });
+      let retryList: any[] = [];
+      if (Array.isArray(retryResult)) retryList = retryResult;
+      else if (typeof retryResult === 'string') { try { retryList = JSON.parse(retryResult); } catch {} }
+      else if (retryResult && typeof retryResult === 'object') {
+        const v = Object.values(retryResult);
+        if (v.length === 1 && Array.isArray(v[0])) retryList = v[0] as any[];
+      }
+      const retryStaff = retryList.filter((s: any) => !s.is_deleted)[0];
+      if (retryStaff) {
+        console.log('OTP: Staff detected on retry — routing to staff flow');
+        deleteSignupProgress(mobileNumber).catch(() => {});
+        if (!retryStaff.user_id) {
+          if (!retryStaff.verification_code) {
+            try {
+              const { createInAppNotification } = await import('@/services/backendApi');
+              await createInAppNotification({
+                businessId: retryStaff.business_id,
+                title: `${retryStaff.name} is trying to log in`,
+                message: `${retryStaff.name} (${cleanPhone}) needs a login code. Please generate one from the Staff section.`,
+                type: 'staff_login_attempt',
+                recipientId: retryStaff.business_id,
+                recipientType: 'owner',
+                category: 'staff_login_attempt',
+                relatedEntityId: retryStaff.id,
+                relatedEntityType: 'staff',
+                sourceStaffName: retryStaff.name,
+              });
+            } catch {}
+            Alert.alert(
+              'Login Code Required',
+              'Your business owner has been notified. They will generate a login code for you. Please try again once you receive it.',
+              [{ text: 'OK', onPress: () => router.replace('/auth/mobile') }]
+            );
+            return;
+          }
+          setSignupData({ staffId: retryStaff.id, staffName: retryStaff.name, businessId: retryStaff.business_id, mobile: cleanPhone });
+          router.replace('/auth/staff-verify');
+          return;
+        }
+        try { await supabase.rpc('create_staff_user_row', { p_staff_mobile: cleanPhone }); } catch {}
+        const { clearBusinessContext } = await import('@/services/backendApi');
+        clearBusinessContext();
+        try {
+          const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+          await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
+        } catch {}
+        router.replace('/dashboard');
+        return;
+      }
+    } catch (e: any) {
+      console.warn('OTP: Staff retry check failed:', e?.message);
+    }
+
+    // Step 6: Not staff, no existing user — owner signup flow
     saveSignupProgress({
       mobile: mobileNumber,
       mobileVerified: true,
