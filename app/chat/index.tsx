@@ -143,11 +143,11 @@ export default function ChatListScreen() {
     if (convo._crossBusiness) {
       return convo._buyerBusinessName || 'Business';
     }
-    if (isStaff && convo.participant_other_type === 'staff' && convo.participant_other_id === staffId) {
+    if (isStaff && convo.participant_other_type === 'staff') {
       return ownerName;
     }
     return convo.participant_other_name;
-  }, [isStaff, staffId, ownerName]);
+  }, [isStaff, ownerName]);
 
   const getDisplayType = useCallback((convo: Conversation): string => {
     if (convo._crossBusiness) {
@@ -155,11 +155,11 @@ export default function ChatListScreen() {
       if (convo.participant_other_type === 'customer') return 'supplier';
       return convo.participant_other_type;
     }
-    if (isStaff && convo.participant_other_type === 'staff' && convo.participant_other_id === staffId) {
+    if (isStaff && convo.participant_other_type === 'staff') {
       return 'owner' as const;
     }
     return convo.participant_other_type;
-  }, [isStaff, staffId]);
+  }, [isStaff]);
 
   const loadConversations = useCallback(async () => {
     if (!businessId) return;

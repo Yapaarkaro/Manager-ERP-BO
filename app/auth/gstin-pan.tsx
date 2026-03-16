@@ -64,6 +64,7 @@ export default function GstinPanScreen() {
   const [mobileMatch, setMobileMatch] = useState<boolean | undefined>(undefined);
   const [registeredMobile, setRegisteredMobile] = useState<string>('');
   const [otpRequestId, setOtpRequestId] = useState<string>('');
+  const [smsFailed, setSmsFailed] = useState(false);
   const [promoters, setPromoters] = useState<string[]>([]);
   const [selectedPromoter, setSelectedPromoter] = useState<string>('');
 
@@ -137,6 +138,18 @@ export default function GstinPanScreen() {
         setMobileMatch(result.mobileMatch);
         setRegisteredMobile(result.registeredMobile || '');
         setOtpRequestId(result.otpRequestId || '');
+        setSmsFailed(!!result.smsFailed);
+
+        if (result.smsFailed && result.mobileMatch === false) {
+          Alert.alert(
+            'SMS Delivery Failed',
+            `GSTIN verified successfully, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}. Please tap "Retry" to try again.`,
+            [
+              { text: 'Retry', onPress: () => verifyGSTINNumber(gstinNumber) },
+              { text: 'OK', style: 'cancel' },
+            ]
+          );
+        }
 
         const proms = result.taxpayerInfo.promoters || [];
         setPromoters(proms);
@@ -192,6 +205,18 @@ export default function GstinPanScreen() {
 
     const currentGstin = inputValue;
 
+    if (selectedType === 'GSTIN' && smsFailed && mobileMatch === false) {
+      Alert.alert(
+        'SMS Delivery Failed',
+        `We need to verify the GSTIN-registered mobile number but couldn't send the OTP. Tap "Retry" to try again.`,
+        [
+          { text: 'Retry', onPress: () => verifyGSTINNumber(currentGstin) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     if (selectedType === 'GSTIN' && promoters.length > 1 && !selectedPromoter) {
       Alert.alert('Select Promoter', 'Please select a business promoter/owner before continuing.');
       return;
@@ -216,6 +241,20 @@ export default function GstinPanScreen() {
         setMobileMatch(result.mobileMatch);
         setRegisteredMobile(result.registeredMobile || '');
         setOtpRequestId(result.otpRequestId || '');
+        setSmsFailed(!!result.smsFailed);
+
+        if (result.smsFailed && result.mobileMatch === false) {
+          setIsVerifying(false);
+          Alert.alert(
+            'SMS Delivery Failed',
+            `GSTIN verified, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}. Please tap "Retry" to try again.`,
+            [
+              { text: 'Retry', onPress: () => verifyGSTINNumber(currentGstin) },
+              { text: 'OK', style: 'cancel' },
+            ]
+          );
+          return;
+        }
 
         const proms = result.taxpayerInfo.promoters || [];
         setPromoters(proms);

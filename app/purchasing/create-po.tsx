@@ -180,8 +180,13 @@ export default function CreatePOScreen() {
   const isSelected = (id: string) => selectedProducts.some((sp) => sp.id === id);
   const getSelected = (id: string) => selectedProducts.find((sp) => sp.id === id);
 
-  const calculateTotal = () =>
+  const calculateSubtotal = () =>
     selectedProducts.reduce((sum, sp) => sum + sp.price * sp.orderQuantity, 0);
+
+  const calculateTax = () =>
+    selectedProducts.reduce((sum, sp) => sum + sp.price * sp.orderQuantity * ((sp.taxRate || 0) / 100), 0);
+
+  const calculateTotal = () => calculateSubtotal() + calculateTax();
 
   const formatAmount = (amount: number) => formatCurrencyINR(amount);
 
@@ -386,6 +391,7 @@ export default function CreatePOScreen() {
           <View style={styles.bottomSummary}>
             <Text style={styles.bottomLabel}>
               {selectedProducts.reduce((s, p) => s + p.orderQuantity, 0)} items
+              {calculateTax() > 0 ? ` · GST: ${formatAmount(calculateTax())}` : ''}
             </Text>
             <Text style={styles.bottomTotal}>{formatAmount(calculateTotal())}</Text>
           </View>

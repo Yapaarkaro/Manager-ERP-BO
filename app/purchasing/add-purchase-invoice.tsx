@@ -99,6 +99,7 @@ export default function AddPurchaseInvoiceScreen() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [gstType, setGstType] = useState<'intra' | 'inter'>('intra');
 
   useEffect(() => {
     (async () => {
@@ -348,8 +349,6 @@ export default function AddPurchaseInvoiceScreen() {
                   {products.map((p, i) => {
                     const isExpanded = expandedProductId === p.id;
                     const gstAmt = p.totalPrice * p.gstRate / 100;
-                    const cgst = gstAmt / 2;
-                    const sgst = gstAmt / 2;
                     const lineTotal = p.totalPrice + gstAmt + p.cessAmount;
                     const isLast = i === products.length - 1;
 
@@ -416,8 +415,14 @@ export default function AddPurchaseInvoiceScreen() {
                             <View style={st.taxBreakdown}>
                               <Text style={st.taxBreakdownTitle}>Tax Breakdown</Text>
                               <View style={st.taxRow}><Text style={st.taxLabel}>Taxable Amount</Text><Text style={st.taxVal}>{formatCurrencyINR(p.totalPrice)}</Text></View>
-                              <View style={st.taxRow}><Text style={st.taxLabel}>CGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(cgst)}</Text></View>
-                              <View style={st.taxRow}><Text style={st.taxLabel}>SGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(sgst)}</Text></View>
+                              {gstType === 'inter' ? (
+                                <View style={st.taxRow}><Text style={st.taxLabel}>IGST ({p.gstRate}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(gstAmt)}</Text></View>
+                              ) : (
+                                <>
+                                  <View style={st.taxRow}><Text style={st.taxLabel}>CGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(gstAmt / 2)}</Text></View>
+                                  <View style={st.taxRow}><Text style={st.taxLabel}>SGST ({(p.gstRate / 2).toFixed(1)}%)</Text><Text style={st.taxVal}>{formatCurrencyINR(gstAmt / 2)}</Text></View>
+                                </>
+                              )}
                               {p.cessAmount > 0 && <View style={st.taxRow}><Text style={st.taxLabel}>Cess</Text><Text style={st.taxVal}>{formatCurrencyINR(p.cessAmount)}</Text></View>}
                               <View style={[st.taxRow, st.taxTotalRow]}>
                                 <Text style={st.taxTotalLabel}>Line Total</Text>
@@ -449,9 +454,20 @@ export default function AddPurchaseInvoiceScreen() {
             {products.length > 0 && (
               <View style={st.section}>
                 <Text style={st.sectionTitle}>Invoice Summary</Text>
+                <View style={st.gstToggleRow}>
+                  <Text style={st.gstToggleLabel}>GST Type:</Text>
+                  <View style={st.gstToggle}>
+                    <TouchableOpacity style={[st.gstToggleBtn, gstType === 'intra' && st.gstToggleBtnActive]} onPress={() => setGstType('intra')} activeOpacity={0.7}>
+                      <Text style={[st.gstToggleBtnText, gstType === 'intra' && st.gstToggleBtnTextActive]}>Intra (CGST+SGST)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[st.gstToggleBtn, gstType === 'inter' && st.gstToggleBtnActive]} onPress={() => setGstType('inter')} activeOpacity={0.7}>
+                      <Text style={[st.gstToggleBtnText, gstType === 'inter' && st.gstToggleBtnTextActive]}>Inter (IGST)</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
                 <View style={st.summaryCard}>
                   <View style={st.summaryRow}><Text style={st.summaryLabel}>Subtotal</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.subtotal)}</Text></View>
-                  <View style={st.summaryRow}><Text style={st.summaryLabel}>GST</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.totalGST)}</Text></View>
+                  <View style={st.summaryRow}><Text style={st.summaryLabel}>{gstType === 'inter' ? 'IGST' : 'GST'}</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.totalGST)}</Text></View>
                   {totals.totalCess > 0 && <View style={st.summaryRow}><Text style={st.summaryLabel}>Cess</Text><Text style={st.summaryVal}>{formatCurrencyINR(totals.totalCess)}</Text></View>}
                   <View style={[st.summaryRow, st.summaryTotal]}>
                     <Text style={st.summaryTotalLabel}>Grand Total</Text>
@@ -699,6 +715,13 @@ const st = StyleSheet.create({
   emptyCard: { alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: Colors.grey[50], borderRadius: 12, borderWidth: 1, borderColor: Colors.grey[200], borderStyle: 'dashed', gap: 8 },
   emptyText: { fontSize: 14, color: Colors.textMuted },
 
+  gstToggleRow: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, marginBottom: 12 },
+  gstToggleLabel: { fontSize: 14, fontWeight: '600' as const, color: Colors.text },
+  gstToggle: { flexDirection: 'row' as const, borderRadius: 8, overflow: 'hidden' as const, borderWidth: 1, borderColor: Colors.primary },
+  gstToggleBtn: { paddingHorizontal: 10, paddingVertical: 5, backgroundColor: Colors.background },
+  gstToggleBtnActive: { backgroundColor: Colors.primary },
+  gstToggleBtnText: { fontSize: 11, fontWeight: '600' as const, color: Colors.primary },
+  gstToggleBtnTextActive: { color: '#fff' },
   summaryCard: { backgroundColor: Colors.grey[50], borderRadius: 12, padding: 16, borderWidth: 1, borderColor: Colors.grey[200] },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   summaryLabel: { fontSize: 14, color: Colors.textLight },

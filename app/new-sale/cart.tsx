@@ -17,7 +17,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { productStore, Product, cartBridge, cartDataBridge } from '@/utils/productStore';
 import { safeRouter } from '@/utils/safeRouter';
-import { uploadProductImages, peekNextInvoiceNumber } from '@/services/backendApi';
+import { uploadProductImages, peekNextInvoiceNumber, assignBarcode } from '@/services/backendApi';
 import { 
   ArrowLeft, 
   Search, 
@@ -181,6 +181,7 @@ export default function CartScreen() {
   
   // Roundoff feature state - applied by default
   const [applyRoundoff, setApplyRoundoff] = useState(true);
+  const [gstType, setGstType] = useState<'intra' | 'inter'>('intra');
   
   // Invoice number preview
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState<string>('');
@@ -997,14 +998,13 @@ export default function CartScreen() {
   const calculateRoundoffAmount = useCallback(() => cartTotals.roundoffAmount, [cartTotals]);
   const calculateFinalTotal = useCallback(() => applyRoundoff ? cartTotals.roundedTotal : cartTotals.exactTotal, [cartTotals, applyRoundoff]);
 
-  const formatPrice = (price: number) => formatCurrencyINR(price, 3, 0);
+  const formatPrice = (price: number) => formatCurrencyINR(price, 2, 2);
 
   const formatGSTDisplay = (taxRate: number) => {
     if (!taxRate || taxRate === 0) return '0%';
-    
-    // For GST rates, show as (CGST%+SGST%)
+    if (gstType === 'inter') return `(IGST ${taxRate}%)`;
     const halfRate = taxRate / 2;
-    return `(${halfRate}%+${halfRate}%)`;
+    return `(CGST ${halfRate}%+SGST ${halfRate}%)`;
   };
 
   const handleContinue = () => {
@@ -1015,7 +1015,7 @@ export default function CartScreen() {
     if (isNavigating) return;
     setIsNavigating(true);
 
-    cartDataBridge.setCartData(cartItems, calculateFinalTotal(), applyRoundoff ? calculateRoundoffAmount() : 0);
+    cartDataBridge.setCartData(cartItems, calculateFinalTotal(), applyRoundoff ? calculateRoundoffAmount() : 0, gstType);
     router.push({
       pathname: '/new-sale/customer-details',
       params: {
@@ -1275,6 +1275,15 @@ export default function CartScreen() {
                   )}
                 </TouchableOpacity>
 
+                {/* Mini tax breakdown */}
+                {itemGST > 0 && !expandedCards.has(item.id) && (
+                  <View style={styles.miniTaxBreakdown}>
+                    <Text style={styles.miniTaxText}>
+                      Base: {formatPrice(taxableBase)} | {gstType === 'inter' ? `IGST: ${formatPrice(gstAmount)}` : `CGST: ${formatPrice(gstAmount / 2)} + SGST: ${formatPrice(gstAmount / 2)}`} | Total: {formatPrice(taxableBase + gstAmount)}
+                    </Text>
+                  </View>
+                )}
+
                 {/* ─── Centered expand chevron ─── */}
                 <TouchableOpacity
                   style={styles.cardExpandToggle}
@@ -1335,7 +1344,9 @@ export default function CartScreen() {
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={styles.expandedValue}>{formatPrice(gstAmount)}</Text>
                           <Text style={styles.gstSplitText}>
-                            CGST {itemGST / 2}%: {formatPrice(gstAmount / 2)} | SGST {itemGST / 2}%: {formatPrice(gstAmount / 2)}
+                            {gstType === 'inter'
+                              ? `IGST ${itemGST}%: ${formatPrice(gstAmount)}`
+                              : `CGST ${itemGST / 2}%: ${formatPrice(gstAmount / 2)} | SGST ${itemGST / 2}%: ${formatPrice(gstAmount / 2)}`}
                           </Text>
                         </View>
                       </View>
@@ -1367,6 +1378,27 @@ export default function CartScreen() {
 
 
 
+
+            {/* GST Type Toggle */}
+            <View style={styles.gstTypeToggleContainer}>
+              <Text style={styles.gstTypeLabel}>GST Type:</Text>
+              <View style={styles.gstTypeToggle}>
+                <TouchableOpacity
+                  style={[styles.gstTypeBtn, gstType === 'intra' && styles.gstTypeBtnActive]}
+                  onPress={() => setGstType('intra')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.gstTypeBtnText, gstType === 'intra' && styles.gstTypeBtnTextActive]}>Intra (CGST+SGST)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.gstTypeBtn, gstType === 'inter' && styles.gstTypeBtnActive]}
+                  onPress={() => setGstType('inter')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.gstTypeBtnText, gstType === 'inter' && styles.gstTypeBtnTextActive]}>Inter (IGST)</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
             {/* Invoice Summary Section */}
             <View style={styles.invoiceSummarySection}>
@@ -1507,7 +1539,7 @@ export default function CartScreen() {
                   >
                     <View style={styles.totalLabelWithChevron}>
                       <ChevronDown size={14} color={Colors.textLight} style={!expandedTaxSections.has('gst') ? { transform: [{ rotate: '-90deg' }] } : undefined} />
-                      <Text style={styles.totalLabel}>GST:</Text>
+                      <Text style={styles.totalLabel}>{gstType === 'inter' ? 'IGST:' : 'GST (CGST+SGST):'}</Text>
                     </View>
                     <Text style={styles.totalAmount}>
                       {formatPrice(cartItems.reduce((total, item) => {
@@ -1526,13 +1558,14 @@ export default function CartScreen() {
                         if (item.taxRate && item.taxRate > 0) {
                           const { finalDiscountedAmount } = getFinalDiscountedAmount(item);
                           const base = getBasePriceForTax(item, finalDiscountedAmount);
-                          const cgst = (base * (item.taxRate / 100)) / 2;
-                          const sgst = cgst;
+                          const totalGst = base * (item.taxRate / 100);
                           return (
                             <View key={index} style={styles.taxExpandedItem}>
                               <Text style={styles.taxExpandedName} numberOfLines={1}>{item.name}</Text>
                               <Text style={styles.taxExpandedAmount}>
-                                {formatPrice(cgst + sgst)}
+                                {gstType === 'inter'
+                                  ? `IGST ${item.taxRate}%: ${formatPrice(totalGst)}`
+                                  : `CGST ${item.taxRate / 2}%: ${formatPrice(totalGst / 2)} | SGST ${item.taxRate / 2}%: ${formatPrice(totalGst / 2)}`}
                               </Text>
                             </View>
                           );
@@ -1628,7 +1661,7 @@ export default function CartScreen() {
               {/* Overall Tax Totals */}
               {cartItems.some(item => item.taxRate && item.taxRate > 0) && (
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Overall GST:</Text>
+                  <Text style={styles.totalLabel}>{gstType === 'inter' ? 'Total IGST:' : 'Total GST:'}</Text>
                   <Text style={styles.totalAmount}>
                     {formatPrice(cartItems.reduce((total, item) => {
                       if (item.taxRate && item.taxRate > 0) {
@@ -3100,6 +3133,16 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
        console.warn('Image upload failed:', err);
      }
 
+     let finalBarcode = barcode.trim();
+     if (!finalBarcode) {
+       try {
+         const barcodeResult = await assignBarcode();
+         if (barcodeResult.success && barcodeResult.barcode) {
+           finalBarcode = barcodeResult.barcode;
+         }
+       } catch {}
+     }
+
      const newProduct: CartProduct = {
        id: Date.now().toString(),
        name: productName.trim(),
@@ -3107,7 +3150,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
        image: uploadedImages.length > 0 ? uploadedImages[0] : '',
        category: productCategory.trim() || 'General',
        quantity: 1,
-       barcode: barcode.trim() || undefined,
+       barcode: finalBarcode || undefined,
        taxRate: parseFloat(taxRate) || 0,
        discountType,
        discountValue: parseFloat(discountValue) || 0,
@@ -4327,6 +4370,16 @@ const styles = StyleSheet.create({
     color: Colors.textLight,
     fontStyle: 'italic',
   },
+  miniTaxBreakdown: {
+    paddingHorizontal: 12,
+    paddingBottom: 6,
+    marginTop: -2,
+  },
+  miniTaxText: {
+    fontSize: 10,
+    color: Colors.textLight,
+    lineHeight: 14,
+  },
   cardExpandToggle: {
     alignItems: 'center',
     paddingTop: 6,
@@ -4920,6 +4973,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.primary,
     fontWeight: '500',
+  },
+  gstTypeToggleContainer: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 16,
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+  },
+  gstTypeLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: Colors.text,
+  },
+  gstTypeToggle: {
+    flexDirection: 'row' as const,
+    borderRadius: 8,
+    overflow: 'hidden' as const,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  gstTypeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: Colors.background,
+  },
+  gstTypeBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  gstTypeBtnText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: Colors.primary,
+  },
+  gstTypeBtnTextActive: {
+    color: '#fff',
   },
   invoiceSummarySection: {
     backgroundColor: Colors.background,

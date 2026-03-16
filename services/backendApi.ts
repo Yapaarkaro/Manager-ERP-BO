@@ -264,7 +264,7 @@ export async function verifyGSTIN(
     return {
       success: true,
       taxpayerInfo: result.data.taxpayerInfo,
-      mobileMatch: result.data.smsFailed ? true : result.data.mobileMatch,
+      mobileMatch: result.data.mobileMatch,
       registeredMobile: result.data.registeredMobile,
       otpRequestId: result.data.otpRequestId,
       smsFailed: !!result.data.smsFailed,

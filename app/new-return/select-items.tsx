@@ -266,6 +266,24 @@ export default function SelectItemsScreen() {
                   {selectedItems.reduce((sum, item) => sum + item.returnQuantity, 0)} items
                 </Text>
               </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Taxable Amount:</Text>
+                <Text style={styles.summaryValue}>
+                  {formatAmount(selectedItems.reduce((t, i) => t + i.rate * i.returnQuantity, 0))}
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>GST:</Text>
+                <Text style={styles.summaryValue}>
+                  {formatAmount(selectedItems.reduce((t, i) => t + i.rate * i.returnQuantity * (i.taxRate / 100), 0))}
+                </Text>
+              </View>
+              <View style={[styles.summaryRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 8, marginTop: 4 }]}>
+                <Text style={[styles.summaryLabel, { fontWeight: '700' }]}>Refund Total:</Text>
+                <Text style={[styles.summaryValue, { fontWeight: '700', color: Colors.primary }]}>
+                  {formatAmount(calculateReturnAmount())}
+                </Text>
+              </View>
             </View>
           </View>
         )}

@@ -284,7 +284,7 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
     const smsBody = new URLSearchParams({
       To: `+91${cleanRegisteredMobile}`,
       From: twilioFrom,
-      Body: `Your GSTIN verification code for Manager is ${otp}. Valid for 10 minutes. Do not share this code.`,
+      Body: `${otp} is your OTP to verify the GSTIN-registered mobile on Manager ERP. Valid for 10 minutes. Do not share this code. - Manager`,
     });
 
     const smsResp = await fetch(twilioUrl, {

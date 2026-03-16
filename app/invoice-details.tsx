@@ -84,6 +84,10 @@ export default function InvoiceDetailsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isItemsLoading, setIsItemsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   const resolvedInvoiceId = Array.isArray(invoiceId) ? invoiceId[0] : invoiceId;
 
@@ -348,10 +352,6 @@ export default function InvoiceDetailsScreen() {
 
   const isCancelled = invoice.status === 'cancelled' || invoice.is_cancelled;
   const isEditable = !isCancelled && (invoice.status !== 'paid' || (invoice.balanceDue || 0) > 0);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editItems, setEditItems] = useState<any[]>([]);
-  const [editNotes, setEditNotes] = useState('');
-  const [editSaving, setEditSaving] = useState(false);
 
   const openEditModal = () => {
     setEditItems(invoiceItems.map(item => ({ ...item })));

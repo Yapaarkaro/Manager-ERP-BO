@@ -174,7 +174,7 @@ export default function ConversationScreen() {
           .eq('id', convo.business_id)
           .maybeSingle();
         setResolvedName(biz?.legal_name || biz?.owner_name || 'Business Partner');
-      } else if (isStaff && ((convo.participant_other_type === 'staff' && convo.participant_other_id === staffId) || type === 'owner')) {
+      } else if (isStaff && (convo.participant_other_type === 'staff' || type === 'owner')) {
         const { data: ownerRow } = await supabase
           .from('users')
           .select('name')

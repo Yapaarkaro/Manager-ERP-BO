@@ -87,6 +87,10 @@ export default function InvoiceDetailsScreen() {
   const [expandedItemIdx, setExpandedItemIdx] = useState<number | null>(null);
   const [supplierExpanded, setSupplierExpanded] = useState(false);
   const [supplierDetails, setSupplierDetails] = useState<any>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => { loadInvoice(); }, [invoiceId, invoiceData]);
 
@@ -255,13 +259,9 @@ export default function InvoiceDetailsScreen() {
   };
 
   const isCancelled = invoice.status === 'cancelled';
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editItems, setEditItems] = useState<any[]>([]);
-  const [editNotes, setEditNotes] = useState('');
-  const [editSaving, setEditSaving] = useState(false);
 
   const openEditModal = () => {
-    setEditItems(invoiceItems.map((item: any) => ({ ...item })));
+    setEditItems(items.map((item: any) => ({ ...item })));
     setEditNotes(invoice.notes || '');
     setShowEditModal(true);
   };

@@ -238,13 +238,13 @@ export const cartBridge = {
 
 // In-memory bridge for passing cart data between Cart → CustomerDetails → Payment
 // Avoids heavy JSON.stringify serialization through navigation params
-let _pendingCartData: { cartItems: any[]; totalAmount: number; roundOffAmount?: number } | null = null;
+let _pendingCartData: { cartItems: any[]; totalAmount: number; roundOffAmount?: number; gstType?: 'intra' | 'inter' } | null = null;
 
 export const cartDataBridge = {
-  setCartData(cartItems: any[], totalAmount: number, roundOffAmount?: number) {
-    _pendingCartData = { cartItems, totalAmount, roundOffAmount };
+  setCartData(cartItems: any[], totalAmount: number, roundOffAmount?: number, gstType?: 'intra' | 'inter') {
+    _pendingCartData = { cartItems, totalAmount, roundOffAmount, gstType };
   },
-  consumeCartData(): { cartItems: any[]; totalAmount: number; roundOffAmount?: number } | null {
+  consumeCartData(): { cartItems: any[]; totalAmount: number; roundOffAmount?: number; gstType?: 'intra' | 'inter' } | null {
     const data = _pendingCartData;
     _pendingCartData = null;
     return data;

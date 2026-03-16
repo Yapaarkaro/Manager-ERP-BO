@@ -1193,9 +1193,11 @@ export default function ManualProductScreen() {
           generatedBarcodeRef.current = barcodeResult.barcode;
         } else {
           console.warn('Barcode generation failed:', barcodeResult.error);
+          showError('Barcode auto-generation failed. Product will be saved without a barcode.');
         }
-      } catch (e) {
+      } catch (e: any) {
         console.warn('Barcode generation error:', e);
+        showError('Barcode auto-generation failed. Product will be saved without a barcode.');
       }
     }
 
