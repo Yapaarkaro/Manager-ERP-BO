@@ -89,6 +89,7 @@ export default function EditAddressSimpleScreen() {
   const value = params.value || stored.value;
   const gstinData = params.gstinData || stored.gstinData;
   const name = params.name || stored.name;
+  const mobile = params.mobile || stored.mobile || '';
   const businessName = params.businessName || stored.businessName;
   const businessType = params.businessType || stored.businessType;
   const customBusinessType = params.customBusinessType || stored.customBusinessType;
@@ -688,6 +689,8 @@ export default function EditAddressSimpleScreen() {
       const isSignupFlow = !!(type && value) && fromSettings !== 'true';
       if (isSignupFlow && !isUUID) {
         console.log('📝 Signup flow: updating local-only address in signup store');
+        const ownerName = Array.isArray(name) ? name[0] : (name || '');
+        const ownerMobile = Array.isArray(mobile) ? mobile[0] : (mobile || '');
         const addressUpdates = {
           name: addressName.trim(),
           doorNumber: doorNumber.trim(),
@@ -698,8 +701,12 @@ export default function EditAddressSimpleScreen() {
           pincode,
           stateName: selectedState?.name || '',
           stateCode: getGSTINStateCode(selectedState?.name || ''),
-          manager: managerName.trim(),
-          phone: managerPhone.trim(),
+          manager: addressType === 'primary'
+            ? (managerName.trim() || ownerName)
+            : managerName.trim(),
+          phone: addressType === 'primary'
+            ? (managerPhone.trim() || ownerMobile)
+            : managerPhone.trim(),
           isPrimary: addressType === 'primary',
           updatedAt: new Date().toISOString(),
         };
@@ -849,20 +856,42 @@ export default function EditAddressSimpleScreen() {
       
       setIsLoading(false);
 
+      const ownerName = Array.isArray(name) ? name[0] : (name || '');
+      const ownerMobile = Array.isArray(mobile) ? mobile[0] : (mobile || '');
+      const updatedAddrList = parsedExistingAddresses.map((a: any) =>
+        (a.id === editAddressId || a.backendId === editAddressId)
+          ? {
+              ...a,
+              name: addressName.trim(),
+              doorNumber: doorNumber.trim(),
+              addressLine1: addressLine1.trim(),
+              addressLine2: addressLine2.trim(),
+              additionalLines: additionalLines.filter(l => l.trim().length > 0),
+              city: city.trim(),
+              pincode,
+              stateName: selectedState?.name || '',
+              stateCode: getGSTINStateCode(selectedState?.name || ''),
+              manager: addressType === 'primary' ? (managerName.trim() || ownerName) : managerName.trim(),
+              phone: addressType === 'primary' ? (managerPhone.trim() || ownerMobile) : managerPhone.trim(),
+              isPrimary: addressType === 'primary',
+              updatedAt: new Date().toISOString(),
+            }
+          : a
+      );
+
       const doNavigate = () => {
         if (fromSettings === 'true') {
           router.back();
         } else if (fromSummary === 'true') {
           setSignupData({
-            type, value, gstinData, name, businessName, businessType, customBusinessType,
-            allBankAccounts: '[]', initialCashBalance: '0',
-            invoicePrefix: 'INV', invoicePattern: '', startingInvoiceNumber: '1', fiscalYear: 'APR-MAR',
+            type, value, gstinData, name, mobile, businessName, businessType, customBusinessType,
+            allAddresses: JSON.stringify(updatedAddrList),
           });
           safeRouter.replace('/auth/business-summary');
         } else if (type && value) {
           setSignupData({
-            type, value, gstinData, name, businessName, businessType, customBusinessType,
-            allAddresses: JSON.stringify(parsedExistingAddresses),
+            type, value, gstinData, name, mobile, businessName, businessType, customBusinessType,
+            allAddresses: JSON.stringify(updatedAddrList),
           });
           safeRouter.replace('/auth/address-confirmation');
         } else {

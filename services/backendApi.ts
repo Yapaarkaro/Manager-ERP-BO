@@ -2597,6 +2597,7 @@ export async function createInvoice(params: {
     totalPrice: number;
     taxRate?: number;
     taxAmount?: number;
+    taxInclusive?: boolean;
     cessType?: string;
     cessRate?: number;
     cessAmount?: number;
@@ -2645,6 +2646,7 @@ export async function createInvoice(params: {
         quantity: item.quantity,
         unit_price: item.unitPrice,
         tax_rate: item.taxRate || 0,
+        tax_inclusive: item.taxInclusive || false,
         discount_type: item.discountType || null,
         discount_value: item.discountValue || 0,
         product_name: item.productName,

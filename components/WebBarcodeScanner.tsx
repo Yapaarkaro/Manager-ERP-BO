@@ -118,6 +118,9 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
         }}
       />
       <style dangerouslySetInnerHTML={{ __html: `
+        #${containerId.current} {
+          z-index: 0;
+        }
         #${containerId.current} video {
           object-fit: cover !important;
           width: 100% !important;
@@ -125,6 +128,7 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
         }
         #${containerId.current} img[alt="Info icon"] { display: none !important; }
         #${containerId.current} > div { border: none !important; }
+        #qr-shaded-region { display: none !important; }
       ` }} />
     </View>
   );

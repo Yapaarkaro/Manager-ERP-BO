@@ -424,7 +424,9 @@ export default function SettingsScreen() {
       ifscCode: acc.ifsc_code,
       upiId: acc.upi_id || '',
       accountType: acc.account_type.toLowerCase() as 'savings' | 'current',
-      isPrimary: acc.is_primary || false
+      isPrimary: acc.is_primary || false,
+      initial_balance: acc.initial_balance ?? acc.opening_balance ?? 0,
+      current_balance: acc.current_balance ?? acc.balance ?? 0,
     }));
   }, [businessData?.bankAccounts]);
 
@@ -598,16 +600,17 @@ export default function SettingsScreen() {
   };
 
   const handleEditBankAccount = (account: BankAccount) => {
-    // Prevent multiple forms from opening
-    if (isAddingBankAccount) {
-      return;
-    }
-    
+    if (isAddingBankAccount) return;
     setIsAddingBankAccount(true);
-    
+
     setNavData('editBankAccount', account);
     safeRouter.push({
       pathname: '/add-bank-account',
+      params: {
+        editAccountId: account.id,
+        fromSettings: 'true',
+        account: JSON.stringify(account),
+      },
     } as any);
   };
 

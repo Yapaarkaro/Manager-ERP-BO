@@ -328,6 +328,13 @@ export default function AddStaffScreen() {
   };
 
   const isFormValid = () => {
+    const hasAnyEmergency = formData.emergencyContactName.trim().length > 0 ||
+      formData.emergencyContactPhone.length > 0;
+    const emergencyValid = !hasAnyEmergency || (
+      formData.emergencyContactName.trim().length > 0 &&
+      formData.emergencyContactPhone.length === 10
+    );
+
     return (
       formData.name.trim().length > 0 &&
       formData.mobile.length === 10 &&
@@ -337,8 +344,7 @@ export default function AddStaffScreen() {
       (formData.department !== 'Others' || formData.customDepartment.trim().length > 0) &&
       formData.address.trim().length > 0 &&
       formData.basicSalary.trim().length > 0 &&
-      formData.emergencyContactName.trim().length > 0 &&
-      formData.emergencyContactPhone.length === 10 &&
+      emergencyValid &&
       formData.permissions.length > 0
     );
   };

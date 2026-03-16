@@ -161,14 +161,28 @@ export default function SaleSuccessScreen() {
       const saleItems: SaleItem[] = payment.cartItems.map((item: any) => {
         const effectivePrice = getUoMPrice(item);
         const lineTotal = effectivePrice * item.quantity;
+        const taxRate = item.taxRate || 0;
+        const isTaxInclusive = item.taxInclusive === true;
+
+        let taxableAmount: number;
+        let taxAmount: number;
+        if (isTaxInclusive && taxRate > 0) {
+          taxableAmount = lineTotal / (1 + taxRate / 100);
+          taxAmount = lineTotal - taxableAmount;
+        } else {
+          taxableAmount = lineTotal;
+          taxAmount = lineTotal * (taxRate / 100);
+        }
+
         return {
           productId: item.productDbId || item.id || `PROD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           productName: item.name,
           quantity: item.quantity,
-          unitPrice: effectivePrice,
-          totalPrice: lineTotal,
-          taxRate: item.taxRate || 0,
-          taxAmount: lineTotal * ((item.taxRate || 0) / 100),
+          unitPrice: isTaxInclusive ? +(taxableAmount / item.quantity).toFixed(2) : effectivePrice,
+          totalPrice: +taxableAmount.toFixed(2),
+          taxRate,
+          taxAmount: +taxAmount.toFixed(2),
+          taxInclusive: isTaxInclusive,
           cessType: item.cessType || 'none',
           cessRate: item.cessRate || 0,
           cessAmount: item.cessAmount ?? 0,
@@ -237,6 +251,7 @@ export default function SaleSuccessScreen() {
           totalPrice: item.totalPrice,
           taxRate: item.taxRate,
           taxAmount: item.taxAmount,
+          taxInclusive: (item as any).taxInclusive || false,
           cessType: item.cessType,
           cessRate: item.cessRate,
           cessAmount: item.cessAmount,

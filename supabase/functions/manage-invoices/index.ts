@@ -250,6 +250,7 @@ Deno.serve(async (req: Request) => {
         let productId: string | null = null;
         let unitPrice = parseFloat(item.unit_price || item.unitPrice || 0);
         let taxRate = parseFloat(item.tax_rate || item.taxRate || 0);
+        let taxInclusive = item.tax_inclusive ?? item.taxInclusive ?? false;
         let cessType = item.cess_type || item.cessType || 'none';
         let cessRate = parseFloat(item.cess_rate || item.cessRate || 0);
         let cessAmount = parseFloat(item.cess_amount || item.cessAmount || 0);
@@ -263,12 +264,12 @@ Deno.serve(async (req: Request) => {
         if (quantity <= 0) continue;
 
         if (rawProductId) {
-          const { data: product } = await supabase.from("products").select("id, sales_price, tax_rate, cess_type, cess_rate, cess_amount, hsn_code, name, primary_unit, current_stock").eq("id", rawProductId).eq("business_id", businessId).eq("is_deleted", false).maybeSingle();
+          const { data: product } = await supabase.from("products").select("id, sales_price, tax_rate, tax_inclusive, cess_type, cess_rate, cess_amount, hsn_code, name, primary_unit, current_stock").eq("id", rawProductId).eq("business_id", businessId).eq("is_deleted", false).maybeSingle();
           if (product) {
             productId = product.id;
-            // Use client-sent price when available; fall back to DB price only when no price was provided
             if (!unitPrice || unitPrice <= 0) unitPrice = product.sales_price || 0;
             taxRate = product.tax_rate ?? taxRate;
+            taxInclusive = product.tax_inclusive ?? taxInclusive;
             cessType = product.cess_type || cessType;
             cessRate = product.cess_rate ?? cessRate;
             cessAmount = product.cess_amount ?? cessAmount;
@@ -284,7 +285,16 @@ Deno.serve(async (req: Request) => {
         else if (discountType === 'flat' && discountValue > 0) itemDiscount = discountValue;
         lineTotal -= itemDiscount;
 
-        const itemTax = lineTotal * (taxRate / 100);
+        let taxableAmount: number;
+        let itemTax: number;
+        if (taxInclusive && taxRate > 0) {
+          taxableAmount = lineTotal / (1 + taxRate / 100);
+          itemTax = lineTotal - taxableAmount;
+          lineTotal = taxableAmount;
+        } else {
+          itemTax = lineTotal * (taxRate / 100);
+        }
+
         let itemCess = 0;
         if (cessType === 'percentage' || cessType === 'ad_valorem') itemCess = lineTotal * (cessRate / 100);
         else if (cessType === 'specific' || cessType === 'quantity') itemCess = cessAmount * quantity;
@@ -295,7 +305,8 @@ Deno.serve(async (req: Request) => {
         totalCess += itemCess;
 
         resolvedItems.push({
-          product_id: productId, product_name: productName, quantity, unit_price: unitPrice,
+          product_id: productId, product_name: productName, quantity,
+          unit_price: taxInclusive ? +(lineTotal / quantity).toFixed(2) : unitPrice,
           total_price: itemTotal, tax_rate: taxRate, tax_amount: itemTax, cess_type: cessType,
           cess_rate: cessRate, cess_amount: itemCess, hsn_code: hsnCode, primary_unit: primaryUnit,
           discount_type: discountType, discount_value: discountValue,

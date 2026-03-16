@@ -94,7 +94,12 @@ export default function BarcodeScannerScreen() {
 
   useEffect(() => {
     if (!productStore.hasProducts()) {
-      productStore.loadProductsFromBackend().then(() => setStoreReady(true));
+      productStore.loadProductsFromBackend()
+        .then((res) => {
+          setStoreReady(true);
+          console.log('Product store loaded:', productStore.getProductCount(), 'products');
+        })
+        .catch(() => setStoreReady(true));
     }
   }, []);
 

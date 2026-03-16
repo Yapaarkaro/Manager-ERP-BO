@@ -283,10 +283,12 @@ export default function AddressConfirmationScreen() {
       value: taxIdValue,
       gstinData,
       name,
+      mobile,
       businessName,
       businessType,
       customBusinessType,
       existingAddresses: JSON.stringify(addresses),
+      allAddresses: JSON.stringify(addresses),
     });
     router.push('/edit-address-simple');
   };

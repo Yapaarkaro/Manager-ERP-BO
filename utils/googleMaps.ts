@@ -85,15 +85,22 @@ export const loadGoogleMapsScript = (apiKey: string): Promise<void> => {
       let attempts = 0;
       const checkApi = () => {
         attempts++;
-        if (window.google?.maps?.Map && window.google?.maps?.places?.AutocompleteService) {
-          resolve();
-        } else if (attempts > 50) {
-          resolve();
+        try {
+          if (window.google?.maps?.Map && window.google?.maps?.places?.AutocompleteService) {
+            const testService = new window.google.maps.places.AutocompleteService();
+            if (testService) {
+              resolve();
+              return;
+            }
+          }
+        } catch {}
+        if (attempts > 100) {
+          reject(new Error('Google Maps Places API failed to initialize'));
         } else {
-          setTimeout(checkApi, 100);
+          setTimeout(checkApi, 150);
         }
       };
-      setTimeout(checkApi, 200);
+      setTimeout(checkApi, 300);
     };
 
     script.onerror = (error) => {
