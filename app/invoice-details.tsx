@@ -881,7 +881,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
-    height: '85%', // Reduce height to avoid camera notch
   },
   headerSafeArea: {
     backgroundColor: Colors.background,
@@ -922,7 +921,6 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
-    maxHeight: '85%', // Limit scroll view height
   },
   scrollContent: {
     padding: 12, // Reduced padding

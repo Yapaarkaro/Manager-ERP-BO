@@ -60,13 +60,13 @@ export default function FinalSetupScreen() {
       : ''
   );
   const [invoicePrefix, setInvoicePrefix] = useState(
-    (incomingInvoicePrefix !== undefined && incomingInvoicePrefix !== null) ? (incomingInvoicePrefix as string) : 'INV'
+    (incomingInvoicePrefix && incomingInvoicePrefix.trim()) ? (incomingInvoicePrefix as string) : 'INV'
   );
   const [invoicePattern, setInvoicePattern] = useState(
     (incomingInvoicePattern !== undefined && incomingInvoicePattern !== null) ? (incomingInvoicePattern as string) : ''
   );
   const [startingInvoiceNumber, setStartingInvoiceNumber] = useState(
-    (incomingStartingNumber !== undefined && incomingStartingNumber !== null) ? (incomingStartingNumber as string) : '1'
+    (incomingStartingNumber && incomingStartingNumber.trim()) ? (incomingStartingNumber as string) : '1'
   );
   const [fiscalYear, setFiscalYear] = useState<'JAN-DEC' | 'APR-MAR'>(
     (incomingFiscalYear !== undefined && incomingFiscalYear !== null) ? (incomingFiscalYear as 'JAN-DEC' | 'APR-MAR') : 'APR-MAR'

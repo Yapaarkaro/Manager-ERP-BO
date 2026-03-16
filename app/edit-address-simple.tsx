@@ -682,9 +682,44 @@ export default function EditAddressSimpleScreen() {
       
       // Resolve the real backend UUID
       let backendId = existingAddress.backendId || (existingAddress.id === editAddressId ? editAddressId : null);
-      
-      // If backendId doesn't look like a UUID, look up the real one from Supabase
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(backendId || '');
+      
+      // Signup flow with local-only address: update in signup store and navigate
+      const isSignupFlow = !!(type && value) && fromSettings !== 'true';
+      if (isSignupFlow && !isUUID) {
+        console.log('📝 Signup flow: updating local-only address in signup store');
+        const addressUpdates = {
+          name: addressName.trim(),
+          doorNumber: doorNumber.trim(),
+          addressLine1: addressLine1.trim(),
+          addressLine2: addressLine2.trim(),
+          additionalLines: additionalLines.filter(l => l.trim().length > 0),
+          city: city.trim(),
+          pincode,
+          stateName: selectedState?.name || '',
+          stateCode: getGSTINStateCode(selectedState?.name || ''),
+          manager: managerName.trim(),
+          phone: managerPhone.trim(),
+          isPrimary: addressType === 'primary',
+          updatedAt: new Date().toISOString(),
+        };
+        const updatedAddresses = parsedExistingAddresses.map((a: any) =>
+          (a.id === editAddressId || a.backendId === editAddressId)
+            ? { ...a, ...addressUpdates }
+            : a
+        );
+        setSignupData({
+          type, value, gstinData, name, businessName, businessType, customBusinessType,
+          allAddresses: JSON.stringify(updatedAddresses),
+        });
+        if (fromSummary === 'true') {
+          safeRouter.replace('/auth/business-summary');
+        } else {
+          safeRouter.replace('/auth/address-confirmation');
+        }
+        setIsLoading(false);
+        return;
+      }
       if (!isUUID) {
         console.log('🔍 backendId is not a UUID, looking up real ID from Supabase...', backendId);
         try {

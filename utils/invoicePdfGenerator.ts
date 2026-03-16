@@ -423,12 +423,20 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<string> 
   const html = generateInvoiceHTML(data);
 
   if (Platform.OS === 'web') {
-    const printWindow = (typeof window !== 'undefined' && window.open) ? window.open('', '_blank') : null;
+    const invoiceUrl = data.invoiceId
+      ? `${typeof window !== 'undefined' ? window.location.origin : ''}/invoice-details?invoiceId=${data.invoiceId}`
+      : '';
+    const blob = new Blob([html], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWindow = (typeof window !== 'undefined' && window.open) ? window.open(blobUrl, '_blank') : null;
     if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
+      printWindow.onload = () => {
+        if (invoiceUrl) {
+          try { printWindow.history.replaceState(null, '', invoiceUrl); } catch {}
+        }
+        printWindow.focus();
+        printWindow.print();
+      };
     }
     return 'web-handled';
   }
@@ -453,12 +461,14 @@ export async function generateInvoicePDF(data: InvoicePDFData): Promise<string> 
 export async function printInvoice(data: InvoicePDFData): Promise<void> {
   const html = generateInvoiceHTML(data);
   if (Platform.OS === 'web') {
-    const printWindow = (typeof window !== 'undefined' && window.open) ? window.open('', '_blank') : null;
+    const blob = new Blob([html], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWindow = (typeof window !== 'undefined' && window.open) ? window.open(blobUrl, '_blank') : null;
     if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
     }
     return;
   }
@@ -472,12 +482,14 @@ export async function printInvoice(data: InvoicePDFData): Promise<void> {
 export function downloadInvoiceOnWeb(data: InvoicePDFData): void {
   const html = generateInvoiceHTML(data);
   if (typeof window !== 'undefined' && window.open) {
-    const printWindow = window.open('', '_blank');
+    const blob = new Blob([html], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWindow = window.open(blobUrl, '_blank');
     if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
     }
   }
 }

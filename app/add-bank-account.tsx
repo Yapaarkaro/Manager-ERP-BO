@@ -258,7 +258,6 @@ export default function AddBankAccount() {
     }
 
     if (isEditMode && existingAccount) {
-      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
       const bankAccountUpdates = {
         accountHolderName: accountHolderName.trim(),
         bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
@@ -272,18 +271,31 @@ export default function AddBankAccount() {
         balance: existingAccount.balance || 0,
       };
       
-      // Optimistically update (DataStore updated immediately, backend sync in background)
-      // ✅ Await backend sync to ensure changes are persisted before navigation
-      await optimisticUpdateBankAccount(existingAccount.id, bankAccountUpdates, { showError: false, awaitSync: true });
+      // Resolve backend UUID if needed
+      let resolvedId = existingAccount.backendId || existingAccount.id;
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRe.test(resolvedId || '')) {
+        try {
+          const { supabase } = await import('@/lib/supabase');
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: userData } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
+            if (userData?.business_id) {
+              const { data: accounts } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
+              const match = accounts?.find((a: any) => a.account_number === accountNumber.trim() || a.account_number === existingAccount.accountNumber);
+              if (match) resolvedId = match.id;
+            }
+          }
+        } catch (e) { console.warn('Failed to resolve bank account UUID:', e); }
+      }
       
-      // ✅ Clear cache to ensure fresh data is loaded when navigating back
+      await optimisticUpdateBankAccount(resolvedId, { ...bankAccountUpdates, backendId: resolvedId }, { showError: false, awaitSync: true });
+      
       clearBusinessDataCache();
-      
-      // ✅ Small additional delay to ensure backend has fully processed the update
       await new Promise(resolve => setTimeout(resolve, 300));
       
       if (isPrimary) {
-        await updateBusinessPrimaryBankAccount(existingAccount.id);
+        await updateBusinessPrimaryBankAccount(resolvedId);
       }
       
       Alert.alert('Success', 'Bank account updated successfully!', [

@@ -535,7 +535,23 @@ export default function BankingDetailsScreen() {
       // Save bank account to backend
       let saveResult: any;
       if (editMode === 'true') {
-        saveResult = await optimisticUpdateBankAccount(editAccountId as string, bankAccount, { showError: false, awaitSync: true });
+        // Resolve backend UUID if the local ID is not a real UUID
+        let resolvedEditId = editAccountId as string;
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRe.test(resolvedEditId || '')) {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { data: userData } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
+              if (userData?.business_id) {
+                const { data: accounts } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
+                const match = accounts?.find((a: any) => a.account_number === accountNumber);
+                if (match) resolvedEditId = match.id;
+              }
+            }
+          } catch (e) { console.warn('Failed to resolve bank UUID:', e); }
+        }
+        saveResult = await optimisticUpdateBankAccount(resolvedEditId, { ...bankAccount, backendId: resolvedEditId }, { showError: false, awaitSync: true });
       } else {
         saveResult = await optimisticAddBankAccount(bankAccount as BankAccount, { showError: false, awaitSync: true });
       }

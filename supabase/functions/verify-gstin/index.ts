@@ -28,32 +28,50 @@ function parseAddress(fullAddress: string) {
     if (fullAddress.toLowerCase().includes(s.toLowerCase())) { state = s; break; }
   }
 
-  const skipWords = new Set([pincode, state.toLowerCase()]);
   const meaningful = parts.filter(p => {
-    const lower = p.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-    return lower && !skipWords.has(lower) && !/^\d{6}$/.test(p.trim());
+    const trimmed = p.trim();
+    if (/^\d{6}$/.test(trimmed)) return false;
+    if (state && trimmed.toLowerCase() === state.toLowerCase()) return false;
+    return trimmed.length > 0;
   });
 
-  const bno = meaningful[0] || '';
-  const bnm = meaningful.length > 1 ? meaningful[1] : '';
-  const st = meaningful.length > 2 ? meaningful[2] : '';
-  const loc = meaningful.length > 3 ? meaningful[3] : '';
-  const remaining = meaningful.slice(4);
+  const streetWords = /\b(road|rd|street|st|cross|main|lane|avenue|ave|nagar|marg|path|gali|circle|layout|extension|extn|phase|sector|block)\b/i;
+  const floorWords = /\b(floor|flr|storey|level|basement)\b/i;
+  const doorPattern = /^(no\.?\s*)?[\d]+[\/\-]?[\d]*[a-z]?$/i;
+  const buildingWords = /\b(building|bldg|tower|complex|apartment|apt|plaza|house|bhavan|bhawan|mansion|residency|arcade|centre|center|mall|market|industrial|estate)\b/i;
 
-  let city = '';
-  let dst = '';
-  if (remaining.length >= 2) {
-    dst = remaining[remaining.length - 2] || '';
-    city = remaining[remaining.length - 1] || '';
-  } else if (remaining.length === 1) {
-    city = remaining[0] || '';
+  let bno = '', bnm = '', flno = '', st = '', loc = '', city = '', dst = '';
+  const unclassified: string[] = [];
+
+  for (const part of meaningful) {
+    const lower = part.toLowerCase();
+    if (!bno && doorPattern.test(part)) { bno = part; continue; }
+    if (!flno && floorWords.test(lower)) { flno = part; continue; }
+    if (!bnm && buildingWords.test(lower)) { bnm = part; continue; }
+    if (!st && streetWords.test(lower)) { st = part; continue; }
+    unclassified.push(part);
   }
 
-  if (!city && meaningful.length >= 3) {
-    city = meaningful[meaningful.length - 1] || '';
+  // If no door number found, check if first part starts with a digit
+  if (!bno && meaningful.length > 0 && /^\d/.test(meaningful[0])) {
+    bno = meaningful[0];
+    const idx = unclassified.indexOf(meaningful[0]);
+    if (idx >= 0) unclassified.splice(idx, 1);
   }
 
-  return { bno, bnm, st, loc, dst, city, stcd: state, pncd: pincode, flno: '', lg: '', lt: '' };
+  // Assign remaining parts: locality, district, city
+  if (unclassified.length >= 3) {
+    if (!bnm) bnm = unclassified.shift()!;
+    else if (!st) st = unclassified.shift()!;
+    else unclassified.shift();
+  }
+  if (unclassified.length >= 1) loc = unclassified.shift()!;
+  if (unclassified.length >= 2) { dst = unclassified.shift()!; city = unclassified.shift()!; }
+  else if (unclassified.length >= 1) city = unclassified.shift()!;
+
+  if (!city && loc) { city = loc; loc = ''; }
+
+  return { bno, bnm, st, loc, dst, city, stcd: state, pncd: pincode, flno, lg: '', lt: '' };
 }
 
 function buildStructuredAddress(details: any, principalContact: any) {
