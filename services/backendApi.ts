@@ -300,6 +300,18 @@ export async function verifyGSTINOTP(
   return { success: false, error: result.error || result.data?.error || 'GSTIN OTP verification failed' };
 }
 
+export async function resendGSTINOTP(
+  otpRequestId: string
+): Promise<{ success: boolean; error?: string }> {
+  const result = await callEdgeFunction('verify-gstin-otp', 'POST', { otpRequestId, action: 'resend' }, true);
+
+  if (result.success && result.data?.success) {
+    return { success: true };
+  }
+
+  return { success: false, error: result.error || result.data?.error || 'Failed to resend OTP' };
+}
+
 /**
  * Verify PAN
  * @param pan - 10-character PAN number

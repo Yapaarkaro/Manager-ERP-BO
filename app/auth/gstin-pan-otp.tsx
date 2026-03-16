@@ -375,12 +375,27 @@ export default function GstinPanOTPScreen() {
     }
   };
 
-  const resendOTP = () => {
+  const resendOTP = async () => {
     setCountdown(30);
     setCanResend(false);
     setOtp(['', '', '', '', '', '']);
     inputRefs.current[0]?.focus();
-    Alert.alert('OTP Sent', `A new verification code has been sent for ${type} verification`);
+
+    if (type === 'GSTIN' && gstinOtpRequestId) {
+      try {
+        const { resendGSTINOTP } = await import('@/services/backendApi');
+        const result = await resendGSTINOTP(gstinOtpRequestId);
+        if (result.success) {
+          Alert.alert('OTP Sent', 'A new OTP has been sent to the GSTIN-registered mobile number.');
+        } else {
+          Alert.alert('Resend Failed', result.error || 'Could not resend OTP. Please try again.');
+        }
+      } catch {
+        Alert.alert('Resend Failed', 'Could not resend OTP. Please check your connection.');
+      }
+    } else {
+      Alert.alert('OTP Sent', `A new verification code has been sent for ${type} verification`);
+    }
   };
 
   const changeGstinPan = () => {

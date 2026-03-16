@@ -40,21 +40,30 @@ function parseAddress(fullAddress: string) {
   };
 }
 
-function generateOTP(): string {
-  const digits = '0123456789';
-  let otp = '';
-  for (let i = 0; i < 6; i++) {
-    otp += digits[Math.floor(Math.random() * 10)];
-  }
-  return otp;
-}
+async function sendOtpViaSupabaseAuth(phone: string): Promise<{ success: boolean; error?: string }> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
 
-async function hashOTP(otp: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(otp);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({ phone: `+91${phone}` }),
+    });
+
+    if (resp.ok) {
+      return { success: true };
+    }
+    const errBody = await resp.text();
+    console.error('Supabase Auth OTP error:', resp.status, errBody);
+    return { success: false, error: `SMS send failed (${resp.status})` };
+  } catch (e) {
+    console.error('Supabase Auth OTP exception:', e);
+    return { success: false, error: 'Failed to send OTP' };
+  }
 }
 
 serve(async (req: Request) => {
@@ -238,9 +247,6 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  const otp = generateOTP();
-  const otpHash = await hashOTP(otp);
-
   const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -250,63 +256,21 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   const { data: insertData, error: insertErr } = await supabase.from('otp_verifications').insert({
     phone: cleanRegisteredMobile,
-    otp_hash: otpHash,
+    otp_hash: 'supabase_auth',
     purpose: 'gstin_verify',
     expires_at: expiresAt,
   }).select('id');
 
   if (insertErr || !insertData || insertData.length === 0) {
-    console.error('Failed to store OTP:', insertErr);
+    console.error('Failed to store OTP record:', insertErr);
     return new Response(JSON.stringify({ error: 'Failed to initiate verification. Please try again.' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
   const otpRequestId = insertData[0].id;
 
-  const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
-  const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
-  const twilioFrom = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+  const smsResult = await sendOtpViaSupabaseAuth(cleanRegisteredMobile);
 
-  if (!twilioSid || !twilioToken || !twilioFrom) {
-    console.error('Twilio credentials not configured:', { hasSid: !!twilioSid, hasToken: !!twilioToken, hasFrom: !!twilioFrom });
-    return new Response(JSON.stringify({
-      error: 'SMS service not configured. Please contact support.',
-      taxpayerInfo,
-      mobileMatch: false,
-      registeredMobile: maskMobile(cleanRegisteredMobile),
-      smsFailed: true,
-    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  }
-
-  let smsSent = false;
-  try {
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-    const credentials = btoa(`${twilioSid}:${twilioToken}`);
-    const smsBody = new URLSearchParams({
-      To: `+91${cleanRegisteredMobile}`,
-      From: twilioFrom,
-      Body: `${otp} is your OTP to verify the GSTIN-registered mobile on Manager ERP. Valid for 10 minutes. Do not share this code. - Manager`,
-    });
-
-    const smsResp = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${credentials}`,
-      },
-      body: smsBody.toString(),
-    });
-
-    if (smsResp.ok) {
-      smsSent = true;
-    } else {
-      const smsErr = await smsResp.text();
-      console.error('Twilio SMS error:', smsResp.status, smsErr);
-    }
-  } catch (smsError) {
-    console.error('Twilio SMS send failed:', smsError);
-  }
-
-  if (!smsSent) {
+  if (!smsResult.success) {
     return new Response(JSON.stringify({
       error: 'Failed to send verification SMS. Please try again.',
       taxpayerInfo,
