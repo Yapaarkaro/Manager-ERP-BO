@@ -101,12 +101,20 @@ export const getContainerStyles = () => {
 };
 
 // Web-specific responsive constants
-const WEB_MAX_CONTENT_WIDTH = 1400; // Maximum width for content on web
-const WEB_CONTENT_PADDING = 32; // Horizontal padding for web content
+const WEB_MAX_CONTENT_WIDTH = 1400;
+const WEB_CONTENT_PADDING = 32;
+const WEB_MOBILE_CONTENT_PADDING = 16; // Match native app padding on mobile-width web / PWA
+
+function isMobileWeb(): boolean {
+  if (Platform.OS !== 'web') return false;
+  return Dimensions.get('window').width <= 768;
+}
 
 // Web-responsive container styles
 export const getWebContainerStyles = () => {
   const colors = getPlatformColors();
+  const mobile = isMobileWeb();
+  const hPad = mobile ? WEB_MOBILE_CONTENT_PADDING : WEB_CONTENT_PADDING;
   
   return StyleSheet.create({
     webContainer: {
@@ -114,7 +122,7 @@ export const getWebContainerStyles = () => {
       backgroundColor: colors.background,
       ...Platform.select({
         web: {
-          alignItems: 'center',
+          alignItems: mobile ? undefined : ('center' as any),
         },
       }),
     },
@@ -122,7 +130,7 @@ export const getWebContainerStyles = () => {
       flex: 1,
       width: '100%',
       ...Platform.select({
-        web: {
+        web: mobile ? {} : {
           maxWidth: WEB_MAX_CONTENT_WIDTH,
           marginHorizontal: 'auto',
           paddingHorizontal: WEB_CONTENT_PADDING,
@@ -132,7 +140,7 @@ export const getWebContainerStyles = () => {
     webScrollContent: {
       ...Platform.select({
         web: {
-          paddingHorizontal: WEB_CONTENT_PADDING,
+          paddingHorizontal: hPad,
         },
         default: {
           paddingHorizontal: 16,

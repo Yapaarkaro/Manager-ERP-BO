@@ -194,10 +194,30 @@ function useWebPWA() {
     webAppMeta.name = 'mobile-web-app-capable';
     webAppMeta.content = 'yes';
     document.head.appendChild(webAppMeta);
+    const appleWebApp = document.createElement('meta');
+    appleWebApp.name = 'apple-mobile-web-app-capable';
+    appleWebApp.content = 'yes';
+    document.head.appendChild(appleWebApp);
     const appleStatus = document.createElement('meta');
     appleStatus.name = 'apple-mobile-web-app-status-bar-style';
     appleStatus.content = 'default';
     document.head.appendChild(appleStatus);
+    const appleTitle = document.createElement('meta');
+    appleTitle.name = 'apple-mobile-web-app-title';
+    appleTitle.content = 'Manager';
+    document.head.appendChild(appleTitle);
+
+    // Ensure viewport is set for mobile-native feel (no zoom, full width)
+    let viewport = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
+    if (viewport) {
+      viewport.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+    } else {
+      viewport = document.createElement('meta');
+      viewport.name = 'viewport';
+      viewport.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+      document.head.appendChild(viewport);
+    }
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
@@ -244,6 +264,25 @@ function useWebGlobalStyles() {
       ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
       /* Remove tap highlight on mobile web */
       * { -webkit-tap-highlight-color: transparent; }
+      /* PWA: full-width body, respect safe areas on notched devices */
+      html, body, #root {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+        padding: 0;
+        margin: 0;
+        -webkit-overflow-scrolling: touch;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+      /* Disable pull-to-refresh and overscroll bounce in standalone PWA */
+      @media (display-mode: standalone) {
+        body { overscroll-behavior: none; }
+      }
+      /* Prevent text selection and long-press context menu for native feel */
+      @media (display-mode: standalone) {
+        body { -webkit-user-select: none; user-select: none; }
+        input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+      }
     `;
     document.head.appendChild(style);
   }, []);

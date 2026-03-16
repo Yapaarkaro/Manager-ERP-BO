@@ -21,18 +21,19 @@ function ResponsiveContainer({ children, style, fullWidth = false, narrow = fals
     return () => sub?.remove();
   }, []);
 
-  if (Platform.OS === 'web' && !fullWidth && width > 768) {
-    const effectiveMaxWidth = maxWidth || (narrow ? 680 : 1400);
-    return (
-      <View style={[webStyles.webContainer, style]}>
-        <View style={[webStyles.webContentWrapper, { maxWidth: effectiveMaxWidth }]}>
-          {children}
-        </View>
-      </View>
-    );
+  // On mobile-width web (PWA or browser), render full-width like a native app
+  if (Platform.OS !== 'web' || fullWidth || width <= 768) {
+    return <View style={[{ flex: 1 }, style]}>{children}</View>;
   }
-  
-  return <View style={[{ flex: 1 }, style]}>{children}</View>;
+
+  const effectiveMaxWidth = maxWidth || (narrow ? 680 : 1400);
+  return (
+    <View style={[webStyles.webContainer, style]}>
+      <View style={[webStyles.webContentWrapper, { maxWidth: effectiveMaxWidth }]}>
+        {children}
+      </View>
+    </View>
+  );
 }
 
 export default React.memo(ResponsiveContainer);
