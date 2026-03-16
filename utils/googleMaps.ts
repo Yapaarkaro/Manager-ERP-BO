@@ -82,9 +82,12 @@ export const loadGoogleMapsScript = (apiKey: string): Promise<void> => {
     script.defer = true;
 
     script.onload = () => {
-      // Wait for API to be fully available
+      let attempts = 0;
       const checkApi = () => {
-        if (window.google && window.google.maps && window.google.maps.Map) {
+        attempts++;
+        if (window.google?.maps?.Map && window.google?.maps?.places?.AutocompleteService) {
+          resolve();
+        } else if (attempts > 50) {
           resolve();
         } else {
           setTimeout(checkApi, 100);
@@ -106,10 +109,14 @@ export const loadGoogleMapsScript = (apiKey: string): Promise<void> => {
  * Note: AutocompleteService is still the standard way to get predictions
  */
 export const createAutocompleteService = (): google.maps.places.AutocompleteService | null => {
-  if (typeof window === 'undefined' || !window.google?.maps?.places) {
+  try {
+    if (typeof window === 'undefined' || !window.google?.maps?.places?.AutocompleteService) {
+      return null;
+    }
+    return new google.maps.places.AutocompleteService();
+  } catch {
     return null;
   }
-  return new google.maps.places.AutocompleteService();
 };
 
 /**
@@ -117,12 +124,15 @@ export const createAutocompleteService = (): google.maps.places.AutocompleteServ
  * Note: PlacesService is still the standard way to get place details
  */
 export const createPlacesService = (): google.maps.places.PlacesService | null => {
-  if (typeof window === 'undefined' || !window.google?.maps?.places) {
+  try {
+    if (typeof window === 'undefined' || !window.google?.maps?.places?.PlacesService) {
+      return null;
+    }
+    const dummyDiv = document.createElement('div');
+    return new google.maps.places.PlacesService(dummyDiv);
+  } catch {
     return null;
   }
-  // Create a dummy div for PlacesService (required by Google Maps API)
-  const dummyDiv = document.createElement('div');
-  return new google.maps.places.PlacesService(dummyDiv);
 };
 
 /**

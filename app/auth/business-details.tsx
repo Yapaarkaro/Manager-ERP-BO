@@ -167,6 +167,10 @@ export default function BusinessDetailsScreen() {
 
   // ✅ Auto-fill data from GSTIN verification IMMEDIATELY (don't wait for backend progress)
   useEffect(() => {
+    // Skip if returning from another screen with existing form data
+    if (incomingName || incomingBusinessName || incomingBusinessType) {
+      return;
+    }
     // Auto-fill GST data immediately if available, but check backend progress in parallel
     if (!isInitialized && type === 'GSTIN' && gstinData && !hasAutoFilled) {
       console.log('📝 Auto-filling from GSTIN data IMMEDIATELY');
@@ -224,7 +228,7 @@ export default function BusinessDetailsScreen() {
         console.error('Error parsing GSTIN data:', error);
       }
     }
-  }, [type, gstinData, isInitialized, hasAutoFilled]); // ✅ Removed hasLoadedProgress dependency - show immediately
+  }, [type, gstinData, isInitialized, hasAutoFilled, incomingName, incomingBusinessName, incomingBusinessType]);
 
   // ✅ Check backend progress in parallel and override if user data exists
   useEffect(() => {
@@ -397,20 +401,32 @@ export default function BusinessDetailsScreen() {
 
       console.log('✅ Business details saved successfully. Business ID:', businessResult.businessId);
       
-      // ✅ Optimistically save signup progress (DataStore updated immediately, backend sync in background)
-      optimisticSaveSignupProgress({
-        mobile: mobileNumber,
-        mobileVerified: true,
-        taxIdType: type as 'GSTIN' | 'PAN',
-        taxIdValue: value as string,
-        taxIdVerified: true,
-        ownerName: name,
-        ownerDob: panDob as string,
-        businessName: businessName,
-        businessType: finalBusinessType,
-        gstinData: parsedGstinData,
-        currentStep: 'businessDetails',
-      });
+      // Trim gstinData to avoid sending the full IDfy payload (prevents 500 errors)
+      const trimmedGstinData = parsedGstinData ? (() => {
+        try {
+          const d = typeof parsedGstinData === 'string' ? JSON.parse(parsedGstinData) : parsedGstinData;
+          const ti = d?.taxpayerInfo || {};
+          return { taxpayerInfo: { lgnm: ti.lgnm, tradeNam: ti.tradeNam, gstin: ti.gstin, sts: ti.sts, ctb: ti.ctb, pradr: ti.pradr }, mobileMatch: d?.mobileMatch };
+        } catch { return parsedGstinData; }
+      })() : undefined;
+
+      try {
+        optimisticSaveSignupProgress({
+          mobile: mobileNumber,
+          mobileVerified: true,
+          taxIdType: type as 'GSTIN' | 'PAN',
+          taxIdValue: value as string,
+          taxIdVerified: true,
+          ownerName: name,
+          ownerDob: panDob as string,
+          businessName: businessName,
+          businessType: finalBusinessType,
+          gstinData: trimmedGstinData,
+          currentStep: 'businessDetails',
+        });
+      } catch (progressErr) {
+        console.warn('⚠️ Failed to save signup progress (non-blocking):', progressErr);
+      }
 
       // For GSTIN users, auto-create primary address from GSTIN data and skip to address confirmation
       // ✅ CRITICAL: Business must be created first (we already awaited it above)
@@ -433,31 +449,37 @@ export default function BusinessDetailsScreen() {
           if (parsedGstinDataForAddress.pradr && parsedGstinDataForAddress.pradr.addr) {
             const addr = parsedGstinDataForAddress.pradr.addr;
           
-            // Build address components from GSTIN data
-            // addressLine1: Building Name, Floor Number (not door number - that's separate)
-            const addressLine1Parts = [addr.bnm, addr.flno].filter(Boolean).join(', ');
-            const addressLine2 = addr.st || addr.loc || '';
+            const doorNumber = addr.bno || '';
+            const buildingParts = [addr.bnm, addr.flno].filter(Boolean);
+            const addressLine1 = buildingParts.length > 0 ? buildingParts.join(', ') : addr.st || '';
+            const addressLine2 = buildingParts.length > 0 ? (addr.st || addr.loc || '') : (addr.loc || '');
+            const extraLines: string[] = [];
+            if (buildingParts.length > 0 && addr.st && addr.loc && addr.st !== addr.loc) {
+              extraLines.push(addr.loc);
+            }
+            if (addr.dst && addr.dst !== (addr.city || '')) {
+              extraLines.push(addr.dst);
+            }
             const city = addr.city || addr.dst || '';
             const pincode = addr.pncd || '';
             const stateName = addr.stcd || '';
             
-            // Create primary address from GSTIN data
             const primaryAddress: BusinessAddress & { backendId?: string } = {
               id: `addr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               name: businessName.trim() || 'Primary Address',
               type: 'primary' as const,
-              doorNumber: addr.bno || '', // Door number goes in its own field
-              addressLine1: addressLine1Parts || addr.st || '', // Building name, floor
-              addressLine2: addressLine2, // Street, locality
-              city: city,
-              pincode: pincode,
-              stateName: stateName,
+              doorNumber,
+              addressLine1,
+              addressLine2,
+              additionalLines: extraLines.length > 0 ? extraLines : undefined,
+              city,
+              pincode,
+              stateName,
               stateCode: getGSTINStateCode(stateName),
               isPrimary: true,
               status: 'active',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-              // Add manager and phone for primary addresses to show user info
               manager: name,
               phone: typeof mobile === 'string' ? mobile : (Array.isArray(mobile) ? mobile[0] : ''),
             };
@@ -469,19 +491,22 @@ export default function BusinessDetailsScreen() {
             // This makes the UI feel instant while backend sync happens asynchronously
             optimisticAddAddress(primaryAddress, { showError: false });
             
-            // ✅ Optimistically save signup progress (non-blocking)
-            optimisticSaveSignupProgress({
-              mobile: mobileNumber,
-              mobileVerified: true,
-              taxIdType: type as 'GSTIN' | 'PAN',
-              taxIdValue: value as string,
-              taxIdVerified: true,
-              ownerName: name,
-              businessName: businessName,
-              businessType: finalBusinessType,
-              gstinData: parsedGstinData,
-              currentStep: 'primaryAddress',
-            });
+            try {
+              optimisticSaveSignupProgress({
+                mobile: mobileNumber,
+                mobileVerified: true,
+                taxIdType: type as 'GSTIN' | 'PAN',
+                taxIdValue: value as string,
+                taxIdVerified: true,
+                ownerName: name,
+                businessName: businessName,
+                businessType: finalBusinessType,
+                gstinData: trimmedGstinData,
+                currentStep: 'primaryAddress',
+              });
+            } catch (progressErr) {
+              console.warn('⚠️ Failed to save signup progress (non-blocking):', progressErr);
+            }
           } else {
             // No address in GSTIN data, fall back to normal flow
             console.warn('⚠️ No address in GSTIN data, falling back to normal flow');

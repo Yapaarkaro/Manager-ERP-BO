@@ -650,6 +650,11 @@ export default function EditAddressSimpleScreen() {
       return;
     }
 
+    if (!editAddressId) {
+      Alert.alert('Error', 'No address selected for editing. Please go back and try again.');
+      return;
+    }
+
     setIsLoading(true);
     
     try {
@@ -661,7 +666,7 @@ export default function EditAddressSimpleScreen() {
           const { data: loc } = await supabase
             .from('locations')
             .select('*')
-            .eq('id', editAddressId)
+            .eq('id', editAddressId as string)
             .maybeSingle();
           if (loc) {
             existingAddress = mapLocationToAddress(loc);

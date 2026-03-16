@@ -13,31 +13,71 @@ function maskMobile(mobile: string): string {
   return mobile.slice(0, 2) + '*'.repeat(mobile.length - 4) + mobile.slice(-2);
 }
 
+const STATE_NAMES = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Jammu and Kashmir','Ladakh','Chandigarh','Puducherry','Lakshadweep','Andaman and Nicobar Islands','Dadra and Nagar Haveli and Daman and Diu'];
+
 function parseAddress(fullAddress: string) {
-  if (!fullAddress) return { bno: '', st: '', loc: '', dst: '', city: '', stcd: '', pncd: '', flno: '', bnm: '', lg: '', lt: '' };
-  const parts = fullAddress.split(',').map(p => p.trim());
+  const empty = { bno: '', st: '', loc: '', dst: '', city: '', stcd: '', pncd: '', flno: '', bnm: '', lg: '', lt: '' };
+  if (!fullAddress) return empty;
+
+  const parts = fullAddress.split(',').map(p => p.trim()).filter(Boolean);
   const pincodeMatch = fullAddress.match(/\b(\d{6})\b/);
   const pincode = pincodeMatch ? pincodeMatch[1] : '';
-  const stateNames = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Jammu and Kashmir','Ladakh','Chandigarh','Puducherry','Lakshadweep','Andaman and Nicobar Islands','Dadra and Nagar Haveli and Daman and Diu'];
+
   let state = '';
-  for (const s of stateNames) {
+  for (const s of STATE_NAMES) {
     if (fullAddress.toLowerCase().includes(s.toLowerCase())) { state = s; break; }
   }
-  const city = parts.length >= 3 ? parts[parts.length - 3] || '' : '';
-  const district = parts.length >= 4 ? parts[parts.length - 4] || '' : '';
-  return {
-    bno: parts[0] || '',
-    st: parts.length > 2 ? parts[1] || '' : '',
-    loc: parts.length > 3 ? parts[2] || '' : '',
-    dst: district,
-    city: city,
-    stcd: state,
-    pncd: pincode,
-    flno: '',
-    bnm: parts[0] || '',
-    lg: '',
-    lt: '',
-  };
+
+  const skipWords = new Set([pincode, state.toLowerCase()]);
+  const meaningful = parts.filter(p => {
+    const lower = p.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    return lower && !skipWords.has(lower) && !/^\d{6}$/.test(p.trim());
+  });
+
+  const bno = meaningful[0] || '';
+  const bnm = meaningful.length > 1 ? meaningful[1] : '';
+  const st = meaningful.length > 2 ? meaningful[2] : '';
+  const loc = meaningful.length > 3 ? meaningful[3] : '';
+  const remaining = meaningful.slice(4);
+
+  let city = '';
+  let dst = '';
+  if (remaining.length >= 2) {
+    dst = remaining[remaining.length - 2] || '';
+    city = remaining[remaining.length - 1] || '';
+  } else if (remaining.length === 1) {
+    city = remaining[0] || '';
+  }
+
+  if (!city && meaningful.length >= 3) {
+    city = meaningful[meaningful.length - 1] || '';
+  }
+
+  return { bno, bnm, st, loc, dst, city, stcd: state, pncd: pincode, flno: '', lg: '', lt: '' };
+}
+
+function buildStructuredAddress(details: any, principalContact: any) {
+  const rawAddress = principalContact.address || '';
+  const parsed = parseAddress(rawAddress);
+
+  const structured = details.pradr?.addr || details.address_details || {};
+  if (structured.bno || structured.bnm || structured.st) {
+    return {
+      bno: structured.bno || structured.door_number || parsed.bno,
+      bnm: structured.bnm || structured.building_name || parsed.bnm,
+      st: structured.st || structured.street || parsed.st,
+      loc: structured.loc || structured.locality || parsed.loc,
+      dst: structured.dst || structured.district || parsed.dst,
+      city: structured.city || parsed.city,
+      stcd: structured.stcd || structured.state || parsed.stcd,
+      pncd: structured.pncd || structured.pincode || parsed.pncd,
+      flno: structured.flno || structured.floor_number || '',
+      lg: structured.lg || '',
+      lt: structured.lt || '',
+    };
+  }
+
+  return parsed;
 }
 
 async function sendOtpViaSupabaseAuth(phone: string): Promise<{ success: boolean; error?: string }> {
@@ -206,8 +246,7 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
   const principalContact = details.contact_details?.principal || {};
   const registeredMobile = result.mobile || principalContact.mobile || '';
   const registeredEmail = principalContact.email || result.email || '';
-  const fullAddress = principalContact.address || '';
-  const parsedAddr = parseAddress(fullAddress);
+  const structuredAddr = buildStructuredAddress(details, principalContact);
 
   const taxpayerInfo = {
     lgnm: details.legal_name || '',
@@ -220,7 +259,7 @@ async function handleIDfyLookup(gstin: string, userMobile: string | undefined, r
     nba: details.nature_bus_activities || [],
     pradr: {
       ntr: (details.nature_bus_activities || []).join(', '),
-      addr: parsedAddr,
+      addr: structuredAddr,
     },
     promoters: details.promoters || [],
     registeredEmail: registeredEmail,
