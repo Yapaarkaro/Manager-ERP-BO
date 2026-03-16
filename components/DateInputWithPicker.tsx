@@ -137,7 +137,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
           onChangeText={handleTextChange}
           placeholder={placeholder}
           placeholderTextColor={Colors.textLight}
-          keyboardType="number-pad"
+          keyboardType={Platform.OS === 'web' ? 'default' : 'number-pad'}
           maxLength={10}
         />
         <TouchableOpacity

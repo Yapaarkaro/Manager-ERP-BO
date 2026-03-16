@@ -18,7 +18,7 @@ import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { ArrowLeft, Building2, Plus, Search, X, ChevronDown, ArrowDownLeft, ArrowUpRight, FileText, Check, Receipt, Edit3, Trash2 } from 'lucide-react-native';
 import { BankAccount } from '@/utils/dataStore';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { getBankTransactions, addBankTransaction, invalidateApiCache, clearBankTransaction, deleteBankTransaction } from '@/services/backendApi';
+import { getBankTransactions, addBankTransaction, invalidateApiCache, clearBankTransaction, deleteBankTransaction, createInAppNotification } from '@/services/backendApi';
 import { onTransactionChange } from '@/utils/transactionEvents';
 import DateInputWithPicker from '@/components/DateInputWithPicker';
 import { safeRouter } from '@/utils/safeRouter';
@@ -269,18 +269,48 @@ export default function BankDetailsScreen() {
   };
   const handleConfirmChequeAction = async () => {
     if (!selectedTransaction || !chequeAction) return;
+    const bizId = businessData?.business?.id;
+    const counterparty = selectedTransaction.counterpartyName || selectedTransaction.counterparty_name || '';
     if (chequeAction === 'clear') {
       if (!clearanceDate) { Alert.alert('Error', 'Please select a clearance date.'); return; }
       try {
         const r = await clearBankTransaction(selectedTransaction.id, clearanceDate);
-        if (r.success) { loadTransactions(); Alert.alert('Success', 'Cheque cleared successfully!'); }
+        if (r.success) {
+          loadTransactions();
+          Alert.alert('Success', 'Cheque cleared successfully!');
+          if (notifyCustomer && bizId) {
+            createInAppNotification({
+              businessId: bizId,
+              recipientId: 'owner',
+              recipientType: 'owner',
+              title: 'Cheque Cleared',
+              message: `Cheque from ${counterparty} for ${formatCurrencyINR(selectedTransaction.amount || 0)} has been cleared.`,
+              type: 'info',
+              category: 'payment',
+            }).catch(() => {});
+          }
+        }
         else Alert.alert('Error', 'Failed to clear cheque.');
       } catch { Alert.alert('Error', 'Failed to clear cheque.'); }
     } else {
       if (!bounceReason.trim()) { Alert.alert('Error', 'Please provide a reason.'); return; }
       try {
         const r = await deleteBankTransaction(selectedTransaction.id);
-        if (r.success) { loadTransactions(); Alert.alert('Success', 'Cheque bounced.'); }
+        if (r.success) {
+          loadTransactions();
+          Alert.alert('Success', 'Cheque bounced.');
+          if (notifyCustomer && bizId) {
+            createInAppNotification({
+              businessId: bizId,
+              recipientId: 'owner',
+              recipientType: 'owner',
+              title: 'Cheque Bounced',
+              message: `Cheque from ${counterparty} for ${formatCurrencyINR(selectedTransaction.amount || 0)} has bounced. Reason: ${bounceReason.trim()}`,
+              type: 'warning',
+              category: 'payment',
+            }).catch(() => {});
+          }
+        }
         else Alert.alert('Error', 'Failed to bounce cheque.');
       } catch { Alert.alert('Error', 'Failed to bounce cheque.'); }
     }

@@ -63,7 +63,7 @@ import FAB from '@/components/FAB';
 import { DashboardSkeleton } from '@/components/SkeletonLoader';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
-import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest } from '@/services/backendApi';
+import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest, withdrawLeaveRequest } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -193,6 +193,7 @@ export default function DashboardScreen() {
   const [reviewingLeave, setReviewingLeave] = useState<any>(null);
   const [reviewNote, setReviewNote] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [allLeaveRequests, setAllLeaveRequests] = useState<any[]>([]);
 
   const [staffOnline, setStaffOnline] = useState(false);
   const [staffToggleLoading, setStaffToggleLoading] = useState(false);
@@ -398,6 +399,8 @@ export default function DashboardScreen() {
       if (isOwner) {
         const res = await getLeaveRequests({ status: 'pending' });
         if (res.success) setPendingLeaveRequests(res.leaveRequests || []);
+        const allRes = await getLeaveRequests();
+        if (allRes.success) setAllLeaveRequests(allRes.leaveRequests || []);
       }
     } catch {}
   }, [isStaff, isOwner, staffId]);
@@ -474,6 +477,40 @@ export default function DashboardScreen() {
       Alert.alert('Error', res.error || 'Failed to update leave request.');
     }
   };
+
+  const handleWithdrawLeave = async (leaveId: string) => {
+    Alert.alert('Withdraw Leave', 'Are you sure you want to withdraw this leave request?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Withdraw', style: 'destructive', onPress: async () => {
+          const res = await withdrawLeaveRequest(leaveId);
+          if (res.success) {
+            Alert.alert('Withdrawn', 'Your leave request has been withdrawn.');
+            loadLeaveRequests();
+          } else {
+            Alert.alert('Error', res.error || 'Failed to withdraw leave request.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const isStaffOnLeave = useCallback(() => {
+    if (!isStaff) return false;
+    const today = new Date().toISOString().split('T')[0];
+    return myLeaveRequests.some(lr =>
+      lr.status === 'approved' && lr.start_date <= today && lr.end_date >= today
+    );
+  }, [isStaff, myLeaveRequests]);
+
+  const requireOnline = useCallback((action: () => void) => {
+    if (isOwner) { action(); return; }
+    if (!staffOnline) {
+      Alert.alert('Go Online First', 'You must be online to perform this action. Please check in first.');
+      return;
+    }
+    action();
+  }, [isOwner, staffOnline]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -1685,64 +1722,88 @@ export default function DashboardScreen() {
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
-  const renderApplyForLeave = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Leave Management</Text>
-        <CalendarDays size={20} color={Colors.text} />
-      </View>
+  const renderApplyForLeave = () => {
+    const onLeave = isStaffOnLeave();
+    const hasPendingLeave = myLeaveRequests.some(lr => lr.status === 'pending');
 
-      <Pressable
-        onPress={() => {
-          setLeaveStartDate(getTodayStr());
-          setLeaveEndDate(getTodayStr());
-          setShowLeaveModal(true);
-        }}
-        style={({ pressed }) => [
-          {
-            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-            paddingVertical: 14, borderRadius: 12,
-            backgroundColor: pressed ? '#4338CA' : Colors.primary,
-          },
-        ]}
-      >
-        <CalendarDays size={18} color="#fff" />
-        <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Apply for Leave</Text>
-      </Pressable>
-
-      {myLeaveRequests.length > 0 && (
-        <View style={{ marginTop: 16, gap: 10 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>My Leave Requests</Text>
-          {myLeaveRequests.slice(0, 5).map((lr) => (
-            <View key={lr.id} style={{
-              backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12,
-              borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
-            }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text }}>
-                  {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
-                </Text>
-                <View style={{
-                  backgroundColor: getLeaveStatusColor(lr.status) + '20',
-                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-                }}>
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
-                    {lr.status}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
-              {lr.reviewer_note && (
-                <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }}>
-                  Owner: {lr.reviewer_note}
-                </Text>
-              )}
-            </View>
-          ))}
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Leave Management</Text>
+          <CalendarDays size={20} color={Colors.text} />
         </View>
-      )}
-    </View>
-  );
+
+        <Pressable
+          onPress={() => {
+            setLeaveStartDate(getTodayStr());
+            setLeaveEndDate(getTodayStr());
+            setShowLeaveModal(true);
+          }}
+          disabled={onLeave || hasPendingLeave}
+          style={({ pressed }) => [
+            {
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+              paddingVertical: 14, borderRadius: 12,
+              backgroundColor: (onLeave || hasPendingLeave) ? Colors.grey[300] : pressed ? '#4338CA' : Colors.primary,
+            },
+          ]}
+        >
+          <CalendarDays size={18} color="#fff" />
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>
+            {onLeave ? 'Currently On Leave' : hasPendingLeave ? 'Leave Request Pending' : 'Apply for Leave'}
+          </Text>
+        </Pressable>
+
+        {myLeaveRequests.length > 0 && (
+          <View style={{ marginTop: 16, gap: 10 }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>My Leave Requests</Text>
+            {myLeaveRequests.map((lr) => (
+              <View key={lr.id} style={{
+                backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12,
+                borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
+              }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text }}>
+                    {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+                  </Text>
+                  <View style={{
+                    backgroundColor: getLeaveStatusColor(lr.status) + '20',
+                    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                  }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
+                      {lr.status}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
+                {lr.reviewer_note && (
+                  <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }}>
+                    Owner: {lr.reviewer_note}
+                  </Text>
+                )}
+                {lr.reviewed_at && (
+                  <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
+                    Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </Text>
+                )}
+                {lr.status === 'pending' && (
+                  <Pressable
+                    onPress={() => handleWithdrawLeave(lr.id)}
+                    style={({ pressed }) => [{
+                      marginTop: 8, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+                      backgroundColor: pressed ? '#B91C1C' : Colors.error,
+                    }]}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#fff' }}>Withdraw Request</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
 
   const renderPendingLeaveRequests = () => {
     if (pendingLeaveRequests.length === 0) return <View />;
@@ -1788,11 +1849,56 @@ export default function DashboardScreen() {
     );
   };
 
+  const renderLeaveLog = () => {
+    if (allLeaveRequests.length === 0) return <View />;
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Leave Log</Text>
+          <CalendarDays size={20} color={Colors.text} />
+        </View>
+        {allLeaveRequests.slice(0, 20).map((lr) => (
+          <View key={lr.id} style={{
+            backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12, marginBottom: 8,
+            borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
+          }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
+              <View style={{
+                backgroundColor: getLeaveStatusColor(lr.status) + '20',
+                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+              }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
+                  {lr.status}
+                </Text>
+              </View>
+            </View>
+            <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 2 }}>
+              {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+            </Text>
+            <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
+            {lr.reviewer_note && (
+              <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }}>
+                Note: {lr.reviewer_note}
+              </Text>
+            )}
+            {lr.reviewed_at && (
+              <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
+                Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const dashboardSections = [
     { id: 'greeting', render: renderGreeting },
     ...(isStaff ? [{ id: 'attendance-toggle', render: renderStaffAttendanceToggle }] : []),
     ...(isStaff ? [{ id: 'apply-leave', render: renderApplyForLeave }] : []),
     ...(isOwner && pendingLeaveRequests.length > 0 ? [{ id: 'pending-leaves', render: renderPendingLeaveRequests }] : []),
+    ...(isOwner && allLeaveRequests.length > 0 ? [{ id: 'leave-log', render: renderLeaveLog }] : []),
     { id: 'kpi', render: renderKPICards },
     ...(hasPermission('inventory') ? [{ id: 'discrepancies', render: renderStockDiscrepancies }] : []),
     { id: 'notifications', render: renderNotifications },
@@ -1887,6 +1993,13 @@ export default function DashboardScreen() {
 
               <FAB
                 onAction={handleFABAction}
+                onBeforeAction={(actionId) => {
+                  if (isStaff && !staffOnline && actionId !== 'notify-owner') {
+                    Alert.alert('Go Online First', 'You must be online to perform this action. Please check in first.');
+                    return false;
+                  }
+                  return true;
+                }}
                 hiddenActions={[
                   ...(!hasPermission('sales') ? ['new-sale'] : []),
                   ...(!hasPermission('inventory') ? ['return', 'stock'] : []),
@@ -2191,18 +2304,26 @@ export default function DashboardScreen() {
                     <TextInput
                       style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
                       value={leaveStartDate}
-                      onChangeText={setLeaveStartDate}
+                      onChangeText={(t) => {
+                        const cleaned = t.replace(/[^0-9-]/g, '');
+                        if (cleaned.length <= 10) setLeaveStartDate(cleaned);
+                      }}
                       placeholder="YYYY-MM-DD"
                       placeholderTextColor={Colors.textLight}
+                      keyboardType="default"
                     />
 
                     <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>End Date *</Text>
                     <TextInput
                       style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
                       value={leaveEndDate}
-                      onChangeText={setLeaveEndDate}
+                      onChangeText={(t) => {
+                        const cleaned = t.replace(/[^0-9-]/g, '');
+                        if (cleaned.length <= 10) setLeaveEndDate(cleaned);
+                      }}
                       placeholder="YYYY-MM-DD"
                       placeholderTextColor={Colors.textLight}
+                      keyboardType="default"
                     />
 
                     <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Reason *</Text>

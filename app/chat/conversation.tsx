@@ -187,7 +187,15 @@ export default function ConversationScreen() {
           .select('name')
           .eq('id', convo.participant_other_id)
           .maybeSingle();
-        setResolvedName(staffRow?.name || convo.participant_other_name || 'Staff');
+        const staffName = staffRow?.name || null;
+        if (staffName) {
+          setResolvedName(staffName);
+          if (staffName !== convo.participant_other_name) {
+            supabase.from('conversations').update({ participant_other_name: staffName }).eq('id', conversationId).then(() => {});
+          }
+        } else {
+          setResolvedName(convo.participant_other_name && convo.participant_other_name !== 'Staff' ? convo.participant_other_name : 'Staff Member');
+        }
       } else if (convo.participant_other_type === 'supplier') {
         const { data: supplierRow } = await supabase
           .from('suppliers')

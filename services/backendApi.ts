@@ -2623,6 +2623,14 @@ export async function createInvoice(params: {
   staffName?: string;
   locationId?: string;
   bankAccountId?: string;
+  chequeDetails?: {
+    bankAccount?: string;
+    chequeNumber?: string;
+    chequeDate?: string;
+    bankName?: string;
+    autoClear?: boolean;
+  };
+  bankTransferReference?: string;
   invoiceExtras?: {
     deliveryNote?: string;
     paymentTermsMode?: string;
@@ -2677,6 +2685,13 @@ export async function createInvoice(params: {
       round_off_amount: params.roundOffAmount || 0,
       bank_account_id: params.bankAccountId || null,
       invoice_extras: params.invoiceExtras || null,
+      cheque_details: params.chequeDetails ? {
+        cheque_number: params.chequeDetails.chequeNumber,
+        cheque_date: params.chequeDetails.chequeDate,
+        bank_name: params.chequeDetails.bankName,
+        auto_clear: params.chequeDetails.autoClear,
+      } : null,
+      bank_transfer_reference: params.bankTransferReference || null,
     }, true);
 
     if (!result.success) return { success: false, error: result.error || 'Failed to create invoice' };
@@ -3887,13 +3902,16 @@ export async function getOrCreateConversation(params: {
 
     // 3. Create new conversation
     let resolvedName = params.otherPartyName;
-    if (!resolvedName || resolvedName === 'Unknown') {
+    if (!resolvedName || resolvedName === 'Unknown' || resolvedName === 'Staff') {
       if (params.otherPartyType === 'supplier') {
         const { data: sRow } = await supabase.from('suppliers').select('business_name, contact_person').eq('id', params.otherPartyId).maybeSingle();
         resolvedName = sRow?.business_name || sRow?.contact_person || resolvedName;
       } else if (params.otherPartyType === 'customer') {
         const { data: cRow } = await supabase.from('customers').select('name, business_name').eq('id', params.otherPartyId).maybeSingle();
         resolvedName = cRow?.business_name || cRow?.name || resolvedName;
+      } else if (params.otherPartyType === 'staff') {
+        const { data: staffRow } = await supabase.from('staff').select('name').eq('id', params.otherPartyId).maybeSingle();
+        resolvedName = staffRow?.name || resolvedName;
       }
     }
 
@@ -4493,6 +4511,36 @@ export async function updateLeaveRequest(
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to update leave request' };
+  }
+}
+
+export async function withdrawLeaveRequest(
+  requestId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const ctx = await getUserBusinessId();
+    if (!ctx) return { success: false, error: 'Not authenticated' };
+
+    const { data: lr } = await supabase
+      .from('leave_requests')
+      .select('status')
+      .eq('id', requestId)
+      .eq('business_id', ctx.businessId)
+      .single();
+
+    if (!lr) return { success: false, error: 'Leave request not found' };
+    if (lr.status !== 'pending') return { success: false, error: 'Only pending requests can be withdrawn' };
+
+    const { error } = await supabase
+      .from('leave_requests')
+      .update({ status: 'withdrawn', updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+      .eq('business_id', ctx.businessId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to withdraw leave request' };
   }
 }
 

@@ -275,6 +275,8 @@ export default function SaleSuccessScreen() {
         staffName: staffName || undefined,
         invoiceExtras: invoiceExtrasRef.current,
         bankAccountId: payment.bankAccount || undefined,
+        chequeDetails: payment.chequeDetails || undefined,
+        bankTransferReference: payment.bankTransferReference || undefined,
       });
       if (!createResult.success) {
         console.error('Backend createInvoice failed:', createResult.error);

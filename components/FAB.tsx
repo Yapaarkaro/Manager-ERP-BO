@@ -25,6 +25,7 @@ interface FABProps {
   onAction?: (action: string) => void;
   onExpandedChange?: (isExpanded: boolean) => void;
   hiddenActions?: string[];
+  onBeforeAction?: (actionId: string) => boolean;
 }
 
 interface FABAction {
@@ -53,7 +54,7 @@ const staffFabActions: FABAction[] = [
   { id: 'new-sale', title: 'New Sale', icon: ShoppingCart, color: '#ffffff', backgroundColor: '#3f66ac' },
 ];
 
-export default function FAB({ onAction, onExpandedChange, hiddenActions }: FABProps) {
+export default function FAB({ onAction, onExpandedChange, hiddenActions, onBeforeAction }: FABProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -104,6 +105,11 @@ export default function FAB({ onAction, onExpandedChange, hiddenActions }: FABPr
     // Check if trial expired before allowing action
     const { canPerformAction } = require('@/utils/trialUtils');
     if (!canPerformAction('this action')) {
+      toggleFAB();
+      return;
+    }
+
+    if (onBeforeAction && !onBeforeAction(actionId)) {
       toggleFAB();
       return;
     }

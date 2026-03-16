@@ -73,7 +73,7 @@ export default function PaymentScreen() {
   const totalAmount = flowData.totalAmount.toString();
   const customer = flowData.customer || { name: '', mobile: '' };
   
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>('cash');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null);
   const [selectedOthersMethod, setSelectedOthersMethod] = useState<OthersMethod | null>(null);
   
   // Cash payment states
@@ -246,6 +246,15 @@ export default function PaymentScreen() {
   const showDigitalWallet = enabledMethods.digitalWallet !== false;
   const showOthers = showBankTransfer || showCheque;
 
+  useEffect(() => {
+    if (selectedPaymentMethod !== null) return;
+    if (showCash) setSelectedPaymentMethod('cash');
+    else if (showUpi) setSelectedPaymentMethod('upi');
+    else if (showCard) setSelectedPaymentMethod('card');
+    else if (showBankTransfer || showCheque) setSelectedPaymentMethod('others');
+    else if (showDigitalWallet) setSelectedPaymentMethod('digital_wallet');
+  }, [showCash, showUpi, showCard, showBankTransfer, showCheque, showDigitalWallet]);
+
   const formatAmount = (amount: number) => {
     return formatCurrencyINR(amount);
   };
@@ -303,7 +312,7 @@ export default function PaymentScreen() {
   const showPaymentConfirmation = () => {
     saveInvoiceExtrasIfNeeded();
     paymentDataBridge.setPaymentData({
-      method: 'cash',
+      method: selectedPaymentMethod || 'cash',
       amount: amount,
       total: amount,
       customer: customer,
@@ -773,7 +782,7 @@ export default function PaymentScreen() {
           )}
           
           {/* Cash Payment Input - Immediately Below Cash Option */}
-          <View style={styles.cashPaymentInputContainer}>
+          {showCash && selectedPaymentMethod === 'cash' && <View style={styles.cashPaymentInputContainer}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Cash Received *</Text>
               <View style={styles.inputContainer}>
@@ -825,7 +834,7 @@ export default function PaymentScreen() {
                 </Text>
               </View>
             )}
-          </View>
+          </View>}
           
           {/* Show payment methods only when balance is updated or full payment */}
           {(balanceUpdated || !showContinueButton) && !showContinueButton && (
@@ -1070,7 +1079,7 @@ export default function PaymentScreen() {
                       onChangeText={(t) => setChequeDate(autoFormatDateInput(t, '/'))}
                       placeholder="DD/MM/YYYY"
                       placeholderTextColor={Colors.textLight}
-                      keyboardType="numeric"
+                      keyboardType={Platform.OS === 'web' ? 'default' : 'numeric'}
                       maxLength={10}
                     />
                     {chequeDate.length === 10 && validateDateDDMMYYYY(chequeDate) && (

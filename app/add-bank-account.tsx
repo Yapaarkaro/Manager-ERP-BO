@@ -236,7 +236,7 @@ export default function AddBankAccount() {
       validateIFSC(ifscCode) &&
       (accountType === 'Savings' || accountType === 'Current') &&
       (isEditMode || (initialBalance.length > 0 && !isNaN(parseFloat(initialBalance)) && parseFloat(initialBalance) >= 0)) &&
-      validateUPI(upiId)
+      (!upiId.trim() || validateUPI(upiId))
     );
   };
 
@@ -356,7 +356,7 @@ export default function AddBankAccount() {
           <View style={styles.placeholder} />
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {/* Account Holder Information */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account Holder Information</Text>

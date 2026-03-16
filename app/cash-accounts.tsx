@@ -40,7 +40,9 @@ export default function CashAccountsScreen() {
   const [totalOut, setTotalOut] = useState(0);
 
   const openingBalance = useMemo(() => {
-    return businessData?.business?.initial_cash_balance || businessData?.business?.current_cash_balance || 0;
+    const initBal = businessData?.business?.initial_cash_balance;
+    const curBal = businessData?.business?.current_cash_balance;
+    return (initBal != null && initBal !== 0) ? initBal : (curBal ?? 0);
   }, [businessData?.business?.initial_cash_balance, businessData?.business?.current_cash_balance]);
 
   const currentBalance = openingBalance + totalIn - totalOut;

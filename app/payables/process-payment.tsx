@@ -67,6 +67,9 @@ export default function ProcessPaymentScreen() {
   const [showBankPicker, setShowBankPicker] = useState(false);
   const [referenceNumber, setReferenceNumber] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [chequeNumber, setChequeNumber] = useState('');
+  const [chequeDate, setChequeDate] = useState('');
+  const [chequeBankName, setChequeBankName] = useState('');
   const [bankAccounts, setBankAccounts] = useState<any[]>([]);
   const [enabledMethods, setEnabledMethods] = useState<Record<string, boolean>>({ cash: true, upi: true, card: true, bankTransfer: true, cheque: false, digitalWallet: true });
   const [digitalWallets, setDigitalWallets] = useState<string[]>([]);
@@ -278,6 +281,16 @@ export default function ProcessPaymentScreen() {
               <Text style={{ flex: 1, fontSize: 14, color: C.text, marginLeft: 10 }}>{selectedBank ? getBankLabel(selectedBank) : 'Select bank account'}</Text>
               <ChevronDown size={16} color={C.textMuted} />
             </TouchableOpacity>
+          </>
+        )}
+
+        {/* Cheque Details */}
+        {selectedMethod === 'cheque' && (
+          <>
+            <Text style={s.sectionTitle}>Cheque Details</Text>
+            <TextInput style={s.textField} value={chequeNumber} onChangeText={setChequeNumber} placeholder="Cheque Number" placeholderTextColor={C.textMuted} keyboardType="numeric" />
+            <TextInput style={[s.textField, { marginTop: 10 }]} value={chequeDate} onChangeText={(t) => { const c = t.replace(/[^0-9/]/g, ''); if (c.length <= 10) setChequeDate(c); }} placeholder="DD/MM/YYYY" placeholderTextColor={C.textMuted} keyboardType="default" maxLength={10} />
+            <TextInput style={[s.textField, { marginTop: 10 }]} value={chequeBankName} onChangeText={setChequeBankName} placeholder="Bank Name on Cheque" placeholderTextColor={C.textMuted} autoCapitalize="words" />
           </>
         )}
 
