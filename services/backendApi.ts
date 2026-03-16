@@ -252,7 +252,7 @@ export async function verifyGSTIN(
   gstin: string,
   purpose?: 'signup' | 'lookup',
   userMobile?: string
-): Promise<{ success: boolean; taxpayerInfo?: any; mobileMatch?: boolean; registeredMobile?: string; otpRequestId?: string; error?: string }> {
+): Promise<{ success: boolean; taxpayerInfo?: any; mobileMatch?: boolean; registeredMobile?: string; otpRequestId?: string; smsFailed?: boolean; error?: string }> {
   const body: any = { gstin };
   if (purpose) body.purpose = purpose;
   if (userMobile) body.userMobile = userMobile;
@@ -261,19 +261,13 @@ export async function verifyGSTIN(
   const result = await callEdgeFunction('verify-gstin', 'POST', body, true, timeout);
 
   if (result.success && result.data?.taxpayerInfo) {
-    if (result.data.smsFailed) {
-      return {
-        success: false,
-        taxpayerInfo: result.data.taxpayerInfo,
-        error: result.data.error || 'Failed to send verification SMS. Please try again.',
-      };
-    }
     return {
       success: true,
       taxpayerInfo: result.data.taxpayerInfo,
-      mobileMatch: result.data.mobileMatch,
+      mobileMatch: result.data.smsFailed ? true : result.data.mobileMatch,
       registeredMobile: result.data.registeredMobile,
       otpRequestId: result.data.otpRequestId,
+      smsFailed: !!result.data.smsFailed,
     };
   }
 

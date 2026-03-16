@@ -106,13 +106,16 @@ export default function GstinPanOTPScreen() {
       return;
     }
 
-    setTimeout(() => {
-      if (type === 'GSTIN') {
-        inputRefs.current[0]?.focus();
-      } else if (type === 'PAN') {
-        panNameInputRef.current?.focus();
-      }
-    }, 300);
+    const timer = setTimeout(() => {
+      try {
+        if (type === 'GSTIN') {
+          inputRefs.current[0]?.focus();
+        } else if (type === 'PAN') {
+          panNameInputRef.current?.focus();
+        }
+      } catch {}
+    }, 500);
+    return () => clearTimeout(timer);
   }, [type]);
 
   useEffect(() => {
@@ -194,8 +197,6 @@ export default function GstinPanOTPScreen() {
       const result = await verifyPAN(panValue, panNameValue, dobValue);
       
       if (result.success && result.panVerified) {
-        // ✅ Save signup progress to backend (PAN verified, moving to businessDetails)
-        // ✅ Optimistically save signup progress (non-blocking)
         (async () => {
           try {
             const { data: { session } } = await supabase.auth.getSession();
@@ -217,7 +218,6 @@ export default function GstinPanOTPScreen() {
           }
         })();
         
-        // Navigate immediately (no delay)
         setSignupData({
           type: type,
           value: panValue,
@@ -228,11 +228,28 @@ export default function GstinPanOTPScreen() {
         });
         router.replace('/auth/business-details');
       } else {
-        Alert.alert('Verification Failed', result.error || 'PAN verification failed. Please check your details and try again.');
+        const rawError = (result.error || '').toLowerCase();
+        let userMessage = 'PAN verification failed. Please check your details and try again.';
+        if (rawError.includes('name') && rawError.includes('match')) {
+          userMessage = 'The name you entered does not match the PAN records. Please enter your name exactly as it appears on your PAN card.';
+        } else if (rawError.includes('date') || rawError.includes('dob')) {
+          userMessage = 'The date of birth does not match the PAN records. Please check and enter the correct date.';
+        } else if (rawError.includes('not found') || rawError.includes('invalid pan') || rawError.includes('no record')) {
+          userMessage = 'This PAN number was not found. Please check the number and try again.';
+        } else if (result.error) {
+          userMessage = result.error;
+        }
+        Alert.alert(
+          'Verification Failed',
+          userMessage + '\n\nPlease correct the details below and try again.',
+        );
       }
     } catch (error: any) {
       console.error('PAN verification error:', error);
-      Alert.alert('Verification Failed', error.message || 'Unable to verify PAN. Please check your connection and try again.');
+      Alert.alert(
+        'Verification Failed',
+        'Unable to verify PAN. Please check your internet connection and try again.',
+      );
     } finally {
       setIsVerifying(false);
     }

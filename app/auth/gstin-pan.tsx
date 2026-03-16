@@ -46,6 +46,14 @@ export default function GstinPanScreen() {
   React.useEffect(() => {
     setStatusBarStyle('dark-content');
   }, [setStatusBarStyle]);
+
+  // Safe auto-focus after mount (avoids "Node cannot be found" on web)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, []);
   
   const [isValid, setIsValid] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -138,9 +146,8 @@ export default function GstinPanScreen() {
           setSelectedPromoter('');
         }
       } else {
-        setVerificationError(result.error || 'GSTIN verification failed');
+        setVerificationError(result.error || 'GSTIN verification failed. Please check the number and try again.');
         setIsValid(false);
-        setInputValue('');
         setHasAutoVerified(false);
         setVerifiedGstinData(null);
         setLastVerifiedGstin('');
@@ -150,14 +157,13 @@ export default function GstinPanScreen() {
         setPromoters([]);
         setSelectedPromoter('');
         setTimeout(() => {
-          inputRef.current?.focus();
-        }, 300);
+          try { inputRef.current?.focus(); } catch {}
+        }, 400);
       }
     } catch (error: any) {
       console.error('GSTIN verification error:', error);
       setVerificationError(error.message || 'Failed to verify GSTIN. Please check your connection and try again.');
       setIsValid(false);
-      setInputValue('');
       setHasAutoVerified(false);
       setVerifiedGstinData(null);
       setLastVerifiedGstin('');
@@ -167,8 +173,8 @@ export default function GstinPanScreen() {
       setPromoters([]);
       setSelectedPromoter('');
       setTimeout(() => {
-        inputRef.current?.focus();
-      }, 300);
+        try { inputRef.current?.focus(); } catch {}
+      }, 400);
     } finally {
       setIsVerifying(false);
     }
@@ -383,7 +389,6 @@ export default function GstinPanScreen() {
             autoCorrect={false}
             maxLength={selectedType === 'GSTIN' ? 15 : 10}
             keyboardType="default"
-            autoFocus
           />
         </View>
 
