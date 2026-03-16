@@ -599,10 +599,28 @@ export default function RootLayout() {
         onDismiss={() => setInvoiceLinkData(null)}
         onViewDetails={() => {
           if (invoiceLinkData) {
-            router.push({
-              pathname: '/invoice-details',
-              params: { invoiceId: invoiceLinkData.invoiceId },
-            } as any);
+            const t = invoiceLinkData.type || 'sale';
+            if (t === 'purchase') {
+              router.push({
+                pathname: '/purchasing/invoice-details',
+                params: { invoiceId: invoiceLinkData.invoiceId },
+              } as any);
+            } else if (t === 'return') {
+              router.push({
+                pathname: '/return-details',
+                params: { returnId: invoiceLinkData.invoiceId },
+              } as any);
+            } else if (t === 'po') {
+              router.push({
+                pathname: '/purchasing/po-details',
+                params: { poId: invoiceLinkData.invoiceId },
+              } as any);
+            } else {
+              router.push({
+                pathname: '/invoice-details',
+                params: { invoiceId: invoiceLinkData.invoiceId },
+              } as any);
+            }
           }
           setInvoiceLinkData(null);
         }}

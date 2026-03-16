@@ -3,7 +3,7 @@ import { EDGE_FUNCTIONS_URL } from '@/lib/supabase';
 export interface InvoiceQRData {
   invoiceId: string;
   businessId: string;
-  type: 'sale' | 'purchase' | 'return';
+  type: 'sale' | 'purchase' | 'return' | 'po';
 }
 
 export function generateInvoiceLinkURL(data: InvoiceQRData): string {

@@ -50,6 +50,7 @@ import { consumeNavData } from '@/utils/navStore';
 import { generateInvoicePDF, printInvoice, InvoicePDFData } from '@/utils/invoicePdfGenerator';
 import { shareInvoicePDF, showShareOptions } from '@/utils/invoiceShareUtils';
 import { showAlert, showConfirm } from '@/utils/webAlert';
+import { supabase } from '@/lib/supabase';
 
 const Colors = {
   background: '#FFFFFF',
@@ -101,10 +102,33 @@ export default function InvoiceDetailsScreen() {
       if (invoiceData && typeof invoiceData === 'string') {
         try { inv = JSON.parse(invoiceData); } catch {}
       }
+
+      const resolvedId = Array.isArray(invoiceId) ? invoiceId[0] : invoiceId;
+
+      if (!inv || !inv.id) {
+        try {
+          const { data: directInv } = await supabase
+            .from('purchase_invoices')
+            .select('*')
+            .eq('id', resolvedId)
+            .maybeSingle();
+          if (directInv) {
+            inv = directInv;
+            try {
+              const { data: itemRows } = await supabase
+                .from('purchase_invoice_items')
+                .select('*')
+                .eq('purchase_invoice_id', resolvedId);
+              if (itemRows && itemRows.length > 0) inv = { ...inv, items: itemRows };
+            } catch {}
+          }
+        } catch {}
+      }
+
       if (!inv || !inv.id) {
         const result = await getPurchaseInvoices();
         if (result.success && result.invoices) {
-          inv = result.invoices.find((i: any) => i.id === invoiceId) || null;
+          inv = result.invoices.find((i: any) => i.id === resolvedId) || null;
         }
       }
       if (inv) {

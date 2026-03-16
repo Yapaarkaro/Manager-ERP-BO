@@ -33,7 +33,7 @@ serve(async (req: Request) => {
       return new Response('Invalid parameters', { status: 400, headers: corsHeaders });
     }
 
-    if (!['sale', 'purchase', 'return'].includes(type)) {
+    if (!['sale', 'purchase', 'return', 'po'].includes(type)) {
       return new Response('Invalid type', { status: 400, headers: corsHeaders });
     }
 
@@ -96,6 +96,23 @@ serve(async (req: Request) => {
           .eq('return_id', invoiceId);
         items = lineItems || [];
       }
+    } else if (type === 'po') {
+      const { data } = await supabase
+        .from('purchase_orders')
+        .select('id, po_number, order_date, total_amount, supplier_name, status, tax_amount, subtotal, notes')
+        .eq('id', invoiceId)
+        .eq('business_id', businessId)
+        .maybeSingle();
+      if (data) {
+        invoice = { ...data, invoice_number: data.po_number, invoice_date: data.order_date, payment_status: data.status };
+      }
+      if (data) {
+        const { data: lineItems } = await supabase
+          .from('purchase_order_items')
+          .select('product_name, quantity, unit_price, total_price, tax_amount, hsn_code, unit')
+          .eq('purchase_order_id', invoiceId);
+        items = lineItems || [];
+      }
     }
 
     const gstinData = business?.gstin_data && typeof business.gstin_data === 'object' ? business.gstin_data : null;
@@ -110,7 +127,7 @@ serve(async (req: Request) => {
     const nativeUrl = `manager://invoice-link?${queryStr}`;
     const deepLinkUrl = webUrl;
 
-    const typeLabel = type === 'sale' ? 'Sales Invoice' : type === 'purchase' ? 'Purchase Invoice' : 'Return / Credit Note';
+    const typeLabel = type === 'sale' ? 'Sales Invoice' : type === 'purchase' ? 'Purchase Invoice' : type === 'po' ? 'Purchase Order' : 'Return / Credit Note';
     const partyLabel = type === 'purchase' ? 'Supplier' : 'Customer';
     const partyName = invoice?.customer_name || invoice?.supplier_name || '';
     const subtotal = invoice?.subtotal ? `₹${Number(invoice.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '';

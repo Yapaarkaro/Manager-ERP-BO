@@ -1,4 +1,4 @@
-const CACHE_NAME = 'manager-v2';
+const CACHE_NAME = 'manager-v3';
 const STATIC_ASSETS = [
   '/manifest.json',
 ];
@@ -23,12 +23,10 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
 
   if (request.method !== 'GET') return;
-
-  // Let the browser handle navigation requests normally (SPA routing via Vercel rewrites)
   if (request.mode === 'navigate') return;
 
-  // Don't cache API / auth / Supabase requests
   const url = new URL(request.url);
+
   if (
     url.pathname.startsWith('/auth/') ||
     url.pathname.startsWith('/rest/') ||
@@ -36,18 +34,25 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('supabase')
   ) return;
 
-  // For static assets: network-first with cache fallback
   event.respondWith(
     fetch(request)
       .then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        if (response && response.ok) {
+          try {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              try { cache.put(request, clone); } catch {}
+            });
+          } catch {}
         }
         return response;
       })
-      .catch(() =>
-        caches.match(request).then((cached) => cached || new Response('', { status: 503 }))
-      )
+      .catch(async () => {
+        try {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+        } catch {}
+        return new Response('', { status: 503, statusText: 'Offline' });
+      })
   );
 });

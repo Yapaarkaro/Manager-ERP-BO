@@ -143,10 +143,16 @@ export default function GstinPanScreen() {
         if (result.smsFailed && result.mobileMatch === false) {
           Alert.alert(
             'SMS Delivery Failed',
-            `GSTIN verified successfully, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}. Please tap "Retry" to try again.`,
+            `GSTIN verified successfully, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}.`,
             [
               { text: 'Retry', onPress: () => verifyGSTINNumber(gstinNumber) },
-              { text: 'OK', style: 'cancel' },
+              {
+                text: 'Proceed Anyway',
+                onPress: () => {
+                  setSmsFailed(false);
+                  setMobileMatch(true);
+                },
+              },
             ]
           );
         }
@@ -208,10 +214,17 @@ export default function GstinPanScreen() {
     if (selectedType === 'GSTIN' && smsFailed && mobileMatch === false) {
       Alert.alert(
         'SMS Delivery Failed',
-        `We need to verify the GSTIN-registered mobile number but couldn't send the OTP. Tap "Retry" to try again.`,
+        `We couldn't send OTP to the GSTIN-registered mobile. You can retry or proceed without mobile verification.`,
         [
           { text: 'Retry', onPress: () => verifyGSTINNumber(currentGstin) },
-          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Proceed Anyway',
+            onPress: () => {
+              setSmsFailed(false);
+              setMobileMatch(true);
+              navigateNext(currentGstin, verifiedGstinData);
+            },
+          },
         ]
       );
       return;
@@ -247,10 +260,17 @@ export default function GstinPanScreen() {
           setIsVerifying(false);
           Alert.alert(
             'SMS Delivery Failed',
-            `GSTIN verified, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}. Please tap "Retry" to try again.`,
+            `GSTIN verified, but we couldn't send OTP to the registered mobile ${result.registeredMobile || 'number'}.`,
             [
               { text: 'Retry', onPress: () => verifyGSTINNumber(currentGstin) },
-              { text: 'OK', style: 'cancel' },
+              {
+                text: 'Proceed Anyway',
+                onPress: () => {
+                  setSmsFailed(false);
+                  setMobileMatch(true);
+                  navigateNext(currentGstin, result.taxpayerInfo);
+                },
+              },
             ]
           );
           return;
