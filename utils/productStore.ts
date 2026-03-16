@@ -46,6 +46,7 @@ class ProductStore {
   private productIndex = new Map<string, Product>();
   private listeners: (() => void)[] = [];
   private isLoading = false;
+  private loadPromise: Promise<{ success: boolean; error?: string }> | null = null;
 
   private rebuildIndex() {
     this.productIndex.clear();
@@ -80,8 +81,18 @@ class ProductStore {
 
   findByBarcode(barcode: string): Product | undefined {
     if (!barcode) return undefined;
-    const bc = barcode.toLowerCase();
-    return this.products.find(p => (p.barcode || '').toLowerCase() === bc);
+    const bc = barcode.trim().toLowerCase();
+    if (!bc) return undefined;
+
+    const exact = this.products.find(p => (p.barcode || '').trim().toLowerCase() === bc);
+    if (exact) return exact;
+
+    const bcNoLeadingZeros = bc.replace(/^0+/, '');
+    return this.products.find(p => {
+      const stored = (p.barcode || '').trim().toLowerCase();
+      if (!stored) return false;
+      return stored.replace(/^0+/, '') === bcNoLeadingZeros;
+    });
   }
 
   searchProducts(query: string): Product[] {
@@ -133,8 +144,13 @@ class ProductStore {
   }
 
   async loadProductsFromBackend(): Promise<{ success: boolean; error?: string }> {
-    if (this.isLoading) return { success: false, error: 'Already loading' };
+    if (this.isLoading && this.loadPromise) return this.loadPromise;
     this.isLoading = true;
+    this.loadPromise = this._doLoad();
+    return this.loadPromise;
+  }
+
+  private async _doLoad(): Promise<{ success: boolean; error?: string }> {
 
     try {
       const result = await getProducts();
@@ -210,6 +226,7 @@ class ProductStore {
       return { success: false, error: error?.message || 'Failed to load products' };
     } finally {
       this.isLoading = false;
+      this.loadPromise = null;
     }
   }
 }

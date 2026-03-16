@@ -7,6 +7,7 @@ import {
   Alert,
   TextInput,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -20,6 +21,9 @@ import {
   X,
 } from 'lucide-react-native';
 import { productStore } from '@/utils/productStore';
+import WebBarcodeScanner from '@/components/WebBarcodeScanner';
+
+const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
 
 const Colors = {
   background: '#FFFFFF',
@@ -76,12 +80,19 @@ export default function ScanProductScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
+  const [storeReady, setStoreReady] = useState(productStore.hasProducts());
 
-  if (!permission) {
+  useEffect(() => {
+    if (!productStore.hasProducts()) {
+      productStore.loadProductsFromBackend().then(() => setStoreReady(true));
+    }
+  }, []);
+
+  if (Platform.OS !== 'web' && !permission) {
     return <View />;
   }
 
-  if (!permission.granted) {
+  if (Platform.OS !== 'web' && !permission?.granted) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
@@ -109,14 +120,18 @@ export default function ScanProductScreen() {
     setScanned(true);
     setIsLoading(true);
     
-    await processBarcode(data);
+    const trimmed = (data || '').trim();
+    await processBarcode(trimmed);
   };
 
   const processBarcode = async (barcode: string) => {
     setIsLoading(true);
     
     try {
-      // Check local product store first (includes Manager-generated barcodes)
+      if (!productStore.hasProducts()) {
+        await productStore.loadProductsFromBackend();
+      }
+
       const localProduct = productStore.findByBarcode(barcode);
 
       if (localProduct) {
@@ -246,12 +261,21 @@ export default function ScanProductScreen() {
 
         {/* Camera */}
         <View style={styles.cameraContainer}>
-          <CameraView
-            style={StyleSheet.absoluteFillObject}
-            facing="back"
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-            flash={flashOn ? 'on' : 'off'}
-          />
+          {Platform.OS === 'web' ? (
+            <WebBarcodeScanner
+              onBarcodeScanned={handleBarCodeScanned}
+              paused={scanned}
+              style={StyleSheet.absoluteFillObject}
+            />
+          ) : (
+            <CameraView
+              style={StyleSheet.absoluteFillObject}
+              facing="back"
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+              barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
+              flash={flashOn ? 'on' : 'off'}
+            />
+          )}
           <View style={[StyleSheet.absoluteFillObject, styles.overlay]} pointerEvents="box-none">
             <View style={styles.scanArea}>
               <View style={styles.scanFrame} />
@@ -259,17 +283,19 @@ export default function ScanProductScreen() {
                 Position the product barcode within the frame
               </Text>
               
-              <TouchableOpacity
-                style={styles.floatingFlashButton}
-                onPress={() => setFlashOn(!flashOn)}
-                activeOpacity={0.7}
-              >
-                {flashOn ? (
-                  <FlashlightOff size={20} color="#ffffff" />
-                ) : (
-                  <Flashlight size={20} color="#ffffff" />
-                )}
-              </TouchableOpacity>
+              {Platform.OS !== 'web' && (
+                <TouchableOpacity
+                  style={styles.floatingFlashButton}
+                  onPress={() => setFlashOn(!flashOn)}
+                  activeOpacity={0.7}
+                >
+                  {flashOn ? (
+                    <FlashlightOff size={20} color="#ffffff" />
+                  ) : (
+                    <Flashlight size={20} color="#ffffff" />
+                  )}
+                </TouchableOpacity>
+              )}
               
               {isLoading && (
                 <View style={styles.loadingContainer}>

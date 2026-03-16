@@ -8,6 +8,7 @@ import {
   TextInput,
   Modal,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -22,6 +23,9 @@ import {
 import { setScannedData } from '@/utils/scannedDataStore';
 import { safeRouter } from '@/utils/safeRouter';
 import { productStore } from '@/utils/productStore';
+import WebBarcodeScanner from '@/components/WebBarcodeScanner';
+
+const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
 
 const Colors = {
   background: '#FFFFFF',
@@ -86,8 +90,15 @@ export default function BarcodeScannerScreen() {
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [storeReady, setStoreReady] = useState(productStore.hasProducts());
 
-  if (!permission || !permission.granted) {
+  useEffect(() => {
+    if (!productStore.hasProducts()) {
+      productStore.loadProductsFromBackend().then(() => setStoreReady(true));
+    }
+  }, []);
+
+  if (Platform.OS !== 'web' && (!permission || !permission.granted)) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
@@ -115,7 +126,8 @@ export default function BarcodeScannerScreen() {
     setScanned(true);
     setIsLoading(true);
     
-    await processBarcode(data);
+    const trimmed = (data || '').trim();
+    await processBarcode(trimmed);
   };
 
   const processBarcode = async (barcode: string) => {
@@ -131,7 +143,10 @@ export default function BarcodeScannerScreen() {
     try {
       console.log('Looking up barcode:', barcode);
 
-      // Step 1: Check local product store first (includes Manager-generated barcodes)
+      if (!productStore.hasProducts()) {
+        await productStore.loadProductsFromBackend();
+      }
+
       const localProduct = productStore.findByBarcode(barcode);
 
       if (localProduct) {
@@ -368,25 +383,36 @@ export default function BarcodeScannerScreen() {
         {/* Camera */}
         {!cameraError ? (
           <View style={styles.cameraContainer}>
-            <CameraView
-              style={StyleSheet.absoluteFillObject}
-              facing="back"
-              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-              flash={flashOn ? 'on' : 'off'}
-            />
+            {Platform.OS === 'web' ? (
+              <WebBarcodeScanner
+                onBarcodeScanned={handleBarCodeScanned}
+                paused={scanned}
+                style={StyleSheet.absoluteFillObject}
+              />
+            ) : (
+              <CameraView
+                style={StyleSheet.absoluteFillObject}
+                facing="back"
+                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+                barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
+                flash={flashOn ? 'on' : 'off'}
+              />
+            )}
             <View style={[StyleSheet.absoluteFillObject, styles.overlay]} pointerEvents="box-none">
               <View style={styles.topControls}>
-                <TouchableOpacity
-                  style={styles.flashlightButton}
-                  onPress={() => setFlashOn(!flashOn)}
-                  activeOpacity={0.7}
-                >
-                  {flashOn ? (
-                    <FlashlightOff size={24} color="#ffffff" />
-                  ) : (
-                    <Flashlight size={24} color="#ffffff" />
-                  )}
-                </TouchableOpacity>
+                {Platform.OS !== 'web' && (
+                  <TouchableOpacity
+                    style={styles.flashlightButton}
+                    onPress={() => setFlashOn(!flashOn)}
+                    activeOpacity={0.7}
+                  >
+                    {flashOn ? (
+                      <FlashlightOff size={24} color="#ffffff" />
+                    ) : (
+                      <Flashlight size={24} color="#ffffff" />
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.scanArea}>

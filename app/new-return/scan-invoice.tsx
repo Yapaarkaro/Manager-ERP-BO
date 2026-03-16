@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -17,6 +18,9 @@ import {
   FlashlightOff,
 } from 'lucide-react-native';
 import { formatCurrencyINR } from '@/utils/formatters';
+import WebBarcodeScanner from '@/components/WebBarcodeScanner';
+
+const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
 
 const Colors = {
   background: '#FFFFFF',
@@ -33,11 +37,11 @@ export default function ScanInvoiceScreen() {
   const [scanned, setScanned] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
 
-  if (!permission) {
+  if (Platform.OS !== 'web' && !permission) {
     return <View />;
   }
 
-  if (!permission.granted) {
+  if (Platform.OS !== 'web' && !permission?.granted) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
@@ -64,8 +68,9 @@ export default function ScanInvoiceScreen() {
     
     setScanned(true);
 
+    const trimmedData = (data || '').trim();
     const scannedInvoice = {
-      id: data || '',
+      id: trimmedData || '',
       invoiceNumber: data ? `INV-${data.slice(-6)}` : '',
       customerName: '',
       customerType: 'individual' as const,
@@ -133,21 +138,40 @@ export default function ScanInvoiceScreen() {
         </View>
 
         {/* Camera */}
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          onBarcodeScanned={scanned ? undefined : handleInvoiceScanned}
-          flash={flashOn ? 'on' : 'off'}
-        >
-          <View style={styles.overlay}>
-            <View style={styles.scanArea}>
-              <View style={styles.scanFrame} />
-              <Text style={styles.scanText}>
-                Position the invoice QR code or barcode within the frame
-              </Text>
+        {Platform.OS === 'web' ? (
+          <View style={styles.camera}>
+            <WebBarcodeScanner
+              onBarcodeScanned={handleInvoiceScanned}
+              paused={scanned}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={styles.overlay} pointerEvents="box-none">
+              <View style={styles.scanArea}>
+                <View style={styles.scanFrame} />
+                <Text style={styles.scanText}>
+                  Position the invoice QR code or barcode within the frame
+                </Text>
+              </View>
             </View>
           </View>
-        </CameraView>
+        ) : (
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            onBarcodeScanned={scanned ? undefined : handleInvoiceScanned}
+            barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
+            flash={flashOn ? 'on' : 'off'}
+          >
+            <View style={styles.overlay}>
+              <View style={styles.scanArea}>
+                <View style={styles.scanFrame} />
+                <Text style={styles.scanText}>
+                  Position the invoice QR code or barcode within the frame
+                </Text>
+              </View>
+            </View>
+          </CameraView>
+        )}
 
         {/* Instructions */}
         <View style={styles.instructions}>
