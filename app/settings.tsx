@@ -344,7 +344,7 @@ export default function SettingsScreen() {
       const today = now.toISOString().split('T')[0];
 
       const [attResult, sessResult] = await Promise.all([
-        getStaffAttendance(staffId),
+        getStaffAttendance({ staffId, startDate: startOfMonth, endDate: today }),
         getStaffSessions({ staffId, startDate: startOfMonth, endDate: today }),
       ]);
       if (cancelled) return;

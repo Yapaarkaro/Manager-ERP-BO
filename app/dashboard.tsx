@@ -65,7 +65,6 @@ import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
 import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest, withdrawLeaveRequest, createInAppNotification } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
-import * as ImagePicker from 'expo-image-picker';
 import {
   requestLocationPermissions,
   getCurrentPosition,
@@ -199,6 +198,7 @@ export default function DashboardScreen() {
   const [staffOnline, setStaffOnline] = useState(false);
   const [staffToggleLoading, setStaffToggleLoading] = useState(false);
   const [staffDistance, setStaffDistance] = useState<number | null>(null);
+  const [staffGeofenceRadius, setStaffGeofenceRadius] = useState<number>(100);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [checkInTime, setCheckInTime] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -592,6 +592,14 @@ export default function DashboardScreen() {
     return () => { if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current); };
   }, [staffOnline, checkInTime]);
 
+  // Load staff geofence radius (owner-configured) for Go Online check
+  useEffect(() => {
+    if (!isStaff || !staffId) return;
+    getStaffAttendanceConfig(staffId).then((config) => {
+      setStaffGeofenceRadius(config.geofenceRadius);
+    }).catch(() => {});
+  }, [isStaff, staffId]);
+
   // Periodically update staff distance from assigned location
   useEffect(() => {
     if (!isStaff || !staffLocationId) return;
@@ -629,9 +637,13 @@ export default function DashboardScreen() {
     setStaffToggleLoading(true);
 
     try {
+      // Ask for location permission first — required before staff can go online
       const perms = await requestLocationPermissions();
       if (!perms.foreground) {
-        Alert.alert('Location Required', 'Please grant location access to mark attendance.');
+        Alert.alert(
+          'Location required',
+          'Location access is required to go online. Please allow location permission so we can verify you are at your work location, then try again.'
+        );
         setStaffToggleLoading(false);
         return;
       }
@@ -640,37 +652,51 @@ export default function DashboardScreen() {
       if (!pos && Platform.OS === 'web') {
         Alert.alert(
           'Location required',
-          'Please allow location access in your browser (site settings or the address bar) and try again. You must be within range of your work location to go online.'
+          'Please allow location access in your browser (site settings or the lock/address bar icon) and refresh. You must be within range of your work location to go online.'
         );
         setStaffToggleLoading(false);
         return;
       }
       if (!pos) {
-        Alert.alert('Location Error', 'Could not determine your current location. Please try again.');
+        Alert.alert(
+          'Location required',
+          'Could not get your location. Please ensure location is enabled in device settings and allow this app to use it, then try again.'
+        );
         setStaffToggleLoading(false);
         return;
       }
 
       const coords = targetCoordsRef.current || (staffLocationId ? await getStaffAssignedCoordinates(staffLocationId) : null);
       if (!coords) {
-        Alert.alert('No Location Assigned', 'Your work location does not have coordinates. Please contact your manager.');
+        Alert.alert(
+          'No Location Assigned',
+          'You must be assigned to a work location with coordinates. Please contact your manager to assign you to a branch or location.'
+        );
         setStaffToggleLoading(false);
         return;
       }
       targetCoordsRef.current = coords;
 
+      const config = await getStaffAttendanceConfig(staffId);
+      const radiusMeters = config.geofenceRadius;
       const dist = calculateDistance(pos.lat, pos.lng, coords.lat, coords.lng);
       setStaffDistance(Math.round(dist));
 
-      if (!isWithinGeofence(pos.lat, pos.lng, coords.lat, coords.lng)) {
-        Alert.alert('Too Far Away', `You are ${Math.round(dist)}m from your work location. You must be within 100m to go online.`);
+      if (!isWithinGeofence(pos.lat, pos.lng, coords.lat, coords.lng, radiusMeters)) {
+        Alert.alert(
+          'Too Far Away',
+          `You are ${Math.round(dist)}m from your work location. You must be within ${radiusMeters}m to go online.`
+        );
         setStaffToggleLoading(false);
         return;
       }
 
+      // Web: no selfie. Mobile (PWA or native): selfie required; if device has no camera, allow without selfie.
+      const isWeb = Platform.OS === 'web';
       let selfieUrl: string | undefined;
-      if (Platform.OS !== 'web') {
+      if (!isWeb) {
         try {
+          const ImagePicker = await import('expo-image-picker');
           const result = await ImagePicker.launchCameraAsync({
             mediaTypes: ['images'],
             allowsEditing: false,
@@ -695,10 +721,17 @@ export default function DashboardScreen() {
               selfieUrl = urlData?.publicUrl;
             }
           }
-        } catch (camErr) {
-          Alert.alert('Selfie required', 'Please take a selfie to go online.');
-          setStaffToggleLoading(false);
-          return;
+        } catch (camErr: any) {
+          const msg = (camErr?.message || String(camErr)).toLowerCase();
+          const noCamera = msg.includes('camera') && (msg.includes('unavailable') || msg.includes('not found') || msg.includes('no camera') || msg.includes('not available'));
+          if (noCamera) {
+            // Hardware has no camera or camera unavailable — allow go online without selfie
+            selfieUrl = undefined;
+          } else {
+            Alert.alert('Selfie required', 'Please take a selfie to go online.');
+            setStaffToggleLoading(false);
+            return;
+          }
         }
       }
 
@@ -716,9 +749,9 @@ export default function DashboardScreen() {
         setCheckInTime(sessionResult.session.check_in);
 
         if (perms.background) {
-          const config = await getStaffAttendanceConfig(staffId);
-          if (config.attendanceMode === 'geofence') {
-            startBackgroundLocationMonitoring(staffId, sessionResult.session.id, coords.lat, coords.lng, config.geofenceRadius);
+          const attendanceConfig = await getStaffAttendanceConfig(staffId);
+          if (attendanceConfig.attendanceMode === 'geofence') {
+            startBackgroundLocationMonitoring(staffId, sessionResult.session.id, coords.lat, coords.lng, attendanceConfig.geofenceRadius);
           }
         }
       } else {
@@ -1253,8 +1286,9 @@ export default function DashboardScreen() {
   };
 
   const renderStaffAttendanceToggle = () => {
-    const withinRange = staffDistance !== null && staffDistance <= 100;
-    const allowGoOnline = staffOnline || withinRange || staffDistance === null;
+    const hasAssignedLocation = !!staffLocationId;
+    const withinRange = hasAssignedLocation && staffDistance !== null && staffDistance <= staffGeofenceRadius;
+    const allowGoOnline = staffOnline || withinRange;
 
     return (
       <View style={[styles.section, { borderLeftWidth: 4, borderLeftColor: staffOnline ? '#059669' : '#6B7280' }]}>
@@ -1274,11 +1308,19 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {!staffOnline && staffDistance !== null && (
+        {!staffOnline && !hasAssignedLocation && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, paddingHorizontal: 4 }}>
+            <MapPin size={14} color={Colors.textLight} />
+            <Text style={{ fontSize: 13, color: Colors.textLight, fontWeight: '500' }}>
+              No work location assigned. Contact your manager to be assigned to a branch or location.
+            </Text>
+          </View>
+        )}
+        {!staffOnline && hasAssignedLocation && staffDistance !== null && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, paddingHorizontal: 4 }}>
             <MapPin size={14} color={withinRange ? '#059669' : '#DC2626'} />
             <Text style={{ fontSize: 13, color: withinRange ? '#059669' : '#DC2626', fontWeight: '500' }}>
-              {withinRange ? `Within range (${staffDistance}m)` : `${staffDistance}m away — must be within 100m`}
+              {withinRange ? `Within range (${staffDistance}m)` : `${staffDistance}m away — must be within ${staffGeofenceRadius}m`}
             </Text>
           </View>
         )}

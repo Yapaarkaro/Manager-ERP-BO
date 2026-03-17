@@ -1537,8 +1537,8 @@ export async function recordStaffAttendance(params: {
  */
 export async function getStaffAttendance(params: {
   staffId?: string;
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
 }): Promise<{ success: boolean; attendance?: any[]; error?: string }> {
   try {
     const { supabase } = await import('@/lib/supabase');
@@ -1553,12 +1553,16 @@ export async function getStaffAttendance(params: {
 
     if (!userData?.business_id) return { success: false, error: 'No business found' };
 
+    const now = new Date();
+    const startDate = params.startDate || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const endDate = params.endDate || now.toISOString().split('T')[0];
+
     let query = supabase
       .from('staff_attendance')
       .select('*')
       .eq('business_id', userData.business_id)
-      .gte('date', params.startDate)
-      .lte('date', params.endDate)
+      .gte('date', startDate)
+      .lte('date', endDate)
       .order('date', { ascending: false });
 
     if (params.staffId) {
