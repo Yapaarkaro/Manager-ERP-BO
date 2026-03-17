@@ -125,14 +125,12 @@ export default function ScanProductScreen() {
   };
 
   const processBarcode = async (barcode: string) => {
+    if (!barcode || typeof barcode !== 'string') return;
     setIsLoading(true);
     
     try {
-      if (!productStore.hasProducts()) {
-        await productStore.loadProductsFromBackend();
-      }
-
-      const localProduct = productStore.findByBarcode(barcode);
+      await productStore.loadProductsFromBackend();
+      const localProduct = productStore.findByBarcode(barcode.trim());
 
       if (localProduct) {
         setIsLoading(false);

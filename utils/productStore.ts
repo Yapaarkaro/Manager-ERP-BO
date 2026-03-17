@@ -80,30 +80,37 @@ class ProductStore {
   }
 
   findByBarcode(barcode: string): Product | undefined {
-    if (!barcode) return undefined;
-    const bc = barcode.trim().toLowerCase();
-    if (!bc) return undefined;
+    if (!barcode || typeof barcode !== 'string') return undefined;
+    const raw = String(barcode).trim();
+    if (!raw) return undefined;
+    const bc = raw.toLowerCase();
 
-    const exact = this.products.find(p => (p.barcode || '').trim().toLowerCase() === bc);
+    const exact = this.products.find(p => {
+      const s = (p.barcode != null && p.barcode !== '') ? String(p.barcode).trim().toLowerCase() : '';
+      return s === bc;
+    });
     if (exact) return exact;
 
     const bcNoLeadingZeros = bc.replace(/^0+/, '');
+    if (!bcNoLeadingZeros) return undefined;
     return this.products.find(p => {
-      const stored = (p.barcode || '').trim().toLowerCase();
-      if (!stored) return false;
-      return stored.replace(/^0+/, '') === bcNoLeadingZeros;
+      const s = (p.barcode != null && p.barcode !== '') ? String(p.barcode).trim().toLowerCase() : '';
+      if (!s) return false;
+      return s.replace(/^0+/, '') === bcNoLeadingZeros;
     });
   }
 
   searchProducts(query: string): Product[] {
-    const q = query.toLowerCase();
-    return this.products.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.category.toLowerCase().includes(q) ||
-      (p.supplier && p.supplier.toLowerCase().includes(q)) ||
-      (p.hsnCode || '').toLowerCase().includes(q) ||
-      (p.barcode || '').toLowerCase().includes(q)
-    );
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return [];
+    return this.products.filter(p => {
+      const name = (p.name || '').toLowerCase();
+      const category = (p.category || '').toLowerCase();
+      const supplier = (p.supplier || '').toLowerCase();
+      const hsnCode = (p.hsnCode || '').toLowerCase();
+      const barcode = (p.barcode != null && p.barcode !== '') ? String(p.barcode).trim().toLowerCase() : '';
+      return name.includes(q) || category.includes(q) || (supplier && supplier.includes(q)) || hsnCode.includes(q) || barcode.includes(q);
+    });
   }
 
   deleteProduct(id: string) {
@@ -175,6 +182,9 @@ class ProductStore {
           else if (bp.current_stock <= bp.min_stock_level) urgencyLevel = 'low';
         }
 
+        const barcodeRaw = bp.barcode ?? bp.barcode_number ?? '';
+        const barcodeStr = (barcodeRaw === null || barcodeRaw === undefined) ? '' : String(barcodeRaw).trim();
+
         return {
           id: bp.id,
           name: bp.name || '',
@@ -188,7 +198,7 @@ class ProductStore {
           unitPrice: bp.per_unit_price || bp.purchase_price || 0,
           salesPrice: bp.sales_price || 0,
           hsnCode: bp.hsn_code || '',
-          barcode: bp.barcode || '',
+          barcode: barcodeStr,
           taxRate: bp.tax_rate || 0,
           taxInclusive: bp.tax_inclusive || false,
           supplier: bp.preferred_supplier_id || undefined,

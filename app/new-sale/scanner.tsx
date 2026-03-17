@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -89,19 +90,29 @@ export default function BarcodeScannerScreen() {
   const [cameraError, setCameraError] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [storeReady, setStoreReady] = useState(productStore.hasProducts());
 
   useEffect(() => {
-    if (!productStore.hasProducts()) {
-      productStore.loadProductsFromBackend()
-        .then((res) => {
-          setStoreReady(true);
-          console.log('Product store loaded:', productStore.getProductCount(), 'products');
-        })
-        .catch(() => setStoreReady(true));
-    }
+    let cancelled = false;
+    (async () => {
+      if (!productStore.hasProducts()) await productStore.loadProductsFromBackend();
+      if (!cancelled) setStoreReady(true);
+    })();
+    return () => { cancelled = true; };
   }, []);
+
+  // When user opens search/manual modal, ensure products are loaded so search works
+  useEffect(() => {
+    if (!showManualInput) return;
+    let cancelled = false;
+    (async () => {
+      await productStore.loadProductsFromBackend();
+      if (!cancelled) setStoreReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [showManualInput]);
 
   if (Platform.OS !== 'web' && (!permission || !permission.granted)) {
     return (
@@ -127,17 +138,17 @@ export default function BarcodeScannerScreen() {
 
   const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
+    const raw = data != null ? String(data) : '';
+    const trimmed = raw.trim();
+    if (!trimmed) return;
     
     setScanned(true);
     setIsLoading(true);
-    
-    const trimmed = (data || '').trim();
     await processBarcode(trimmed);
   };
 
   const processBarcode = async (barcode: string) => {
     if (!barcode || typeof barcode !== 'string') {
-      console.error('Invalid barcode provided:', barcode);
       Alert.alert('Error', 'Invalid barcode. Please try again.');
       setScanned(false);
       return;
@@ -146,13 +157,8 @@ export default function BarcodeScannerScreen() {
     setIsLoading(true);
     
     try {
-      console.log('Looking up barcode:', barcode);
-
-      if (!productStore.hasProducts()) {
-        await productStore.loadProductsFromBackend();
-      }
-
-      const localProduct = productStore.findByBarcode(barcode);
+      await productStore.loadProductsFromBackend();
+      const localProduct = productStore.findByBarcode(barcode.trim());
 
       if (localProduct) {
         console.log('Product found in local store:', localProduct.name);
@@ -343,6 +349,48 @@ export default function BarcodeScannerScreen() {
     }
   };
 
+  const handleProductSelected = useCallback((localProduct: import('@/utils/productStore').Product) => {
+    setShowManualInput(false);
+    setSearchQuery('');
+    setManualBarcode('');
+    if (returnTo === 'manual-product') {
+      setScannedData(JSON.stringify({
+        barcode: localProduct.barcode,
+        name: localProduct.name,
+        brand: localProduct.brand || '',
+        category: localProduct.category || 'Others',
+        isScanned: 'true',
+        existingProduct: 'true',
+      }));
+      router.back();
+      return;
+    }
+    try {
+      safeRouter.push({
+        pathname: '/new-sale/cart',
+        params: {
+          selectedProducts: JSON.stringify([{
+            id: localProduct.id,
+            name: localProduct.name,
+            price: localProduct.salesPrice || localProduct.unitPrice,
+            barcode: localProduct.barcode,
+            image: localProduct.image || '',
+            category: localProduct.category,
+            brand: localProduct.brand || '',
+            quantity: 1,
+            hsnCode: localProduct.hsnCode || '',
+            taxRate: localProduct.taxRate || 0,
+            taxInclusive: localProduct.taxInclusive || false,
+            primaryUnit: localProduct.primaryUnit || 'PCS',
+          }]),
+          preSelectedCustomer: preSelectedCustomer || ''
+        }
+      });
+    } catch {
+      Alert.alert('Error', 'Failed to add product to cart. Please try again.');
+    }
+  }, [returnTo, preSelectedCustomer]);
+
   const handleManualBarcodeSubmit = async () => {
     if (!manualBarcode || !manualBarcode.trim()) {
       Alert.alert('Error', 'Please enter a barcode number');
@@ -360,6 +408,19 @@ export default function BarcodeScannerScreen() {
     await processBarcode(trimmedBarcode);
     setManualBarcode('');
   };
+
+  const searchQueryTrimmed = searchQuery.trim();
+  const searchResultsRaw = searchQueryTrimmed.length >= 1
+    ? productStore.searchProducts(searchQueryTrimmed).slice(0, 50)
+    : [];
+  const exactBarcodeMatch = searchQueryTrimmed.length >= 1
+    ? productStore.findByBarcode(searchQueryTrimmed)
+    : undefined;
+  const searchResults = exactBarcodeMatch && !searchResultsRaw.some(p => p.id === exactBarcodeMatch.id)
+    ? [exactBarcodeMatch, ...searchResultsRaw]
+    : exactBarcodeMatch && searchResultsRaw.length > 0
+      ? [exactBarcodeMatch, ...searchResultsRaw.filter(p => p.id !== exactBarcodeMatch.id)]
+      : searchResultsRaw;
 
   return (
     <View style={styles.container}>
@@ -494,11 +555,43 @@ export default function BarcodeScannerScreen() {
 
               <View style={styles.modalContent}>
                 <Text style={styles.modalDescription}>
-                  Enter the barcode number manually if you're unable to scan it
+                  Search by product name or barcode, or enter a barcode number below
                 </Text>
-                
+
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Barcode Number</Text>
+                  <Text style={styles.inputLabel}>Search products</Text>
+                  {!storeReady && (
+                    <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 4 }}>Loading products...</Text>
+                  )}
+                  <TextInput
+                    style={styles.barcodeInput}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Type product name or barcode..."
+                    placeholderTextColor={Colors.textLight}
+                  />
+                </View>
+                {searchResults.length > 0 && (
+                  <View style={{ maxHeight: 200, marginBottom: 12 }}>
+                    <FlatList
+                      data={searchResults}
+                      keyExtractor={(item) => item.id}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={{ paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: Colors.grey[200] }}
+                          onPress={() => handleProductSelected(item)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text }} numberOfLines={1}>{item.name}</Text>
+                          <Text style={{ fontSize: 12, color: Colors.textLight }}>{item.barcode ? `Barcode: ${item.barcode}` : item.category}</Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  </View>
+                )}
+
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputLabel}>Or enter barcode number</Text>
                   <View style={styles.inputRow}>
                     <TextInput
                       style={styles.barcodeInput}
@@ -507,7 +600,6 @@ export default function BarcodeScannerScreen() {
                       placeholder="Enter barcode number"
                       placeholderTextColor={Colors.textLight}
                       keyboardType="default"
-                      autoFocus={true}
                       maxLength={20}
                       selectionColor={Colors.primary}
                       autoCapitalize="characters"

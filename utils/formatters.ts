@@ -63,15 +63,11 @@ export function formatCurrencyINR(amount: number | string, decimals: number = 2,
 }
 
 /**
- * Format a price for display, preserving up to 4 decimal places.
- * Strips trailing zeros but shows meaningful decimals.
+ * Format a price for display. Default 2 decimal places to avoid confusion.
  */
-export function formatPrice(price: number): string {
-  if (price === null || price === undefined || isNaN(price)) return '0';
-  // Show up to 4 decimal places, strip trailing zeros
-  const fixed = price.toFixed(4);
-  const trimmed = fixed.replace(/\.?0+$/, '');
-  return trimmed;
+export function formatPrice(price: number, decimals: number = 2): string {
+  if (price === null || price === undefined || isNaN(price)) return decimals === 0 ? '0' : '0.' + '0'.repeat(decimals);
+  return Number(price).toFixed(decimals);
 }
 
 /**
@@ -82,16 +78,14 @@ export function formatPriceINR(price: number, minDecimals: number = 2): string {
 }
 
 /**
- * Format a quantity / stock value.
- * Shows decimals only when the fractional part is non-zero.
- * Up to 3 decimal places, trailing zeros stripped.
+ * Format a quantity / stock value. Uses 2 decimal places when not a whole number to avoid confusion.
  */
-export function formatQty(value: number | string | null | undefined): string {
+export function formatQty(value: number | string | null | undefined, decimals: number = 2): string {
   if (value === null || value === undefined || value === '') return '0';
   const n = typeof value === 'string' ? parseFloat(value) : value;
   if (isNaN(n)) return '0';
   if (Number.isInteger(n)) return n.toString();
-  return n.toFixed(3).replace(/\.?0+$/, '');
+  return Number(n).toFixed(decimals);
 }
 
 /**
