@@ -636,7 +636,15 @@ export default function DashboardScreen() {
         return;
       }
 
-      const pos = await getCurrentPosition();
+      let pos = await getCurrentPosition();
+      if (!pos && Platform.OS === 'web') {
+        Alert.alert(
+          'Location required',
+          'Please allow location access in your browser (site settings or the address bar) and try again. You must be within range of your work location to go online.'
+        );
+        setStaffToggleLoading(false);
+        return;
+      }
       if (!pos) {
         Alert.alert('Location Error', 'Could not determine your current location. Please try again.');
         setStaffToggleLoading(false);
@@ -661,35 +669,32 @@ export default function DashboardScreen() {
       }
 
       let selfieUrl: string | undefined;
-      try {
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'],
-          allowsEditing: false,
-          quality: 0.6,
-          cameraType: ImagePicker.CameraType.front,
-        });
+      if (Platform.OS !== 'web') {
+        try {
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ['images'],
+            allowsEditing: false,
+            quality: 0.6,
+            cameraType: ImagePicker.CameraType.front,
+          });
 
-        if (result.canceled) {
-          setStaffToggleLoading(false);
-          return;
-        }
+          if (!result.canceled && result.assets?.[0]?.uri) {
+            const asset = result.assets[0];
+            const filename = `${staffId}_${Date.now()}.jpg`;
+            const response = await fetch(asset.uri);
+            const blob = await response.blob();
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('staff-selfies')
+              .upload(filename, blob, { contentType: 'image/jpeg', upsert: false });
 
-        const asset = result.assets[0];
-        if (asset?.uri) {
-          const filename = `${staffId}_${Date.now()}.jpg`;
-          const response = await fetch(asset.uri);
-          const blob = await response.blob();
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('staff-selfies')
-            .upload(filename, blob, { contentType: 'image/jpeg', upsert: false });
-
-          if (!uploadError && uploadData?.path) {
-            const { data: urlData } = supabase.storage.from('staff-selfies').getPublicUrl(uploadData.path);
-            selfieUrl = urlData?.publicUrl;
+            if (!uploadError && uploadData?.path) {
+              const { data: urlData } = supabase.storage.from('staff-selfies').getPublicUrl(uploadData.path);
+              selfieUrl = urlData?.publicUrl;
+            }
           }
+        } catch (camErr) {
+          console.warn('Selfie capture failed, continuing without:', camErr);
         }
-      } catch (camErr) {
-        console.warn('Selfie capture failed, continuing without:', camErr);
       }
 
       const sessionResult = await createStaffSession({
