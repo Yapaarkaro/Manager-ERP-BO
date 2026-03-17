@@ -149,8 +149,9 @@ export default function BarcodeScannerScreen() {
 
   const processBarcode = async (barcode: string) => {
     if (!barcode || typeof barcode !== 'string') {
-      Alert.alert('Error', 'Invalid barcode. Please try again.');
+      setIsLoading(false);
       setScanned(false);
+      Alert.alert('Error', 'Invalid barcode. Please try again.');
       return;
     }
 
@@ -410,17 +411,27 @@ export default function BarcodeScannerScreen() {
   };
 
   const searchQueryTrimmed = searchQuery.trim();
-  const searchResultsRaw = searchQueryTrimmed.length >= 1
-    ? productStore.searchProducts(searchQueryTrimmed).slice(0, 50)
+  const bySearch = searchQueryTrimmed.length >= 1
+    ? productStore.searchProducts(searchQueryTrimmed)
     : [];
-  const exactBarcodeMatch = searchQueryTrimmed.length >= 1
-    ? productStore.findByBarcode(searchQueryTrimmed)
-    : undefined;
-  const searchResults = exactBarcodeMatch && !searchResultsRaw.some(p => p.id === exactBarcodeMatch.id)
-    ? [exactBarcodeMatch, ...searchResultsRaw]
-    : exactBarcodeMatch && searchResultsRaw.length > 0
-      ? [exactBarcodeMatch, ...searchResultsRaw.filter(p => p.id !== exactBarcodeMatch.id)]
-      : searchResultsRaw;
+  const byBarcode = searchQueryTrimmed.length >= 1
+    ? productStore.findAllByBarcode(searchQueryTrimmed)
+    : [];
+  const seenIds = new Set<string>();
+  const combined: typeof bySearch = [];
+  for (const p of byBarcode) {
+    if (!seenIds.has(p.id)) {
+      seenIds.add(p.id);
+      combined.push(p);
+    }
+  }
+  for (const p of bySearch) {
+    if (!seenIds.has(p.id)) {
+      seenIds.add(p.id);
+      combined.push(p);
+    }
+  }
+  const searchResults = combined.slice(0, 80);
 
   return (
     <View style={styles.container}>
@@ -460,7 +471,10 @@ export default function BarcodeScannerScreen() {
                 style={StyleSheet.absoluteFillObject}
                 facing="back"
                 onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-                barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
+                barcodeScannerSettings={{
+                  barcodeTypes: [...BARCODE_TYPES],
+                  scanningInterval: 1500,
+                }}
                 flash={flashOn ? 'on' : 'off'}
               />
             )}
@@ -555,7 +569,7 @@ export default function BarcodeScannerScreen() {
 
               <View style={styles.modalContent}>
                 <Text style={styles.modalDescription}>
-                  Search by product name or barcode, or enter a barcode number below
+                  All products matching your search (by name or barcode) are listed below. You can also enter a barcode number to look up.
                 </Text>
 
                 <View style={styles.inputContainer}>

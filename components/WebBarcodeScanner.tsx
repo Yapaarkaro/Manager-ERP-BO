@@ -15,9 +15,19 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
   const lastScannedTimeRef = useRef<number>(0);
   const pausedRef = useRef(paused);
   const onScanRef = useRef(onBarcodeScanned);
+  const prevPausedRef = useRef(paused);
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { onScanRef.current = onBarcodeScanned; }, [onBarcodeScanned]);
+
+  // When user taps "Scan Again", allow same barcode to be scanned again
+  useEffect(() => {
+    if (prevPausedRef.current === true && paused === false) {
+      lastScannedRef.current = '';
+      lastScannedTimeRef.current = 0;
+    }
+    prevPausedRef.current = paused;
+  }, [paused]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -31,9 +41,15 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
 
         if (!mounted) return;
 
-        scanner = new Html5Qrcode(containerId.current, {
+        const containerIdStr = containerId.current;
+        const el = typeof document !== 'undefined' ? document.getElementById(containerIdStr) : null;
+        if (!el) {
+          if (mounted) setError('Scanner container not found. Please refresh and try again.');
+          return;
+        }
+
+        scanner = new Html5Qrcode(containerIdStr, {
           formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.CODE_128,
             Html5QrcodeSupportedFormats.CODE_39,
             Html5QrcodeSupportedFormats.CODE_93,
@@ -43,6 +59,7 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
             Html5QrcodeSupportedFormats.UPC_E,
             Html5QrcodeSupportedFormats.ITF,
             Html5QrcodeSupportedFormats.CODABAR,
+            Html5QrcodeSupportedFormats.QR_CODE,
           ],
           verbose: false,
         });
@@ -51,21 +68,23 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
         await scanner.start(
           { facingMode: 'environment' },
           {
-            fps: 10,
-            qrbox: { width: 280, height: 160 },
+            fps: 8,
+            qrbox: { width: 320, height: 200 },
           },
           (decodedText: string, decodedResult: any) => {
             if (pausedRef.current) return;
+            const text = (decodedText != null ? String(decodedText) : '').trim();
+            if (!text) return;
 
             const now = Date.now();
-            if (decodedText === lastScannedRef.current && now - lastScannedTimeRef.current < 3000) {
+            if (text === lastScannedRef.current && now - lastScannedTimeRef.current < 2000) {
               return;
             }
-            lastScannedRef.current = decodedText;
+            lastScannedRef.current = text;
             lastScannedTimeRef.current = now;
 
             const format = decodedResult?.result?.format?.formatName || 'unknown';
-            onScanRef.current({ type: format, data: decodedText.trim() });
+            onScanRef.current({ type: format, data: text });
           },
           () => {}
         );
@@ -77,7 +96,7 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
       }
     };
 
-    const timer = setTimeout(initScanner, 200);
+    const timer = setTimeout(initScanner, 350);
 
     return () => {
       mounted = false;

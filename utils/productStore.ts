@@ -100,6 +100,17 @@ class ProductStore {
     });
   }
 
+  /** Returns all products whose barcode contains the given string (for search). */
+  findAllByBarcode(barcodeQuery: string): Product[] {
+    if (!barcodeQuery || typeof barcodeQuery !== 'string') return [];
+    const q = String(barcodeQuery).trim().toLowerCase();
+    if (!q) return [];
+    return this.products.filter(p => {
+      const s = (p.barcode != null && p.barcode !== '') ? String(p.barcode).trim().toLowerCase() : '';
+      return s.includes(q) || s.replace(/^0+/, '') === q.replace(/^0+/, '');
+    });
+  }
+
   searchProducts(query: string): Product[] {
     const q = (query || '').trim().toLowerCase();
     if (!q) return [];
