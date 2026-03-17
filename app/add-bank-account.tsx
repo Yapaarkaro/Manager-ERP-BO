@@ -264,49 +264,50 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
     }
 
     if (isEditMode && existingAccount) {
-      const bankAccountUpdates = {
-        accountHolderName: accountHolderName.trim(),
-        bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
-        bankId: selectedBank?.shortName || '',
-        bankShortName: selectedBank?.shortName || '',
-        accountNumber: accountNumber.trim(),
-        ifscCode: ifscCode.trim(),
-        upiId: upiId.trim(),
-        accountType: accountType,
-        isPrimary,
-        balance: existingAccount.balance || 0,
-      };
-      
-      // Resolve backend UUID if needed
-      let resolvedId = existingAccount.backendId || existingAccount.id;
-      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRe.test(resolvedId || '')) {
-        try {
-          const { supabase } = await import('@/lib/supabase');
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            const { data: userData } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
-            if (userData?.business_id) {
-              const { data: accounts } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
-              const match = accounts?.find((a: any) => a.account_number === accountNumber.trim() || a.account_number === existingAccount.accountNumber);
-              if (match) resolvedId = match.id;
+      try {
+        const bankAccountUpdates = {
+          accountHolderName: accountHolderName.trim(),
+          bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
+          bankId: selectedBank?.shortName || '',
+          bankShortName: selectedBank?.shortName || '',
+          accountNumber: accountNumber.trim(),
+          ifscCode: ifscCode.trim(),
+          upiId: upiId.trim(),
+          accountType: accountType,
+          isPrimary,
+          balance: existingAccount.balance || 0,
+        };
+        
+        let resolvedId = existingAccount.backendId || existingAccount.id;
+        const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRe.test(resolvedId || '')) {
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { data: userData } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
+              if (userData?.business_id) {
+                const { data: accounts } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
+                const match = accounts?.find((a: any) => a.account_number === accountNumber.trim() || a.account_number === existingAccount.accountNumber);
+                if (match) resolvedId = match.id;
+              }
             }
-          }
-        } catch (e) { console.warn('Failed to resolve bank account UUID:', e); }
+          } catch (e) { console.warn('Failed to resolve bank account UUID:', e); }
+        }
+        
+        await optimisticUpdateBankAccount(resolvedId, { ...bankAccountUpdates, backendId: resolvedId }, { showError: false, awaitSync: true });
+        clearBusinessDataCache();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        if (isPrimary) {
+          await updateBusinessPrimaryBankAccount(resolvedId);
+        }
+        Alert.alert('Success', 'Bank account updated successfully.', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
+      } catch (err: any) {
+        Alert.alert('Update failed', err?.message || 'Could not update bank account. Please try again.');
       }
-      
-      await optimisticUpdateBankAccount(resolvedId, { ...bankAccountUpdates, backendId: resolvedId }, { showError: false, awaitSync: true });
-      
-      clearBusinessDataCache();
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      if (isPrimary) {
-        await updateBusinessPrimaryBankAccount(resolvedId);
-      }
-      
-      Alert.alert('Success', 'Bank account updated successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      return;
     } else {
       // Add new bank account
       const newBankAccount: BankAccount = {

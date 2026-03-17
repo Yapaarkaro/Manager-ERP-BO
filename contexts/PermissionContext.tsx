@@ -215,11 +215,21 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
       if (userRole === 'staff') {
         const rawPhone = (session.user.phone || '').replace(/\D/g, '');
         const phone = rawPhone.slice(-10);
-        const { data: staffRows } = await supabase
+        let staffRows: any[] | null = null;
+        const { data: exact } = await supabase
           .from('staff')
           .select('*')
           .eq('business_id', userRow.business_id)
           .eq('mobile', phone);
+        staffRows = exact;
+        if (!staffRows?.length && phone.length >= 10) {
+          const { data: suffix } = await supabase
+            .from('staff')
+            .select('*')
+            .eq('business_id', userRow.business_id)
+            .ilike('mobile', '%' + phone);
+          staffRows = suffix;
+        }
 
         const staffRow = (staffRows || []).find((s: any) => !s.is_deleted) || staffRows?.[0];
         setRole('staff');

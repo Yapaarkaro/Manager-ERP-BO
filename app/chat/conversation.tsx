@@ -142,7 +142,8 @@ export default function ConversationScreen() {
   const senderId = isStaff ? (staffId || '') : (userId || '');
   const senderName = isStaff ? (staffName || 'Staff') : (bizData?.business?.owner_name || bizData?.business?.legal_name || 'Owner');
 
-  const name = resolvedName || routeName;
+  const safeRouteName = isStaff && routeName === staffName ? '' : routeName;
+  const name = resolvedName || safeRouteName || 'Chat';
 
   useEffect(() => {
     (async () => {
@@ -227,8 +228,17 @@ export default function ConversationScreen() {
         } else {
           setResolvedName(convo.participant_other_name || 'Customer');
         }
+      } else if (convo.participant_other_type === 'owner' || (isStaff && type === 'owner')) {
+        const ownerId = convo.participant_other_type === 'owner' ? convo.participant_other_id : convo.participant_owner_id;
+        const { data: ownerRow } = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', ownerId)
+          .maybeSingle();
+        setResolvedName(ownerRow?.name || 'Business Owner');
       } else {
-        setResolvedName(convo.participant_other_name || routeName || 'Chat');
+        const fallback = (convo.participant_other_name && convo.participant_other_name !== staffName) ? convo.participant_other_name : (routeName && routeName !== staffName ? routeName : 'Chat');
+        setResolvedName(fallback);
       }
     })();
   }, [conversationId, routeName, isStaff, staffId, isCrossBusiness, type]);

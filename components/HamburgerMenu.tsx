@@ -11,7 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet, MessageSquare, Briefcase } from 'lucide-react-native';
+import { X, Chrome as Home, CreditCard, ShoppingCart, RotateCcw, Receipt, FileText, Package, ShoppingBag, Users, MapPin, Building2, Warehouse, ChartBar as BarChart3, Megaphone, Settings, ChevronDown, ChevronRight, IndianRupee, Building, Wallet, MessageSquare, Briefcase, CalendarDays } from 'lucide-react-native';
 import { usePermissions } from '@/contexts/PermissionContext';
 
 interface HamburgerMenuProps {
@@ -116,6 +116,13 @@ const menuSections: MenuSection[] = [
       { id: 'business-consultation', title: 'Business Consultation', route: '/services/coming-soon?service=Business Consultation' },
       { id: 'working-capital', title: 'Working Capital', route: '/services/coming-soon?service=Working Capital Assistance' },
     ],
+  },
+  {
+    id: 'leave-log',
+    title: 'Leave Log',
+    icon: CalendarDays,
+    route: '/leave-log',
+    permission: 'staff_management',
   },
   {
     id: 'chat',

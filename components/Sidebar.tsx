@@ -36,6 +36,7 @@ import {
   Wallet,
   MessageSquare,
   Briefcase,
+  CalendarDays,
 } from 'lucide-react-native';
 
 interface SidebarProps {
@@ -140,6 +141,13 @@ const menuSections: MenuSection[] = [
       { id: 'business-consultation', title: 'Business Consultation', route: '/services/coming-soon?service=Business Consultation' },
       { id: 'working-capital', title: 'Working Capital', route: '/services/coming-soon?service=Working Capital Assistance' },
     ],
+  },
+  {
+    id: 'leave-log',
+    title: 'Leave Log',
+    icon: CalendarDays,
+    route: '/leave-log',
+    permission: 'staff_management',
   },
   {
     id: 'chat',

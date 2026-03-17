@@ -63,7 +63,7 @@ import FAB from '@/components/FAB';
 import { DashboardSkeleton } from '@/components/SkeletonLoader';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { usePathname } from 'expo-router';
-import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest, withdrawLeaveRequest } from '@/services/backendApi';
+import { getProducts, getWriteOffs, invalidateApiCache, createStaffSession, endStaffSession, getActiveStaffSession, getInAppNotifications, markNotificationRead, getStaff as getStaffList, getTotalUnreadChatCount, getInvoices, getReturns, getReceivables, getPayables, getPurchaseOrders, createLeaveRequest, getLeaveRequests, updateLeaveRequest, withdrawLeaveRequest, createInAppNotification } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -194,7 +194,6 @@ export default function DashboardScreen() {
   const [reviewNote, setReviewNote] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [allLeaveRequests, setAllLeaveRequests] = useState<any[]>([]);
-  const [leaveLogSearch, setLeaveLogSearch] = useState('');
   const [leaveDetailModal, setLeaveDetailModal] = useState<any>(null);
 
   const [staffOnline, setStaffOnline] = useState(false);
@@ -411,7 +410,7 @@ export default function DashboardScreen() {
     loadLeaveRequests();
   }, [loadLeaveRequests]);
 
-  // Realtime subscription for leave requests
+  // Realtime subscription for leave requests: refresh list and on new pending leave show popup + notification (owner only)
   useEffect(() => {
     const businessId = businessData?.business?.id;
     if (!businessId) return;
@@ -421,12 +420,32 @@ export default function DashboardScreen() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'leave_requests', filter: `business_id=eq.${businessId}` },
-        () => { loadLeaveRequests(); }
+        (payload) => {
+          loadLeaveRequests();
+          if (isOwner && payload.eventType === 'INSERT' && payload.new?.status === 'pending') {
+            const staffName = (payload.new as any).staff_name || 'A staff member';
+            const msg = `${staffName} has applied for leave. Open Leave Log from the menu to review.`;
+            Alert.alert('New leave request', msg, [
+              { text: 'Later' },
+              { text: 'View Leave Log', onPress: () => debouncedNavigate('/leave-log') },
+            ]);
+            createInAppNotification({
+              businessId,
+              recipientId: 'owner',
+              recipientType: 'owner',
+              title: 'New leave request',
+              message: msg,
+              type: 'info',
+              category: 'leave',
+              priority: 'high',
+            }).catch(() => {});
+          }
+        }
       )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [businessData?.business?.id, loadLeaveRequests]);
+  }, [businessData?.business?.id, loadLeaveRequests, isOwner]);
 
   const handleSubmitLeave = async () => {
     if (!staffId || !leaveStartDate || !leaveEndDate || !leaveReason.trim()) {
@@ -600,7 +619,13 @@ export default function DashboardScreen() {
   };
 
   const handleGoOnline = async () => {
-    if (!staffId || !staffBusinessId) return;
+    if (!staffId || !staffBusinessId) {
+      Alert.alert(
+        'Cannot go online',
+        'Your staff account could not be found. Please ensure you are logged in with the phone number registered by your manager, or contact your manager.'
+      );
+      return;
+    }
     setStaffToggleLoading(true);
 
     try {
@@ -1571,11 +1596,6 @@ export default function DashboardScreen() {
     );
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const onLeaveToday = allLeaveRequests.filter(
-    (lr) => lr.status === 'approved' && lr.start_date <= todayStr && lr.end_date >= todayStr
-  );
-
   // Render staff performance section
   const renderStaffPerformance = () => (
     <View style={styles.section}>
@@ -1610,29 +1630,6 @@ export default function DashboardScreen() {
               </View>
             </Pressable>
           ))
-        )}
-        {onLeaveToday.length > 0 && (
-          <>
-            <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text, marginTop: 16, marginBottom: 8 }}>On leave today</Text>
-            {onLeaveToday.map((lr) => (
-              <Pressable key={lr.id} onPress={() => setLeaveDetailModal(lr)} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
-                <View style={[styles.staffCard, { borderLeftWidth: 3, borderLeftColor: Colors.primary }]}>
-                  <View style={styles.staffHeader}>
-                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary + '15', justifyContent: 'center', alignItems: 'center' }}>
-                      <CalendarDays size={22} color={Colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.staffNameText}>{lr.staff_name}</Text>
-                      <Text style={{ fontSize: 12, color: Colors.textLight }}>
-                        {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
-                      </Text>
-                    </View>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: Colors.primary }}>Leave</Text>
-                  </View>
-                </View>
-              </Pressable>
-            ))}
-          </>
         )}
         <Pressable
           onPress={() => debouncedNavigate('/people/staff')}
@@ -1836,116 +1833,10 @@ export default function DashboardScreen() {
     );
   };
 
-  const renderPendingLeaveRequests = () => {
-    if (pendingLeaveRequests.length === 0) return <View />;
-    return (
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Pending Leave Requests</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <View style={{ backgroundColor: Colors.warning, borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 }}>
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{pendingLeaveRequests.length}</Text>
-            </View>
-            <CalendarDays size={20} color={Colors.text} />
-          </View>
-        </View>
-
-        {pendingLeaveRequests.map((lr) => (
-          <Pressable
-            key={lr.id}
-            onPress={() => {
-              setReviewingLeave(lr);
-              setReviewNote('');
-              setShowLeaveReviewModal(true);
-            }}
-            style={{ marginBottom: 10 }}
-          >
-            <View style={{
-              backgroundColor: '#FEF3C7', borderRadius: 10, padding: 14,
-              borderLeftWidth: 3, borderLeftColor: Colors.warning,
-            }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
-                <Text style={{ fontSize: 12, color: Colors.warning, fontWeight: '600' }}>Pending</Text>
-              </View>
-              <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 4 }}>
-                {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
-              </Text>
-              <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
-              <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 6, fontWeight: '500' }}>Tap to review</Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-    );
-  };
-
-  const filteredLeaveLog = leaveLogSearch.trim()
-    ? allLeaveRequests.filter((lr) => (lr.staff_name || '').toLowerCase().includes(leaveLogSearch.trim().toLowerCase()))
-    : allLeaveRequests;
-
-  const renderLeaveLog = () => {
-    if (allLeaveRequests.length === 0) return <View />;
-    return (
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Leave Log</Text>
-          <CalendarDays size={20} color={Colors.text} />
-        </View>
-        <TextInput
-          placeholder="Search by staff name..."
-          placeholderTextColor={Colors.textLight}
-          value={leaveLogSearch}
-          onChangeText={setLeaveLogSearch}
-          style={{
-            borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-            fontSize: 14, color: Colors.text, marginBottom: 12,
-          }}
-        />
-        {filteredLeaveLog.slice(0, 50).map((lr) => (
-          <Pressable key={lr.id} onPress={() => setLeaveDetailModal(lr)} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
-            <View style={{
-              backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12, marginBottom: 8,
-              borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
-            }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
-                <View style={{
-                  backgroundColor: getLeaveStatusColor(lr.status) + '20',
-                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-                }}>
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
-                    {lr.status}
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 2 }}>
-                {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
-              </Text>
-              <Text style={{ fontSize: 12, color: Colors.textLight }} numberOfLines={2}>{lr.reason}</Text>
-              {lr.reviewer_note && (
-                <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }} numberOfLines={1}>
-                  Note: {lr.reviewer_note}
-                </Text>
-              )}
-              {lr.reviewed_at && (
-                <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
-                  Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                </Text>
-              )}
-            </View>
-          </Pressable>
-        ))}
-      </View>
-    );
-  };
-
   const dashboardSections = [
     { id: 'greeting', render: renderGreeting },
     ...(isStaff ? [{ id: 'attendance-toggle', render: renderStaffAttendanceToggle }] : []),
     ...(isStaff ? [{ id: 'apply-leave', render: renderApplyForLeave }] : []),
-    ...(isOwner && pendingLeaveRequests.length > 0 ? [{ id: 'pending-leaves', render: renderPendingLeaveRequests }] : []),
-    ...(isOwner && allLeaveRequests.length > 0 ? [{ id: 'leave-log', render: renderLeaveLog }] : []),
     { id: 'kpi', render: renderKPICards },
     ...(hasPermission('inventory') ? [{ id: 'discrepancies', render: renderStockDiscrepancies }] : []),
     { id: 'notifications', render: renderNotifications },
