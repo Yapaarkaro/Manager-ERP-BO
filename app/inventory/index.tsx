@@ -95,7 +95,8 @@ export default function InventoryScreen() {
     (async () => {
       try {
         await productStore.loadProductsFromBackend();
-        refreshProducts();
+        const next = productStore.getProducts();
+        if (next.length > 0) setFilteredProducts(next);
         const result = await getSuppliers();
         if (result.success && result.suppliers) {
           const map: Record<string, string> = {};

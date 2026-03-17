@@ -78,9 +78,14 @@ interface LocationStock {
 export default function ProductDetailsScreen() {
   const { productId } = useLocalSearchParams();
   const finalProductId = productId as string | null;
-  const product = finalProductId ? productStore.getProductById(finalProductId) : null;
-  
-  // If product is still not found, show error
+  const productFromStore = finalProductId ? productStore.getProductById(finalProductId) : null;
+  const [cachedProduct, setCachedProduct] = useState<any>(productFromStore || null);
+  const product = productFromStore || cachedProduct;
+
+  useEffect(() => {
+    if (productFromStore) setCachedProduct(productFromStore);
+  }, [productFromStore]);
+
   if (!product) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>

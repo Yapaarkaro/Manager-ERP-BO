@@ -37,6 +37,7 @@ import {
   XCircle,
   Edit3,
   X,
+  Trash2,
 } from 'lucide-react-native';
 import { safeRouter } from '@/utils/safeRouter';
 import { consumeNavData } from '@/utils/navStore';
@@ -378,19 +379,35 @@ export default function InvoiceDetailsScreen() {
   };
 
   const handleCancelInvoice = () => {
-    showConfirm(
-      'Cancel Invoice',
-      'Are you sure you want to cancel this invoice? This will mark it as cancelled for audit purposes.',
-      async () => {
-        const res = await cancelInvoice(invoice.id);
-        if (res.success) {
-          showAlert('Cancelled', 'Invoice has been cancelled');
-          setInvoice((prev: any) => ({ ...prev, status: 'cancelled', is_cancelled: true }));
-        } else {
-          showAlert('Error', res.error || 'Failed to cancel invoice');
-        }
+    const doCancel = async () => {
+      const invoiceIdToUse = invoice.id || invoice.backendId || resolvedInvoiceId;
+      if (!invoiceIdToUse) {
+        showAlert('Error', 'Invoice ID not found');
+        return;
       }
-    );
+      const res = await cancelInvoice(invoiceIdToUse);
+      if (res.success) {
+        showAlert('Cancelled', 'Invoice has been cancelled');
+        setInvoice((prev: any) => ({ ...prev, status: 'cancelled', is_cancelled: true }));
+      } else {
+        showAlert('Error', res.error || 'Failed to cancel invoice');
+      }
+    };
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to cancel this invoice? This will mark it as cancelled for audit purposes.')) {
+        doCancel();
+      }
+    } else {
+      Alert.alert(
+        'Cancel Invoice',
+        'Are you sure you want to cancel this invoice? This will mark it as cancelled for audit purposes.',
+        [
+          { text: 'No', style: 'cancel' },
+          { text: 'Yes, Cancel', style: 'destructive', onPress: doCancel },
+        ],
+        { cancelable: true }
+      );
+    }
   };
 
   const buildPDFData = (): InvoicePDFData => {
@@ -519,8 +536,14 @@ export default function InvoiceDetailsScreen() {
               </TouchableOpacity>
             )}
             {!isCancelled && (
-              <TouchableOpacity style={styles.headerActionButton} onPress={handleCancelInvoice} activeOpacity={0.7}>
-                <XCircle size={20} color={Colors.error} />
+              <TouchableOpacity
+                style={[styles.headerActionButton, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
+                onPress={handleCancelInvoice}
+                activeOpacity={0.7}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Trash2 size={20} color={Colors.error} />
+                <Text style={{ fontSize: 12, color: Colors.error, fontWeight: '600' }}>Cancel</Text>
               </TouchableOpacity>
             )}
           </View>

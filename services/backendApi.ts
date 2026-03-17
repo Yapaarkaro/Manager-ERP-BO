@@ -1588,6 +1588,22 @@ export async function createStaffSession(params: {
     const now = new Date().toISOString();
     const today = now.split('T')[0];
 
+    // If staff status is on_leave but their approved leave has ended (today > end_date), clear so they can check in
+    const { data: staffRow } = await supabase.from('staff').select('status').eq('id', params.staffId).maybeSingle();
+    if (staffRow?.status === 'on_leave') {
+      const { data: activeLeave } = await supabase
+        .from('leave_requests')
+        .select('id')
+        .eq('staff_id', params.staffId)
+        .eq('status', 'approved')
+        .lte('start_date', today)
+        .gte('end_date', today)
+        .maybeSingle();
+      if (!activeLeave) {
+        await supabase.from('staff').update({ status: 'active', updated_at: now }).eq('id', params.staffId);
+      }
+    }
+
     const { data, error } = await supabase
       .from('staff_sessions')
       .insert({

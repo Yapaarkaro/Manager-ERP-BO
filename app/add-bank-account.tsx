@@ -60,12 +60,18 @@ const Colors = {
   },
 };
 
-export default function AddBankAccount() {
+interface AddBankAccountProps {
+  initialAccount?: any;
+  forceEditMode?: boolean;
+}
+
+export default function AddBankAccount(props: AddBankAccountProps = {}) {
+  const { initialAccount: propAccount, forceEditMode: propForceEdit } = props;
   const params = useLocalSearchParams();
   const { data: businessData } = useBusinessData();
   const navAccount = consumeNavData('editBankAccount');
-  const existingAccount = navAccount || (params.account ? JSON.parse(params.account as string) : null);
-  const isEditMode = !!existingAccount;
+  const existingAccount = propAccount ?? navAccount ?? (params.account ? JSON.parse(params.account as string) : null);
+  const isEditMode = !!propForceEdit || !!existingAccount;
 
   const [selectedBank, setSelectedBank] = useState<IndianBank | null>(null);
   const [customBankName, setCustomBankName] = useState('');

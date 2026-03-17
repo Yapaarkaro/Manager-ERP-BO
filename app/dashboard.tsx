@@ -194,6 +194,8 @@ export default function DashboardScreen() {
   const [reviewNote, setReviewNote] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [allLeaveRequests, setAllLeaveRequests] = useState<any[]>([]);
+  const [leaveLogSearch, setLeaveLogSearch] = useState('');
+  const [leaveDetailModal, setLeaveDetailModal] = useState<any>(null);
 
   const [staffOnline, setStaffOnline] = useState(false);
   const [staffToggleLoading, setStaffToggleLoading] = useState(false);
@@ -1217,6 +1219,7 @@ export default function DashboardScreen() {
 
   const renderStaffAttendanceToggle = () => {
     const withinRange = staffDistance !== null && staffDistance <= 100;
+    const allowGoOnline = staffOnline || withinRange || staffDistance === null;
 
     return (
       <View style={[styles.section, { borderLeftWidth: 4, borderLeftColor: staffOnline ? '#059669' : '#6B7280' }]}>
@@ -1253,7 +1256,7 @@ export default function DashboardScreen() {
 
         <Pressable
           onPress={staffOnline ? handleGoOffline : handleGoOnline}
-          disabled={staffToggleLoading || (!staffOnline && !withinRange)}
+          disabled={staffToggleLoading || (!staffOnline && !allowGoOnline)}
           style={({ pressed }) => [
             {
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -1262,7 +1265,7 @@ export default function DashboardScreen() {
                 ? '#9CA3AF'
                 : staffOnline
                   ? '#DC2626'
-                  : withinRange
+                  : allowGoOnline
                     ? '#059669'
                     : '#D1D5DB',
               opacity: pressed ? 0.85 : 1,
@@ -1568,6 +1571,11 @@ export default function DashboardScreen() {
     );
   };
 
+  const todayStr = new Date().toISOString().split('T')[0];
+  const onLeaveToday = allLeaveRequests.filter(
+    (lr) => lr.status === 'approved' && lr.start_date <= todayStr && lr.end_date >= todayStr
+  );
+
   // Render staff performance section
   const renderStaffPerformance = () => (
     <View style={styles.section}>
@@ -1602,6 +1610,29 @@ export default function DashboardScreen() {
               </View>
             </Pressable>
           ))
+        )}
+        {onLeaveToday.length > 0 && (
+          <>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.text, marginTop: 16, marginBottom: 8 }}>On leave today</Text>
+            {onLeaveToday.map((lr) => (
+              <Pressable key={lr.id} onPress={() => setLeaveDetailModal(lr)} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+                <View style={[styles.staffCard, { borderLeftWidth: 3, borderLeftColor: Colors.primary }]}>
+                  <View style={styles.staffHeader}>
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.primary + '15', justifyContent: 'center', alignItems: 'center' }}>
+                      <CalendarDays size={22} color={Colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.staffNameText}>{lr.staff_name}</Text>
+                      <Text style={{ fontSize: 12, color: Colors.textLight }}>
+                        {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: Colors.primary }}>Leave</Text>
+                  </View>
+                </View>
+              </Pressable>
+            ))}
+          </>
         )}
         <Pressable
           onPress={() => debouncedNavigate('/people/staff')}
@@ -1849,6 +1880,10 @@ export default function DashboardScreen() {
     );
   };
 
+  const filteredLeaveLog = leaveLogSearch.trim()
+    ? allLeaveRequests.filter((lr) => (lr.staff_name || '').toLowerCase().includes(leaveLogSearch.trim().toLowerCase()))
+    : allLeaveRequests;
+
   const renderLeaveLog = () => {
     if (allLeaveRequests.length === 0) return <View />;
     return (
@@ -1857,37 +1892,49 @@ export default function DashboardScreen() {
           <Text style={styles.sectionTitle}>Leave Log</Text>
           <CalendarDays size={20} color={Colors.text} />
         </View>
-        {allLeaveRequests.slice(0, 20).map((lr) => (
-          <View key={lr.id} style={{
-            backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12, marginBottom: 8,
-            borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
-          }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
-              <View style={{
-                backgroundColor: getLeaveStatusColor(lr.status) + '20',
-                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-              }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
-                  {lr.status}
-                </Text>
+        <TextInput
+          placeholder="Search by staff name..."
+          placeholderTextColor={Colors.textLight}
+          value={leaveLogSearch}
+          onChangeText={setLeaveLogSearch}
+          style={{
+            borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+            fontSize: 14, color: Colors.text, marginBottom: 12,
+          }}
+        />
+        {filteredLeaveLog.slice(0, 50).map((lr) => (
+          <Pressable key={lr.id} onPress={() => setLeaveDetailModal(lr)} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+            <View style={{
+              backgroundColor: Colors.grey[50], borderRadius: 10, padding: 12, marginBottom: 8,
+              borderLeftWidth: 3, borderLeftColor: getLeaveStatusColor(lr.status),
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.text }}>{lr.staff_name}</Text>
+                <View style={{
+                  backgroundColor: getLeaveStatusColor(lr.status) + '20',
+                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: getLeaveStatusColor(lr.status), textTransform: 'capitalize' }}>
+                    {lr.status}
+                  </Text>
+                </View>
               </View>
+              <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 2 }}>
+                {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
+              </Text>
+              <Text style={{ fontSize: 12, color: Colors.textLight }} numberOfLines={2}>{lr.reason}</Text>
+              {lr.reviewer_note && (
+                <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }} numberOfLines={1}>
+                  Note: {lr.reviewer_note}
+                </Text>
+              )}
+              {lr.reviewed_at && (
+                <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
+                  Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </Text>
+              )}
             </View>
-            <Text style={{ fontSize: 13, color: Colors.text, marginBottom: 2 }}>
-              {formatLeaveDate(lr.start_date)} — {formatLeaveDate(lr.end_date)}
-            </Text>
-            <Text style={{ fontSize: 12, color: Colors.textLight }}>{lr.reason}</Text>
-            {lr.reviewer_note && (
-              <Text style={{ fontSize: 12, color: Colors.primary, marginTop: 4, fontStyle: 'italic' }}>
-                Note: {lr.reviewer_note}
-              </Text>
-            )}
-            {lr.reviewed_at && (
-              <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
-                Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-              </Text>
-            )}
-          </View>
+          </Pressable>
         ))}
       </View>
     );
@@ -2421,6 +2468,49 @@ export default function DashboardScreen() {
                           </Pressable>
                         </View>
                       </>
+                    )}
+                  </View>
+                </View>
+              </Modal>
+
+              {/* Leave detail modal (view message & approval/rejection reason) */}
+              <Modal visible={!!leaveDetailModal} transparent animationType="fade" onRequestClose={() => setLeaveDetailModal(null)}>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '80%' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Leave details</Text>
+                      <TouchableOpacity onPress={() => setLeaveDetailModal(null)}>
+                        <X size={22} color={Colors.textLight} />
+                      </TouchableOpacity>
+                    </View>
+                    {leaveDetailModal && (
+                      <ScrollView showsVerticalScrollIndicator={false}>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: Colors.text, marginBottom: 8 }}>{leaveDetailModal.staff_name}</Text>
+                        <View style={{
+                          backgroundColor: getLeaveStatusColor(leaveDetailModal.status) + '18',
+                          paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 12,
+                        }}>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: getLeaveStatusColor(leaveDetailModal.status), textTransform: 'capitalize' }}>
+                            {leaveDetailModal.status}
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 14, color: Colors.text, marginBottom: 4 }}>
+                          {formatLeaveDate(leaveDetailModal.start_date)} — {formatLeaveDate(leaveDetailModal.end_date)}
+                        </Text>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginTop: 12, marginBottom: 4 }}>Message / Reason</Text>
+                        <Text style={{ fontSize: 14, color: Colors.textLight, marginBottom: 12 }}>{leaveDetailModal.reason || '—'}</Text>
+                        {leaveDetailModal.reviewer_note ? (
+                          <>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 4 }}>Approval / Rejection note</Text>
+                            <Text style={{ fontSize: 14, color: Colors.primary, fontStyle: 'italic', marginBottom: 8 }}>{leaveDetailModal.reviewer_note}</Text>
+                          </>
+                        ) : null}
+                        {leaveDetailModal.reviewed_at && (
+                          <Text style={{ fontSize: 12, color: Colors.textLight }}>
+                            Reviewed: {new Date(leaveDetailModal.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        )}
+                      </ScrollView>
                     )}
                   </View>
                 </View>

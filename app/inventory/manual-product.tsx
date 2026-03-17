@@ -2293,7 +2293,7 @@ export default function ManualProductScreen() {
             <Text style={styles.sectionTitle}>Tax Information (GST 2.0)</Text>
             
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>GST Rate *</Text>
+              <Text style={styles.label}>GST 2.0 Rate *</Text>
               <TouchableOpacity
                 style={styles.dropdown}
                 onPress={() => setShowTaxModal(true)}
@@ -2308,28 +2308,7 @@ export default function ManualProductScreen() {
 
 
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>CESS Calculation</Text>
-              <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 8, lineHeight: 17 }}>
-                Compensation Cess was abolished under GST 2.0 for most categories. Only applicable for select tobacco and specialty goods.
-              </Text>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => setShowCessTypeModal(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.dropdownText}>
-                  {formData.cessType === 'none' ? 'No CESS' : 
-                   formData.cessType === 'value' ? `Value Based (${formData.cessRate}%)` :
-                   formData.cessType === 'quantity' ? `Quantity Based (${formatCurrencyINR(formData.cessAmount)}/${formData.cessUnit || 'unit'})` :
-                   formData.cessType === 'value_and_quantity' ? `Value & Quantity (${formData.cessRate}% + ${formatCurrencyINR(formData.cessAmount)}/${formData.cessUnit || 'unit'})` :
-                   formData.cessType === 'mrp' ? `MRP Based (${formData.cessRate}%)` :
-                   'Select CESS calculation method'
-                  }
-                </Text>
-                <ChevronDown size={20} color={Colors.textLight} />
-              </TouchableOpacity>
-            </View>
+            {/* CESS removed under GST 2.0; product form uses GST only. CESS fields kept in data model for legacy. */}
           </View>
 
           {/* Stock Management */}
@@ -3672,7 +3651,11 @@ export default function ManualProductScreen() {
                 </View>
               </TouchableOpacity>
               
-              {primaryUnits
+              {[
+                ...(formData.primaryUnit && !primaryUnits.includes(formData.primaryUnit) ? [formData.primaryUnit] : []),
+                ...primaryUnits,
+              ]
+                .filter((unit, idx, arr) => arr.indexOf(unit) === idx)
                 .filter(unit => 
                   unit.toLowerCase().includes(primaryUnitSearch.toLowerCase())
                 )
@@ -3757,7 +3740,11 @@ export default function ManualProductScreen() {
                 </View>
               </TouchableOpacity>
               
-              {secondaryUnits
+              {[
+                ...(formData.secondaryUnit && formData.secondaryUnit !== 'None' && !secondaryUnits.includes(formData.secondaryUnit) ? [formData.secondaryUnit] : []),
+                ...secondaryUnits,
+              ]
+                .filter((unit, idx, arr) => arr.indexOf(unit) === idx)
                 .filter(unit => 
                   unit.toLowerCase().includes(secondaryUnitSearch.toLowerCase())
                 )
@@ -4258,13 +4245,17 @@ export default function ManualProductScreen() {
                 <Text style={styles.modalOptionText}>+ Add Custom Unit</Text>
               </TouchableOpacity>
               
-              {secondaryUnits
+              {[
+                ...(formData.tertiaryUnit && formData.tertiaryUnit !== 'None' && !secondaryUnits.includes(formData.tertiaryUnit) ? [formData.tertiaryUnit] : []),
+                ...secondaryUnits,
+              ]
+                .filter((unit, idx, arr) => arr.indexOf(unit) === idx)
                 .filter(unit => 
                   unit.toLowerCase().includes(tertiaryUnitSearch.toLowerCase())
                 )
                 .map((unit, index) => (
                   <TouchableOpacity
-                    key={index}
+                    key={unit}
                     style={[
                       styles.modalOption,
                       formData.tertiaryUnit === unit && styles.selectedOption

@@ -2258,14 +2258,14 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
 
                         {/* GST Rate Selection */}
                         <View style={styles.inputGroup}>
-                          <Text style={styles.inputLabel}>GST Rate</Text>
+                          <Text style={styles.inputLabel}>GST 2.0 Rate</Text>
                           <TouchableOpacity
                             style={styles.dropdownButton}
                             onPress={() => setShowGstModal(true)}
                             activeOpacity={0.7}
                           >
                             <Text style={styles.dropdownButtonText}>
-                              {gstRates.find(rate => rate.value === parseFloat(taxRate))?.label || 'Select GST Rate'}
+                              {gstRates.find(rate => rate.value === parseFloat(taxRate))?.label || 'Select GST 2.0 Rate'}
                             </Text>
                             <ChevronDown size={16} color={Colors.textLight} />
                           </TouchableOpacity>
@@ -2714,7 +2714,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
          <View style={styles.modalOverlay}>
            <View style={styles.modalContainer}>
              <View style={styles.modalHeader}>
-               <Text style={styles.modalTitle}>Select GST Rate</Text>
+               <Text style={styles.modalTitle}>Select GST 2.0 Rate</Text>
                <TouchableOpacity
                  onPress={() => setShowGstModal(false)}
                  activeOpacity={0.7}
@@ -3468,14 +3468,14 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
 
              {/* GST Rate Selection */}
              <View style={styles.inputGroup}>
-               <Text style={styles.inputLabel}>GST Rate</Text>
+               <Text style={styles.inputLabel}>GST 2.0 Rate</Text>
                <TouchableOpacity
                  style={styles.dropdownButton}
                  onPress={() => setShowGstModal(true)}
                  activeOpacity={0.7}
                >
                  <Text style={styles.dropdownButtonText}>
-                   {gstRates.find(rate => rate.value === parseFloat(taxRate))?.label || 'Select GST Rate'}
+                   {gstRates.find(rate => rate.value === parseFloat(taxRate))?.label || 'Select GST 2.0 Rate'}
                  </Text>
                  <ChevronDown size={20} color={Colors.textLight} />
                </TouchableOpacity>
@@ -3948,7 +3948,7 @@ function ProductEditModal({ product, onSave, onCancel, formatPrice }: ProductEdi
          <View style={styles.modalOverlay}>
            <View style={styles.modalContainer}>
              <View style={styles.modalHeader}>
-               <Text style={styles.modalTitle}>Select GST Rate</Text>
+               <Text style={styles.modalTitle}>Select GST 2.0 Rate</Text>
                <TouchableOpacity
                  onPress={() => setShowGstModal(false)}
                  activeOpacity={0.7}

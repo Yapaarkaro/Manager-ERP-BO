@@ -605,11 +605,11 @@ export default function SettingsScreen() {
 
     setNavData('editBankAccount', account);
     safeRouter.push({
-      pathname: '/add-bank-account',
+      pathname: '/edit-bank-account',
       params: {
         editAccountId: account.id,
+        bankId: account.id,
         fromSettings: 'true',
-        account: JSON.stringify(account),
       },
     } as any);
   };

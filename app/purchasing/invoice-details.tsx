@@ -574,7 +574,7 @@ export default function InvoiceDetailsScreen() {
                 <Text style={st.totalFullVal}>{fmt(subtotal)}</Text>
               </View>
               <View style={st.totalFullRow}>
-                <Text style={st.totalFullLabel}>GST</Text>
+                <Text style={st.totalFullLabel}>GST 2.0</Text>
                 <Text style={st.totalFullVal}>{fmt(taxAmount)}</Text>
               </View>
               {cessAmount > 0 && (

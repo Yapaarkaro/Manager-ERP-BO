@@ -182,19 +182,20 @@ export default function ConversationScreen() {
           .maybeSingle();
         setResolvedName(ownerRow?.name || 'Business Owner');
       } else if (convo.participant_other_type === 'staff') {
-        const { data: staffRow } = await supabase
-          .from('staff')
-          .select('name')
-          .eq('id', convo.participant_other_id)
-          .maybeSingle();
-        const staffName = staffRow?.name || null;
-        if (staffName) {
-          setResolvedName(staffName);
-          if (staffName !== convo.participant_other_name) {
-            supabase.from('conversations').update({ participant_other_name: staffName }).eq('id', conversationId).then(() => {});
-          }
+        if (isStaff && staffId && convo.participant_other_id === staffId) {
+          const { data: ownerRow } = await supabase.from('users').select('name').eq('id', convo.participant_owner_id).maybeSingle();
+          setResolvedName(ownerRow?.name || 'Business Owner');
         } else {
-          setResolvedName(convo.participant_other_name && convo.participant_other_name !== 'Staff' ? convo.participant_other_name : 'Staff Member');
+          const { data: staffRow } = await supabase.from('staff').select('name').eq('id', convo.participant_other_id).maybeSingle();
+          const otherStaffName = staffRow?.name ?? null;
+          if (otherStaffName) {
+            setResolvedName(otherStaffName);
+            if (otherStaffName !== convo.participant_other_name) {
+              supabase.from('conversations').update({ participant_other_name: otherStaffName }).eq('id', conversationId).then(() => {});
+            }
+          } else {
+            setResolvedName(convo.participant_other_name && convo.participant_other_name !== 'Staff' ? convo.participant_other_name : 'Staff Member');
+          }
         }
       } else if (convo.participant_other_type === 'supplier') {
         const { data: supplierRow } = await supabase
