@@ -143,7 +143,8 @@ export default function ConversationScreen() {
   const senderName = isStaff ? (staffName || 'Staff') : (bizData?.business?.owner_name || bizData?.business?.legal_name || 'Owner');
 
   const safeRouteName = isStaff && routeName === staffName ? '' : routeName;
-  const name = resolvedName || safeRouteName || 'Chat';
+  const baseName = resolvedName || safeRouteName || 'Chat';
+  const name = isStaff && baseName === staffName ? 'Chat' : baseName;
 
   useEffect(() => {
     (async () => {
@@ -168,34 +169,39 @@ export default function ConversationScreen() {
         .single();
       if (!convo) return;
 
+      const setOtherName = (value: string) => {
+        setResolvedName(isStaff && value === staffName ? '' : value);
+      };
+
       if (isCrossBusiness) {
         const { data: biz } = await supabase
           .from('businesses')
           .select('legal_name, owner_name')
           .eq('id', convo.business_id)
           .maybeSingle();
-        setResolvedName(biz?.legal_name || biz?.owner_name || 'Business Partner');
+        setOtherName(biz?.legal_name || biz?.owner_name || 'Business Partner');
       } else if (isStaff && (convo.participant_other_type === 'staff' || type === 'owner')) {
         const { data: ownerRow } = await supabase
           .from('users')
           .select('name')
           .eq('id', convo.participant_owner_id)
           .maybeSingle();
-        setResolvedName(ownerRow?.name || 'Business Owner');
+        setOtherName(ownerRow?.name || 'Business Owner');
       } else if (convo.participant_other_type === 'staff') {
         if (isStaff && staffId && convo.participant_other_id === staffId) {
           const { data: ownerRow } = await supabase.from('users').select('name').eq('id', convo.participant_owner_id).maybeSingle();
-          setResolvedName(ownerRow?.name || 'Business Owner');
+          setOtherName(ownerRow?.name || 'Business Owner');
         } else {
           const { data: staffRow } = await supabase.from('staff').select('name').eq('id', convo.participant_other_id).maybeSingle();
           const otherStaffName = staffRow?.name ?? null;
           if (otherStaffName) {
-            setResolvedName(otherStaffName);
+            setOtherName(otherStaffName);
             if (otherStaffName !== convo.participant_other_name) {
               supabase.from('conversations').update({ participant_other_name: otherStaffName }).eq('id', conversationId).then(() => {});
             }
           } else {
-            setResolvedName(convo.participant_other_name && convo.participant_other_name !== 'Staff' ? convo.participant_other_name : 'Staff Member');
+            const fallback = convo.participant_other_name && convo.participant_other_name !== 'Staff' ? convo.participant_other_name : 'Staff Member';
+            setOtherName(fallback);
           }
         }
       } else if (convo.participant_other_type === 'supplier') {
@@ -206,12 +212,12 @@ export default function ConversationScreen() {
           .maybeSingle();
         const supplierName = supplierRow?.business_name || supplierRow?.contact_person;
         if (supplierName) {
-          setResolvedName(supplierName);
+          setOtherName(supplierName);
           if (supplierName !== convo.participant_other_name) {
             supabase.from('conversations').update({ participant_other_name: supplierName }).eq('id', conversationId).then(() => {});
           }
         } else {
-          setResolvedName(convo.participant_other_name || 'Supplier');
+          setOtherName(convo.participant_other_name || 'Supplier');
         }
       } else if (convo.participant_other_type === 'customer') {
         const { data: customerRow } = await supabase
@@ -221,12 +227,12 @@ export default function ConversationScreen() {
           .maybeSingle();
         const customerName = customerRow?.business_name || customerRow?.name;
         if (customerName) {
-          setResolvedName(customerName);
+          setOtherName(customerName);
           if (customerName !== convo.participant_other_name) {
             supabase.from('conversations').update({ participant_other_name: customerName }).eq('id', conversationId).then(() => {});
           }
         } else {
-          setResolvedName(convo.participant_other_name || 'Customer');
+          setOtherName(convo.participant_other_name || 'Customer');
         }
       } else if (convo.participant_other_type === 'owner' || (isStaff && type === 'owner')) {
         const ownerId = convo.participant_other_type === 'owner' ? convo.participant_other_id : convo.participant_owner_id;
@@ -235,13 +241,13 @@ export default function ConversationScreen() {
           .select('name')
           .eq('id', ownerId)
           .maybeSingle();
-        setResolvedName(ownerRow?.name || 'Business Owner');
+        setOtherName(ownerRow?.name || 'Business Owner');
       } else {
         const fallback = (convo.participant_other_name && convo.participant_other_name !== staffName) ? convo.participant_other_name : (routeName && routeName !== staffName ? routeName : 'Chat');
-        setResolvedName(fallback);
+        setOtherName(fallback);
       }
     })();
-  }, [conversationId, routeName, isStaff, staffId, isCrossBusiness, type]);
+  }, [conversationId, routeName, isStaff, staffId, staffName, isCrossBusiness, type]);
 
   // Load messages on mount
   useEffect(() => {

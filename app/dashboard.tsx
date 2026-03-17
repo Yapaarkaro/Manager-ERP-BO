@@ -677,9 +677,12 @@ export default function DashboardScreen() {
             quality: 0.6,
             cameraType: ImagePicker.CameraType.front,
           });
-
-          if (!result.canceled && result.assets?.[0]?.uri) {
-            const asset = result.assets[0];
+          if (result.canceled) {
+            setStaffToggleLoading(false);
+            return;
+          }
+          const asset = result.assets?.[0];
+          if (asset?.uri) {
             const filename = `${staffId}_${Date.now()}.jpg`;
             const response = await fetch(asset.uri);
             const blob = await response.blob();
@@ -693,7 +696,9 @@ export default function DashboardScreen() {
             }
           }
         } catch (camErr) {
-          console.warn('Selfie capture failed, continuing without:', camErr);
+          Alert.alert('Selfie required', 'Please take a selfie to go online.');
+          setStaffToggleLoading(false);
+          return;
         }
       }
 
