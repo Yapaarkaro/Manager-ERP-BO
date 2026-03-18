@@ -19,7 +19,7 @@ import { getInvoices, getReturns, getPurchaseInvoices, invalidateApiCache } from
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
-import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { formatIndianNumber, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { setNavData } from '@/utils/navStore';
 
 import { 
@@ -367,14 +367,7 @@ export default function AllInvoicesScreen() {
 
   const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString: string) => formatDateDDMMYYYY(dateString);
 
   const handleInvoiceAction = (action: string, invoiceId: string) => {
     console.log(`${action} action for invoice ${invoiceId}`);

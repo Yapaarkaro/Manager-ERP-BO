@@ -14,7 +14,7 @@ import { router } from 'expo-router';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
 import { setNavData } from '@/utils/navStore';
-import { formatCurrencyINR } from '@/utils/formatters';
+import { formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { getInvoices, getInvoiceWithItems, getPurchaseInvoices } from '@/services/backendApi';
 import { productStore } from '@/utils/productStore';
 import { 
@@ -219,14 +219,7 @@ export default function NewReturnScreen() {
     return formatCurrencyINR(amount);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString: string) => formatDateDDMMYYYY(dateString);
 
   const getPaymentStatusColor = (status: string) => {
     switch (status) {

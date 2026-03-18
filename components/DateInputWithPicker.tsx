@@ -32,6 +32,8 @@ interface DateInputWithPickerProps {
   placeholder?: string;
   minimumDate?: Date;
   maximumDate?: Date;
+  /** Use inside ScrollView (avoid flex:1 stretching) */
+  compact?: boolean;
 }
 
 function toDisplayFormat(isoDate: string): string {
@@ -69,6 +71,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
   placeholder = 'DD-MM-YYYY',
   minimumDate,
   maximumDate = new Date(2030, 11, 31),
+  compact = false,
 }) => {
   const [displayText, setDisplayText] = useState(toDisplayFormat(value));
   const [showPicker, setShowPicker] = useState(false);
@@ -128,7 +131,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
   }, [value]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && { flex: 0 }]}>
       <Text style={styles.label}>{label}</Text>
       <View style={[styles.inputRow, hasError && styles.inputRowError]}>
         <TextInput

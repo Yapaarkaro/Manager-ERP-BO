@@ -19,7 +19,7 @@ import { Receivable } from '@/utils/dataStore';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { getReceivables, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
-import { getInitials, getAvatarColor, formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { getInitials, getAvatarColor, formatIndianNumber, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
 
@@ -237,14 +237,7 @@ export default function ReceivablesScreen() {
 
   const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString: string) => formatDateDDMMYYYY(dateString);
 
   const handleReceivableAction = (action: string, receivableId: string) => {
     console.log(`${action} action for receivable ${receivableId}`);

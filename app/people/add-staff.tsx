@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { 
   ArrowLeft, 
   User, 
@@ -775,7 +776,7 @@ export default function AddStaffScreen() {
                 ].filter(Boolean) as any,
               }) as any}>
                 <User size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
+                <CapitalizedTextInput
                   style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.name}
                   onChangeText={(text) => updateFormData('name', text)}
@@ -917,7 +918,7 @@ export default function AddStaffScreen() {
               {formData.role === 'Others' ? (
                 <View style={styles.customInputContainer}>
                   <View style={[styles.inputContainer, { flex: 1 }]}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.customRole}
                       onChangeText={(text) => updateFormData('customRole', text)}
@@ -969,7 +970,7 @@ export default function AddStaffScreen() {
                       focusedField === 'customDepartment' && styles.inputContainerFocused,
                     ].filter(Boolean) as any,
                   }) as any}>
-                    <TextInput
+                    <CapitalizedTextInput
                       style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                       value={formData.customDepartment}
                       onChangeText={(text) => updateFormData('customDepartment', text)}
@@ -1439,12 +1440,15 @@ export default function AddStaffScreen() {
             </View>
           )}
 
-          {/* Emergency Contact */}
+          {/* Emergency Contact (optional) */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Emergency Contact</Text>
+            <Text style={styles.sectionTitle}>Emergency contact (optional)</Text>
+            <Text style={{ fontSize: 13, color: Colors.textLight, marginBottom: 12, lineHeight: 18 }}>
+              Skip this section if you prefer. If you add a name, enter a valid 10-digit phone number.
+            </Text>
             
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Contact Name *</Text>
+              <Text style={styles.label}>Contact name</Text>
               <View style={Platform.select({
                 web: [
                   inputFocusStyles.inputContainer,
@@ -1456,7 +1460,7 @@ export default function AddStaffScreen() {
                 ].filter(Boolean) as any,
               }) as any}>
                 <User size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
+                <CapitalizedTextInput
                   style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.emergencyContactName}
                   onChangeText={(text) => updateFormData('emergencyContactName', text)}
@@ -1482,7 +1486,7 @@ export default function AddStaffScreen() {
                 ].filter(Boolean) as any,
               }) as any}>
                 <User size={20} color={Colors.textLight} style={styles.inputIcon} />
-                <TextInput
+                <CapitalizedTextInput
                   style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                   value={formData.emergencyContactRelation}
                   onChangeText={(text) => updateFormData('emergencyContactRelation', text)}
@@ -1496,7 +1500,7 @@ export default function AddStaffScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Contact Phone *</Text>
+              <Text style={styles.label}>Contact phone</Text>
               <View style={Platform.select({
                 web: [
                   inputFocusStyles.inputContainer,

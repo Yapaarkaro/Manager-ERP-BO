@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from 'react-native';
 import { Calendar, X } from 'lucide-react-native';
 import DateInputWithPicker from './DateInputWithPicker';
+import { formatDateDDMMYYYY } from '@/utils/formatters';
 
 export type TimeRange = 'today' | 'week' | 'month' | 'custom';
 
@@ -82,9 +83,7 @@ export function getTimeRangeLabel(
     case 'month': return 'This Month';
     case 'custom':
       if (customFrom && customTo) {
-        const fmtFrom = customFrom.split('-').reverse().join('/');
-        const fmtTo = customTo.split('-').reverse().join('/');
-        return `${fmtFrom} - ${fmtTo}`;
+        return `${formatDateDDMMYYYY(customFrom)} – ${formatDateDDMMYYYY(customTo)}`;
       }
       return 'Custom Range';
     default: return '';
@@ -155,7 +154,8 @@ const DateFilterBar: React.FC<DateFilterBarProps> = ({
                   label="From Date"
                   value={customFromDate}
                   onChangeDate={onCustomFromChange}
-                  placeholder="YYYY-MM-DD"
+                  placeholder="DD-MM-YYYY"
+                  compact
                 />
               </View>
               <View style={styles.dateField}>
@@ -163,7 +163,8 @@ const DateFilterBar: React.FC<DateFilterBarProps> = ({
                   label="To Date"
                   value={customToDate}
                   onChangeDate={onCustomToChange}
-                  placeholder="YYYY-MM-DD"
+                  placeholder="DD-MM-YYYY"
+                  compact
                 />
               </View>
             </View>

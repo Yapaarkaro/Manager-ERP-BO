@@ -20,7 +20,7 @@ import { getPayables, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import ExportModal from '@/components/ExportModal';
 import DateFilterBar, { TimeRange, filterByDateRange } from '@/components/DateFilterBar';
-import { formatIndianNumber, formatCurrencyINR } from '@/utils/formatters';
+import { formatIndianNumber, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -235,14 +235,7 @@ export default function PayablesScreen() {
 
   const formatAmount = (amount: number) => formatCurrencyINR(amount, 2, 0);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString: string) => formatDateDDMMYYYY(dateString);
 
   const handleMakePayment = () => {
     debouncedNavigate('/payables/make-payment');

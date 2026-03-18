@@ -20,7 +20,7 @@ import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { safeRouter } from '@/utils/safeRouter';
 import { ArrowLeft, Search, Filter, Plus, Building2, User, Phone, Mail, MapPin, Star, ShoppingCart, TrendingUp, TrendingDown, Eye, MessageCircle, Award, Clock, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle } from 'lucide-react-native';
 import { getCustomers, getAllCustomerMetrics, getInvoices, getReturns, invalidateApiCache } from '@/services/backendApi';
-import { getInitials as getNameInitials, getAvatarColor, formatCurrencyINR } from '@/utils/formatters';
+import { getInitials as getNameInitials, getAvatarColor, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { ListSkeleton } from '@/components/SkeletonLoader';
 import { onTransactionChange } from '@/utils/transactionEvents';
 import { setNavData } from '@/utils/navStore';
@@ -352,13 +352,8 @@ export default function CustomersScreen() {
 
   const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
+    const s = formatDateDDMMYYYY(dateString);
+    return s || 'N/A';
   };
 
   const renderCustomerCard = (customer: Customer) => {

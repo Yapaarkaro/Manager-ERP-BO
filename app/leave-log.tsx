@@ -18,6 +18,7 @@ import { ArrowLeft, CalendarDays, X, Check, CircleX } from 'lucide-react-native'
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { getLeaveRequests, updateLeaveRequest, createInAppNotification } from '@/services/backendApi';
 import { usePermissions } from '@/contexts/PermissionContext';
+import { formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from '@/utils/formatters';
 
 const Colors = {
   background: '#FFFFFF',
@@ -30,15 +31,7 @@ const Colors = {
   grey: { 50: '#F9FAFB', 200: '#E5E7EB' },
 };
 
-const formatLeaveDate = (d: string) => {
-  try {
-    const [y, m, day] = d.split(/[-/]/);
-    if (y && m && day) return `${day}-${m}-${y}`;
-    return d;
-  } catch {
-    return d;
-  }
-};
+const formatLeaveDate = (d: string) => formatDateDDMMYYYY(d);
 
 const getLeaveStatusColor = (status: string) => {
   if (status === 'approved') return Colors.success;
@@ -205,7 +198,7 @@ export default function LeaveLogScreen() {
                 )}
                 {detailModal.reviewed_at && (
                   <Text style={styles.detailSmall}>
-                    Reviewed: {new Date(detailModal.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    Reviewed: {formatDateTimeDDMMYYYY(detailModal.reviewed_at)}
                   </Text>
                 )}
                 {detailModal.status === 'pending' && (

@@ -51,7 +51,7 @@ import {
   searchProducts,
   verifySuperadmin,
 } from '@/services/superadminApi';
-import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
+import { formatCurrencyINR, formatIndianNumber, formatDateDDMMYYYY, formatDateTimeDDMMYYYY } from '@/utils/formatters';
 
 const C = {
   primary: '#3F66AC',
@@ -88,12 +88,12 @@ const fmt = (n: number) => {
 
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return 'N/A';
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return formatDateDDMMYYYY(d) || 'N/A';
 };
 
 const fmtDateTime = (d: string | null | undefined) => {
   if (!d) return 'N/A';
-  return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return formatDateTimeDDMMYYYY(d) || 'N/A';
 };
 
 type ViewMode = 'search' | 'business_detail' | 'product_detail';

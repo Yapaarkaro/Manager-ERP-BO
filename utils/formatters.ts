@@ -154,6 +154,43 @@ export function ddmmyyyyToISO(dateStr: string): string | undefined {
 }
 
 /**
+ * Display any common date input (ISO YYYY-MM-DD, Date, or timestamp) as DD-MM-YYYY.
+ */
+export function formatDateDDMMYYYY(input: string | Date | null | undefined): string {
+  if (input == null || input === '') return '';
+  if (input instanceof Date) {
+    if (isNaN(input.getTime())) return '';
+    const dd = String(input.getDate()).padStart(2, '0');
+    const mm = String(input.getMonth() + 1).padStart(2, '0');
+    const yyyy = input.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  const s = String(input).trim();
+  if (!s) return '';
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(s.split('T')[0]);
+  if (isoMatch) {
+    const [, y, m, d] = isoMatch;
+    return `${d}-${m}-${y}`;
+  }
+  const p = parseDDMMYYYY(s.replace(/\//g, '-'));
+  if (p && !isNaN(p.getTime())) {
+    return `${String(p.getDate()).padStart(2, '0')}-${String(p.getMonth() + 1).padStart(2, '0')}-${p.getFullYear()}`;
+  }
+  const d2 = new Date(s);
+  if (!isNaN(d2.getTime())) return formatDateDDMMYYYY(d2);
+  return s;
+}
+
+/** Date and time as DD-MM-YYYY, hh:mm AM/PM */
+export function formatDateTimeDDMMYYYY(iso: string | Date | null | undefined): string {
+  if (iso == null || iso === '') return '';
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (isNaN(d.getTime())) return typeof iso === 'string' ? iso : '';
+  const t = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${formatDateDDMMYYYY(d)}, ${t}`;
+}
+
+/**
  * Extract 1-2 letter initials from a name.
  * "Vikram M" → "VM", "Acme Corp" → "AC", "Vikram" → "V"
  */

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { 
   ArrowLeft, 
   Building2, 
@@ -360,7 +361,7 @@ export default function AddCustomerScreen() {
                     <Text style={styles.label}>Business Name *</Text>
                     <View style={styles.inputContainer}>
                       <Building2 size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
+                      <CapitalizedTextInput
                         style={styles.input}
                         value={formData.businessName}
                         onChangeText={(text) => updateFormData('businessName', text)}
@@ -391,7 +392,7 @@ export default function AddCustomerScreen() {
                     <Text style={styles.label}>Contact Person *</Text>
                     <View style={styles.inputContainer}>
                       <User size={20} color={Colors.textLight} style={styles.inputIcon} />
-                      <TextInput
+                      <CapitalizedTextInput
                         style={styles.input}
                         value={formData.contactPerson}
                         onChangeText={(text) => updateFormData('contactPerson', text)}
@@ -409,7 +410,7 @@ export default function AddCustomerScreen() {
                   <Text style={styles.label}>Full Name *</Text>
                   <View style={styles.inputContainer}>
                     <User size={20} color={Colors.textLight} style={styles.inputIcon} />
-                    <TextInput
+                    <CapitalizedTextInput
                       style={styles.input}
                       value={formData.name}
                       onChangeText={(text) => updateFormData('name', text)}
@@ -487,7 +488,7 @@ export default function AddCustomerScreen() {
                     formData.paymentTerms === 'Others' && styles.customInputContainer
                   ]}>
                     {formData.paymentTerms === 'Others' ? (
-                      <TextInput
+                      <CapitalizedTextInput
                         style={styles.input}
                         value={formData.customPaymentTerms}
                         onChangeText={(text) => updateFormData('customPaymentTerms', text)}

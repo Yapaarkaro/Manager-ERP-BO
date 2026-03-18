@@ -386,7 +386,6 @@ export default function StaffDetailsScreen() {
   const missingFields: string[] = [];
   if (!staff.address || staff.address.trim() === '') missingFields.push('Address');
   if (staff.salary.total <= 0) missingFields.push('Salary');
-  if (!staff.emergencyContact.name || staff.emergencyContact.name.trim() === '') missingFields.push('Emergency Contact');
   if (staff.permissions.length === 0) missingFields.push('Permissions');
   const isIncomplete = missingFields.length > 0;
 

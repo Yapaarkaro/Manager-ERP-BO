@@ -78,7 +78,8 @@ import {
 } from '@/utils/geofenceService';
 import { supabase } from '@/lib/supabase';
 import { onTransactionChange } from '@/utils/transactionEvents';
-import { formatCurrencyINR, formatIndianNumber } from '@/utils/formatters';
+import { formatCurrencyINR, formatIndianNumber, formatDateDDMMYYYY } from '@/utils/formatters';
+import DateInputWithPicker from '@/components/DateInputWithPicker';
 
 const Colors = {
   background: '#FFFFFF',
@@ -1788,10 +1789,7 @@ export default function DashboardScreen() {
     </View>
   );
 
-  const formatLeaveDate = (d: string) => {
-    try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
-    catch { return d; }
-  };
+  const formatLeaveDate = (d: string) => formatDateDDMMYYYY(d);
 
   const getLeaveStatusColor = (status: string) => {
     if (status === 'approved') return Colors.success;
@@ -1862,7 +1860,7 @@ export default function DashboardScreen() {
                 )}
                 {lr.reviewed_at && (
                   <Text style={{ fontSize: 11, color: Colors.textLight, marginTop: 2 }}>
-                    Reviewed: {new Date(lr.reviewed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    Reviewed: {formatDateDDMMYYYY(lr.reviewed_at)}
                   </Text>
                 )}
                 {lr.status === 'pending' && (
@@ -2281,7 +2279,8 @@ export default function DashboardScreen() {
               {/* Leave Application Modal (Staff) */}
               <Modal visible={showLeaveModal} transparent animationType="fade" onRequestClose={() => setShowLeaveModal(false)}>
                 <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
+                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '90%' }}>
+                    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                       <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Apply for Leave</Text>
                       <TouchableOpacity onPress={() => setShowLeaveModal(false)}>
@@ -2289,31 +2288,26 @@ export default function DashboardScreen() {
                       </TouchableOpacity>
                     </View>
 
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Start Date *</Text>
-                    <TextInput
-                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
+                    <DateInputWithPicker
+                      compact
+                      label="Start date *"
                       value={leaveStartDate}
-                      onChangeText={(t) => {
-                        const cleaned = t.replace(/[^0-9-]/g, '');
-                        if (cleaned.length <= 10) setLeaveStartDate(cleaned);
-                      }}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={Colors.textLight}
-                      keyboardType="default"
+                      onChangeDate={setLeaveStartDate}
+                      placeholder="DD-MM-YYYY"
+                      minimumDate={new Date(2020, 0, 1)}
+                      maximumDate={new Date(2035, 11, 31)}
                     />
-
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>End Date *</Text>
-                    <TextInput
-                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 14 }}
+                    <View style={{ height: 14 }} />
+                    <DateInputWithPicker
+                      compact
+                      label="End date *"
                       value={leaveEndDate}
-                      onChangeText={(t) => {
-                        const cleaned = t.replace(/[^0-9-]/g, '');
-                        if (cleaned.length <= 10) setLeaveEndDate(cleaned);
-                      }}
-                      placeholder="YYYY-MM-DD"
-                      placeholderTextColor={Colors.textLight}
-                      keyboardType="default"
+                      onChangeDate={setLeaveEndDate}
+                      placeholder="DD-MM-YYYY"
+                      minimumDate={new Date(2020, 0, 1)}
+                      maximumDate={new Date(2035, 11, 31)}
                     />
+                    <View style={{ height: 8 }} />
 
                     <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Reason *</Text>
                     <TextInput
@@ -2340,6 +2334,7 @@ export default function DashboardScreen() {
                         <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Submit Leave Request</Text>
                       )}
                     </Pressable>
+                    </ScrollView>
                   </View>
                 </View>
               </Modal>

@@ -18,7 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useWebBackNavigation } from '@/hooks/useWebBackNavigation';
 import { useDebounceNavigation } from '@/hooks/useDebounceNavigation';
 import { ArrowLeft, Search, Filter, Users, Plus, Phone, Mail, Clock, IndianRupee, Award, Target, Eye, UserCheck, UserX, AlertCircle, ChevronRight, User } from 'lucide-react-native';
-import { formatCurrencyINR } from '@/utils/formatters';
+import { formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { useBusinessData } from '@/hooks/useBusinessData';
 import { getStaff as getStaffFromBackend, invalidateApiCache } from '@/services/backendApi';
 import { ListSkeleton } from '@/components/SkeletonLoader';
@@ -483,14 +483,7 @@ export default function StaffScreen() {
     return formatCurrencyINR(amount);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
-  };
+  const formatDate = (dateString: string) => formatDateDDMMYYYY(dateString);
 
   const handleFilterToggle = (filterType: keyof typeof activeFilters, value: string) => {
     setActiveFilters(prev => {
