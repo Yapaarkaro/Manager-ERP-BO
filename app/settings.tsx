@@ -52,6 +52,7 @@ import {
   Send,
   MessageSquare,
   Smartphone,
+  Repeat,
 } from 'lucide-react-native';
 import { getGSTINStateCode, mapLocationsToAddresses } from '@/utils/dataStore';
 import { subscriptionStore } from '@/utils/subscriptionStore';
@@ -115,6 +116,36 @@ const Colors = {
     300: '#cbd5e1',
   }
 };
+
+/** Branded colour badges for known wallets; generic wallet icon + text for others */
+function getDigitalWalletBadge(walletName: string): { kind: 'brand'; bg: string; abbr: string } | { kind: 'generic' } {
+  const lower = walletName.trim().toLowerCase();
+  const brands: { match: string; bg: string; abbr: string }[] = [
+    { match: 'paytm', bg: '#00BAF2', abbr: 'Pt' },
+    { match: 'phonepe', bg: '#5F259F', abbr: 'Pe' },
+    { match: 'google pay', bg: '#1A73E8', abbr: 'G' },
+    { match: 'googlepay', bg: '#1A73E8', abbr: 'G' },
+    { match: 'gpay', bg: '#1A73E8', abbr: 'G' },
+    { match: 'amazon pay', bg: '#E47911', abbr: 'Ap' },
+    { match: 'amazonpay', bg: '#E47911', abbr: 'Ap' },
+    { match: 'freecharge', bg: '#FF6B35', abbr: 'Fc' },
+    { match: 'mobikwik', bg: '#D2252B', abbr: 'Mw' },
+    { match: 'bhim', bg: '#002F6C', abbr: 'Bh' },
+    { match: 'whatsapp', bg: '#25D366', abbr: 'Wa' },
+    { match: 'payzapp', bg: '#004C97', abbr: 'Pz' },
+    { match: 'airtel', bg: '#E60000', abbr: 'At' },
+    { match: 'jiomoney', bg: '#0A2885', abbr: 'Ji' },
+    { match: 'jio money', bg: '#0A2885', abbr: 'Ji' },
+    { match: 'navi', bg: '#503CF8', abbr: 'Nv' },
+    { match: 'cred', bg: '#111827', abbr: 'Cr' },
+    { match: 'slice', bg: '#7C3AED', abbr: 'Sl' },
+    { match: 'niyo', bg: '#2563EB', abbr: 'Ny' },
+  ];
+  for (const b of brands) {
+    if (lower.includes(b.match)) return { kind: 'brand', bg: b.bg, abbr: b.abbr };
+  }
+  return { kind: 'generic' };
+}
 
 const DEFAULT_USER_PROFILE = {
   name: '',
@@ -2148,8 +2179,20 @@ export default function SettingsScreen() {
               </View>
               <ChevronRight size={16} color={Colors.textLight} />
             </TouchableOpacity>
+          </View>
+        </View>
+        )}
 
-            {/* Subscriptions */}
+        {/* Subscriptions Section (separate from Payments) */}
+        {(!isStaff || hasPermission('master_access')) && (
+        <View style={styles.section}>
+          <View style={styles.mainSectionHeader}>
+            <View style={styles.mainSectionHeaderContent}>
+              <Repeat size={20} color={Colors.primary} />
+              <Text style={styles.mainSectionTitle}>Subscriptions</Text>
+            </View>
+          </View>
+          <View style={styles.mainExpandedContent}>
             <TouchableOpacity 
               style={styles.paymentOption}
               onPress={() => safeRouter.push({
@@ -2160,8 +2203,8 @@ export default function SettingsScreen() {
               <View style={styles.paymentOptionInfo}>
                 <Calendar size={20} color={Colors.warning} />
                 <View style={styles.paymentOptionText}>
-                  <Text style={styles.paymentOptionTitle}>Subscriptions</Text>
-                  <Text style={styles.paymentOptionDescription}>View subscription details and payment status</Text>
+                  <Text style={styles.paymentOptionTitle}>Plan & billing</Text>
+                  <Text style={styles.paymentOptionDescription}>View subscription details, usage, and payment status</Text>
                 </View>
               </View>
               <ChevronRight size={16} color={Colors.textLight} />
@@ -2447,8 +2490,8 @@ export default function SettingsScreen() {
         onRequestClose={() => setShowDigitalWalletsModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.paymentModal}>
-            <View style={styles.modalHeader}>
+          <View style={[styles.paymentModal, styles.digitalWalletModalCard]}>
+            <View style={[styles.modalHeader, styles.digitalWalletModalHeader]}>
               <Text style={styles.modalTitle}>Digital Wallets</Text>
               <TouchableOpacity
                 style={styles.closeButton}
@@ -2458,45 +2501,63 @@ export default function SettingsScreen() {
                 <X size={20} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
-            
-            <ScrollView style={{ maxHeight: 350 }}>
-              {digitalWallets.map((wallet) => (
-                <View key={wallet} style={styles.bankAccountModalItem}>
-                  <View style={styles.bankAccountModalInfo}>
-                    <Text style={styles.bankAccountModalName}>{wallet}</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveWallet(wallet)}
-                    activeOpacity={0.7}
-                    style={{ padding: 6 }}
-                  >
-                    <X size={16} color={Colors.error} />
-                  </TouchableOpacity>
-                </View>
-              ))}
+
+            <ScrollView
+              style={styles.digitalWalletScroll}
+              contentContainerStyle={styles.digitalWalletScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {digitalWallets.length === 0 ? (
+                <Text style={styles.digitalWalletEmpty}>No wallets added yet. Use the field below to add one.</Text>
+              ) : (
+                digitalWallets.map((wallet) => {
+                  const badge = getDigitalWalletBadge(wallet);
+                  return (
+                    <View key={wallet} style={styles.digitalWalletRow}>
+                      <View style={styles.digitalWalletRowLeft}>
+                        {badge.kind === 'brand' ? (
+                          <View style={[styles.walletBadge, { backgroundColor: badge.bg }]}>
+                            <Text style={styles.walletBadgeText}>{badge.abbr}</Text>
+                          </View>
+                        ) : (
+                          <View style={[styles.walletBadge, styles.walletBadgeGeneric]}>
+                            <Wallet size={20} color="#ffffff" />
+                          </View>
+                        )}
+                        <Text style={styles.digitalWalletName} numberOfLines={2}>
+                          {wallet}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleRemoveWallet(wallet)}
+                        activeOpacity={0.7}
+                        style={styles.digitalWalletRemove}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <X size={18} color={Colors.error} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
             </ScrollView>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8, paddingHorizontal: 4 }}>
+            <View style={styles.digitalWalletAddRow}>
               <TextInput
-                style={{ flex: 1, borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: Colors.text, backgroundColor: Colors.grey[50] }}
+                style={styles.digitalWalletInput}
                 value={customWalletName}
                 onChangeText={setCustomWalletName}
-                placeholder="Add custom wallet name..."
+                placeholder="Add wallet name..."
                 placeholderTextColor={Colors.textLight}
                 returnKeyType="done"
                 onSubmitEditing={handleAddCustomWallet}
               />
               <TouchableOpacity
-                style={{
-                  backgroundColor: Colors.primary,
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                  borderRadius: 8,
-                }}
+                style={styles.digitalWalletAddBtn}
                 onPress={handleAddCustomWallet}
                 activeOpacity={0.7}
               >
-                <Plus size={18} color="#fff" />
+                <Plus size={20} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
@@ -3171,6 +3232,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textLight,
   },
+  digitalWalletModalCard: {
+    paddingBottom: 8,
+  },
+  digitalWalletModalHeader: {
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  digitalWalletScroll: {
+    maxHeight: 340,
+  },
+  digitalWalletScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  digitalWalletEmpty: {
+    fontSize: 14,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingVertical: 20,
+    lineHeight: 20,
+  },
+  digitalWalletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
+  },
+  digitalWalletRowLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+    gap: 14,
+  },
+  walletBadge: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  walletBadgeGeneric: {
+    backgroundColor: Colors.primary,
+  },
+  walletBadgeText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  digitalWalletName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  digitalWalletRemove: {
+    padding: 8,
+  },
+  digitalWalletAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
+    borderTopWidth: 1,
+    borderTopColor: Colors.grey[200],
+    marginTop: 4,
+  },
+  digitalWalletInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: Colors.text,
+    backgroundColor: Colors.grey[50],
+  },
+  digitalWalletAddBtn: {
+    backgroundColor: Colors.primary,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   deleteAccountModal: {
     backgroundColor: Colors.background,
     borderRadius: 20,
@@ -3586,6 +3742,7 @@ const styles = StyleSheet.create({
   },
   attendanceContent: {
     paddingHorizontal: 16,
+    paddingTop: 20,
     paddingBottom: 16,
   },
   attendanceStatsRow: {
