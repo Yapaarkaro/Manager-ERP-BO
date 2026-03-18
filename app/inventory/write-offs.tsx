@@ -7,15 +7,22 @@ import {
   FlatList,
   RefreshControl,
   Modal,
-  Pressable,
   Platform,
   TextInput,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { safeRouter } from '@/utils/safeRouter';
-import { ArrowLeft, Search, Filter, Plus, Trash2, Package } from 'lucide-react-native';
-import ResponsiveContainer from '@/components/ResponsiveContainer';
+import {
+  ArrowLeft,
+  Search,
+  Filter,
+  Trash2,
+  Package,
+  IndianRupee,
+  ClipboardList,
+} from 'lucide-react-native';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { getWriteOffs, invalidateApiCache } from '@/services/backendApi';
 import { formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
@@ -28,6 +35,8 @@ const Colors = {
   text: '#1F2937',
   textLight: '#6B7280',
   primary: '#3f66ac',
+  success: '#059669',
+  error: '#DC2626',
   orange: '#EA580C',
   grey: { 50: '#F9FAFB', 100: '#F3F4F6', 200: '#E5E7EB', 300: '#D1D5DB' },
 };
@@ -46,6 +55,10 @@ function normalizeWriteOff(w: any) {
     itemCount: arr.length || Number(w.item_count) || 0,
     raw: w,
   };
+}
+
+function totalQtyFromItems(items: any[]) {
+  return items.reduce((s, it) => s + Math.abs(Number(it.quantity || 0)), 0);
 }
 
 export default function WriteOffsScreen() {
@@ -106,9 +119,20 @@ export default function WriteOffsScreen() {
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (selectedTimeRange !== 'all') n++;
-    if (selectedTimeRange === 'custom' && (customFromDate || customToDate)) n++;
+    if (selectedTimeRange === 'custom' && customFromDate && customToDate) n++;
     return n;
   }, [selectedTimeRange, customFromDate, customToDate]);
+
+  const summary = useMemo(() => {
+    const totalValue = filtered.reduce((s, r) => s + r.total_value, 0);
+    const entries = filtered.length;
+    const totalUnits = filtered.reduce((s, r) => s + totalQtyFromItems(r.items), 0);
+    return { totalValue, entries, totalUnits };
+  }, [filtered]);
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+  };
 
   const handleOpenDetail = (row: ReturnType<typeof normalizeWriteOff>) => {
     setNavData('writeOffDetail', { ...row.raw, items: row.items });
@@ -146,10 +170,10 @@ export default function WriteOffsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
             <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Write-offs</Text>
+          <Text style={styles.headerTitle}>Write-offs</Text>
           <View style={{ width: 40 }} />
         </View>
         <ListSkeleton itemCount={6} showSearch showFilter />
@@ -159,36 +183,79 @@ export default function WriteOffsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ResponsiveContainer maxWidth={1200}>
-        <View style={[styles.header, getWebContainerStyles()]}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <ArrowLeft size={24} color={Colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Write-offs</Text>
-          <View style={{ width: 40 }} />
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+          <ArrowLeft size={24} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Write-offs</Text>
+        <View style={styles.headerRight}>
+          <Text style={styles.totalCount}>{filtered.length} entries</Text>
+        </View>
+      </View>
+
+      <View style={[styles.summaryContainer, getWebContainerStyles()]}>
+        <View style={styles.summaryCard}>
+          <IndianRupee size={20} color={Colors.orange} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Total value</Text>
+            <Text style={[styles.summaryValue, { color: Colors.orange }]}>
+              {formatCurrencyINR(summary.totalValue, 2, 0)}
+            </Text>
+            <Text style={styles.summaryCount}>in view</Text>
+          </View>
         </View>
 
-        <View style={[styles.searchRow, getWebContainerStyles()]}>
-          <View style={styles.searchBar}>
-            <Search size={20} color={Colors.textLight} style={{ marginRight: 10 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search reason, product, staff…"
-              placeholderTextColor={Colors.textLight}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
+        <View style={styles.summaryCard}>
+          <ClipboardList size={20} color={Colors.primary} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Write-offs</Text>
+            <Text style={[styles.summaryValue, { color: Colors.primary }]}>{summary.entries}</Text>
+            <Text style={styles.summaryCount}>records</Text>
           </View>
-          <TouchableOpacity style={styles.filterBtn} onPress={() => setShowFilterModal(true)}>
-            <Filter size={22} color={Colors.primary} />
+        </View>
+
+        <View style={styles.summaryCard}>
+          <Package size={20} color={Colors.success} />
+          <View style={styles.summaryInfo}>
+            <Text style={styles.summaryLabel}>Units removed</Text>
+            <Text style={[styles.summaryValue, { color: Colors.success }]}>
+              {summary.totalUnits % 1 === 0 ? String(summary.totalUnits) : summary.totalUnits.toFixed(2)}
+            </Text>
+            <Text style={styles.summaryCount}>qty</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={[styles.inlineSearchContainer, getWebContainerStyles()]}>
+        <View style={styles.searchBar}>
+          <Search size={20} color={Colors.primary} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search reason, product, staff…"
+            placeholderTextColor={Colors.textLight}
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilterModal(true)}
+            activeOpacity={0.7}
+          >
+            <Filter size={20} color="#FFFFFF" />
             {activeFilterCount > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{activeFilterCount}</Text>
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
               </View>
             ) : null}
           </TouchableOpacity>
         </View>
+      </View>
 
+      <View style={styles.divider} />
+
+      <View style={getWebContainerStyles()}>
         <DateFilterBar
           selectedRange={selectedTimeRange}
           onRangeChange={setSelectedTimeRange}
@@ -197,48 +264,66 @@ export default function WriteOffsScreen() {
           onCustomFromChange={setCustomFromDate}
           onCustomToChange={setCustomToDate}
         />
+      </View>
 
-        <FlatList
-          data={filtered}
-          keyExtractor={(item) => item.id}
-          renderItem={renderCard}
-          contentContainerStyle={[styles.listContent, getWebContainerStyles(), { paddingBottom: 100 }]}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Package size={48} color={Colors.grey[300]} />
-              <Text style={styles.emptyTitle}>No write-offs</Text>
-              <Text style={styles.emptySub}>Tap + to record stock write-off</Text>
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => item.id}
+        renderItem={renderCard}
+        style={styles.scrollView}
+        contentContainerStyle={[styles.listContent, getWebContainerStyles(), { paddingBottom: 100 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Trash2 size={56} color={Colors.textLight} />
+            <Text style={styles.emptyTitle}>No write-offs</Text>
+            <Text style={styles.emptySub}>
+              {searchQuery ? 'Nothing matches your search' : 'Record a stock write-off to see it here'}
+            </Text>
+          </View>
+        }
+      />
+
+      <TouchableOpacity
+        style={styles.writeOffFab}
+        onPress={() => safeRouter.push('/inventory/stock-out')}
+        activeOpacity={0.85}
+      >
+        <Package size={20} color="#fff" />
+        <Text style={styles.writeOffFabText}>Stock write-off</Text>
+      </TouchableOpacity>
+
+      <Modal
+        visible={showFilterModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.filterModal}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filter write-offs</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={() => setShowFilterModal(false)}>
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
             </View>
-          }
-        />
-
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => safeRouter.push('/inventory/stock-out')}
-          activeOpacity={0.85}
-        >
-          <Plus size={28} color="#fff" />
-        </TouchableOpacity>
-
-        <Modal visible={showFilterModal} transparent animationType="fade">
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowFilterModal(false)} />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Date filter</Text>
-            <DateFilterBar
-              selectedRange={selectedTimeRange}
-              onRangeChange={setSelectedTimeRange}
-              customFromDate={customFromDate}
-              customToDate={customToDate}
-              onCustomFromChange={setCustomFromDate}
-              onCustomToChange={setCustomToDate}
-            />
+            <ScrollView style={styles.filterModalContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.filterHint}>Date range applies to the list below.</Text>
+              <DateFilterBar
+                selectedRange={selectedTimeRange}
+                onRangeChange={setSelectedTimeRange}
+                customFromDate={customFromDate}
+                customToDate={customToDate}
+                onCustomFromChange={setCustomFromDate}
+                onCustomToChange={setCustomToDate}
+              />
+            </ScrollView>
             <TouchableOpacity style={styles.applyBtn} onPress={() => setShowFilterModal(false)}>
               <Text style={styles.applyBtnText}>Done</Text>
             </TouchableOpacity>
           </View>
-        </Modal>
-      </ResponsiveContainer>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -246,54 +331,106 @@ export default function WriteOffsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  backBtn: { padding: 8 },
-  title: { fontSize: 18, fontWeight: '700', color: Colors.text },
-  searchRow: {
-    flexDirection: 'row',
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    gap: 10,
-    marginBottom: 8,
+    marginRight: 12,
   },
-  searchBar: {
+  headerTitle: { fontSize: 18, fontWeight: '600', color: Colors.text, flex: 1 },
+  headerRight: { alignItems: 'flex-end' },
+  totalCount: { fontSize: 14, color: Colors.textLight },
+  summaryContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+    backgroundColor: Colors.grey[50],
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  summaryCard: {
     flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  summaryInfo: { alignItems: 'center', marginTop: 8 },
+  summaryLabel: {
+    fontSize: 11,
+    color: Colors.textLight,
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  summaryValue: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 2 },
+  summaryCount: { fontSize: 10, color: Colors.textLight, textAlign: 'center' },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.grey[200],
+    marginHorizontal: 16,
+  },
+  inlineSearchContainer: { paddingHorizontal: 16, paddingVertical: 16 },
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.grey[100],
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 48,
+    borderRadius: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 52,
     borderWidth: 1,
     borderColor: Colors.grey[200],
+    backgroundColor: 'transparent',
   },
-  searchInput: { flex: 1, fontSize: 16, color: Colors.text, paddingVertical: 8 },
-  filterBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
-    alignItems: 'center',
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text,
+    marginLeft: 12,
+    marginRight: 12,
   },
-  badge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
+  filterButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.primary,
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: Colors.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  filterBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  scrollView: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingTop: 8 },
   card: {
     backgroundColor: '#fff',
@@ -317,40 +454,59 @@ const styles = StyleSheet.create({
   amount: { fontSize: 15, fontWeight: '700', color: Colors.orange },
   empty: { alignItems: 'center', paddingVertical: 48 },
   emptyTitle: { fontSize: 17, fontWeight: '600', color: Colors.text, marginTop: 12 },
-  emptySub: { fontSize: 14, color: Colors.textLight, marginTop: 6 },
-  fab: {
+  emptySub: { fontSize: 14, color: Colors.textLight, marginTop: 6, textAlign: 'center', paddingHorizontal: 24 },
+  writeOffFab: {
     position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 50 : 40,
     right: 20,
-    bottom: Platform.OS === 'ios' ? 32 : 24,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
+    backgroundColor: Colors.orange,
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 25,
+    zIndex: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
+    elevation: 5,
   },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+  writeOffFabText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
-  modalCard: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    top: '22%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    maxHeight: '70%',
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16, color: Colors.text },
+  filterModal: {
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    maxHeight: '75%',
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[200],
+  },
+  filterModalTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
+  closeButton: { padding: 8 },
+  closeButtonText: { fontSize: 20, color: Colors.textLight },
+  filterModalContent: { paddingHorizontal: 16, paddingTop: 12 },
+  filterHint: { fontSize: 13, color: Colors.textLight, marginBottom: 12 },
   applyBtn: {
-    marginTop: 20,
+    marginHorizontal: 20,
+    marginTop: 8,
     backgroundColor: Colors.primary,
     paddingVertical: 14,
     borderRadius: 12,
