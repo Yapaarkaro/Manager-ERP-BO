@@ -13,7 +13,7 @@ import {
   TextInput,
 } from 'react-native';
 import { invalidateApiCache, getCustomers, getInvoiceWithItems, cancelInvoice, updateInvoiceItems } from '@/services/backendApi';
-import { formatQty, formatCurrencyINR } from '@/utils/formatters';
+import { formatQty, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -343,12 +343,9 @@ export default function InvoiceDetailsScreen() {
   const formatAmount = (amount: number) => formatCurrencyINR(amount, 3, 0);
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    });
+    if (!dateString) return '—';
+    const s = formatDateDDMMYYYY(dateString);
+    return s || '—';
   };
 
   const isCancelled = invoice.status === 'cancelled' || invoice.is_cancelled;

@@ -46,7 +46,7 @@ import { supabase } from '@/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-audio';
 import { useBusinessData } from '@/hooks/useBusinessData';
-import { getInitials, formatCurrencyINR } from '@/utils/formatters';
+import { getInitials, formatCurrencyINR, formatDateDDMMYYYY } from '@/utils/formatters';
 import { generateInvoiceHTML } from '@/utils/invoicePdfGenerator';
 import { WebView } from 'react-native-webview';
 import { consumeNavData } from '@/utils/navStore';
@@ -1062,7 +1062,7 @@ export default function ConversationScreen() {
     yesterday.setDate(today.getDate() - 1);
     if (d.toDateString() === today.toDateString()) return 'Today';
     if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    return formatDateDDMMYYYY(iso) || d.toLocaleDateString('en-IN');
   };
 
   const formatDuration = (s: number) =>
@@ -1451,7 +1451,7 @@ export default function ConversationScreen() {
                       <View style={docPickerStyles.docInfo}>
                         <Text style={docPickerStyles.docLabel}>{doc.label}</Text>
                         <Text style={docPickerStyles.docSub}>
-                          {formatCurrencyINR(doc.amount || 0)} · {new Date(doc.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {formatCurrencyINR(doc.amount || 0)} · {formatDateDDMMYYYY(doc.date) || '—'}
                         </Text>
                       </View>
                       <Send size={16} color={Colors.primary} />

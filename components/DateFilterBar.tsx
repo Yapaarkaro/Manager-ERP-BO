@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Platform, Pressable } from 'react-native';
 import { Calendar, X } from 'lucide-react-native';
 import DateInputWithPicker from './DateInputWithPicker';
 import { formatDateDDMMYYYY } from '@/utils/formatters';
@@ -139,19 +139,25 @@ const DateFilterBar: React.FC<DateFilterBarProps> = ({
       </View>
 
       <Modal visible={showCustomModal} transparent animationType="fade" onRequestClose={() => setShowCustomModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCustomModal(false)}>
-          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setShowCustomModal(false)}
+            accessibilityLabel="Close date picker"
+          />
+          <View style={styles.modalContent} pointerEvents="box-none">
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Custom Date Range</Text>
-              <TouchableOpacity onPress={() => setShowCustomModal(false)}>
+              <TouchableOpacity onPress={() => setShowCustomModal(false)} hitSlop={12}>
                 <X size={22} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
+            <Text style={styles.modalHint}>Type DD-MM-YYYY or tap the calendar icon</Text>
 
             <View style={styles.dateRow}>
               <View style={styles.dateField}>
                 <DateInputWithPicker
-                  label="From Date"
+                  label="From date"
                   value={customFromDate}
                   onChangeDate={onCustomFromChange}
                   placeholder="DD-MM-YYYY"
@@ -160,7 +166,7 @@ const DateFilterBar: React.FC<DateFilterBarProps> = ({
               </View>
               <View style={styles.dateField}>
                 <DateInputWithPicker
-                  label="To Date"
+                  label="To date"
                   value={customToDate}
                   onChangeDate={onCustomToChange}
                   placeholder="DD-MM-YYYY"
@@ -178,7 +184,7 @@ const DateFilterBar: React.FC<DateFilterBarProps> = ({
               <Text style={styles.applyButtonText}>Apply Range</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </View>
   );
@@ -217,18 +223,29 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  modalOverlay: {
+  modalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   modalContent: {
     backgroundColor: Colors.background,
     borderRadius: 16,
     padding: 24,
-    width: Platform.OS === 'web' ? 400 : '88%',
-    maxWidth: 420,
+    width: '92%',
+    maxWidth: 440,
+    zIndex: 10,
+    elevation: 24,
+  },
+  modalHint: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginBottom: 16,
+    marginTop: -8,
   },
   modalHeader: {
     flexDirection: 'row',

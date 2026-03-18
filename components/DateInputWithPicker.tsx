@@ -7,6 +7,7 @@ import {
   Modal,
   StyleSheet,
   Platform,
+  Pressable,
 } from 'react-native';
 import { Calendar, X, Check } from 'lucide-react-native';
 import CustomDatePicker from './CustomDatePicker';
@@ -131,23 +132,31 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
   }, [value]);
 
   return (
-    <View style={[styles.container, compact && { flex: 0 }]}>
+    <View style={[styles.container, compact && { flex: 0 }]} pointerEvents="box-none">
       <Text style={styles.label}>{label}</Text>
-      <View style={[styles.inputRow, hasError && styles.inputRowError]}>
+      <View
+        style={[styles.inputRow, hasError && styles.inputRowError]}
+        pointerEvents="auto"
+      >
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, Platform.OS === 'web' && styles.textInputWeb]}
           value={displayText}
           onChangeText={handleTextChange}
           placeholder={placeholder}
           placeholderTextColor={Colors.textLight}
-          keyboardType={Platform.OS === 'web' ? 'default' : 'number-pad'}
+          keyboardType="numeric"
+          inputMode="numeric"
           maxLength={10}
+          editable
+          selectTextOnFocus={Platform.OS !== 'web'}
+          importantForAutofill="no"
         />
         <TouchableOpacity
           style={styles.calendarButton}
           onPress={handlePickerOpen}
           activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Open calendar"
         >
           <Calendar size={20} color={Colors.primary} />
         </TouchableOpacity>
@@ -162,15 +171,12 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
         animationType="fade"
         onRequestClose={() => setShowPicker(false)}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowPicker(false)}
-        >
-          <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
+        <View style={styles.pickerModalRoot}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowPicker(false)} />
+          <View style={styles.modalContent} pointerEvents="box-none">
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Date</Text>
-              <TouchableOpacity onPress={() => setShowPicker(false)} activeOpacity={0.7}>
+              <Text style={styles.modalTitle}>Select date (DD-MM-YYYY)</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)} activeOpacity={0.7} hitSlop={12}>
                 <X size={24} color={Colors.textLight} />
               </TouchableOpacity>
             </View>
@@ -200,7 +206,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </View>
   );
@@ -230,10 +236,24 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
+    minWidth: 96,
     fontSize: 15,
     color: Colors.text,
-    paddingVertical: 0,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
     letterSpacing: 0.5,
+  },
+  textInputWeb: {
+    outlineStyle: 'none' as any,
+    minHeight: 40,
+  },
+  pickerModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   calendarButton: {
     padding: 4,
@@ -244,15 +264,11 @@ const styles = StyleSheet.create({
     color: Colors.error,
     marginTop: 4,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   modalContent: {
     width: '90%',
     maxWidth: 380,
+    zIndex: 20,
+    elevation: 30,
     backgroundColor: Colors.background,
     borderRadius: 16,
     paddingVertical: 20,
