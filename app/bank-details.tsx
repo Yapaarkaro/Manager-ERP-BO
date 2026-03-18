@@ -386,7 +386,13 @@ export default function BankDetailsScreen() {
       ...bankAccount,
       bankCode: bankAccount.bankShortName || bankAccount.bankId,
     });
-    safeRouter.push('/add-bank-account');
+    safeRouter.push({
+      pathname: '/add-bank-account',
+      params: {
+        returnTo: 'bank-details',
+        bankAccountId: String(bankAccount.id),
+      },
+    } as any);
   };
 
   const handleDeleteBank = () => {

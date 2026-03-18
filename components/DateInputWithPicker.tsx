@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Calendar, X, Check } from 'lucide-react-native';
 import CustomDatePicker from './CustomDatePicker';
+import { isValidISODateString } from '@/utils/isValidDate';
 
 const Colors = {
   background: '#FFFFFF',
@@ -54,8 +55,9 @@ function toISOFormat(displayDate: string): string {
   const day = parseInt(dd, 10);
   const year = parseInt(yyyy, 10);
   if (isNaN(month) || isNaN(day) || isNaN(year)) return '';
-  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900) return '';
-  return `${yyyy}-${mm}-${dd}`;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2100) return '';
+  const iso = `${yyyy}-${mm}-${dd}`;
+  return isValidISODateString(iso) ? iso : '';
 }
 
 function autoFormatDateInput(text: string): string {
@@ -87,12 +89,22 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
 
     if (formatted.length === 10) {
       const iso = toISOFormat(formatted);
-      if (iso) {
-        const testDate = new Date(iso);
-        if (!isNaN(testDate.getTime())) {
+      if (iso && isValidISODateString(iso)) {
+        let inRange = true;
+        if (minimumDate) {
+          const min = new Date(minimumDate.getFullYear(), minimumDate.getMonth(), minimumDate.getDate());
+          const cur = new Date(iso + 'T12:00:00');
+          if (cur < min) inRange = false;
+        }
+        if (maximumDate && inRange) {
+          const max = new Date(maximumDate.getFullYear(), maximumDate.getMonth(), maximumDate.getDate());
+          const cur = new Date(iso + 'T12:00:00');
+          if (cur > max) inRange = false;
+        }
+        if (inRange) {
           setHasError(false);
           onChangeDate(iso);
-          setPickerDate(testDate);
+          setPickerDate(new Date(iso + 'T12:00:00'));
           return;
         }
       }
@@ -103,7 +115,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
         onChangeDate('');
       }
     }
-  }, [onChangeDate]);
+  }, [onChangeDate, minimumDate, maximumDate]);
 
   const handlePickerOpen = useCallback(() => {
     if (value) {
@@ -162,7 +174,7 @@ const DateInputWithPicker: React.FC<DateInputWithPickerProps> = ({
         </TouchableOpacity>
       </View>
       {hasError && (
-        <Text style={styles.errorText}>Invalid date format</Text>
+        <Text style={styles.errorText}>Enter a valid date (DD-MM-YYYY) within the allowed range</Text>
       )}
 
       <Modal

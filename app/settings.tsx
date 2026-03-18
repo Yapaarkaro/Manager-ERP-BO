@@ -595,7 +595,8 @@ export default function SettingsScreen() {
     
     // Navigate to add bank account page
     safeRouter.push({
-      pathname: '/add-bank-account'
+      pathname: '/add-bank-account',
+      params: { returnTo: 'settings' },
     } as any);
   };
 
@@ -610,6 +611,7 @@ export default function SettingsScreen() {
         editAccountId: account.id,
         bankId: account.id,
         fromSettings: 'true',
+        returnTo: 'settings',
       },
     } as any);
   };

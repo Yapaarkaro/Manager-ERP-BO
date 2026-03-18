@@ -34,6 +34,7 @@ import { optimisticUpdateBankAccount, optimisticAddBankAccount } from '@/utils/o
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { updateBusinessPrimaryBankAccount } from '@/services/backendApi';
 import { consumeNavData } from '@/utils/navStore';
+import Toast from 'react-native-toast-message';
 import CapitalizedTextInput from '@/components/CapitalizedTextInput';
 import { getInputFocusStyles } from '@/utils/platformUtils';
 
@@ -69,11 +70,32 @@ interface AddBankAccountProps {
 
 export default function AddBankAccount(props: AddBankAccountProps = {}) {
   const { initialAccount: propAccount, forceEditMode: propForceEdit } = props;
-  const params = useLocalSearchParams();
+  const params = useLocalSearchParams<{ returnTo?: string; bankAccountId?: string; account?: string }>();
+  const returnTo = typeof params.returnTo === 'string' ? params.returnTo : undefined;
+  const returnBankAccountId = typeof params.bankAccountId === 'string' ? params.bankAccountId : undefined;
+
   const { data: businessData } = useBusinessData();
   const navAccount = consumeNavData('editBankAccount');
   const existingAccount = propAccount ?? navAccount ?? (params.account ? JSON.parse(params.account as string) : null);
   const isEditMode = !!propForceEdit || !!existingAccount;
+
+  const navigateAfterBankSave = () => {
+    Toast.show({
+      type: 'success',
+      text1: isEditMode ? 'Bank account updated' : 'Bank account added',
+      visibilityTime: 2200,
+    });
+    const go = () => {
+      if (returnTo === 'settings') {
+        router.replace('/settings' as any);
+      } else if (returnTo === 'bank-details' && returnBankAccountId) {
+        router.replace({ pathname: '/bank-details' as any, params: { bankAccountId: returnBankAccountId } });
+      } else {
+        router.back();
+      }
+    };
+    setTimeout(go, Platform.OS === 'web' ? 100 : 0);
+  };
 
   const [selectedBank, setSelectedBank] = useState<IndianBank | null>(null);
   const [customBankName, setCustomBankName] = useState('');
@@ -332,18 +354,21 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
           } catch (e) { console.warn('Failed to resolve bank account UUID:', e); }
         }
         
-        await optimisticUpdateBankAccount(resolvedId, { ...bankAccountUpdates, backendId: resolvedId }, { showError: false, awaitSync: true });
+        const syncRes = await optimisticUpdateBankAccount(resolvedId, { ...bankAccountUpdates, backendId: resolvedId }, { showError: false, awaitSync: true });
+        if (!syncRes || syncRes.success === false) {
+          Alert.alert('Update failed', (syncRes as any)?.error || 'Could not update bank account. Please try again.');
+          setIsSubmitting(false);
+          return;
+        }
         clearBusinessDataCache();
         await new Promise(resolve => setTimeout(resolve, 300));
         if (isPrimary) {
           await updateBusinessPrimaryBankAccount(resolvedId);
         }
-        Alert.alert('Success', 'Bank account updated successfully.', [
-          { text: 'OK', onPress: () => router.back() }
-        ]);
+        setIsSubmitting(false);
+        navigateAfterBankSave();
       } catch (err: any) {
         Alert.alert('Update failed', err?.message || 'Could not update bank account. Please try again.');
-      } finally {
         setIsSubmitting(false);
       }
       return;
@@ -364,18 +389,22 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
           balance: parseFloat(initialBalance) || 0,
           createdAt: new Date().toISOString(),
         };
-        await optimisticAddBankAccount(newBankAccount, { showError: false, awaitSync: true });
+        const addRes = await optimisticAddBankAccount(newBankAccount, { showError: false, awaitSync: true });
+        if (!addRes || addRes.success === false) {
+          Alert.alert('Error', (addRes as any)?.error || 'Could not add bank account.');
+          setIsSubmitting(false);
+          return;
+        }
+        const createdId = (addRes as any).data?.id || newBankAccount.id;
         clearBusinessDataCache();
         await new Promise(resolve => setTimeout(resolve, 300));
         if (isPrimary) {
-          await updateBusinessPrimaryBankAccount(newBankAccount.id);
+          await updateBusinessPrimaryBankAccount(createdId);
         }
-        Alert.alert('Success', 'Bank account added successfully!', [
-          { text: 'OK', onPress: () => router.back() }
-        ]);
+        setIsSubmitting(false);
+        navigateAfterBankSave();
       } catch (e: any) {
         Alert.alert('Error', e?.message || 'Could not add bank account.');
-      } finally {
         setIsSubmitting(false);
       }
     }

@@ -4,7 +4,7 @@ import { Calendar, X } from 'lucide-react-native';
 import DateInputWithPicker from './DateInputWithPicker';
 import { formatDateDDMMYYYY } from '@/utils/formatters';
 
-export type TimeRange = 'today' | 'week' | 'month' | 'custom';
+export type TimeRange = 'all' | 'today' | 'week' | 'month' | 'custom';
 
 interface DateFilterBarProps {
   selectedRange: TimeRange;
@@ -24,6 +24,7 @@ const Colors = {
 };
 
 const CHIPS: { key: TimeRange; label: string }[] = [
+  { key: 'all', label: 'All' },
   { key: 'today', label: 'Today' },
   { key: 'week', label: 'This Week' },
   { key: 'month', label: 'This Month' },
@@ -41,6 +42,7 @@ export function filterByDateRange<T>(
   customFrom?: string,
   customTo?: string,
 ): T[] {
+  if (range === 'all') return items;
   if (range === 'custom' && (!customFrom || !customTo)) return items;
 
   const now = new Date();
@@ -78,6 +80,7 @@ export function getTimeRangeLabel(
   customTo?: string,
 ): string {
   switch (range) {
+    case 'all': return 'All time';
     case 'today': return 'Today';
     case 'week': return 'This Week';
     case 'month': return 'This Month';

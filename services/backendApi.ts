@@ -3617,6 +3617,7 @@ export async function createWriteOff(params: {
     }, true);
 
     if (!result.success) return { success: false, error: result.error || 'Failed to create write-off' };
+    invalidateApiCache('writeoffs');
     return { success: true, writeOff: result.data?.write_off };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to create write-off' };

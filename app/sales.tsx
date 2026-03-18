@@ -131,7 +131,7 @@ export default function SalesInvoicesScreen() {
             paymentStatus: (inv.payment_status ?? 'pending') as 'paid' | 'partially_paid' | 'pending',
             paymentMethod: (inv.payment_method ?? 'cash') as 'cash' | 'upi' | 'card' | 'others',
             amount: Number(inv.total_amount ?? inv.subtotal ?? 0),
-            itemCount: 0,
+            itemCount: Number(inv.item_count) || Number(inv.items_count) || 0,
             date: invoiceDate,
             time: timeStr,
           };
@@ -165,7 +165,7 @@ export default function SalesInvoicesScreen() {
               paymentStatus: (inv.payment_status ?? 'pending') as 'paid' | 'partially_paid' | 'pending',
               paymentMethod: (inv.payment_method ?? 'cash') as 'cash' | 'upi' | 'card' | 'others',
               amount: Number(inv.total_amount ?? inv.subtotal ?? 0),
-              itemCount: 0,
+              itemCount: Number(inv.item_count) || Number(inv.items_count) || 0,
               date: invoiceDate,
               time: timeStr,
             };

@@ -38,6 +38,8 @@ const ROUTE_PERMISSIONS: Record<string, string> = {
   '/inventory/stock-out/confirmation': 'inventory',
   '/inventory/stock-out/success': 'inventory',
   '/inventory/stock-out/stock-details': 'inventory',
+  '/inventory/write-offs': 'inventory',
+  '/inventory/write-off-details': 'inventory',
 
   '/purchasing/purchases': 'inventory',
   '/purchasing/suppliers': 'inventory',

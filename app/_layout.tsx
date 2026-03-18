@@ -508,6 +508,8 @@ export default function RootLayout() {
         <Stack.Screen name="inventory/stock-in/stock-confirmation" />
         <Stack.Screen name="inventory/stock-in/invoice-input" />
         <Stack.Screen name="inventory/stock-in/discrepancy-report" />
+        <Stack.Screen name="inventory/write-offs" />
+        <Stack.Screen name="inventory/write-off-details" />
         <Stack.Screen name="invoice-details" />
         <Stack.Screen name="receivables" />
         <Stack.Screen name="receivables/customer-details" />

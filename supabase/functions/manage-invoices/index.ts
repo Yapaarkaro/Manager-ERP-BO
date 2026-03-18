@@ -191,7 +191,25 @@ Deno.serve(async (req: Request) => {
 
       const { data: invoices, error } = await supabase.from("invoices").select("*").eq("business_id", businessId).eq("is_deleted", false).order("invoice_date", { ascending: false });
       if (error) return json({ error: error.message }, 500);
-      return json({ invoices: invoices || [] });
+      const list = invoices || [];
+      if (list.length === 0) return json({ invoices: [] });
+      const ids = list.map((i: any) => i.id);
+      const countMap: Record<string, number> = {};
+      const chunkSize = 200;
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const { data: rows } = await supabase
+          .from("invoice_items")
+          .select("invoice_id")
+          .eq("is_deleted", false)
+          .in("invoice_id", chunk);
+        for (const r of rows || []) {
+          const id = (r as { invoice_id: string }).invoice_id;
+          countMap[id] = (countMap[id] || 0) + 1;
+        }
+      }
+      const enriched = list.map((inv: any) => ({ ...inv, item_count: countMap[inv.id] ?? 0 }));
+      return json({ invoices: enriched });
     }
 
     if (method === "POST") {

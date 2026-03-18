@@ -639,7 +639,7 @@ export default function AddStaffScreen() {
       department: deptIsPreset ? staffDept : (staffDept ? 'Others' : ''),
       customDepartment: deptIsPreset ? '' : staffDept,
       address: s.address || s.full_address || '',
-      employeeId: existingEmpId,
+      employeeId: existingEmpId || generateEmployeeId(),
       basicSalary: s.basic_salary?.toString() || s.basicSalary?.toString() || '',
       allowances: s.allowances?.toString() || '',
       emergencyContactName: s.emergency_contact_name || s.emergencyContactName || '',
@@ -655,9 +655,7 @@ export default function AddStaffScreen() {
       geofenceRadius: (s.geofence_radius || s.geofenceRadius || 100).toString(),
     });
 
-    if (existingEmpId) {
-      setUseCustomEmployeeId(true);
-    }
+    setUseCustomEmployeeId(!!existingEmpId);
 
     const locId = s.location_id || s.locationId;
     if (locId) {
@@ -1078,82 +1076,66 @@ export default function AddStaffScreen() {
               </View>
             </View>
 
-            {!editMode && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Employee ID</Text>
-                <View style={styles.employeeIdToggle}>
-                  <TouchableOpacity
-                    style={[styles.toggleOption, !useCustomEmployeeId && styles.toggleOptionActive]}
-                    onPress={() => {
-                      setUseCustomEmployeeId(false);
-                      updateFormData('employeeId', generateEmployeeId());
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.toggleOptionText, !useCustomEmployeeId && styles.toggleOptionTextActive]}>
-                      Auto-generate
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.toggleOption, useCustomEmployeeId && styles.toggleOptionActive]}
-                    onPress={() => { setUseCustomEmployeeId(true); updateFormData('employeeId', ''); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.toggleOptionText, useCustomEmployeeId && styles.toggleOptionTextActive]}>
-                      Enter manually
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                {useCustomEmployeeId ? (
-                  <View style={[styles.inputContainer, { marginTop: 8 }]}>
-                    <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
-                    <TextInput
-                      style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
-                      value={formData.employeeId}
-                      onChangeText={(text) => updateFormData('employeeId', text.toUpperCase())}
-                      placeholder="e.g. EMP001"
-                      placeholderTextColor={Colors.textLight}
-                      autoCapitalize="characters"
-                      onFocus={() => setFocusedField('employeeId')}
-                      onBlur={() => setFocusedField(null)}
-                    />
-                  </View>
-                ) : (
-                  <View style={styles.autoIdContainer}>
-                    <View style={styles.autoIdDisplay}>
-                      <Hash size={18} color={Colors.primary} />
-                      <Text style={styles.autoIdValue}>{formData.employeeId || '—'}</Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.regenerateBtn}
-                      onPress={() => updateFormData('employeeId', generateEmployeeId())}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.regenerateBtnText}>Regenerate</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Employee ID</Text>
+              {editMode ? (
+                <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 8 }}>
+                  Generate a new ID or enter your own (e.g. after staff signs up).
+                </Text>
+              ) : null}
+              <View style={styles.employeeIdToggle}>
+                <TouchableOpacity
+                  style={[styles.toggleOption, !useCustomEmployeeId && styles.toggleOptionActive]}
+                  onPress={() => {
+                    setUseCustomEmployeeId(false);
+                    updateFormData('employeeId', generateEmployeeId());
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toggleOptionText, !useCustomEmployeeId && styles.toggleOptionTextActive]}>
+                    Auto-generate
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toggleOption, useCustomEmployeeId && styles.toggleOptionActive]}
+                  onPress={() => { setUseCustomEmployeeId(true); updateFormData('employeeId', ''); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.toggleOptionText, useCustomEmployeeId && styles.toggleOptionTextActive]}>
+                    Enter manually
+                  </Text>
+                </TouchableOpacity>
               </View>
-            )}
-
-            {editMode && (
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Employee ID</Text>
-                <View style={[styles.inputContainer, { marginTop: 0 }]}>
+              {useCustomEmployeeId ? (
+                <View style={[styles.inputContainer, { marginTop: 8 }]}>
                   <Hash size={20} color={Colors.textLight} style={styles.inputIcon} />
                   <TextInput
                     style={Platform.OS === 'web' ? inputFocusStyles.input : styles.input}
                     value={formData.employeeId}
                     onChangeText={(text) => updateFormData('employeeId', text.toUpperCase())}
-                    placeholder="Employee ID"
+                    placeholder="e.g. EMP001"
                     placeholderTextColor={Colors.textLight}
                     autoCapitalize="characters"
                     onFocus={() => setFocusedField('employeeId')}
                     onBlur={() => setFocusedField(null)}
                   />
                 </View>
-              </View>
-            )}
+              ) : (
+                <View style={styles.autoIdContainer}>
+                  <View style={styles.autoIdDisplay}>
+                    <Hash size={18} color={Colors.primary} />
+                    <Text style={styles.autoIdValue}>{formData.employeeId || '—'}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.regenerateBtn}
+                    onPress={() => updateFormData('employeeId', generateEmployeeId())}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.regenerateBtnText}>Regenerate</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
 
           {/* Salary Information */}

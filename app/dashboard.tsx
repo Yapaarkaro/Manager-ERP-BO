@@ -18,6 +18,7 @@ import {
   Modal,
   TextInput,
   ScrollView,
+  KeyboardAvoidingView,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -80,6 +81,7 @@ import { supabase } from '@/lib/supabase';
 import { onTransactionChange } from '@/utils/transactionEvents';
 import { formatCurrencyINR, formatIndianNumber, formatDateDDMMYYYY } from '@/utils/formatters';
 import DateInputWithPicker from '@/components/DateInputWithPicker';
+import { isValidISODateString } from '@/utils/isValidDate';
 
 const Colors = {
   background: '#FFFFFF',
@@ -451,6 +453,10 @@ export default function DashboardScreen() {
   const handleSubmitLeave = async () => {
     if (!staffId || !leaveStartDate || !leaveEndDate || !leaveReason.trim()) {
       Alert.alert('Incomplete', 'Please fill in all fields — start date, end date, and reason.');
+      return;
+    }
+    if (!isValidISODateString(leaveStartDate) || !isValidISODateString(leaveEndDate)) {
+      Alert.alert('Invalid date', 'Please enter valid start and end dates (DD-MM-YYYY).');
       return;
     }
     if (new Date(leaveEndDate) < new Date(leaveStartDate)) {
@@ -1452,7 +1458,7 @@ export default function DashboardScreen() {
       )}
 
       {hasPermission('inventory') && (
-        <Pressable onPress={isNavigating ? undefined : () => debouncedNavigate('/inventory/stock-out')} disabled={isNavigating}>
+        <Pressable onPress={isNavigating ? undefined : () => debouncedNavigate('/inventory/write-offs')} disabled={isNavigating}>
           <View style={[styles.kpiCard, { borderLeftColor: Colors.orange }]}>
             <View style={styles.kpiHeader}>
               <Text style={styles.kpiTitle}>Write-Offs</Text>
@@ -1462,7 +1468,7 @@ export default function DashboardScreen() {
               {writeOffSummary.count > 0 ? fmtCurrency(writeOffSummary.totalValue) : '₹0'}
             </Text>
             <View style={styles.kpiFooter}>
-              <Text style={styles.kpiPeriod}>{writeOffSummary.count} this month</Text>
+              <Text style={styles.kpiPeriod}>{writeOffSummary.count} this month · tap to view all</Text>
             </View>
           </View>
         </Pressable>
@@ -2278,46 +2284,55 @@ export default function DashboardScreen() {
               )}
               {/* Leave Application Modal (Staff) */}
               <Modal visible={showLeaveModal} transparent animationType="fade" onRequestClose={() => setShowLeaveModal(false)}>
-                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '90%' }}>
-                    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <KeyboardAvoidingView
+                  behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                  style={{ flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 20 }}
+                >
+                  <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '100%', maxWidth: 440, maxHeight: Platform.OS === 'web' ? '88vh' as const : '88%', alignSelf: 'center' }}>
+                    <ScrollView
+                      keyboardShouldPersistTaps="handled"
+                      showsVerticalScrollIndicator={false}
+                      nestedScrollEnabled
+                      contentContainerStyle={{ paddingBottom: 28, flexGrow: 1 }}
+                    >
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                       <Text style={{ fontSize: 18, fontWeight: '700', color: Colors.text }}>Apply for Leave</Text>
-                      <TouchableOpacity onPress={() => setShowLeaveModal(false)}>
+                      <TouchableOpacity onPress={() => setShowLeaveModal(false)} hitSlop={12}>
                         <X size={22} color={Colors.textLight} />
                       </TouchableOpacity>
                     </View>
 
-                    <DateInputWithPicker
-                      compact
-                      label="Start date *"
-                      value={leaveStartDate}
-                      onChangeDate={setLeaveStartDate}
-                      placeholder="DD-MM-YYYY"
-                      minimumDate={new Date(2020, 0, 1)}
-                      maximumDate={new Date(2035, 11, 31)}
-                    />
-                    <View style={{ height: 14 }} />
-                    <DateInputWithPicker
-                      compact
-                      label="End date *"
-                      value={leaveEndDate}
-                      onChangeDate={setLeaveEndDate}
-                      placeholder="DD-MM-YYYY"
-                      minimumDate={new Date(2020, 0, 1)}
-                      maximumDate={new Date(2035, 11, 31)}
-                    />
-                    <View style={{ height: 8 }} />
+                    <View style={{ marginBottom: 18, width: '100%' }}>
+                      <DateInputWithPicker
+                        compact
+                        label="Start date *"
+                        value={leaveStartDate}
+                        onChangeDate={setLeaveStartDate}
+                        placeholder="DD-MM-YYYY"
+                        minimumDate={new Date(2020, 0, 1)}
+                        maximumDate={new Date(2035, 11, 31)}
+                      />
+                    </View>
+                    <View style={{ marginBottom: 18, width: '100%' }}>
+                      <DateInputWithPicker
+                        compact
+                        label="End date *"
+                        value={leaveEndDate}
+                        onChangeDate={setLeaveEndDate}
+                        placeholder="DD-MM-YYYY"
+                        minimumDate={new Date(2020, 0, 1)}
+                        maximumDate={new Date(2035, 11, 31)}
+                      />
+                    </View>
 
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 6 }}>Reason *</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: Colors.text, marginBottom: 8 }}>Reason *</Text>
                     <TextInput
-                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 12, fontSize: 15, color: Colors.text, marginBottom: 20, minHeight: 80, textAlignVertical: 'top' }}
+                      style={{ borderWidth: 1, borderColor: Colors.grey[200], borderRadius: 10, padding: 14, fontSize: 15, color: Colors.text, marginBottom: 20, minHeight: 100, textAlignVertical: 'top', width: '100%' }}
                       value={leaveReason}
                       onChangeText={setLeaveReason}
                       placeholder="Enter reason for leave"
                       placeholderTextColor={Colors.textLight}
                       multiline
-                      numberOfLines={3}
                     />
 
                     <Pressable
@@ -2336,7 +2351,7 @@ export default function DashboardScreen() {
                     </Pressable>
                     </ScrollView>
                   </View>
-                </View>
+                </KeyboardAvoidingView>
               </Modal>
 
               {/* Leave Review Modal (Owner) */}
