@@ -28,6 +28,7 @@ import { supabase } from '@/lib/supabase';
 import { generateBarcodeImage } from '@/utils/barcodeGenerator';
 import { showSuccess, showError } from '@/utils/notifications';
 import { autoFormatDateInput, parseDDMMYYYY, ddmmyyyyToISO, formatCurrencyINR } from '@/utils/formatters';
+import { validateCompoundStockQuantity } from '@/utils/compoundQuantity';
 import { safeRouter } from '@/utils/safeRouter';
 import { 
   ArrowLeft, 
@@ -1061,11 +1062,14 @@ export default function ManualProductScreen() {
 
   const getDisplayPrices = () => displayPrices;
 
-  const priceDec = Math.max(formData.quantityDecimals, 2);
+  /** Decimals for stock fields: only when compound UoM (e.g. half boxes that map to whole pieces). */
+  const stockQtyDecimals =
+    formData.useCompoundUnit && formData.secondaryUnit && formData.secondaryUnit !== 'None' ? 2 : 0;
+  const priceDec = 2;
   const fmtPrice = (n: number) => formatCurrencyINR(n, priceDec, 2);
 
   const handleStockChange = (field: 'minStockLevel' | 'maxStockLevel' | 'openingStock', text: string) => {
-    const decimals = formData.quantityDecimals;
+    const decimals = stockQtyDecimals;
     if (decimals > 0) {
       const regex = new RegExp(`^\\d*\\.?\\d{0,${decimals}}$`);
       if (regex.test(text) || text === '') {
@@ -1181,6 +1185,39 @@ export default function ManualProductScreen() {
   const proceedWithProductCreation = async () => {
     setIsSubmitting(true);
 
+    const qdSave =
+      formData.useCompoundUnit && formData.secondaryUnit && formData.secondaryUnit !== 'None' ? 2 : 0;
+
+    if (
+      returnToStockIn !== 'true' &&
+      formData.useCompoundUnit &&
+      formData.secondaryUnit &&
+      formData.secondaryUnit !== 'None' &&
+      formData.conversionRatio
+    ) {
+      const checks: [string, number][] = [
+        ['Opening stock', parseFloat(formData.openingStock || '0') || 0],
+        ['Min stock level', parseFloat(formData.minStockLevel || '0') || 0],
+        ['Max stock level', parseFloat(formData.maxStockLevel || '0') || 0],
+      ];
+      for (const [label, num] of checks) {
+        const v = validateCompoundStockQuantity(
+          num,
+          formData.stockUoM,
+          formData.primaryUnit,
+          formData.secondaryUnit,
+          formData.conversionRatio,
+          formData.tertiaryUnit !== 'None' ? formData.tertiaryUnit : undefined,
+          formData.tertiaryConversionRatio || undefined
+        );
+        if (!v.ok) {
+          Alert.alert(`${label} not valid`, v.message);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+    }
+
     // Auto-generate barcode if none exists
     let barcodeToUse = formData.barcode;
     if (!barcodeToUse || barcodeToUse.trim().length === 0) {
@@ -1274,7 +1311,7 @@ export default function ManualProductScreen() {
       cessRate: formData.cessRate,
       cessAmount: parseFloat(formData.cessAmount) || 0,
       cessUnit: formData.cessUnit,
-      quantityDecimals: formData.quantityDecimals,
+      quantityDecimals: qdSave,
     };
 
     try {
@@ -1319,7 +1356,7 @@ export default function ManualProductScreen() {
           mrpPrice: parseFloat(formData.mrp) || 0,
           preferredSupplierId: formData.preferredSupplier || undefined,
           storageLocationName: productData.location || undefined,
-          quantityDecimals: formData.quantityDecimals,
+          quantityDecimals: qdSave,
         });
 
         if (!updateResult.success || !updateResult.product) {
@@ -1372,7 +1409,7 @@ export default function ManualProductScreen() {
             mrpPrice: parseFloat(formData.mrp) || 0,
             preferredSupplierId: formData.preferredSupplier || undefined,
             storageLocationName: productData.location || undefined,
-            quantityDecimals: formData.quantityDecimals,
+            quantityDecimals: qdSave,
           };
 
           const stockInProductData = {
@@ -1445,7 +1482,7 @@ export default function ManualProductScreen() {
           mrpPrice: parseFloat(formData.mrp) || 0,
           preferredSupplierId: formData.preferredSupplier || undefined,
           storageLocationName: productData.location || undefined,
-          quantityDecimals: formData.quantityDecimals,
+          quantityDecimals: qdSave,
         });
 
         if (!createResult.success || !createResult.product) {
@@ -2378,6 +2415,24 @@ export default function ManualProductScreen() {
                 </View>
               </View>
             )}
+
+            {formData.useCompoundUnit &&
+              formData.secondaryUnit &&
+              formData.secondaryUnit !== 'None' &&
+              formData.conversionRatio && (
+              <View style={[styles.section, { marginBottom: 8 }]}>
+                <Text style={styles.sectionTitle}>How quantities work</Text>
+                <Text style={{ fontSize: 14, color: Colors.textLight, lineHeight: 22 }}>
+                  Prices are per {formData.primaryUnit}. On the cart, you can enter quantities like{' '}
+                  <Text style={{ fontWeight: '700', color: Colors.text }}>1.5 {formData.primaryUnit}</Text> only
+                  when that equals a <Text style={{ fontWeight: '700' }}>whole number</Text> of{' '}
+                  {formData.secondaryUnit}s (e.g. 1 {formData.primaryUnit} = {formData.conversionRatio}{' '}
+                  {formData.secondaryUnit} → 1.5 {formData.primaryUnit} ={' '}
+                  {(parseFloat(formData.conversionRatio) || 0) * 1.5} {formData.secondaryUnit}). If the result
+                  is not whole (e.g. 13.5 pieces), the app will ask you to fix the quantity on the cart screen.
+                </Text>
+              </View>
+            )}
             
             {returnToStockIn !== 'true' && (
             <View style={styles.inputGroup}>
@@ -2401,9 +2456,9 @@ export default function ManualProductScreen() {
                   onChangeText={(text) => handleStockChange('openingStock', text)}
                   onFocus={() => setFocusedField('openingStock')}
                   onBlur={() => setFocusedField(null)}
-                  placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
+                  placeholder={stockQtyDecimals > 0 ? '0.00' : '0'}
                   placeholderTextColor={Colors.textLight}
-                  keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
+                  keyboardType={stockQtyDecimals > 0 ? 'decimal-pad' : 'numeric'}
                 />
               </FocusableInput>
             </View>
@@ -2422,9 +2477,9 @@ export default function ManualProductScreen() {
                     onChangeText={(text) => handleStockChange('minStockLevel', text)}
                     onFocus={() => setFocusedField('minStockLevel')}
                     onBlur={() => setFocusedField(null)}
-                    placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
+                    placeholder={stockQtyDecimals > 0 ? '0.00' : '0'}
                     placeholderTextColor={Colors.textLight}
-                    keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
+                    keyboardType={stockQtyDecimals > 0 ? 'decimal-pad' : 'numeric'}
                   />
                 </FocusableInput>
               </View>
@@ -2441,50 +2496,11 @@ export default function ManualProductScreen() {
                     onChangeText={(text) => handleStockChange('maxStockLevel', text)}
                     onFocus={() => setFocusedField('maxStockLevel')}
                     onBlur={() => setFocusedField(null)}
-                    placeholder={formData.quantityDecimals > 0 ? '0.00' : '0'}
+                    placeholder={stockQtyDecimals > 0 ? '0.00' : '0'}
                     placeholderTextColor={Colors.textLight}
-                    keyboardType={formData.quantityDecimals > 0 ? 'decimal-pad' : 'numeric'}
+                    keyboardType={stockQtyDecimals > 0 ? 'decimal-pad' : 'numeric'}
                   />
                 </FocusableInput>
-              </View>
-            </View>
-          </View>
-
-          {/* Quantity Decimal Precision */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Quantity Precision</Text>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>How many decimals for quantity?</Text>
-              <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 8 }}>
-                {formData.quantityDecimals === 0
-                  ? 'Whole numbers only (e.g. 1, 2, 10)'
-                  : `Up to ${formData.quantityDecimals} decimal${formData.quantityDecimals > 1 ? 's' : ''} (e.g. ${formData.quantityDecimals === 1 ? '1.5' : formData.quantityDecimals === 2 ? '1.75' : formData.quantityDecimals === 3 ? '1.999' : '1.9999'})`}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {[0, 1, 2, 3, 4].map((d) => (
-                  <TouchableOpacity
-                    key={d}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 10,
-                      borderRadius: 8,
-                      backgroundColor: formData.quantityDecimals === d ? Colors.primary : Colors.grey[100],
-                      borderWidth: 1,
-                      borderColor: formData.quantityDecimals === d ? Colors.primary : Colors.grey[200],
-                      alignItems: 'center',
-                    }}
-                    onPress={() => updateFormData('quantityDecimals', d)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={{
-                      fontSize: 14,
-                      fontWeight: '600',
-                      color: formData.quantityDecimals === d ? '#fff' : Colors.text,
-                    }}>
-                      {d}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
               </View>
             </View>
           </View>

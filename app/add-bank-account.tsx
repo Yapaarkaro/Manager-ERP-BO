@@ -34,6 +34,8 @@ import { optimisticUpdateBankAccount, optimisticAddBankAccount } from '@/utils/o
 import { useBusinessData, clearBusinessDataCache } from '@/hooks/useBusinessData';
 import { updateBusinessPrimaryBankAccount } from '@/services/backendApi';
 import { consumeNavData } from '@/utils/navStore';
+import CapitalizedTextInput from '@/components/CapitalizedTextInput';
+import { getInputFocusStyles } from '@/utils/platformUtils';
 
 const Colors = {
   primary: '#3F66AC',
@@ -87,7 +89,11 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
   const [bankSearch, setBankSearch] = useState('');
   const [showAccountTypeModal, setShowAccountTypeModal] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
-  
+  const [acceptsUpiPayments, setAcceptsUpiPayments] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const inputFocusStyles = getInputFocusStyles();
+
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
   const ifscInputRef = useRef<TextInput>(null);
@@ -113,6 +119,10 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
           setCustomBankName(existingAccount.bankName || existingAccount.bank_name || '');
         }
       }
+      const uid = existingAccount.upiId || existingAccount.upi_id || '';
+      setAcceptsUpiPayments(uid.trim().length > 0);
+    } else {
+      setAcceptsUpiPayments(false);
     }
 
     Animated.timing(slideAnimation, {
@@ -230,7 +240,27 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
     setUpiId(cleaned);
   };
 
+  const getValidationMessage = () => {
+    if (!selectedBank) return 'Please select a bank';
+    if (selectedBank.id === 'others' && !customBankName.trim()) return 'Please enter bank name';
+    if (!accountHolderName.trim()) return 'Please enter account holder name';
+    if (!accountNumber) return 'Please enter account number';
+    if (accountNumber !== confirmAccountNumber) return 'Account numbers do not match';
+    if (selectedBank.id !== 'others' && !validateAccountNumber(selectedBank.id, accountNumber)) {
+      return `Account number should be ${selectedBank.accountNumberFormat}`;
+    }
+    if (ifscCode.length !== 11) return 'IFSC must be 11 characters';
+    if (!validateIFSC(ifscCode)) return 'Invalid IFSC format';
+    if (!isEditMode && (!initialBalance.length || isNaN(parseFloat(initialBalance)))) return 'Please enter initial balance';
+    if (acceptsUpiPayments && !upiId.trim()) return 'Enter your UPI ID or turn off UPI';
+    if (upiId.trim() && !validateUPI(upiId)) return 'Invalid UPI ID (e.g. name@bank)';
+    return 'Please check all fields';
+  };
+
   const isFormValid = () => {
+    const upiOk = acceptsUpiPayments
+      ? upiId.trim().length > 0 && validateUPI(upiId)
+      : !upiId.trim() || validateUPI(upiId);
     return (
       selectedBank !== null &&
       (selectedBank.id !== 'others' || customBankName.trim().length > 0) &&
@@ -242,24 +272,31 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
       validateIFSC(ifscCode) &&
       (accountType === 'Savings' || accountType === 'Current') &&
       (isEditMode || (initialBalance.length > 0 && !isNaN(parseFloat(initialBalance)) && parseFloat(initialBalance) >= 0)) &&
-      (!upiId.trim() || validateUPI(upiId))
+      upiOk
     );
   };
 
   const handleConfirmBankAccount = async () => {
     if (!isFormValid()) {
-      Alert.alert('Missing Information', 'Please fill in all required fields correctly.');
+      Alert.alert('Incomplete details', getValidationMessage());
       return;
     }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
     const allBankAccounts = businessData.bankAccounts || [];
-    const isDuplicateUpi = allBankAccounts.some((account: any) => 
-      (account.upi_id || account.upiId || '').toLowerCase() === upiId.toLowerCase() &&
-      (!isEditMode || account.id !== existingAccount?.id)
-    );
+    const upiToSave = acceptsUpiPayments ? upiId.trim() : '';
+    const isDuplicateUpi =
+      upiToSave.length > 0 &&
+      allBankAccounts.some(
+        (account: any) =>
+          (account.upi_id || account.upiId || '').toLowerCase() === upiToSave.toLowerCase() &&
+          (!isEditMode || account.id !== existingAccount?.id)
+      );
 
     if (isDuplicateUpi) {
       Alert.alert('Duplicate UPI ID', 'A bank account with this UPI ID already exists. Please use a different UPI ID.');
+      setIsSubmitting(false);
       return;
     }
 
@@ -272,7 +309,7 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
           bankShortName: selectedBank?.shortName || '',
           accountNumber: accountNumber.trim(),
           ifscCode: ifscCode.trim(),
-          upiId: upiId.trim(),
+          upiId: upiToSave,
           accountType: accountType,
           isPrimary,
           balance: existingAccount.balance || 0,
@@ -306,44 +343,41 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
         ]);
       } catch (err: any) {
         Alert.alert('Update failed', err?.message || 'Could not update bank account. Please try again.');
+      } finally {
+        setIsSubmitting(false);
       }
       return;
     } else {
-      // Add new bank account
-      const newBankAccount: BankAccount = {
-        id: `bank_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        accountHolderName: accountHolderName.trim(),
-        bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
-        bankId: selectedBank?.shortName || '',
-        bankShortName: selectedBank?.shortName || '',
-        accountNumber: accountNumber.trim(),
-        ifscCode: ifscCode.trim(),
-        upiId: upiId.trim(),
-        accountType: accountType,
-        isPrimary,
-        initialBalance: parseFloat(initialBalance) || 0,
-        balance: parseFloat(initialBalance) || 0,
-        createdAt: new Date().toISOString(),
-      };
-      
-      // ✅ Use optimistic update: Update DataStore immediately, sync backend in background
-      // Optimistically add (DataStore updated immediately, backend sync in background)
-      // ✅ Await backend sync to ensure changes are persisted before navigation
-      await optimisticAddBankAccount(newBankAccount, { showError: false, awaitSync: true });
-      
-      // ✅ Clear cache to ensure fresh data is loaded when navigating back
-      clearBusinessDataCache();
-      
-      // ✅ Small additional delay to ensure backend has fully processed the update
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      if (isPrimary) {
-        await updateBusinessPrimaryBankAccount(newBankAccount.id);
+      try {
+        const newBankAccount: BankAccount = {
+          id: `bank_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          accountHolderName: accountHolderName.trim(),
+          bankName: selectedBank?.id === 'others' ? customBankName : selectedBank?.name || '',
+          bankId: selectedBank?.shortName || '',
+          bankShortName: selectedBank?.shortName || '',
+          accountNumber: accountNumber.trim(),
+          ifscCode: ifscCode.trim(),
+          upiId: upiToSave,
+          accountType: accountType,
+          isPrimary,
+          initialBalance: parseFloat(initialBalance) || 0,
+          balance: parseFloat(initialBalance) || 0,
+          createdAt: new Date().toISOString(),
+        };
+        await optimisticAddBankAccount(newBankAccount, { showError: false, awaitSync: true });
+        clearBusinessDataCache();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        if (isPrimary) {
+          await updateBusinessPrimaryBankAccount(newBankAccount.id);
+        }
+        Alert.alert('Success', 'Bank account added successfully!', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
+      } catch (e: any) {
+        Alert.alert('Error', e?.message || 'Could not add bank account.');
+      } finally {
+        setIsSubmitting(false);
       }
-      
-      Alert.alert('Success', 'Bank account added successfully!', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
     }
   };
 
@@ -373,14 +407,29 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Account Holder Name *</Text>
-              <TextInput
-                style={[styles.input, { borderColor: accountHolderName ? Colors.success : Colors.border }]}
-                value={accountHolderName}
-                onChangeText={setAccountHolderName}
-                placeholder="Enter account holder's full name"
-                placeholderTextColor={Colors.textSecondary}
-                editable={true}
-              />
+              <View
+                style={[
+                  inputFocusStyles.inputContainer,
+                  focusedField === 'accountHolderName' && inputFocusStyles.inputContainerFocused,
+                  { borderColor: accountHolderName ? Colors.success : Colors.border },
+                ]}
+              >
+                <User
+                  size={20}
+                  color={Colors.textSecondary}
+                  style={{ position: 'absolute', left: 14, top: Platform.OS === 'web' ? 14 : 16, zIndex: 1 }}
+                />
+                <CapitalizedTextInput
+                  style={[inputFocusStyles.input as any, { paddingLeft: 44, minHeight: 50 }]}
+                  value={accountHolderName}
+                  onChangeText={setAccountHolderName}
+                  placeholder="Enter account holder's full name"
+                  placeholderTextColor={Colors.textSecondary}
+                  autoCapitalize="words"
+                  onFocus={() => setFocusedField('accountHolderName')}
+                  onBlur={() => setFocusedField(null)}
+                />
+              </View>
             </View>
           </View>
 
@@ -416,14 +465,28 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
             {selectedBank?.id === 'others' && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Bank Name *</Text>
-                <TextInput
-                  style={[styles.input, { borderColor: customBankName ? Colors.success : Colors.border }]}
-                  value={customBankName}
-                  onChangeText={setCustomBankName}
-                  placeholder="Enter bank name"
-                  placeholderTextColor={Colors.textSecondary}
-                  editable={true}
-                />
+                <View
+                  style={[
+                    inputFocusStyles.inputContainer,
+                    focusedField === 'customBank' && inputFocusStyles.inputContainerFocused,
+                  ]}
+                >
+                  <Building2
+                    size={20}
+                    color={Colors.textSecondary}
+                    style={{ position: 'absolute', left: 14, top: Platform.OS === 'web' ? 14 : 16, zIndex: 1 }}
+                  />
+                  <CapitalizedTextInput
+                    style={[inputFocusStyles.input as any, { paddingLeft: 44, minHeight: 50 }]}
+                    value={customBankName}
+                    onChangeText={setCustomBankName}
+                    placeholder="Enter bank name"
+                    placeholderTextColor={Colors.textSecondary}
+                    autoCapitalize="words"
+                    onFocus={() => setFocusedField('customBank')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
                 <Text style={styles.fieldHint}>
                   Please enter the complete name of your bank
                 </Text>
@@ -500,27 +563,46 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
             </View>
           </View>
 
-          {/* UPI ID */}
+          {/* UPI — same flow as signup */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>UPI ID</Text>
+            <Text style={styles.sectionTitle}>UPI payments</Text>
             <Text style={styles.sectionSubtitle}>
-              Enter your UPI ID for digital payments
+              Optional. Turn on only if you accept UPI on this account.
             </Text>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>UPI ID *</Text>
-              <TextInput
-                style={[styles.input, { borderColor: upiId ? Colors.success : Colors.border }]}
-                value={upiId}
-                onChangeText={handleUPIChange}
-                placeholder="username@bank (e.g., john.doe@hdfc)"
-                placeholderTextColor={Colors.textSecondary}
-                editable={true}
-              />
-              <Text style={styles.fieldHint}>
-                Format: username@bank (e.g., john.doe@hdfc, business@icici)
-              </Text>
+            <View style={styles.upiToggleRow}>
+              <TouchableOpacity
+                style={[styles.upiToggleBtn, acceptsUpiPayments && styles.upiToggleBtnOn]}
+                onPress={() => setAcceptsUpiPayments(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.upiToggleBtnText, acceptsUpiPayments && styles.upiToggleBtnTextOn]}>Yes</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.upiToggleBtn, !acceptsUpiPayments && styles.upiToggleBtnOff]}
+                onPress={() => {
+                  setAcceptsUpiPayments(false);
+                  setUpiId('');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.upiToggleBtnText, !acceptsUpiPayments && styles.upiToggleBtnTextOn]}>No</Text>
+              </TouchableOpacity>
             </View>
+            {acceptsUpiPayments && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>UPI ID *</Text>
+                <TextInput
+                  style={[styles.input, { borderColor: upiId ? Colors.success : Colors.border }]}
+                  value={upiId}
+                  onChangeText={handleUPIChange}
+                  placeholder="username@bank"
+                  placeholderTextColor={Colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text style={styles.fieldHint}>e.g. name@hdfcbank</Text>
+              </View>
+            )}
           </View>
 
           {/* Initial Balance */}
@@ -571,12 +653,19 @@ export default function AddBankAccount(props: AddBankAccountProps = {}) {
           )}
 
           <TouchableOpacity
-            style={styles.confirmButton}
+            style={[styles.confirmButton, isSubmitting && { opacity: 0.75 }]}
             onPress={handleConfirmBankAccount}
             activeOpacity={0.8}
+            disabled={isSubmitting}
           >
             <Text style={styles.confirmButtonText}>
-              {isEditMode ? 'Update Bank Account' : 'Add Bank Account'}
+              {isSubmitting
+                ? isEditMode
+                  ? 'Updating…'
+                  : 'Adding…'
+                : isEditMode
+                  ? 'Update Bank Account'
+                  : 'Add Bank Account'}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -803,6 +892,36 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  upiToggleRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  upiToggleBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    backgroundColor: Colors.grey[50],
+  },
+  upiToggleBtnOn: {
+    borderColor: Colors.primary,
+    backgroundColor: 'rgba(63, 102, 172, 0.12)',
+  },
+  upiToggleBtnOff: {
+    borderColor: Colors.primary,
+    backgroundColor: 'rgba(63, 102, 172, 0.12)',
+  },
+  upiToggleBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  upiToggleBtnTextOn: {
+    color: Colors.primary,
   },
   confirmButton: {
     backgroundColor: Colors.primary,

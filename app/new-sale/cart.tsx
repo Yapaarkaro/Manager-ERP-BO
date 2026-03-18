@@ -37,6 +37,11 @@ import {
   FileText
 } from 'lucide-react-native';
 import { formatCurrencyINR } from '@/utils/formatters';
+import {
+  validateCompoundCartQuantity,
+  cartQuantityDecimalsForItem,
+  isCompoundProduct,
+} from '@/utils/compoundQuantity';
 
 const Colors = {
   background: '#FFFFFF',
@@ -414,9 +419,13 @@ export default function CartScreen() {
       return;
     }
     
-    // Find the item to check stock
-    const item = cartItems.find(item => item.id === productId);
+    const item = cartItems.find(i => i.id === productId);
     if (item) {
+      const v = validateCompoundCartQuantity(newQuantity, item);
+      if (!v.ok) {
+        showCustomAlert('Quantity not allowed', v.message, 'error');
+        return;
+      }
       const stockLimits = calculateStockLimits(item);
       
       if (newQuantity > stockLimits.maxQuantityForSelectedUoM) {
@@ -430,25 +439,40 @@ export default function CartScreen() {
     }
     
     setCartItems(prev => 
-      prev.map(item => 
-        item.id === productId 
-          ? { ...item, quantity: newQuantity }
-          : item
+      prev.map(i => 
+        i.id === productId 
+          ? { ...i, quantity: newQuantity }
+          : i
       )
     );
   };
 
   const updateItemUoM = (productId: string, selectedUoM: 'primary' | 'secondary' | 'tertiary') => {
-    setCartItems(prev => 
+    setCartItems(prev =>
       prev.map(item => {
-        if (item.id === productId) {
-          const stockLimits = calculateStockLimits({ ...item, selectedUoM });
-          if (item.quantity > stockLimits.maxQuantityForSelectedUoM) {
-            return { ...item, selectedUoM, quantity: stockLimits.maxQuantityForSelectedUoM };
+        if (item.id !== productId) return item;
+        const from = item.selectedUoM || 'primary';
+        const R = parseFloat(item.conversionRatio || '1');
+        let qty = item.quantity;
+        if (from === 'primary' && selectedUoM === 'secondary' && R > 0 && isCompoundProduct(item)) {
+          qty = Math.max(1, Math.round(item.quantity * R));
+        } else if (from === 'secondary' && selectedUoM === 'primary' && R > 0 && isCompoundProduct(item)) {
+          qty = item.quantity / R;
+          if (!validateCompoundCartQuantity(qty, { ...item, selectedUoM: 'primary' }).ok) {
+            qty = 1;
           }
-          return { ...item, selectedUoM };
         }
-        return item;
+        let next = { ...item, selectedUoM, quantity: qty };
+        const stockLimits = calculateStockLimits(next);
+        if (next.quantity > stockLimits.maxQuantityForSelectedUoM) {
+          next = { ...next, quantity: stockLimits.maxQuantityForSelectedUoM };
+        }
+        if (!validateCompoundCartQuantity(next.quantity, next).ok) {
+          next = { ...next, quantity: 1 };
+          const sl2 = calculateStockLimits(next);
+          if (next.quantity > sl2.maxQuantityForSelectedUoM) next = { ...next, quantity: sl2.maxQuantityForSelectedUoM };
+        }
+        return next;
       })
     );
   };
@@ -1119,8 +1143,10 @@ export default function CartScreen() {
 
                   <View style={styles.collapsedQuantityControls}>
                     {(() => {
-                      const qtyDec = item.quantityDecimals ?? 0;
-                      const step = qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
+                      const qtyDec = cartQuantityDecimalsForItem(item);
+                      const compPrimary =
+                        isCompoundProduct(item) && (item.selectedUoM || 'primary') === 'primary';
+                      const step = compPrimary ? 1 : qtyDec > 0 ? parseFloat((1 / Math.pow(10, qtyDec)).toFixed(qtyDec)) : 1;
                       const qtyTextValue = editingQtyText[item.id] ?? item.quantity.toString();
                       const isEditing = editingQtyText[item.id] !== undefined;
                       return (

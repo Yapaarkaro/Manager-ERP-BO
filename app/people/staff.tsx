@@ -547,7 +547,6 @@ export default function StaffScreen() {
     const missing: string[] = [];
     if (!staff.address || staff.address.trim() === '') missing.push('address');
     if (!staff.salary || staff.salary.total <= 0) missing.push('salary');
-    if (!staff.emergencyContact) missing.push('emergency contact');
     return missing;
   };
 

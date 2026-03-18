@@ -134,7 +134,25 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
     }, 50);
   };
 
-  // On web, use our capitalization logic; on mobile, let the keyboard handle it
+  const handleBlur = (e: any) => {
+    if (autoCapitalize === 'words' && internalValue.trim()) {
+      const titleCase = internalValue
+        .split(/\s+/)
+        .map((word) => {
+          if (!word) return word;
+          if (word.length > 1 && /^[A-Z0-9.&]+$/.test(word)) return word;
+          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(' ');
+      if (titleCase !== internalValue) {
+        setInternalValue(titleCase);
+        lastTextRef.current = titleCase;
+        onChangeText?.(titleCase);
+      }
+    }
+    props.onBlur?.(e);
+  };
+
   return (
     <TextInput
       ref={ref}
@@ -142,7 +160,8 @@ const CapitalizedTextInput = forwardRef<TextInput, CapitalizedTextInputProps>(({
       style={[inputStyles.baseInput, props.style]}
       value={internalValue}
       onChangeText={handleTextChange}
-      autoCapitalize={Platform.OS === 'web' ? 'none' : autoCapitalize} // Disable native capitalization on web since we handle it
+      onBlur={handleBlur}
+      autoCapitalize={Platform.OS === 'web' ? 'sentences' : autoCapitalize}
     />
   );
 });

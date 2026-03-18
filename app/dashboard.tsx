@@ -986,8 +986,7 @@ export default function DashboardScreen() {
         const incomplete = staffOnly.filter((s: any) => {
           const missingAddress = !s.address;
           const missingSalary = !s.basic_salary && s.basic_salary !== 0;
-          const missingEmergency = !s.emergency_contact_name;
-          return missingAddress || missingSalary || missingEmergency;
+          return missingAddress || missingSalary;
         });
         setIncompleteStaffList(incomplete);
         setShowIncompleteStaffBanner(incomplete.length > 0);
@@ -2112,7 +2111,7 @@ export default function DashboardScreen() {
                         </Text>
                         <Text style={{ fontSize: 12, color: '#9A3412', marginTop: 2 }}>
                           {incompleteStaffList.length === 1
-                            ? 'Complete address, salary or emergency contact'
+                            ? 'Complete address and salary'
                             : 'Tap to complete their details'}
                         </Text>
                       </View>
