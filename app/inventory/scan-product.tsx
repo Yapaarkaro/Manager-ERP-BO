@@ -18,12 +18,13 @@ import {
   Flashlight,
   FlashlightOff,
   Hash,
+  Search,
   X,
 } from 'lucide-react-native';
 import { productStore } from '@/utils/productStore';
 import WebBarcodeScanner from '@/components/WebBarcodeScanner';
 
-const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
+const BARCODE_TYPES = ['code128', 'code39', 'code93', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr', 'datamatrix'] as const;
 
 const Colors = {
   background: '#FFFFFF',
@@ -317,7 +318,6 @@ export default function ScanProductScreen() {
         </View>
       </SafeAreaView>
 
-      {/* Manual Barcode Entry Modal */}
       <Modal
         visible={showManualEntry}
         transparent={true}
@@ -327,7 +327,7 @@ export default function ScanProductScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Enter Barcode Manually</Text>
+              <Text style={styles.modalTitle}>Enter Barcode Number</Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={handleManualBarcodeCancel}
@@ -338,21 +338,35 @@ export default function ScanProductScreen() {
             </View>
 
             <View style={styles.modalContent}>
-              <TextInput
-                style={styles.barcodeInput}
-                value={manualBarcode}
-                onChangeText={setManualBarcode}
-                placeholder="Enter barcode number"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="default"
-                autoCapitalize="characters"
-                autoCorrect={false}
-                autoFocus
-              />
+              <Text style={styles.modalDescription}>
+                Type or paste the barcode number printed on the product packaging.
+              </Text>
+              <View style={styles.barcodeSearchRow}>
+                <Search size={20} color={Colors.textLight} />
+                <TextInput
+                  style={styles.barcodeSearchInput}
+                  value={manualBarcode}
+                  onChangeText={setManualBarcode}
+                  placeholder="Barcode number…"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="default"
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  autoFocus
+                  returnKeyType="search"
+                  onSubmitEditing={handleManualBarcodeSubmit}
+                />
+                {manualBarcode.length > 0 && (
+                  <TouchableOpacity onPress={() => setManualBarcode('')} hitSlop={8}>
+                    <X size={18} color={Colors.textLight} />
+                  </TouchableOpacity>
+                )}
+              </View>
               
               <TouchableOpacity
-                style={styles.submitBarcodeButton}
+                style={[styles.submitBarcodeButton, !manualBarcode.trim() && styles.disabledButton]}
                 onPress={handleManualBarcodeSubmit}
+                disabled={!manualBarcode.trim()}
                 activeOpacity={0.8}
               >
                 <Text style={styles.submitBarcodeButtonText}>Fetch Product Details</Text>
@@ -547,19 +561,28 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
   },
-  barcodeInput: {
-    backgroundColor: Colors.grey[50],
-    borderWidth: 1,
-    borderColor: Colors.grey[200],
+  modalDescription: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  barcodeSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.grey[300],
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.grey[50],
+    gap: 10,
+    marginBottom: 20,
+  },
+  barcodeSearchInput: {
+    flex: 1,
     fontSize: 16,
     color: Colors.text,
-    marginBottom: 20,
-    fontFamily: 'monospace',
-    letterSpacing: 1,
-    
+    paddingVertical: 14,
   },
   submitBarcodeButton: {
     backgroundColor: Colors.primary,
@@ -571,5 +594,8 @@ const styles = StyleSheet.create({
     color: Colors.background,
     fontSize: 16,
     fontWeight: '600',
+  },
+  disabledButton: {
+    backgroundColor: Colors.grey[300],
   },
 });

@@ -60,16 +60,25 @@ export default function WebBarcodeScanner({ onBarcodeScanned, paused, style }: W
             Html5QrcodeSupportedFormats.ITF,
             Html5QrcodeSupportedFormats.CODABAR,
             Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.DATA_MATRIX,
           ],
           verbose: false,
         });
         scannerRef.current = scanner;
 
+        const containerEl = document.getElementById(containerIdStr);
+        const containerW = containerEl?.clientWidth || 640;
+        const containerH = containerEl?.clientHeight || 480;
+        const qrW = Math.min(Math.round(containerW * 0.85), 600);
+        const qrH = Math.min(Math.round(containerH * 0.55), 300);
+
         await scanner.start(
           { facingMode: 'environment' },
           {
-            fps: 8,
-            qrbox: { width: 320, height: 200 },
+            fps: 15,
+            qrbox: { width: qrW, height: qrH },
+            aspectRatio: 1.0,
+            disableFlip: false,
           },
           (decodedText: string, decodedResult: any) => {
             if (pausedRef.current) return;

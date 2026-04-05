@@ -19,6 +19,7 @@ import {
   Flashlight,
   FlashlightOff,
   Keyboard,
+  Search,
   X,
 } from 'lucide-react-native';
 import { setScannedData } from '@/utils/scannedDataStore';
@@ -26,7 +27,7 @@ import { safeRouter } from '@/utils/safeRouter';
 import { productStore } from '@/utils/productStore';
 import WebBarcodeScanner from '@/components/WebBarcodeScanner';
 
-const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
+const BARCODE_TYPES = ['code128', 'code39', 'code93', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr', 'datamatrix'] as const;
 
 const Colors = {
   background: '#FFFFFF',
@@ -393,21 +394,17 @@ export default function BarcodeScannerScreen() {
   }, [returnTo, preSelectedCustomer]);
 
   const handleManualBarcodeSubmit = async () => {
-    if (!manualBarcode || !manualBarcode.trim()) {
+    const barcode = (manualBarcode || searchQuery || '').trim();
+    if (!barcode) {
       Alert.alert('Error', 'Please enter a barcode number');
-      return;
-    }
-
-    const trimmedBarcode = manualBarcode.trim();
-    if (trimmedBarcode.length === 0) {
-      Alert.alert('Error', 'Please enter a valid barcode number');
       return;
     }
 
     setShowManualInput(false);
     setScanned(true);
-    await processBarcode(trimmedBarcode);
+    await processBarcode(barcode);
     setManualBarcode('');
+    setSearchQuery('');
   };
 
   const searchQueryTrimmed = searchQuery.trim();
@@ -473,7 +470,6 @@ export default function BarcodeScannerScreen() {
                 onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
                 barcodeScannerSettings={{
                   barcodeTypes: [...BARCODE_TYPES],
-                  scanningInterval: 1500,
                 }}
                 flash={flashOn ? 'on' : 'off'}
               />
@@ -554,12 +550,15 @@ export default function BarcodeScannerScreen() {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Enter Barcode</Text>
+                <Text style={styles.modalTitle}>
+                  {returnTo === 'manual-product' ? 'Enter Barcode' : 'Search or Enter Barcode'}
+                </Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
                   onPress={() => {
                     setShowManualInput(false);
                     setManualBarcode('');
+                    setSearchQuery('');
                   }}
                   activeOpacity={0.7}
                 >
@@ -568,87 +567,116 @@ export default function BarcodeScannerScreen() {
               </View>
 
               <View style={styles.modalContent}>
-                <Text style={styles.modalDescription}>
-                  All products matching your search (by name or barcode) are listed below. You can also enter a barcode number to look up.
-                </Text>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Search products</Text>
-                  {!storeReady && (
-                    <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 4 }}>Loading products...</Text>
-                  )}
-                  <TextInput
-                    style={styles.barcodeInput}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    placeholder="Type product name or barcode..."
-                    placeholderTextColor={Colors.textLight}
-                  />
-                </View>
-                {searchResults.length > 0 && (
-                  <View style={{ maxHeight: 200, marginBottom: 12 }}>
-                    <FlatList
-                      data={searchResults}
-                      keyExtractor={(item) => item.id}
-                      renderItem={({ item }) => (
-                        <TouchableOpacity
-                          style={{ paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: Colors.grey[200] }}
-                          onPress={() => handleProductSelected(item)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={{ fontSize: 15, fontWeight: '600', color: Colors.text }} numberOfLines={1}>{item.name}</Text>
-                          <Text style={{ fontSize: 12, color: Colors.textLight }}>{item.barcode ? `Barcode: ${item.barcode}` : item.category}</Text>
-                        </TouchableOpacity>
+                {returnTo === 'manual-product' ? (
+                  <>
+                    <Text style={styles.modalDescription}>
+                      Type or paste the barcode number printed on the product.
+                    </Text>
+                    <View style={styles.inputContainer}>
+                      <View style={styles.unifiedSearchRow}>
+                        <Search size={20} color={Colors.textLight} />
+                        <TextInput
+                          style={styles.unifiedSearchInput}
+                          value={manualBarcode}
+                          onChangeText={setManualBarcode}
+                          placeholder="Enter barcode number…"
+                          placeholderTextColor={Colors.textLight}
+                          keyboardType="default"
+                          maxLength={30}
+                          selectionColor={Colors.primary}
+                          autoCapitalize="characters"
+                          autoCorrect={false}
+                          autoFocus
+                          returnKeyType="search"
+                          onSubmitEditing={handleManualBarcodeSubmit}
+                        />
+                        {manualBarcode.length > 0 && (
+                          <TouchableOpacity onPress={() => setManualBarcode('')} hitSlop={8}>
+                            <X size={18} color={Colors.textLight} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.submitButton, !manualBarcode.trim() && styles.disabledButton]}
+                      onPress={handleManualBarcodeSubmit}
+                      disabled={!manualBarcode.trim()}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.submitButtonText}>Look up barcode</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.modalDescription}>
+                      Search by product name or barcode number. Tap a result to add it, or type a barcode to look up.
+                    </Text>
+                    <View style={styles.inputContainer}>
+                      {!storeReady && (
+                        <Text style={{ fontSize: 12, color: Colors.textLight, marginBottom: 4 }}>Loading products...</Text>
                       )}
-                    />
-                  </View>
+                      <View style={styles.unifiedSearchRow}>
+                        <Search size={20} color={Colors.textLight} />
+                        <TextInput
+                          style={styles.unifiedSearchInput}
+                          value={searchQuery}
+                          onChangeText={(text) => {
+                            setSearchQuery(text);
+                            setManualBarcode(text);
+                          }}
+                          placeholder="Product name or barcode number…"
+                          placeholderTextColor={Colors.textLight}
+                          autoFocus
+                          returnKeyType="search"
+                          onSubmitEditing={() => {
+                            if (searchQuery.trim()) {
+                              setManualBarcode(searchQuery.trim());
+                              handleManualBarcodeSubmit();
+                            }
+                          }}
+                        />
+                        {searchQuery.length > 0 && (
+                          <TouchableOpacity onPress={() => { setSearchQuery(''); setManualBarcode(''); }} hitSlop={8}>
+                            <X size={18} color={Colors.textLight} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                    {searchResults.length > 0 && (
+                      <View style={styles.searchResultsBox}>
+                        <FlatList
+                          data={searchResults}
+                          keyExtractor={(item) => item.id}
+                          keyboardShouldPersistTaps="handled"
+                          renderItem={({ item }) => (
+                            <TouchableOpacity
+                              style={styles.searchResultRow}
+                              onPress={() => handleProductSelected(item)}
+                              activeOpacity={0.7}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.searchResultName} numberOfLines={1}>{item.name}</Text>
+                                <Text style={styles.searchResultMeta}>
+                                  {item.barcode ? `Barcode: ${item.barcode}` : item.category}
+                                  {item.salesPrice || item.unitPrice ? ` · ₹${item.salesPrice || item.unitPrice}` : ''}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+                        />
+                      </View>
+                    )}
+                    {searchQuery.trim().length > 0 && searchResults.length === 0 && (
+                      <TouchableOpacity
+                        style={[styles.submitButton, { marginTop: 12 }]}
+                        onPress={handleManualBarcodeSubmit}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.submitButtonText}>Look up "{searchQuery.trim()}" as barcode</Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
                 )}
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Or enter barcode number</Text>
-                  <View style={styles.inputRow}>
-                    <TextInput
-                      style={styles.barcodeInput}
-                      value={manualBarcode}
-                      onChangeText={setManualBarcode}
-                      placeholder="Enter barcode number"
-                      placeholderTextColor={Colors.textLight}
-                      keyboardType="default"
-                      maxLength={20}
-                      selectionColor={Colors.primary}
-                      autoCapitalize="characters"
-                      autoCorrect={false}
-                    />
-                  </View>
-                  {manualBarcode.length > 0 && (
-                    <Text style={styles.inputPreview}>Preview: {manualBarcode}</Text>
-                  )}
-                </View>
-
-                <View style={styles.modalActions}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={() => {
-                      setShowManualInput(false);
-                      setManualBarcode('');
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    style={[
-                      styles.submitButton,
-                      !manualBarcode.trim() && styles.disabledButton
-                    ]}
-                    onPress={handleManualBarcodeSubmit}
-                    disabled={!manualBarcode.trim()}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.submitButtonText}>Submit</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             </View>
           </View>
@@ -854,59 +882,51 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   inputContainer: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
-  inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.text,
-    marginBottom: 8,
-  },
-  inputRow: {
+  unifiedSearchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.grey[300],
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 0,
+    backgroundColor: Colors.grey[50],
+    gap: 10,
   },
-  barcodeInput: {
+  unifiedSearchInput: {
     flex: 1,
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    fontSize: 20,
+    fontSize: 16,
     color: Colors.text,
-    backgroundColor: Colors.background,
-    fontFamily: 'monospace',
-    letterSpacing: 2,
-    textAlign: 'center',
-    fontWeight: '600',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    paddingVertical: 14,
   },
-  torchButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: Colors.grey[100],
-    justifyContent: 'center',
+  searchResultsBox: {
+    maxHeight: 260,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.grey[200],
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  searchResultRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: Colors.primary,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.grey[100],
   },
-  inputPreview: {
-    fontSize: 14,
-    color: Colors.success,
-    textAlign: 'center',
-    marginTop: 8,
-    fontFamily: 'monospace',
+  searchResultName: {
+    fontSize: 15,
     fontWeight: '600',
+    color: Colors.text,
+  },
+  searchResultMeta: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 2,
   },
   modalActions: {
     flexDirection: 'row',

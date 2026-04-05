@@ -176,9 +176,9 @@ export async function generateBarcodeImage(barcodeValue: string): Promise<string
     const text = barcodeValue.trim();
     const bars = encodeCode128B(text);
 
-    const barWidth = 2;
-    const barcodeHeight = 80;
-    const padding = 20;
+    const barWidth = 3;
+    const barcodeHeight = 120;
+    const padding = 30;
     const textHeight = 20;
     const totalWidth = bars.length * barWidth + padding * 2;
     const totalHeight = barcodeHeight + textHeight + padding * 2;

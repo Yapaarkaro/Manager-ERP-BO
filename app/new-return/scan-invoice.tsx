@@ -20,7 +20,7 @@ import {
 import { formatCurrencyINR } from '@/utils/formatters';
 import WebBarcodeScanner from '@/components/WebBarcodeScanner';
 
-const BARCODE_TYPES = ['code128', 'code39', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr'] as const;
+const BARCODE_TYPES = ['code128', 'code39', 'code93', 'ean13', 'ean8', 'upc_a', 'upc_e', 'itf14', 'codabar', 'qr', 'datamatrix'] as const;
 
 const Colors = {
   background: '#FFFFFF',
