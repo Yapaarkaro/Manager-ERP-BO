@@ -393,7 +393,12 @@ export default function BusinessDetailsScreen() {
 
       if (!businessResult.success) {
         console.error('❌ Business details save failed:', businessResult.error);
-        Alert.alert('Error', 'Failed to save business details. Please try again.');
+        const errorMsg = businessResult.error || 'Failed to save business details. Please try again.';
+        const isAlreadyRegistered = errorMsg.includes('already registered');
+        Alert.alert(
+          isAlreadyRegistered ? 'Already Registered' : 'Error',
+          errorMsg
+        );
         setIsCompleting(false);
         setIsNavigating(false);
         return;
