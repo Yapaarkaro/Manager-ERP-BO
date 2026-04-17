@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { onTransactionChange } from '@/utils/transactionEvents';
+import { REVIEW_MODE, REVIEW_MOCK_BUSINESS_ID, REVIEW_USER_ID } from '@/lib/config';
 
 interface BusinessData {
   user: {
@@ -73,6 +74,49 @@ let globalCache: {
 const CACHE_DURATION = 30000; // 30 seconds cache (longer for better UX)
 const MIN_BACKGROUND_REFRESH_INTERVAL = 15000; // Don't background-refresh more than once per 15s
 
+function getReviewBusinessDataMock(): BusinessData {
+  const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  return {
+    user: {
+      id: REVIEW_USER_ID,
+      name: 'Demo User',
+      full_name: 'Demo User',
+      business_id: REVIEW_MOCK_BUSINESS_ID,
+      role: 'Owner',
+    },
+    business: {
+      id: REVIEW_MOCK_BUSINESS_ID,
+      legal_name: 'Demo Traders Pvt Ltd',
+      owner_name: 'Demo User',
+      business_type: 'Private Limited',
+      tax_id: '27AAPFU0939F1ZV',
+      phone: '9999999999',
+      is_onboarding_complete: true,
+      primary_address_id: null,
+      primary_bank_account_id: null,
+      current_subscription_id: null,
+      total_cash_balance: 0,
+      total_bank_balance: 0,
+      total_funds: 0,
+      initial_cash_balance: 0,
+      current_cash_balance: 0,
+      initial_bank_balance: 0,
+      current_primary_bank_balance: 0,
+      current_total_bank_balance: 0,
+      current_total_cash_balance: 0,
+      current_total_funds: 0,
+      subscription_status: 'active',
+      is_on_trial: true,
+      trial_start_date: new Date().toISOString(),
+      trial_end_date: trialEnd,
+      subscription_plan_name: 'trial',
+      subscription_expires_at: trialEnd,
+    },
+    addresses: [],
+    bankAccounts: [],
+  };
+}
+
 /**
  * Get global cache (for synchronous access in component initialization)
  * This allows components to read cached data synchronously before first render
@@ -88,6 +132,12 @@ export function __getGlobalCache() {
 export function useBusinessData(): UseBusinessDataReturn {
   // ✅ Initialize with cached data if available (instant display, zero delay)
   const getInitialState = (): { data: BusinessData; loading: boolean } => {
+    if (REVIEW_MODE) {
+      const reviewData = getReviewBusinessDataMock();
+      globalCache.data = reviewData;
+      globalCache.timestamp = Date.now();
+      return { data: reviewData, loading: false };
+    }
     const now = Date.now();
     const hasValidCache = globalCache.data && (now - globalCache.timestamp) < CACHE_DURATION;
     return {
@@ -116,6 +166,20 @@ export function useBusinessData(): UseBusinessDataReturn {
   const hasEverLoadedRef = useRef(initializedWithCacheRef.current);
 
   const fetchData = useCallback(async (useCache = true) => {
+    if (REVIEW_MODE) {
+      const reviewData = getReviewBusinessDataMock();
+      globalCache.data = reviewData;
+      globalCache.timestamp = Date.now();
+      globalCache.promise = null;
+      if (mountedRef.current) {
+        setData(reviewData);
+        setLoading(false);
+        setError(null);
+      }
+      hasEverLoadedRef.current = true;
+      return;
+    }
+
     // Check cache first - return immediately if valid
     const now = Date.now();
     const cachedData = globalCache.data;
@@ -308,7 +372,7 @@ export function useBusinessData(): UseBusinessDataReturn {
   // Silent auto-refresh when any transaction is recorded anywhere in the app
   useEffect(() => {
     const unsubscribe = onTransactionChange(() => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || REVIEW_MODE) return;
       // Mark cache as stale but keep existing data visible (stale-while-revalidate)
       globalCache.timestamp = 0;
       globalCache.promise = null;
@@ -340,6 +404,13 @@ export function clearBusinessDataCache() {
  * Prefetch business data (useful for warming up cache before navigation)
  */
 export async function prefetchBusinessData(): Promise<void> {
+  if (REVIEW_MODE) {
+    const reviewData = getReviewBusinessDataMock();
+    globalCache.data = reviewData;
+    globalCache.timestamp = Date.now();
+    return;
+  }
+
   // Force fetch data to warm up cache
   const now = Date.now();
   if (!globalCache.data || (now - globalCache.timestamp) >= CACHE_DURATION) {

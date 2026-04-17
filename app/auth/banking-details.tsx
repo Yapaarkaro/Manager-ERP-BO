@@ -33,6 +33,7 @@ import type { BankAccount } from '@/utils/dataStore';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { supabase } from '@/lib/supabase';
+import { REVIEW_MODE, REVIEW_MOCK_BUSINESS_ID } from '@/lib/config';
 import { numberToWords } from '@/utils/numberToWords';
 import { optimisticAddBankAccount, optimisticUpdateBankAccount, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
 import { getPlatformShadow } from '@/utils/shadowUtils';
@@ -542,10 +543,21 @@ export default function BankingDetailsScreen() {
           try {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
-              const { data: userData } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
-              if (userData?.business_id) {
-                const { data: accounts } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
-                const match = accounts?.find((a: any) => a.account_number === accountNumber);
+              let userData: { business_id?: string } | null = null;
+              let accounts: { id: string; account_number: string }[] | null = null;
+              if (REVIEW_MODE) {
+                userData = { business_id: REVIEW_MOCK_BUSINESS_ID };
+                accounts = [];
+              } else {
+                const { data: ud } = await supabase.from('users').select('business_id').eq('id', session.user.id).single();
+                userData = ud;
+                if (userData?.business_id) {
+                  const { data: acc } = await supabase.from('bank_accounts').select('id, account_number').eq('business_id', userData.business_id);
+                  accounts = acc || [];
+                }
+              }
+              if (userData?.business_id && accounts) {
+                const match = accounts.find((a: any) => a.account_number === accountNumber);
                 if (match) resolvedEditId = match.id;
               }
             }

@@ -18,11 +18,17 @@
       }
     },
     "android": {
-      "package": "in.getmanager.app",
+      "package": "com.exanite.manager",
+      "versionCode": 1,
+      "targetSdkVersion": 34,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "config": {
         "googleMaps": {
@@ -41,6 +47,7 @@
       "backgroundColor": "#FFFFFF"
     },
     "plugins": [
+      "./plugins/withAndroidxCorePin.js",
       "expo-router",
       "expo-font",
       "expo-web-browser",
@@ -54,6 +61,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0ce92a3c-656f-4418-af1c-cbf860cc29d8"
+      }
+    },
+    "owner": "getmanager"
   }
 }

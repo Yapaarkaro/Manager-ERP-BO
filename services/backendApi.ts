@@ -4,6 +4,11 @@
  */
 
 import { EDGE_FUNCTIONS_URL, supabase, SUPABASE_ANON_KEY, withTimeout } from '@/lib/supabase';
+import {
+  REVIEW_MODE,
+  REVIEW_ACCESS_TOKEN,
+  REVIEW_MOCK_BUSINESS_ID,
+} from '@/lib/config';
 import { emitTransactionChange } from '@/utils/transactionEvents';
 
 // Lazy import to avoid circular dependency
@@ -124,6 +129,181 @@ export function invalidateApiCache(keyPrefix?: string) {
   for (const k of _apiCache.keys()) { if (k.startsWith(keyPrefix)) _apiCache.delete(k); }
 }
 
+/** In-memory signup progress for REVIEW_MODE manage-signup-progress mocks only. */
+let _reviewSignupProgress: Record<string, any> | null = null;
+
+function mergeReviewSignupProgressFromBody(body: any) {
+  const prev = _reviewSignupProgress || {};
+  const next: Record<string, any> = { ...prev };
+  if (body?.mobile) next.phone = String(body.mobile).replace(/\D/g, '').slice(0, 10);
+  if (body?.mobileVerified !== undefined) next.mobile_verified = body.mobileVerified;
+  if (body?.currentStep) next.current_step = body.currentStep;
+  if (body?.taxIdType) next.tax_id_type = body.taxIdType;
+  if (body?.taxIdValue) next.tax_id_value = body.taxIdValue;
+  if (body?.taxIdVerified !== undefined) next.tax_id_verified = body.taxIdVerified;
+  if (body?.ownerName) next.owner_name = body.ownerName;
+  if (body?.ownerDob) next.owner_dob = body.ownerDob;
+  if (body?.businessName) next.business_name = body.businessName;
+  if (body?.businessType) next.business_type = body.businessType;
+  if (body?.gstinData !== undefined) {
+    try {
+      next.gstin_data = typeof body.gstinData === 'string' ? JSON.parse(body.gstinData) : body.gstinData;
+    } catch {
+      next.gstin_data = body.gstinData;
+    }
+  }
+  if (body?.businessId) next.business_id = body.businessId;
+  _reviewSignupProgress = next;
+}
+
+/**
+ * Short-circuit responses for onboarding Edge Functions in REVIEW_MODE (no network).
+ */
+function tryReviewEdgeMock(
+  functionName: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  body?: any
+): { success: boolean; data?: any; error?: string } | null {
+  if (!REVIEW_MODE) return null;
+  switch (functionName) {
+    case 'submit-business-details':
+      return { success: true, data: { businessId: REVIEW_MOCK_BUSINESS_ID } };
+    case 'manage-addresses':
+      if (method === 'GET') return { success: true, data: { addresses: [] } };
+      if (method === 'POST') {
+        return {
+          success: true,
+          data: {
+            address: {
+              id: '00000000-0000-4000-a000-000000000002',
+              name: 'Review Primary',
+              is_primary: true,
+              type: 'primary',
+            },
+          },
+        };
+      }
+      if (method === 'DELETE') return { success: true, data: {} };
+      if (method === 'PUT') return { success: true, data: { address: body } };
+      return { success: true, data: {} };
+    case 'manage-bank-accounts':
+      if (method === 'GET') return { success: true, data: { accounts: [] } };
+      if (method === 'POST') {
+        return {
+          success: true,
+          data: {
+            account: {
+              id: '00000000-0000-4000-a000-000000000003',
+              bank_name: 'Review Bank',
+              is_primary: true,
+              account_number: '000001',
+            },
+          },
+        };
+      }
+      return { success: true, data: {} };
+    case 'manage-cash-balance': {
+      const bal = body?.initial_cash_balance ?? body?.initialCashBalance ?? 0;
+      return { success: true, data: { business: { id: REVIEW_MOCK_BUSINESS_ID, initial_cash_balance: bal } } };
+    }
+    case 'manage-signup-progress':
+      if (method === 'GET') {
+        return {
+          success: true,
+          data: {
+            progress:
+              _reviewSignupProgress || { current_step: 'mobileOtp', phone: '9999999999', mobile_verified: true },
+          },
+        };
+      }
+      if (method === 'POST') {
+        if (body?.action === 'delete') {
+          _reviewSignupProgress = null;
+          return { success: true, data: {} };
+        }
+        mergeReviewSignupProgressFromBody(body);
+        return { success: true, data: { progress: _reviewSignupProgress } };
+      }
+      return { success: true, data: { progress: _reviewSignupProgress } };
+    case 'complete-onboarding':
+      if (method === 'GET') return { success: true, data: {} };
+      return {
+        success: true,
+        data: { completed: true, businessId: REVIEW_MOCK_BUSINESS_ID },
+      };
+    case 'manage-subscriptions':
+      if (method === 'GET') {
+        return {
+          success: true,
+          data: {
+            subscription: {
+              plan: 'trial',
+              status: 'active',
+              trial_ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+              days_remaining: 30,
+            },
+          },
+        };
+      }
+      return { success: true, data: { success: true } };
+    case 'manage-notifications':
+      if (method === 'GET') return { success: true, data: { notifications: [] } };
+      return { success: true, data: {} };
+    case 'manage-device-snapshots':
+      if (method === 'GET') return { success: true, data: { snapshots: [] } };
+      if (method === 'DELETE') return { success: true, data: {} };
+      return {
+        success: true,
+        data: {
+          snapshot: { id: 'review-device-snapshot', device_id: body?.deviceId || 'review-device' },
+          id: 'review-device-snapshot',
+          device_id: body?.deviceId || 'review-device',
+        },
+      };
+    default:
+      break;
+  }
+
+  if (functionName === 'manage-invoices' || functionName.startsWith('manage-invoices?')) {
+    if (method === 'GET') return { success: true, data: { invoices: [], total: 0 } };
+    return { success: true, data: {} };
+  }
+  if (functionName === 'manage-products' || functionName.startsWith('manage-products')) {
+    if (method === 'GET') return { success: true, data: { products: [], total: 0 } };
+    return { success: true, data: {} };
+  }
+  if (functionName === 'manage-customers' || functionName.startsWith('manage-customers')) {
+    if (method === 'GET') return { success: true, data: { customers: [], total: 0 } };
+    return { success: true, data: {} };
+  }
+  if (functionName === 'manage-suppliers' || functionName.startsWith('manage-suppliers')) {
+    if (method === 'GET') return { success: true, data: { suppliers: [], total: 0 } };
+    return { success: true, data: {} };
+  }
+  if (functionName === 'manage-staff' || functionName.startsWith('manage-staff')) {
+    if (method === 'GET') return { success: true, data: { staff: [], total: 0 } };
+    return { success: true, data: {} };
+  }
+  if (functionName === 'get-financial-summary' || functionName.startsWith('get-financial-summary')) {
+    if (method === 'GET') {
+      return {
+        success: true,
+        data: {
+          summary: { revenue: 0, expenses: 0, profit: 0, period: 'this_month' },
+          receivables: [],
+          payables: [],
+          total_receivables: 0,
+          total_payables: 0,
+        },
+      };
+    }
+    return { success: true, data: {} };
+  }
+
+  if (method === 'GET') return { success: true, data: [] };
+  return { success: true };
+}
+
 // Helper to call Edge Functions
 export async function callEdgeFunction(
   functionName: string,
@@ -132,11 +312,15 @@ export async function callEdgeFunction(
   requireAuth: boolean = false,
   timeoutMs: number = 15000
 ): Promise<{ success: boolean; data?: any; error?: string }> {
+  const mocked = tryReviewEdgeMock(functionName, method, body);
+  if (mocked) return mocked;
+
   const attempt = async (token: string | null): Promise<{ response: Response; data: any } | { error: string }> => {
+    const authHeader = REVIEW_MODE ? REVIEW_ACCESS_TOKEN : (token || SUPABASE_ANON_KEY);
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${token || SUPABASE_ANON_KEY}`,
+      'Authorization': `Bearer ${authHeader}`,
     };
     const options: RequestInit = { method, headers, credentials: 'omit' };
     if (body && method !== 'GET') options.body = JSON.stringify(body);
@@ -162,7 +346,9 @@ export async function callEdgeFunction(
   try {
     let accessToken: string | null = null;
 
-    if (requireAuth) {
+    if (REVIEW_MODE) {
+      accessToken = REVIEW_ACCESS_TOKEN;
+    } else if (requireAuth) {
       const { data: { session } } = await withTimeout(
         supabase.auth.getSession(),
         10000,
@@ -192,7 +378,7 @@ export async function callEdgeFunction(
     const result = await attempt(accessToken);
     if ('error' in result) return { success: false, error: result.error };
 
-    if (result.response.status === 401 && requireAuth) {
+    if (result.response.status === 401 && requireAuth && !REVIEW_MODE) {
       const newToken = await getRefreshedToken();
       if (newToken) {
         const retry = await attempt(newToken);
@@ -253,6 +439,47 @@ export async function verifyGSTIN(
   purpose?: 'signup' | 'lookup',
   userMobile?: string
 ): Promise<{ success: boolean; taxpayerInfo?: any; mobileMatch?: boolean; registeredMobile?: string; otpRequestId?: string; smsFailed?: boolean; error?: string }> {
+  if (REVIEW_MODE) {
+    const mock = {
+      success: true,
+      gstin: '27AAPFU0939F1ZV',
+      business_name: 'Demo Traders Pvt Ltd',
+      address: '123, MG Road, Bengaluru, Karnataka, 560001',
+      mobile: '9999999999',
+      status: 'Active',
+    };
+    const taxpayerInfo = {
+      lgnm: mock.business_name,
+      tradeNam: mock.business_name,
+      gstin: mock.gstin,
+      sts: mock.status,
+      pradr: {
+        ntr: 'Trading',
+        addr: {
+          bno: '123',
+          bnm: '',
+          st: 'MG Road',
+          loc: 'Bengaluru',
+          dst: 'Bengaluru Urban',
+          city: 'Bengaluru',
+          stcd: 'Karnataka',
+          pncd: '560001',
+        },
+      },
+      promoters: ['Demo Promoter'],
+    };
+    const cleanUser = (userMobile || '').replace(/^\+91/, '').replace(/\D/g, '');
+    const mobileMatch = cleanUser.length >= 10 && cleanUser === mock.mobile;
+    return {
+      success: true,
+      taxpayerInfo,
+      mobileMatch,
+      registeredMobile: mobileMatch ? '' : '********99',
+      otpRequestId: mobileMatch ? '' : 'review-mock',
+      smsFailed: false,
+    };
+  }
+
   const body: any = { gstin };
   if (purpose) body.purpose = purpose;
   if (userMobile) body.userMobile = userMobile;
@@ -323,6 +550,17 @@ export async function verifyPAN(
   name: string,
   dateOfBirth: string
 ): Promise<{ success: boolean; panVerified?: boolean; error?: string }> {
+  if (REVIEW_MODE) {
+    return {
+      success: true,
+      panVerified: true,
+      pan: 'ABCDE1234F',
+      name: 'Demo User',
+      dateOfBirth: '01/01/1990',
+      status: 'Valid',
+    } as { success: boolean; panVerified?: boolean; error?: string };
+  }
+
   const result = await callEdgeFunction('verify-pan', 'POST', { pan, name, dateOfBirth }, true);
 
   if (result.success && (result.data?.panVerified || result.data?.success)) {
@@ -350,20 +588,23 @@ export async function submitBusinessDetails(params: {
   dateOfBirth?: string;
   registeredMobile?: string; // Add mobile number parameter
 }): Promise<{ success: boolean; businessId?: string; error?: string }> {
-  // Get current user (should be authenticated by this point)
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
-    return {
-      success: false,
-      error: 'User not authenticated. Please sign in first.',
-    };
-  }
-
-  // Get mobile number from user's phone if not provided
   let mobileNumber = params.registeredMobile;
-  if (!mobileNumber && user.phone) {
-    mobileNumber = user.phone.replace(/\D/g, '').slice(-10);
+
+  if (!REVIEW_MODE) {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return {
+        success: false,
+        error: 'User not authenticated. Please sign in first.',
+      };
+    }
+
+    if (!mobileNumber && user.phone) {
+      mobileNumber = user.phone.replace(/\D/g, '').slice(-10);
+    }
+  } else if (!mobileNumber) {
+    mobileNumber = '9999999999';
   }
 
   const result = await callEdgeFunction(

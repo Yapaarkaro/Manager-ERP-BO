@@ -10,6 +10,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -20,6 +21,7 @@ import { supabase } from '@/lib/supabase';
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 import { setSignupData, clearSignupData } from '@/utils/signupStore';
+import { REVIEW_MODE } from '@/lib/config';
 import { isPwaInstallable, onPwaInstallChange, triggerPwaInstall } from '@/app/_layout';
 
 const COLORS = {
@@ -73,6 +75,10 @@ export default function MobileScreen() {
       return;
     }
     const timer = setTimeout(async () => {
+      if (REVIEW_MODE) {
+        setIsReturningUser(false);
+        return;
+      }
       try {
         const { data: progress } = await supabase.from('signup_progress')
           .select('id, owner_name')
@@ -95,6 +101,13 @@ export default function MobileScreen() {
       console.log('✅ Valid mobile number entered, sending OTP...');
 
       const sendOtpAndNavigate = async () => {
+        if (REVIEW_MODE && mobileNumber === '9999999999') {
+          console.log('📱 REVIEW_MODE: skipping SMS, navigating to OTP screen');
+          setSignupData({ mobile: mobileNumber });
+          router.push('/auth/otp');
+          return;
+        }
+
         const MAX_RETRIES = 3;
         let lastError = '';
 
@@ -302,16 +315,25 @@ export default function MobileScreen() {
           </View>
         )}
 
-        {/* Privacy Policy and Terms */}
         <View style={[styles.legalContainer, { paddingBottom: Platform.select({
           web: 20,
           default: Math.max(insets.bottom, 20),
         })}]}>
           <Text style={styles.legalText}>
             By continuing, you agree to our{' '}
-            <Text style={styles.legalLink}>Privacy Policy</Text>
+            <Text
+              style={styles.legalLink}
+              onPress={() => Linking.openURL('https://getmanager.in/terms')}
+            >
+              Terms &amp; Conditions
+            </Text>
             {' '}and{' '}
-            <Text style={styles.legalLink}>Terms & Conditions</Text>
+            <Text
+              style={styles.legalLink}
+              onPress={() => Linking.openURL('https://getmanager.in/privacy-policy')}
+            >
+              Privacy Policy
+            </Text>
           </Text>
         </View>
 

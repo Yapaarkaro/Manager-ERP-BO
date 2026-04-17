@@ -21,6 +21,7 @@ import CustomDatePicker from '@/components/CustomDatePicker';
 import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { verifyGSTINOTP, verifyPAN, saveSignupProgress } from '@/services/backendApi';
+import { REVIEW_MODE } from '@/lib/config';
 import { supabase } from '@/lib/supabase';
 import { autoFormatDateInput, parseDDMMYYYY } from '@/utils/formatters';
 import { getSignupData, setSignupData } from '@/utils/signupStore';
@@ -266,6 +267,42 @@ export default function GstinPanOTPScreen() {
     const gstinValue = value as string;
     
     if (type === 'GSTIN') {
+      if (REVIEW_MODE && otpCode === '000000') {
+        supabase.auth.getSession().then(async ({ data: { session } }) => {
+          if (session?.user) {
+            saveSignupProgress({
+              mobile: mobile as string,
+              mobileVerified: true,
+              taxIdType: 'GSTIN',
+              taxIdValue: gstinValue,
+              taxIdVerified: true,
+              gstinData: typeof gstinData === 'string' ? JSON.parse(gstinData) : gstinData,
+              currentStep: 'gstinOtp',
+            }).then((result) => {
+              if (result.success) {
+                console.log('✅ Signup progress saved: gstinOtp');
+              } else {
+                console.error('❌ Failed to save signup progress:', result.error);
+              }
+            }).catch((error) => {
+              console.error('Error saving signup progress:', error);
+            });
+          }
+        }).catch((error) => {
+          console.error('Error getting session:', error);
+        });
+
+        setIsVerifying(false);
+        setSignupData({
+          type: type,
+          value: gstinValue,
+          gstinData: gstinData,
+          mobile: mobile,
+        });
+        router.replace('/auth/business-details');
+        return;
+      }
+
       const verifyPromise = verifyGSTINOTP(gstinValue, otpCode, gstinOtpRequestId);
       
       verifyPromise.then(async (result) => {

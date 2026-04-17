@@ -20,6 +20,7 @@ import { ListSkeleton } from '@/components/SkeletonLoader';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { deleteAddress, updateAddress, saveSignupProgress } from '@/services/backendApi';
 import { supabase } from '@/lib/supabase';
+import { REVIEW_MODE, REVIEW_MOCK_BUSINESS_ID, REVIEW_USER_ID } from '@/lib/config';
 import { getPlatformShadow } from '@/utils/shadowUtils';
 import { mapLocationToAddress } from '@/utils/dataStore';
 import { getSignupData, setSignupData } from '@/utils/signupStore';
@@ -153,6 +154,9 @@ export default function AddressConfirmationScreen() {
       if (managerPhones.length === 0) return;
 
       try {
+        if (REVIEW_MODE) {
+          return;
+        }
         const { data: staffRecords } = await supabase
           .from('staff')
           .select('mobile, name, verification_code')
@@ -530,12 +534,21 @@ export default function AddressConfirmationScreen() {
         // Query backend directly for bank accounts
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          const { data: userRow } = await supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle();
-          if (userRow?.business_id) {
-            const { data: bankData } = await supabase.from('bank_accounts').select('*').eq('business_id', userRow.business_id);
-            if (bankData && bankData.length > 0) {
-              existingBankAccounts = bankData;
+          let userRow: { id?: string; business_id?: string } | null = null;
+          let bankData: any[] | null = null;
+          if (REVIEW_MODE) {
+            userRow = { id: REVIEW_USER_ID, business_id: REVIEW_MOCK_BUSINESS_ID };
+            bankData = [];
+          } else {
+            const { data: ur } = await supabase.from('users').select('business_id').eq('id', session.user.id).maybeSingle();
+            userRow = ur;
+            if (userRow?.business_id) {
+              const { data: bd } = await supabase.from('bank_accounts').select('*').eq('business_id', userRow.business_id);
+              bankData = bd || [];
             }
+          }
+          if (userRow?.business_id && bankData && bankData.length > 0) {
+            existingBankAccounts = bankData;
           }
         }
       } catch {

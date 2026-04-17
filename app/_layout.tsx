@@ -69,8 +69,14 @@ function RouteGuard() {
   // Routes that are used during onboarding and only need an active session (not completed onboarding)
   const onboardingAllowedRoutes = ['/edit-address-simple', '/edit-address', '/add-address', '/subscription', '/subscription-success'];
 
+  const isPublicLegalRoute =
+    pathname === '/privacy-policy' ||
+    pathname === '/terms-and-conditions' ||
+    pathname === '/account-deletion';
+
   // Protect app routes: require completed auth & onboarding
   useEffect(() => {
+    if (isPublicLegalRoute) return;
     if (pathname.startsWith('/auth') || pathname === '/' || pathname === '/index') return;
     if (pathname.startsWith('/admin')) return;
     if (authCheckDone.current) return;
@@ -123,7 +129,7 @@ function RouteGuard() {
     };
     check();
     return () => { cancelled = true; };
-  }, [pathname]);
+  }, [pathname, isPublicLegalRoute]);
 
   // Reset auth check when user logs out (navigates to auth)
   useEffect(() => {
@@ -136,6 +142,7 @@ function RouteGuard() {
   useEffect(() => {
     if (loading || !isStaff) return;
     if (permissions.length === 0) return;
+    if (isPublicLegalRoute) return;
     if (pathname.startsWith('/auth') || pathname === '/' || pathname === '/index') return;
     const alwaysAllowed = ['/dashboard', '/settings', '/chat', '/notifications'];
     if (alwaysAllowed.some(r => pathname === r || pathname.startsWith(r + '/'))) return;
@@ -144,7 +151,7 @@ function RouteGuard() {
       Alert.alert('Access Denied', 'You do not have permission to access this section.');
       router.replace('/dashboard');
     }
-  }, [pathname, loading, isStaff, permissions, canAccessRoute]);
+  }, [pathname, isPublicLegalRoute, loading, isStaff, permissions, canAccessRoute]);
 
   return null;
 }

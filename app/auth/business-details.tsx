@@ -20,6 +20,7 @@ import { getGSTINStateCode, toTitleCase, mapLocationsToAddresses, type BusinessA
 import { getInputFocusStyles, getWebContainerStyles } from '@/utils/platformUtils';
 import { submitBusinessDetails } from '@/services/backendApi';
 import { supabase, withTimeout } from '@/lib/supabase';
+import { REVIEW_MODE } from '@/lib/config';
 import { optimisticAddAddress, optimisticSaveSignupProgress } from '@/utils/optimisticSync';
 import { getSignupData, setSignupData } from '@/utils/signupStore';
 
@@ -32,6 +33,19 @@ const COLORS = {
   lightGray: '#F3F4F6',
   error: '#EF4444',
   success: '#10B981',
+};
+
+/** DB-shaped row for mapLocationToAddress when REVIEW_MODE skips locations query */
+const REVIEW_MOCK_LOCATION_ROW = {
+  id: 'review-location-id',
+  name: 'Primary',
+  address_line_1: '123, MG Road',
+  city: 'Bengaluru',
+  state: 'Karnataka',
+  pincode: '560001',
+  type: 'primary',
+  is_primary: true,
+  is_deleted: false,
 };
 
 const businessTypes = [
@@ -442,10 +456,14 @@ export default function BusinessDetailsScreen() {
         // Check backend for existing addresses (Supabase is source of truth)
         let existingAddresses: any[] = [];
         try {
-          const { data: locations } = await supabase.from('locations')
-            .select('*')
-            .eq('business_id', businessResult.businessId);
-          existingAddresses = locations || [];
+          if (REVIEW_MODE) {
+            existingAddresses = [REVIEW_MOCK_LOCATION_ROW];
+          } else {
+            const { data: locations } = await supabase.from('locations')
+              .select('*')
+              .eq('business_id', businessResult.businessId);
+            existingAddresses = locations || [];
+          }
         } catch {}
         const hasPrimaryAddress = existingAddresses.some((addr: any) => addr.is_primary);
         
@@ -558,10 +576,14 @@ export default function BusinessDetailsScreen() {
         // For PAN users, check backend for existing addresses
         let panAddresses: any[] = [];
         try {
-          const { data: locations } = await supabase.from('locations')
-            .select('*')
-            .eq('business_id', businessResult.businessId);
-          panAddresses = locations || [];
+          if (REVIEW_MODE) {
+            panAddresses = [REVIEW_MOCK_LOCATION_ROW];
+          } else {
+            const { data: locations } = await supabase.from('locations')
+              .select('*')
+              .eq('business_id', businessResult.businessId);
+            panAddresses = locations || [];
+          }
         } catch {}
         const hasPrimaryAddress = panAddresses.some((addr: any) => addr.is_primary);
         

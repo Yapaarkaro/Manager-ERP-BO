@@ -8,9 +8,11 @@ import {
   ScrollView,
   Animated,
   Platform,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AuthCheckSkeleton } from '@/components/SkeletonLoader';
 import { supabase, withTimeout } from '@/lib/supabase';
 import { mapLocationsToAddresses } from '@/utils/dataStore';
@@ -84,6 +86,7 @@ export default function OnboardingScreen() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const debouncedNavigate = useDebounceNavigation();
+  const insets = useSafeAreaInsets();
 
   // Check auth status on mount - Supabase is the sole source of truth
   useEffect(() => {
@@ -377,6 +380,33 @@ export default function OnboardingScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {currentIndex === onboardingData.length - 1 && (
+        <View
+          style={[
+            styles.agreementFooter,
+            { bottom: 118 + Math.max(insets.bottom, 0) * 0.35 },
+          ]}
+          pointerEvents="box-none"
+        >
+          <Text style={styles.agreementFooterText}>
+            By continuing, you agree to our{' '}
+            <Text
+              style={styles.agreementFooterLink}
+              onPress={() => Linking.openURL('https://getmanager.in/terms')}
+            >
+              Terms &amp; Conditions
+            </Text>
+            {' '}and{' '}
+            <Text
+              style={styles.agreementFooterLink}
+              onPress={() => Linking.openURL('https://getmanager.in/privacy-policy')}
+            >
+              Privacy Policy
+            </Text>
+          </Text>
+        </View>
+      )}
     </View>
     </ResponsiveContainer>
   );
@@ -522,5 +552,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.primary,
     marginRight: 8,
+  },
+  agreementFooter: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+  },
+  agreementFooterText: {
+    fontSize: 13,
+    color: COLORS.gray,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  agreementFooterLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+    textDecorationLine: 'underline',
   },
 });

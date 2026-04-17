@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Account Deletion — Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #ff6600;
+      --primary-dark: #e65c00;
+      --text: #1a1a1a;
+      --muted: #5c5c5c;
+      --border: #e8e8e8;
+      --bg: #ffffff;
+      --card: #fafafa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+    .logo {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .tagline {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: var(--text);
+    }
+    h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin: 32px 0 12px;
+      color: var(--text);
+    }
+    p, li {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    ol.steps {
+      padding-left: 1.25rem;
+      margin: 16px 0;
+    }
+    ol.steps li { margin-bottom: 10px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 16px;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      margin: 16px 0 6px;
+    }
+    label:first-of-type { margin-top: 0; }
+    input[type="text"],
+    input[type="tel"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 1rem;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: 2px solid rgba(255, 102, 0, 0.35);
+      border-color: var(--primary);
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .checkbox-row input { margin-top: 4px; width: auto; }
+    .checkbox-row label {
+      margin: 0;
+      font-weight: 400;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      margin-top: 24px;
+      padding: 14px 20px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+      font-size: 1rem;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn:hover { background: var(--primary-dark); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .msg {
+      display: none;
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 10px;
+      color: #065f46;
+      font-size: 0.95rem;
+    }
+    .msg.show { display: block; }
+    .err {
+      display: none;
+      margin-top: 12px;
+      color: #b91c1c;
+      font-size: 0.875rem;
+    }
+    .err.show { display: block; }
+    footer {
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--primary); text-decoration: none; font-weight: 500; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">Manager</div>
+    <p class="tagline">by Exanite Technologies Private Limited</p>
+
+    <h1>Account &amp; data deletion</h1>
+    <p>Request removal of your Manager account and associated data.</p>
+
+    <h2>Delete your account</h2>
+    <p>You can delete your account directly from within the Manager app:</p>
+    <ol class="steps">
+      <li>Open the Manager app</li>
+      <li>Go to Settings (bottom navigation)</li>
+      <li>Scroll to the bottom and tap &quot;Delete Account&quot;</li>
+      <li>Confirm your decision</li>
+      <li>Your account and all business data will be permanently deleted</li>
+    </ol>
+
+    <h2>Request account deletion via email</h2>
+    <p>If you no longer have access to the app, fill in the form below and we will delete your account within 7 business days.</p>
+
+    <div class="card">
+      <form id="deletion-form" novalidate>
+        <label for="phone">Registered phone number *</label>
+        <input type="tel" id="phone" name="phone" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile number" required />
+
+        <label for="business">Business name *</label>
+        <input type="text" id="business" name="business" autocomplete="organization" required />
+
+        <label for="reason">Reason for deletion *</label>
+        <select id="reason" name="reason" required>
+          <option value="">Select a reason</option>
+          <option value="No longer needed">No longer needed</option>
+          <option value="Switching to another app">Switching to another app</option>
+          <option value="Privacy concerns">Privacy concerns</option>
+          <option value="Business closed">Business closed</option>
+          <option value="Other">Other</option>
+        </select>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="confirm" name="confirm" required />
+          <label for="confirm">I understand this action is permanent and cannot be undone</label>
+        </div>
+
+        <p class="err" id="form-error" role="alert"></p>
+
+        <button type="submit" class="btn" id="submit-btn">Request account deletion</button>
+      </form>
+
+      <div class="msg" id="success-msg" role="status">
+        Your request has been submitted. We will process your deletion within 7 business days and confirm via SMS to your registered number.
+      </div>
+    </div>
+
+    <footer>
+      For urgent requests contact <a href="mailto:support@getmanager.in">support@getmanager.in</a>
+      &nbsp;|&nbsp; <a href="https://getmanager.in">getmanager.in</a>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('deletion-form');
+      var errEl = document.getElementById('form-error');
+      var successEl = document.getElementById('success-msg');
+      var submitBtn = document.getElementById('submit-btn');
+
+      function showErr(msg) {
+        errEl.textContent = msg;
+        errEl.classList.add('show');
+      }
+      function clearErr() {
+        errEl.textContent = '';
+        errEl.classList.remove('show');
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        clearErr();
+        successEl.classList.remove('show');
+
+        var rawPhone = document.getElementById('phone').value || '';
+        var phone = rawPhone.replace(/\D/g, '');
+        if (phone.length > 10) phone = phone.slice(-10);
+        var business = (document.getElementById('business').value || '').trim();
+        var reason = document.getElementById('reason').value;
+        var confirmed = document.getElementById('confirm').checked;
+
+        if (phone.length !== 10) {
+          showErr('Please enter a valid 10-digit registered phone number.');
+          return;
+        }
+        if (!business) {
+          showErr('Please enter your business name.');
+          return;
+        }
+        if (!reason) {
+          showErr('Please select a reason for deletion.');
+          return;
+        }
+        if (!confirmed) {
+          showErr('Please confirm that you understand this action is permanent.');
+          return;
+        }
+
+        var body =
+          'Account Deletion Request\r\n\r\n' +
+          'Registered phone: +91' + phone + '\r\n\r\n' +
+          'Business name: ' + business + '\r\n\r\n' +
+          'Reason: ' + reason + '\r\n\r\n' +
+          'Confirmed permanent deletion: Yes\r\n';
+
+        var subject = 'Account Deletion Request';
+        var mailto =
+          'mailto:support@getmanager.in?subject=' +
+          encodeURIComponent(subject) +
+          '&body=' +
+          encodeURIComponent(body);
+
+        window.location.href = mailto;
+
+        form.style.display = 'none';
+        successEl.classList.add('show');
+        submitBtn.disabled = true;
+      });
+    })();
+  </script>
+</body>
+</html>

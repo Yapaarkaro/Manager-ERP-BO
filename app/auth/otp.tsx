@@ -18,6 +18,12 @@ import ResponsiveContainer from '@/components/ResponsiveContainer';
 import { getWebContainerStyles } from '@/utils/platformUtils';
 import { getSignupProgress, saveSignupProgress, deleteSignupProgress, saveDeviceSnapshot } from '@/services/backendApi';
 import { supabase, withTimeout } from '@/lib/supabase';
+import {
+  REVIEW_MODE,
+  REVIEW_ACCESS_TOKEN,
+  REVIEW_REFRESH_TOKEN,
+  REVIEW_USER_ID,
+} from '@/lib/config';
 import { mapLocationsToAddresses } from '@/utils/dataStore';
 import { getSignupField, setSignupData } from '@/utils/signupStore';
 
@@ -125,6 +131,44 @@ export default function OTPScreen() {
     const otpCode = otp.join('');
     
     try {
+      if (REVIEW_MODE && mobileNumber.endsWith('9999999999') && otpCode === '000000') {
+        const mockSession = {
+          access_token: REVIEW_ACCESS_TOKEN,
+          refresh_token: REVIEW_REFRESH_TOKEN,
+          expires_in: 3600,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          token_type: 'bearer' as const,
+          user: {
+            id: REVIEW_USER_ID,
+            phone: '+919999999999',
+            app_metadata: {},
+            user_metadata: {},
+            aud: 'authenticated',
+            role: 'authenticated',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        };
+        try {
+          const { error } = await supabase.auth.setSession({
+            access_token: mockSession.access_token,
+            refresh_token: mockSession.refresh_token,
+          });
+          if (error) console.warn('REVIEW_MODE setSession:', error.message);
+        } catch (e) {
+          console.warn('REVIEW_MODE setSession failed:', e);
+        }
+        setIsVerifying(false);
+        try {
+          await handleSuccessfulVerification(mobileNumber, mockSession);
+        } catch (postVerifyErr: any) {
+          console.warn('OTP: post-verification routing error:', postVerifyErr?.message);
+          Alert.alert('Error', 'Something went wrong after verification. Please try logging in again.');
+          router.replace('/auth/mobile');
+        }
+        return;
+      }
+
       let verifyData: any = null;
       let verifyError: any = null;
 
@@ -207,6 +251,36 @@ export default function OTPScreen() {
 
     if (!session?.user) {
       console.warn('OTP: No session after verification — cannot route');
+      setSignupData({ mobile: mobileNumber });
+      router.replace('/auth/gstin-pan');
+      return;
+    }
+
+    if (REVIEW_MODE && session?.access_token === REVIEW_ACCESS_TOKEN) {
+      await saveSignupProgress({
+        mobile: mobileNumber,
+        mobileVerified: true,
+        currentStep: 'mobileOtp',
+      }).catch(() => {});
+
+      try {
+        const progressResult = await withTimeout(getSignupProgress(), 10000, 'Get signup progress');
+        if (progressResult.success && progressResult.progress) {
+          const progress = progressResult.progress;
+          const completedSteps = ['signupComplete', 'completed', 'complete'];
+          if (completedSteps.includes(progress.current_step)) {
+            try {
+              const { prefetchBusinessData } = await import('@/hooks/useBusinessData');
+              await Promise.race([prefetchBusinessData(), new Promise(r => setTimeout(r, 3000))]);
+            } catch {}
+            router.replace('/dashboard');
+            return;
+          }
+          await continueFromSignupProgress(progress, mobileNumber);
+          return;
+        }
+      } catch {}
+
       setSignupData({ mobile: mobileNumber });
       router.replace('/auth/gstin-pan');
       return;

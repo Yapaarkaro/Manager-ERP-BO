@@ -2284,6 +2284,21 @@ export default function SettingsScreen() {
           <Text style={styles.dangerZoneDescription}>
             Deleting your account will remove all business data and reset your setup. This action cannot be undone.
           </Text>
+          <View style={styles.dangerZoneLegalLinks}>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('https://getmanager.in/privacy-policy')}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            >
+              <Text style={styles.dangerZoneLegalLinkText}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.dangerZoneLegalLinkSep}> · </Text>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('https://getmanager.in/terms')}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            >
+              <Text style={styles.dangerZoneLegalLinkText}>Terms &amp; Conditions</Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={[styles.dangerZoneButton, isDeletingAccount && styles.dangerZoneButtonDisabled]}
             onPress={handleDeleteAccountPress}
@@ -3150,6 +3165,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  dangerZoneLegalLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+    gap: 2,
+  },
+  dangerZoneLegalLinkText: {
+    fontSize: 13,
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+    fontWeight: '500',
+  },
+  dangerZoneLegalLinkSep: {
+    fontSize: 13,
+    color: Colors.textLight,
   },
   dangerZoneButton: {
     flexDirection: 'row',
