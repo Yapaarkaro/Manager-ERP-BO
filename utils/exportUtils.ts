@@ -2,7 +2,6 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Print from 'expo-print';
 import { Platform, Alert } from 'react-native';
-import * as XLSX from 'xlsx';
 import { formatIndianNumber } from './formatters';
 
 export type ExportFormat = 'pdf' | 'csv' | 'excel' | 'json';
@@ -19,6 +18,21 @@ export interface ExportConfig {
   columns: ExportColumn[];
   data: any[];
   summaryRows?: { label: string; value: string }[];
+}
+
+let excelRuntimePromise: Promise<{ ExcelJS: any; Buffer: any }> | null = null;
+
+async function getExcelRuntime(): Promise<{ ExcelJS: any; Buffer: any }> {
+  if (!excelRuntimePromise) {
+    excelRuntimePromise = Promise.all([
+      import('exceljs'),
+      import('buffer'),
+    ]).then(([excelModule, bufferModule]) => ({
+      ExcelJS: excelModule.default,
+      Buffer: bufferModule.Buffer,
+    }));
+  }
+  return excelRuntimePromise;
 }
 
 function getCellValue(row: any, col: ExportColumn): string {
@@ -232,22 +246,21 @@ async function exportJSON(config: ExportConfig, baseFileName: string): Promise<v
 }
 
 async function exportExcel(config: ExportConfig, baseFileName: string): Promise<void> {
-  const wsData: any[][] = [];
-
-  wsData.push(config.columns.map(c => c.header));
+  const { ExcelJS, Buffer } = await getExcelRuntime();
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(config.title.slice(0, 31));
+  worksheet.addRow(config.columns.map(c => c.header));
 
   config.data.forEach(row => {
-    wsData.push(config.columns.map(col => getCellValue(row, col)));
+    worksheet.addRow(config.columns.map(col => getCellValue(row, col)));
   });
 
   if (config.summaryRows?.length) {
-    wsData.push([]);
+    worksheet.addRow([]);
     config.summaryRows.forEach(sr => {
-      wsData.push([sr.label, sr.value]);
+      worksheet.addRow([sr.label, sr.value]);
     });
   }
-
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
 
   const colWidths = config.columns.map((col, idx) => {
     let maxLen = col.header.length;
@@ -257,23 +270,23 @@ async function exportExcel(config: ExportConfig, baseFileName: string): Promise<
     });
     return { wch: Math.min(maxLen + 2, 40) };
   });
-  ws['!cols'] = colWidths;
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, config.title.slice(0, 31));
+  colWidths.forEach((col, idx) => {
+    worksheet.getColumn(idx + 1).width = col.wch;
+  });
 
   const fileName = `${baseFileName}.xlsx`;
+  const workbookBuffer = await workbook.xlsx.writeBuffer();
+  const excelMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
   if (Platform.OS === 'web') {
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    triggerWebDownloadBinary(new Uint8Array(wbout), fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    triggerWebDownloadBinary(new Uint8Array(workbookBuffer), fileName, excelMimeType);
     return;
   }
 
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+  const wbout = Buffer.from(workbookBuffer).toString('base64');
   const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
   await FileSystem.writeAsStringAsync(fileUri, wbout, { encoding: FileSystem.EncodingType.Base64 });
-  await shareFile(fileUri, fileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  await shareFile(fileUri, fileName, excelMimeType);
 }
 
 async function exportPDF(config: ExportConfig, baseFileName: string): Promise<void> {
